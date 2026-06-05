@@ -6,42 +6,43 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 
 ### ロード系
 
-| # | 名前 | 形式 | 動作 |
-|---|------|------|------|
-| 0 | OP_NOP | Z | 何もしない |
-| 1 | OP_MOVE | BB | R[a] = R[b] |
-| 2 | OP_LOADL | BB | R[a] = Pool[b] |
-| 3 | OP_LOADI8 | BB | R[a] = signed_int8(b) |
-| 5 | OP_LOADI__1 | B | R[a] = -1 |
-| 6 | OP_LOADI_0 | B | R[a] = 0 |
-| 7 | OP_LOADI_1 | B | R[a] = 1 |
-| 8 | OP_LOADI_2 | B | R[a] = 2 |
-| 9 | OP_LOADI_3 | B | R[a] = 3 |
-| 10 | OP_LOADI_4 | B | R[a] = 4 |
-| 11 | OP_LOADI_5 | B | R[a] = 5 |
-| 12 | OP_LOADI_6 | B | R[a] = 6 |
-| 13 | OP_LOADI_7 | B | R[a] = 7 |
-| 14 | OP_LOADI16 | BS | R[a] = signed_int16(b) |
-| 15 | OP_LOADI32 | BSS | R[a] = (b << 16) + c |
-| 18 | OP_LOADSELF | B | R[a] = self (トップレベルでは 0) |
+| # (hex) | # (dec) | 名前 | 形式 | 動作 |
+|---------|---------|------|------|------|
+| 0x00 | 0 | OP_NOP | Z | 何もしない |
+| 0x01 | 1 | OP_MOVE | BB | R[a] = R[b] |
+| 0x02 | 2 | OP_LOADL | BB | R[a] = Pool[b] |
+| 0x03 | 3 | OP_LOADI8 | BB | R[a] = signed_int8(b) |
+| 0x04 | 4 | OP_LOADINEG | BB | R[a] = -b |
+| 0x05 | 5 | OP_LOADI__1 | B | R[a] = -1 |
+| 0x06 | 6 | OP_LOADI_0 | B | R[a] = 0 |
+| 0x07 | 7 | OP_LOADI_1 | B | R[a] = 1 |
+| 0x08 | 8 | OP_LOADI_2 | B | R[a] = 2 |
+| 0x09 | 9 | OP_LOADI_3 | B | R[a] = 3 |
+| 0x0A | 10 | OP_LOADI_4 | B | R[a] = 4 |
+| 0x0B | 11 | OP_LOADI_5 | B | R[a] = 5 |
+| 0x0C | 12 | OP_LOADI_6 | B | R[a] = 6 |
+| 0x0D | 13 | OP_LOADI_7 | B | R[a] = 7 |
+| 0x0E | 14 | OP_LOADI16 | BS | R[a] = signed_int16(b) |
+| 0x0F | 15 | OP_LOADI32 | BSS | R[a] = (b << 16) + c |
+| 0x12 | 18 | OP_LOADSELF | B | R[a] = self (トップレベルでは 0) |
 
 ### 演算系
 
-| # | 名前 | 形式 | 動作 |
-|---|------|------|------|
-| 70 | OP_ADD | B | R[a] = R[a] + R[a+1] |
-| 71 | OP_ADDI | BB | R[a] = R[a] + int(b) |
-| 72 | OP_SUB | B | R[a] = R[a] - R[a+1] |
-| 73 | OP_SUBI | BB | R[a] = R[a] - int(b) |
-| 76 | OP_MUL | B | R[a] = R[a] * R[a+1] |
-| 77 | OP_DIV | B | R[a] = R[a] / R[a+1] |
+| # (hex) | # (dec) | 名前 | 形式 | 動作 |
+|---------|---------|------|------|------|
+| 0x3C | 60 | OP_ADD | B | R[a] = R[a] + R[a+1] |
+| 0x3D | 61 | OP_ADDI | BB | R[a] = R[a] + int(b) |
+| 0x3E | 62 | OP_SUB | B | R[a] = R[a] - R[a+1] |
+| 0x3F | 63 | OP_SUBI | BB | R[a] = R[a] - int(b) |
+| 0x40 | 64 | OP_MUL | B | R[a] = R[a] * R[a+1] |
+| 0x41 | 65 | OP_DIV | B | R[a] = R[a] / R[a+1] |
 
 ### 制御系
 
-| # | 名前 | 形式 | 動作 |
-|---|------|------|------|
-| 62 | OP_RETURN | B | return R[a] (トップレベルでは VM 停止) |
-| 119 | OP_STOP | Z | VM 停止 |
+| # (hex) | # (dec) | 名前 | 形式 | 動作 |
+|---------|---------|------|------|------|
+| 0x38 | 56 | OP_RETURN | B | return R[a] (トップレベルでは VM 停止) |
+| 0x69 | 105 | OP_STOP | Z | VM 停止 |
 
 ### 命令形式の読み方
 

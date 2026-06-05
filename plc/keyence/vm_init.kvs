@@ -1,0 +1,16 @@
+' =======================================
+' mruby/c VM - Initialization
+' =======================================
+' このスクリプトは VM 起動前に1回実行します。
+' PC、ステータス、レジスタファイルを初期化します。
+
+EM0 = 0      ' PC = 0
+EM1 = 0      ' STATUS = stopped (0)
+EM2 = 0      ' ERROR = none
+EM3.L = 0    ' STEP_COUNT = 0
+EM5 = 50     ' STEPS_PER_CYCLE = 50
+
+' レジスタファイルクリア (EM100-EM259)
+FOR Z1 = 100 TO 259
+    EM[Z1] = 0
+NEXT
