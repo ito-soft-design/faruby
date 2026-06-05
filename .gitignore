@@ -1,0 +1,25 @@
+# mruby compiled bytecode
+*.mrb
+
+# mruby source (built separately)
+/mruby/
+
+# Temporary files
+/tmp/
+*.tmp
+
+# Ruby
+*.gem
+.bundle/
+vendor/bundle/
+Gemfile.lock
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
