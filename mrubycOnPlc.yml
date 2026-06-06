@@ -1,0 +1,11 @@
+# mruby/c on PLC - Configuration
+plc:
+  protocol: keyence_kv
+  host: 192.168.0.10
+  port: 8501
+
+mrbc:
+  path: C:/mruby-build/mruby/build/host/bin/mrbc.exe
+
+vm:
+  steps_per_cycle: 50
