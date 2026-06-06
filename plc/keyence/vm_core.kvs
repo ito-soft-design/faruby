@@ -9,6 +9,7 @@
 ' EM6  = CURRENT_OPCODE (デバッグ用)
 ' EM7  = operand a
 ' EM8  = operand b
+' EM13 = RESET_REQ (1=リセット要求, vm_init で処理)
 ' EM100~ = レジスタファイル R[n] = EM(100+n*2).L
 ' EM1000~ = バイトコード (1バイト/1EM)
 ' EM4000~ = 定数プール Pool[n] = EM(4000+n*2).L

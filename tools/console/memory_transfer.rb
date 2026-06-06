@@ -41,7 +41,7 @@ module MrubycOnPlc
 
       # VM 状態を PLC から読み出す
       def read_vm_state
-        words = @adapter.read_words(VM_STATE_BASE, 13)
+        words = @adapter.read_words(VM_STATE_BASE, 14)
         {
           pc:              words[PC_ADDR],
           status:          words[STATUS_ADDR],
@@ -56,6 +56,7 @@ module MrubycOnPlc
           bytecode_len:    words[BYTECODE_LEN_ADDR],
           nregs:           words[NREGS_ADDR],
           nlocals:         words[NLOCALS_ADDR],
+          reset_req:       words[RESET_REQ_ADDR],
         }
       end
 
@@ -94,9 +95,9 @@ module MrubycOnPlc
         @adapter.write_word(STATUS_ADDR, value)
       end
 
-      # VM をリセット (PC=0, STATUS=停止, レジスタクリア)
-      def reset_vm(steps_per_cycle: 50)
-        @adapter.write_words(PC_ADDR, [0, VM_STOPPED, 0, 0, 0, steps_per_cycle])
+      # VM リセット要求 (PLC 側の vm_init で処理される)
+      def request_reset
+        @adapter.write_word(RESET_REQ_ADDR, 1)
       end
 
       private

@@ -92,15 +92,16 @@ module MrubycOnPlc
       def cmd_status(args)
         state = @transfer.read_vm_state
         puts "=== VM Status ==="
-        puts "  STATUS : #{state[:status]} (#{state[:status_label]})"
-        puts "  PC     : #{state[:pc]}"
-        puts "  ERROR  : #{state[:error]}"
-        puts "  STEPS  : #{state[:step_count]}"
-        puts "  OPCODE : #{state[:current_opcode]}"
-        puts "  ARGS   : a=#{state[:operand_a]} b=#{state[:operand_b]} c=#{state[:operand_c]}"
-        puts "  BCLEN  : #{state[:bytecode_len]}"
-        puts "  NREGS  : #{state[:nregs]}"
-        puts "  NLOCALS: #{state[:nlocals]}"
+        puts "  STATUS   : #{state[:status]} (#{state[:status_label]})"
+        puts "  PC       : #{state[:pc]}"
+        puts "  ERROR    : #{state[:error]}"
+        puts "  STEPS    : #{state[:step_count]}"
+        puts "  OPCODE   : #{state[:current_opcode]}"
+        puts "  ARGS     : a=#{state[:operand_a]} b=#{state[:operand_b]} c=#{state[:operand_c]}"
+        puts "  BCLEN    : #{state[:bytecode_len]}"
+        puts "  NREGS    : #{state[:nregs]}"
+        puts "  NLOCALS  : #{state[:nlocals]}"
+        puts "  RESET_REQ: #{state[:reset_req]}" if state[:reset_req] != 0
       end
 
       # regs [count]
@@ -126,8 +127,8 @@ module MrubycOnPlc
 
       # reset
       def cmd_reset(args)
-        @transfer.reset_vm(steps_per_cycle: @config.steps_per_cycle)
-        puts "OK: VM をリセットしました"
+        @transfer.request_reset
+        puts "OK: リセット要求を送信しました (RESET_REQ=1)"
       end
 
       # disasm

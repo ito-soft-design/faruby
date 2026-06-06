@@ -1,16 +1,23 @@
 ' =======================================
-' mruby/c VM - Initialization
+' mruby/c VM - Reset Handler
 ' =======================================
-' このスクリプトは VM 起動前に1回実行します。
-' PC、ステータス、レジスタファイルを初期化します。
+' 毎スキャン実行。EM13 (RESET_REQ) = 1 のとき
+' VM 状態とレジスタファイルを初期化します。
+'
+' EM13 = RESET_REQ (1=リセット要求)
 
-EM0 = 0      ' PC = 0
-EM1 = 0      ' STATUS = stopped (0)
-EM2 = 0      ' ERROR = none
-EM3.L = 0    ' STEP_COUNT = 0
-EM5 = 50     ' STEPS_PER_CYCLE = 50
+IF EM13 = 1 THEN
 
-' レジスタファイルクリア (EM100-EM259)
-FOR Z1 = 100 TO 259
-    EM0:Z1 = 0
-NEXT
+    EM0 = 0      ' PC = 0
+    EM1 = 0      ' STATUS = stopped (0)
+    EM2 = 0      ' ERROR = none
+    EM3.L = 0    ' STEP_COUNT = 0
+
+    ' レジスタファイルクリア (EM100-EM259)
+    FOR Z1 = 100 TO 259
+        EM0:Z1 = 0
+    NEXT
+
+    EM13 = 0     ' リセット要求クリア
+
+END IF

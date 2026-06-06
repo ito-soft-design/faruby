@@ -61,6 +61,7 @@ Keyence KV-5000 の EM (拡張データメモリ) を使用します。DM はモ
 | EM10 | BYTECODE_LEN | .U | バイトコード長 |
 | EM11 | NREGS | .U | レジスタ数 |
 | EM12 | NLOCALS | .U | ローカル変数数 |
+| EM13 | RESET_REQ | .U | リセット要求 (1=要求, vm_init で処理後 0 に戻る) |
 
 ### レジスタファイル (EM100-EM259)
 

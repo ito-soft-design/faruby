@@ -96,6 +96,7 @@ module MrubycOnPlc
       lines << "#{MemoryMap.device(BYTECODE_LEN_ADDR)} = #{@irep.ilen}         ' BYTECODE_LEN"
       lines << "#{MemoryMap.device(NREGS_ADDR)} = #{@irep.nregs}          ' NREGS"
       lines << "#{MemoryMap.device(NLOCALS_ADDR)} = #{@irep.nlocals}          ' NLOCALS"
+      lines << "#{MemoryMap.device(RESET_REQ_ADDR)} = 0          ' RESET_REQ = off"
       lines << ""
       lines << "' --- Clear Register File ---"
       lines << "FOR Z1 = #{REG_FILE_BASE} TO #{REG_FILE_BASE + @irep.nregs * 2 - 1}"

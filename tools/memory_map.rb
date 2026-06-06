@@ -19,6 +19,7 @@ module MrubycOnPlc
     BYTECODE_LEN_ADDR = 10    # バイトコード長
     NREGS_ADDR        = 11    # レジスタ数
     NLOCALS_ADDR      = 12    # ローカル変数数
+    RESET_REQ_ADDR    = 13    # リセット要求 (1=要求, PLC側で処理後0に戻る)
 
     # レジスタファイル (32ビット符号付き = 2ワード/レジスタ)
     REG_FILE_BASE     = 100

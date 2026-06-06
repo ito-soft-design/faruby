@@ -204,18 +204,13 @@ class TestMemoryTransfer < Minitest::Test
     assert_equal VM_RUNNING, @adapter.memory[STATUS_ADDR]
   end
 
-  # === reset_vm テスト ===
+  # === request_reset テスト ===
 
-  def test_reset_vm
-    @adapter.memory[PC_ADDR] = 50
-    @adapter.memory[STATUS_ADDR] = VM_ERROR
-    @adapter.memory[ERROR_ADDR] = 99
+  def test_request_reset
+    @adapter.memory[RESET_REQ_ADDR] = 0
 
-    @transfer.reset_vm(steps_per_cycle: 100)
+    @transfer.request_reset
 
-    assert_equal 0, @adapter.memory[PC_ADDR]
-    assert_equal VM_STOPPED, @adapter.memory[STATUS_ADDR]
-    assert_equal 0, @adapter.memory[ERROR_ADDR]
-    assert_equal 100, @adapter.memory[STEPS_PER_CYCLE]
+    assert_equal 1, @adapter.memory[RESET_REQ_ADDR]
   end
 end
