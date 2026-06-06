@@ -95,6 +95,25 @@ module MrubycOnPlc
         @adapter.write_word(STATUS_ADDR, value)
       end
 
+      # メモリイメージと PLC 上のデータを比較する
+      # 戻り値: { match: true/false, total: N, mismatches: [{addr:, expected:, actual:}] }
+      def verify_image(image)
+        mismatches = []
+        runs = group_consecutive(image)
+
+        runs.each do |start_addr, expected_values|
+          actual_values = @adapter.read_words(start_addr, expected_values.size)
+          expected_values.each_with_index do |expected, i|
+            actual = actual_values[i]
+            if actual != expected
+              mismatches << { addr: start_addr + i, expected: expected, actual: actual }
+            end
+          end
+        end
+
+        { match: mismatches.empty?, total: image.size, mismatches: mismatches }
+      end
+
       # VM リセット要求 (PLC 側の vm_init で処理される)
       def request_reset
         @adapter.write_word(RESET_REQ_ADDR, 1)

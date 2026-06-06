@@ -49,6 +49,7 @@ mrubycOnPlc/
 
 - Ruby 3.0 以上
 - mruby 3.3.0 (mrbc コンパイラを使用)
+- [plc_access](https://github.com/ito-soft-design/plc_access) gem (PLC 通信用)
 
 ### mruby のビルド
 
@@ -59,6 +60,78 @@ rake
 ```
 
 ビルド後、`mruby/build/host/bin/mrbc` が使用できるようになります。
+
+### 依存 gem のインストール
+
+```bash
+bundle install
+```
+
+### 設定ファイル
+
+`mrubycOnPlc.yml.example` をコピーして、環境に合わせて編集してください。
+
+```bash
+cp mrubycOnPlc.yml.example mrubycOnPlc.yml
+```
+
+```yaml
+plc:
+  protocol: keyence_kv
+  host: 192.168.0.10     # PLC の IP アドレス
+  port: 8501
+
+mrbc:
+  path: /path/to/mrbc    # mrbc コンパイラのパス
+
+vm:
+  steps_per_cycle: 50     # 1スキャンあたりの実行命令数
+```
+
+## 使い方
+
+### コンソールの起動
+
+```bash
+rake console
+```
+
+対話型コンソールが起動し、PLC との通信が可能になります。
+
+### コンソールコマンド
+
+| コマンド | 説明 |
+|---------|------|
+| `compile <file.rb>` | Ruby ソースをコンパイル (.mrb 生成) |
+| `load <file.mrb>` | バイトコードを PLC に転送 |
+| `run` | VM 実行開始 |
+| `status` | VM 状態を表示 |
+| `regs [count]` | レジスタ値を表示 |
+| `stop` | VM 停止 |
+| `reset` | VM リセット要求を送信 |
+| `verify` | PLC メモリとバイナリを比較 |
+| `disasm <file.mrb>` | バイトコード逆アセンブル表示 |
+| `sim <file.mrb>` | PC 上のシミュレータで実行 |
+| `connect` | PLC 接続確認 |
+| `help` | コマンド一覧 |
+| `quit` | 終了 |
+
+### 使用例
+
+```
+mrubycOnPlc> compile test.rb
+mrubycOnPlc> load
+mrubycOnPlc> verify
+mrubycOnPlc> run
+mrubycOnPlc> status
+mrubycOnPlc> regs
+```
+
+### テストの実行
+
+```bash
+rake test
+```
 
 ## 現在のマイルストーン
 

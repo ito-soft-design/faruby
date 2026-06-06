@@ -131,6 +131,31 @@ module MrubycOnPlc
         puts "OK: リセット要求を送信しました (RESET_REQ=1)"
       end
 
+      # verify
+      def cmd_verify(args)
+        unless @last_irep
+          puts "ERROR: 先に compile を実行してください"
+          return
+        end
+
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle)
+        image = codegen.memory_image
+
+        result = @transfer.verify_image(image)
+
+        if result[:match]
+          puts "OK: PLC メモリと一致 (#{result[:total]} ワード)"
+        else
+          puts "NG: #{result[:mismatches].size} / #{result[:total]} ワード不一致"
+          puts ""
+          puts "  %-8s  %-10s  %-10s  %-10s" % ["ADDR", "DEVICE", "EXPECTED", "ACTUAL"]
+          puts "  #{'-' * 42}"
+          result[:mismatches].each do |m|
+            puts "  %-8d  %-10s  %-10d  %-10d" % [m[:addr], MemoryMap.device(m[:addr]), m[:expected], m[:actual]]
+          end
+        end
+      end
+
       # disasm
       def cmd_disasm(args)
         unless @last_disasm
@@ -181,6 +206,7 @@ module MrubycOnPlc
           regs [count]       レジスタ値を表示
           stop               VM を停止 (STATUS=0)
           reset              VM をリセット
+          verify             PLC メモリとバイナリを比較
           disasm             逆アセンブリ表示
           sim                シミュレータで実行
           connect            PLC に接続

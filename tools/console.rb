@@ -22,6 +22,7 @@ module MrubycOnPlc
         "regs"    => :cmd_regs,
         "stop"    => :cmd_stop,
         "reset"   => :cmd_reset,
+        "verify"  => :cmd_verify,
         "disasm"  => :cmd_disasm,
         "sim"     => :cmd_sim,
         "connect" => :cmd_connect,
