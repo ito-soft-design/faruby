@@ -13,6 +13,9 @@
 ' EM100~ = レジスタファイル R[n] = EM(100+n*2).L
 ' EM1000~ = バイトコード (1バイト/1EM)
 ' EM4000~ = 定数プール Pool[n] = EM(4000+n*2).L
+' EM5000~ = デバイスマッピングテーブル (2ワード/エントリ)
+'           EM(5000+idx*2)   = device_type (0=EM,1=DM,2=ZF,3=R,4=MR,5=B,6=L,8=T,9=C)
+'           EM(5000+idx*2+1) = device_address
 '
 ' Z1-Z6 を間接アドレッシングに使用
 
@@ -217,6 +220,142 @@ IF EM1 = 1 THEN
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             EM0:Z1.L = 0
+
+        ELSE IF EM6 = 21 THEN
+            ' OP_GETGV (BB): R[a] = global[symbols[b]]
+            ' fetch operand a
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            ' fetch operand b
+            Z1 = EM0 + 1000
+            EM8 = EM0:Z1
+            EM0 = EM0 + 1
+            ' デバイスマッピングテーブル参照
+            Z3 = EM8 * 2 + 5000
+            Z4 = Z3 + 1
+            Z5 = EM0:Z3
+            Z6 = EM0:Z4
+            ' レジスタアドレス
+            Z2 = EM7 * 2 + 100
+            ' デバイスタイプ別読み取り
+            ' ワードデバイス (EM, DM, ZF): .L (32ビット)
+            ' ビットデバイス (R, MR, B, L, T, C): 個別ビット → 0/1
+            IF Z5 = 0 THEN
+                EM0:Z2.L = EM0:Z6.L
+            ELSE IF Z5 = 1 THEN
+                EM0:Z2.L = DM0:Z6.L
+            ELSE IF Z5 = 2 THEN
+                EM0:Z2.L = ZF0:Z6.L
+            ELSE IF Z5 = 3 THEN
+                IF R0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE IF Z5 = 4 THEN
+                IF MR0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE IF Z5 = 5 THEN
+                IF B0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE IF Z5 = 6 THEN
+                IF L0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE IF Z5 = 8 THEN
+                IF T0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE IF Z5 = 9 THEN
+                IF C0:Z6 THEN
+                    EM0:Z2.L = 1
+                ELSE
+                    EM0:Z2.L = 0
+                END IF
+            ELSE
+                EM1 = 3
+                EM2 = 21
+                BREAK
+            END IF
+
+        ELSE IF EM6 = 22 THEN
+            ' OP_SETGV (BB): global[symbols[b]] = R[a]
+            ' fetch operand a
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            ' fetch operand b
+            Z1 = EM0 + 1000
+            EM8 = EM0:Z1
+            EM0 = EM0 + 1
+            ' デバイスマッピングテーブル参照
+            Z3 = EM8 * 2 + 5000
+            Z4 = Z3 + 1
+            Z5 = EM0:Z3
+            Z6 = EM0:Z4
+            ' レジスタアドレス
+            Z2 = EM7 * 2 + 100
+            ' デバイスタイプ別書き込み
+            ' ワードデバイス (EM, DM, ZF): .L (32ビット)
+            ' ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF
+            IF Z5 = 0 THEN
+                EM0:Z6.L = EM0:Z2.L
+            ELSE IF Z5 = 1 THEN
+                DM0:Z6.L = EM0:Z2.L
+            ELSE IF Z5 = 2 THEN
+                ZF0:Z6.L = EM0:Z2.L
+            ELSE IF Z5 = 3 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    R0:Z6 = 1
+                ELSE
+                    R0:Z6 = 0
+                END IF
+            ELSE IF Z5 = 4 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    MR0:Z6 = 1
+                ELSE
+                    MR0:Z6 = 0
+                END IF
+            ELSE IF Z5 = 5 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    B0:Z6 = 1
+                ELSE
+                    B0:Z6 = 0
+                END IF
+            ELSE IF Z5 = 6 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    L0:Z6 = 1
+                ELSE
+                    L0:Z6 = 0
+                END IF
+            ELSE IF Z5 = 8 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    SET(T0:Z6)
+                ELSE
+                    RES(T0:Z6)
+                END IF
+            ELSE IF Z5 = 9 THEN
+                IF EM0:Z2.L <> 0 THEN
+                    SET(C0:Z6)
+                ELSE
+                    RES(C0:Z6)
+                END IF
+            ELSE
+                EM1 = 3
+                EM2 = 22
+                BREAK
+            END IF
 
         ELSE IF EM6 = 37 THEN
             ' OP_JMP (S): 無条件ジャンプ PC += signed16(a)

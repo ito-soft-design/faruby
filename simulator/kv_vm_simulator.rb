@@ -14,10 +14,13 @@ module MrubycOnPlc
   class KvVmSimulator
     include MemoryMap
 
-    attr_reader :em
+    attr_reader :em, :devices
 
     def initialize
       @em = EmMemory.new
+      @devices = Array.new(10) { EmMemory.new }
+      @devices[0] = @em  # EM はメインメモリを共用
+      @irep = nil
     end
 
     # メモリイメージをロードして実行
@@ -28,9 +31,32 @@ module MrubycOnPlc
 
     # IREP から直接ロードして実行
     def load_irep_and_run(irep, max_steps: 10000)
+      @irep = irep
       codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps)
       image = codegen.memory_image
       load_and_run(image, max_steps: max_steps)
+    end
+
+    # ビットデバイスタイプ (R, MR, B, L, T, C)
+    # CR はインデックス扱い不可のため非対応
+    BIT_DEVICE_TYPES = [DEVICE_TYPE_R, DEVICE_TYPE_MR, DEVICE_TYPE_B,
+                        DEVICE_TYPE_L, DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
+
+    # グローバル変数の値をシンボル名で取得 (テスト用)
+    def global_value(sym_name)
+      return nil unless @irep
+      idx = @irep.symbols.index(sym_name)
+      return nil unless idx
+      table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+      device_type = @em.read_u16(table_addr)
+      device_addr = @em.read_u16(table_addr + 1)
+      dev = device_memory(device_type)
+      return nil unless dev
+      if bit_device?(device_type)
+        dev.read_u16(device_addr)
+      else
+        dev.read_s32(device_addr)
+      end
     end
 
     # VM 実行ループ (KV スクリプトの FOR ループに対応)
@@ -160,6 +186,45 @@ module MrubycOnPlc
         a = fetch_byte
         write_reg(a, 0)  # false = 0
 
+      when 0x15 # OP_GETGV (BB)
+        a = fetch_byte
+        b = fetch_byte
+        table_addr = DEVICE_TABLE_BASE + b * DEVICE_TABLE_STRIDE
+        device_type = @em.read_u16(table_addr)
+        device_addr = @em.read_u16(table_addr + 1)
+        dev = device_memory(device_type)
+        if dev
+          if bit_device?(device_type)
+            # ビットデバイス: 0 or 1 を読む
+            write_reg(a, dev.read_u16(device_addr) != 0 ? 1 : 0)
+          else
+            write_reg(a, dev.read_s32(device_addr))
+          end
+        else
+          @em.write_u16(STATUS_ADDR, VM_ERROR)
+          @em.write_u16(ERROR_ADDR, 0x15)
+        end
+
+      when 0x16 # OP_SETGV (BB)
+        a = fetch_byte
+        b = fetch_byte
+        val = read_reg(a)
+        table_addr = DEVICE_TABLE_BASE + b * DEVICE_TABLE_STRIDE
+        device_type = @em.read_u16(table_addr)
+        device_addr = @em.read_u16(table_addr + 1)
+        dev = device_memory(device_type)
+        if dev
+          if bit_device?(device_type)
+            # ビットデバイス: 非0→1, 0→0
+            dev.write_u16(device_addr, val != 0 ? 1 : 0)
+          else
+            dev.write_s32(device_addr, val)
+          end
+        else
+          @em.write_u16(STATUS_ADDR, VM_ERROR)
+          @em.write_u16(ERROR_ADDR, 0x16)
+        end
+
       when 0x25 # OP_JMP (S)
         offset = fetch_s16
         @em.write_u16(PC_ADDR, pc + offset)
@@ -287,6 +352,16 @@ module MrubycOnPlc
     # VM レジスタ書き込み
     def write_reg(n, val)
       @em.write_s32(MemoryMap.reg_addr(n), val)
+    end
+
+    # ビットデバイスかどうか判定
+    def bit_device?(type)
+      BIT_DEVICE_TYPES.include?(type)
+    end
+
+    # デバイスタイプに対応するメモリを返す
+    def device_memory(type)
+      @devices[type] if type >= 0 && type < @devices.size
     end
   end
 end

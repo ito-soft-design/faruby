@@ -5,6 +5,7 @@
 
 require_relative "mrb_parser"
 require_relative "memory_map"
+require "plc_access"
 
 module MrubycOnPlc
   class PlcCodegen
@@ -29,6 +30,8 @@ module MrubycOnPlc
       lines.concat(generate_bytecode)
       lines << ""
       lines.concat(generate_pool)
+      lines << ""
+      lines.concat(generate_device_table)
 
       lines.join("\n")
     end
@@ -78,6 +81,22 @@ module MrubycOnPlc
         addr = REG_FILE_BASE + i * 2
         image[addr] = 0
         image[addr + 1] = 0
+      end
+
+      # デバイスマッピングテーブル
+      image[NUM_SYMBOLS_ADDR] = @irep.symbols.size
+      general_global_next = GENERAL_GLOBAL_BASE
+      @irep.symbols.each_with_index do |sym, idx|
+        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+        parsed = parse_device_symbol(sym)
+        if parsed
+          image[table_addr] = parsed[:device_type]
+          image[table_addr + 1] = parsed[:z_offset]
+        else
+          image[table_addr] = DEVICE_TYPE_EM
+          image[table_addr + 1] = general_global_next
+          general_global_next += 2
+        end
       end
 
       image
@@ -135,6 +154,81 @@ module MrubycOnPlc
       end
 
       lines
+    end
+
+    def generate_device_table
+      return [] if @irep.symbols.empty?
+
+      lines = []
+      lines << "' --- Device Mapping Table (#{@irep.symbols.size} symbols) ---"
+      lines << "#{MemoryMap.device(NUM_SYMBOLS_ADDR)} = #{@irep.symbols.size}    ' NUM_SYMBOLS"
+
+      general_global_next = GENERAL_GLOBAL_BASE
+      @irep.symbols.each_with_index do |sym, idx|
+        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+        parsed = parse_device_symbol(sym)
+        if parsed
+          lines << "#{MemoryMap.device(table_addr)} = #{parsed[:device_type]}    ' #{sym} type=#{DEVICE_TYPE_NAMES[parsed[:device_type]]}"
+          lines << "#{MemoryMap.device(table_addr + 1)} = #{parsed[:z_offset]}    ' #{sym} Z offset"
+        else
+          lines << "#{MemoryMap.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{sym} type=EM (auto)"
+          lines << "#{MemoryMap.device(table_addr + 1)} = #{general_global_next}    ' #{sym} -> EM#{general_global_next}"
+          general_global_next += 2
+        end
+      end
+
+      lines
+    end
+
+    # デバイスパターン (MR を R より先にマッチさせる)
+    # CR はインデックス扱い不可のため非対応
+    # B は16進アドレス (例: $B1F), 他は10進
+    DEVICE_PATTERN = /^\$(EM|DM|ZF|MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+    # dev コマンド用: $ なしパターン
+    DEVICE_PATTERN_BARE = /^(EM|DM|ZF|MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+    DEVICE_NAME_TO_TYPE = {
+      "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
+      "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
+      "L" => DEVICE_TYPE_L, "T" => DEVICE_TYPE_T, "C" => DEVICE_TYPE_C,
+    }.freeze
+    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.invert.freeze
+
+    # KvDevice を使ってデバイスアドレスの Z レジスタ用オフセットを取得
+    # HEXDEC (R, MR 等): MR200 → 32, R100 → 16
+    # HEX (B): B10 → 16
+    # DEC (EM, DM 等): そのまま
+    def self.device_z_offset(device_name, addr_str)
+      PlcAccess::Protocol::Keyence::KvDevice.new("#{device_name}#{addr_str}").number
+    end
+
+    def parse_device_symbol(sym)
+      self.class.parse_device_symbol(sym)
+    end
+
+    # シンボル名 ($DM100) からデバイス情報をパース
+    # address: 元のアドレス (PLC アダプタ通信用)
+    # z_offset: Z レジスタ用オフセット (マッピングテーブル・シミュレータ用)
+    def self.parse_device_symbol(sym)
+      return nil unless sym
+      m = sym.match(DEVICE_PATTERN)
+      return nil unless m
+      device_name = m[1].upcase
+      addr_str = m[2]
+      z_offset = device_z_offset(device_name, addr_str)
+      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
+        z_offset: z_offset, device_name: device_name }
+    end
+
+    # デバイス名 (DM100, $ なし) からデバイス情報をパース
+    def self.parse_device_name(name)
+      return nil unless name
+      m = name.match(DEVICE_PATTERN_BARE)
+      return nil unless m
+      device_name = m[1].upcase
+      addr_str = m[2]
+      z_offset = device_z_offset(device_name, addr_str)
+      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
+        z_offset: z_offset, device_name: device_name }
     end
   end
 end

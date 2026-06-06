@@ -526,6 +526,136 @@ class TestVmSimulator < Minitest::Test
     assert_equal VM_FINISHED, @sim.status
   end
 
+  # === OP_GETGV / OP_SETGV ===
+
+  # デバイスマッピングテーブルにエントリを設定するヘルパー
+  def setup_device_mapping(sym_index, device_type, device_addr)
+    table_addr = DEVICE_TABLE_BASE + sym_index * DEVICE_TABLE_STRIDE
+    @sim.em.write_u16(table_addr, device_type)
+    @sim.em.write_u16(table_addr + 1, device_addr)
+  end
+
+  def test_setgv_em
+    # OP_SETGV: R[1] を EM6000 に書き込み
+    load_bytecode([
+      0x03, 0x01, 42,   # OP_LOADI8 R[1], 42
+      0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_EM, 6000)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 42, @sim.em.read_s32(6000)
+  end
+
+  def test_getgv_em
+    # OP_GETGV: EM6000 の値を R[1] に読み取り
+    load_bytecode([
+      0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_EM, 6000)
+    @sim.em.write_s32(6000, 99)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 99, @sim.reg(1)
+  end
+
+  def test_setgv_getgv_combined
+    # 書き込み後、レジスタをクリアして読み戻し
+    load_bytecode([
+      0x03, 0x01, 42,   # OP_LOADI8 R[1], 42
+      0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
+      0x06, 0x01,       # OP_LOADI_0 R[1]  (clear)
+      0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_EM, 6000)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 42, @sim.reg(1)
+  end
+
+  def test_getgv_dm
+    # DM デバイスからの読み取り
+    load_bytecode([
+      0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_DM, 100)
+    @sim.devices[DEVICE_TYPE_DM].write_s32(100, 77)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 77, @sim.reg(1)
+  end
+
+  def test_setgv_dm
+    # DM デバイスへの書き込み
+    load_bytecode([
+      0x03, 0x01, 55,   # OP_LOADI8 R[1], 55
+      0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_DM, 200)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 55, @sim.devices[DEVICE_TYPE_DM].read_s32(200)
+  end
+
+  def test_getgv_negative_value
+    # 負の値の読み取り
+    load_bytecode([
+      0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_EM, 6000)
+    @sim.em.write_s32(6000, -100)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal(-100, @sim.reg(1))
+  end
+
+  # --- ビットデバイステスト ---
+
+  def test_setgv_bit_device_clamps_to_1
+    # ビットデバイス (MR) への書き込みは非0→1になる
+    load_bytecode([
+      0x03, 0x01, 42,   # OP_LOADI8 R[1], 42
+      0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_MR, 10)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 1, @sim.devices[DEVICE_TYPE_MR].read_u16(10)
+  end
+
+  def test_setgv_bit_device_zero
+    # ビットデバイス (R) への 0 の書き込み
+    load_bytecode([
+      0x06, 0x01,       # OP_LOADI_0 R[1], 0
+      0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_R, 200)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 0, @sim.devices[DEVICE_TYPE_R].read_u16(200)
+  end
+
+  def test_getgv_bit_device_returns_0_or_1
+    # ビットデバイス (MR) からの読み取りは 0 or 1
+    load_bytecode([
+      0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
+      0x69,             # OP_STOP
+    ])
+    setup_device_mapping(0, DEVICE_TYPE_MR, 5)
+    @sim.devices[DEVICE_TYPE_MR].write_u16(5, 1)
+    @sim.run
+    assert_equal VM_FINISHED, @sim.status
+    assert_equal 1, @sim.reg(1)
+  end
+
   # === 未知のオペコード ===
   def test_unknown_opcode_causes_error
     load_bytecode([

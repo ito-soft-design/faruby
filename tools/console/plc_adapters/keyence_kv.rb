@@ -55,6 +55,16 @@ module MrubycOnPlc
           DEVICE_PREFIX
         end
 
+        def read_device(device_prefix, addr)
+          ensure_connected
+          @plc["#{device_prefix}#{addr}"]
+        end
+
+        def write_device(device_prefix, addr, value)
+          ensure_connected
+          @plc["#{device_prefix}#{addr}"] = value
+        end
+
         private
 
         def ensure_connected

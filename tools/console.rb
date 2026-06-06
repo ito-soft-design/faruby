@@ -20,6 +20,8 @@ module MrubycOnPlc
         "run"     => :cmd_run,
         "status"  => :cmd_status,
         "regs"    => :cmd_regs,
+        "vars"    => :cmd_vars,
+        "dev"     => :cmd_dev,
         "stop"    => :cmd_stop,
         "reset"   => :cmd_reset,
         "verify"  => :cmd_verify,

@@ -294,10 +294,12 @@ module MrubycOnPlc
       when :OP_LOADSYM
         sym = @irep.symbols[ops[1]] || "sym_#{ops[1]}"
         "R[#{ops[0]}] = :#{sym}"
-      when :OP_GETGV, :OP_SETGV, :OP_GETIV, :OP_SETIV,
-           :OP_GETCV, :OP_SETCV, :OP_GETCONST, :OP_SETCONST
+      when :OP_GETGV, :OP_GETIV, :OP_GETCV, :OP_GETCONST
         sym = @irep.symbols[ops[1]] || "sym_#{ops[1]}"
         "R[#{ops[0]}], #{sym}"
+      when :OP_SETGV, :OP_SETIV, :OP_SETCV, :OP_SETCONST
+        sym = @irep.symbols[ops[1]] || "sym_#{ops[1]}"
+        "#{sym}, R[#{ops[0]}]"
       else
         ops.map(&:to_s).join(", ")
       end

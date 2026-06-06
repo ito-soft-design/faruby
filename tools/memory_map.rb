@@ -20,6 +20,7 @@ module MrubycOnPlc
     NREGS_ADDR        = 11    # レジスタ数
     NLOCALS_ADDR      = 12    # ローカル変数数
     RESET_REQ_ADDR    = 13    # リセット要求 (1=要求, PLC側で処理後0に戻る)
+    NUM_SYMBOLS_ADDR  = 14    # シンボル数
 
     # レジスタファイル (32ビット符号付き = 2ワード/レジスタ)
     REG_FILE_BASE     = 100
@@ -32,6 +33,26 @@ module MrubycOnPlc
     # 定数プール (32ビット符号付き = 2ワード/エントリ)
     POOL_BASE         = 4000
     MAX_POOL          = 250
+
+    # デバイスマッピングテーブル (2ワード/エントリ: device_type + device_address)
+    DEVICE_TABLE_BASE = 5000
+    DEVICE_TABLE_STRIDE = 2
+    MAX_SYMBOLS       = 100
+
+    # デバイスタイプ定数
+    DEVICE_TYPE_EM    = 0
+    DEVICE_TYPE_DM    = 1
+    DEVICE_TYPE_ZF    = 2
+    DEVICE_TYPE_R     = 3
+    DEVICE_TYPE_MR    = 4
+    DEVICE_TYPE_B     = 5
+    DEVICE_TYPE_L     = 6
+    DEVICE_TYPE_CR    = 7
+    DEVICE_TYPE_T     = 8
+    DEVICE_TYPE_C     = 9
+
+    # 汎用グローバル変数領域 (32ビット = 2ワード/変数)
+    GENERAL_GLOBAL_BASE = 6000
 
     # VM 状態定数
     VM_STOPPED  = 0

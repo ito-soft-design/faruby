@@ -100,6 +100,118 @@ class TestEndToEnd < Minitest::Test
     assert_equal 5, result[:locals]["i"]
   end
 
+  # --- マイルストーン3: グローバル変数テスト ---
+
+  def test_global_var_write
+    source = <<~RUBY
+      $foo = 42
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 42, result[:sim].global_value("$foo")
+  end
+
+  def test_global_var_read_write
+    source = <<~RUBY
+      $foo = 10
+      a = $foo + 5
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 10, result[:sim].global_value("$foo")
+    assert_equal 15, result[:locals]["a"]
+  end
+
+  def test_global_var_in_loop
+    source = <<~RUBY
+      $count = 0
+      i = 0
+      while i < 5
+        $count = $count + 1
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 5, result[:sim].global_value("$count")
+    assert_equal 5, result[:locals]["i"]
+  end
+
+  def test_global_var_dm_device
+    source = <<~RUBY
+      $DM100 = 42
+    RUBY
+    result = compile_and_run(source)
+    # DM100 はデバイスタイプ1 (DM), アドレス100 にマッピングされる
+    sim = result[:sim]
+    assert_equal 42, sim.global_value("$DM100")
+    # DM デバイスメモリ (devices[1]) のアドレス100に書き込まれていることを確認
+    assert_equal 42, sim.devices[1].read_s32(100)
+  end
+
+  # --- 実デバイスアクセステスト ---
+
+  def test_device_io_multi_device
+    source = <<~RUBY
+      $DM100 = 42
+      $MR10 = 1
+      $MR200 = $DM100 + $MR10
+    RUBY
+    result = compile_and_run(source)
+    sim = result[:sim]
+    # DM デバイス (type=1, ワード): 32ビット値
+    assert_equal 42, sim.devices[1].read_s32(100)
+    # MR デバイス (type=4, ビット): 0 or 1
+    assert_equal 1, sim.devices[4].read_u16(10)
+    # MR デバイス (type=4, ビット): 42+1=43 → 非0 → 1
+    # MR200 は HEXDEC → Z offset = 32
+    assert_equal 1, sim.devices[4].read_u16(32)
+  end
+
+  def test_device_io_zf
+    source = <<~RUBY
+      $ZF500 = 999
+    RUBY
+    result = compile_and_run(source)
+    sim = result[:sim]
+    assert_equal 999, sim.global_value("$ZF500")
+    assert_equal 999, sim.devices[2].read_s32(500)
+  end
+
+  def test_device_io_loop_dm
+    source = <<~RUBY
+      $DM0 = 0
+      i = 0
+      while i < 10
+        $DM0 = $DM0 + i
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    sim = result[:sim]
+    # 0+1+2+...+9 = 45
+    assert_equal 45, sim.devices[1].read_s32(0)
+  end
+
+  def test_device_io_cross_device_copy
+    source = <<~RUBY
+      $DM50 = 123
+      $ZF10 = $DM50
+      $MR0 = $ZF10
+    RUBY
+    result = compile_and_run(source)
+    sim = result[:sim]
+    assert_equal 123, sim.devices[1].read_s32(50)   # DM50 (ワード)
+    assert_equal 123, sim.devices[2].read_s32(10)   # ZF10 (ワード)
+    assert_equal 1, sim.devices[4].read_u16(0)      # MR0 (ビット): 123→非0→1
+  end
+
+  def test_device_io_negative_value
+    source = <<~RUBY
+      $DM200 = -100
+    RUBY
+    result = compile_and_run(source)
+    sim = result[:sim]
+    assert_equal(-100, sim.devices[1].read_s32(200))
+  end
+
   private
 
   def find_mrbc

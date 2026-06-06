@@ -43,6 +43,16 @@ module MrubycOnPlc
         def device_name
           raise NotImplementedError
         end
+
+        # 任意デバイスの読み取り (例: "DM", 100)
+        def read_device(device_prefix, addr)
+          raise NotImplementedError
+        end
+
+        # 任意デバイスの書き込み
+        def write_device(device_prefix, addr, value)
+          raise NotImplementedError
+        end
       end
     end
   end
