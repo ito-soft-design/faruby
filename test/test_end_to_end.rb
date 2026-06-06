@@ -81,8 +81,8 @@ class TestEndToEnd < Minitest::Test
 
       # パースして実行
       data = File.binread(mrb_path)
-      parser = RubyOnPlc::MrbParser.new(data).parse
-      sim = RubyOnPlc::KvVmSimulator.new
+      parser = MrubycOnPlc::MrbParser.new(data).parse
+      sim = MrubycOnPlc::KvVmSimulator.new
       sim.load_irep_and_run(parser.irep)
 
       assert_equal 2, sim.status, "VM should finish (status=2)"

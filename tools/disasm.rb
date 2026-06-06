@@ -5,7 +5,7 @@
 
 require_relative "mrb_parser"
 
-module RubyOnPlc
+module MrubycOnPlc
   class Disassembler
     # オペコード定義: [名前, 形式]
     # mruby 3.x (ops.h に基づく)
@@ -313,12 +313,12 @@ if __FILE__ == $0
   end
 
   data = File.binread(ARGV[0])
-  parser = RubyOnPlc::MrbParser.new(data).parse
+  parser = MrubycOnPlc::MrbParser.new(data).parse
 
   puts "=== #{parser.header} ==="
   puts parser.irep
   puts
 
-  disasm = RubyOnPlc::Disassembler.new(parser.irep)
+  disasm = MrubycOnPlc::Disassembler.new(parser.irep)
   puts disasm.disassemble_to_s
 end

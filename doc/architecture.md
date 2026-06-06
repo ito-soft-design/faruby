@@ -88,7 +88,7 @@ R[n] = EM(100 + n * 2).L
 byte[n] = EM(1000 + n).U
 ```
 
-フェッチは `EM[1000 + PC]` で行い、PC をインクリメントします。
+フェッチは Z レジスタ間接アドレッシング (`Z1 = PC + 1000` → `EM0:Z1`) で行い、PC をインクリメントします。
 
 ### 定数プール (EM4000-EM4499)
 
@@ -101,12 +101,12 @@ Pool[n] = EM(4000 + n * 2).L
 ### fetch-decode-execute ループ
 
 ```
-FOR ループカウンタ = 1 TO EM5 (STEPS_PER_CYCLE)
-    1. オペコードフェッチ: EM[1000 + PC] を読み、PC++
+FOR EM20 = 1 TO EM5 (STEPS_PER_CYCLE)
+    1. オペコードフェッチ: Z1 = PC + 1000; EM0:Z1 を読み、PC++
     2. デコード: IF/ELSE IF チェーンでオペコード判定
     3. オペランドフェッチ: 形式に応じて追加バイトを読む
     4. 実行: レジスタ操作
-    5. STOP/RETURN で EXIT FOR
+    5. STOP/RETURN で BREAK
 NEXT
 ```
 

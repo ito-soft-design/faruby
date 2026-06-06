@@ -3,7 +3,7 @@
 # PLC メモリマップ定義
 # EM (拡張データメモリ) のアドレス割り当てを定義します。
 
-module RubyOnPlc
+module MrubycOnPlc
   module MemoryMap
     # VM 状態領域
     VM_STATE_BASE     = 0

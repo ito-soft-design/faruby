@@ -7,10 +7,10 @@ require_relative "../simulator/em_memory"
 require_relative "../simulator/kv_vm_simulator"
 
 class TestVmSimulator < Minitest::Test
-  include RubyOnPlc::MemoryMap
+  include MrubycOnPlc::MemoryMap
 
   def setup
-    @sim = RubyOnPlc::KvVmSimulator.new
+    @sim = MrubycOnPlc::KvVmSimulator.new
   end
 
   # EM メモリにバイトコードをセットして VM を起動するヘルパー
@@ -33,7 +33,7 @@ class TestVmSimulator < Minitest::Test
 
     # レジスタクリア
     nregs.times do |i|
-      em.write_s32(RubyOnPlc::MemoryMap.reg_addr(i), 0)
+      em.write_s32(MrubycOnPlc::MemoryMap.reg_addr(i), 0)
     end
   end
 

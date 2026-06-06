@@ -10,7 +10,7 @@ require_relative "memory_map"
 require_relative "plc_codegen"
 require_relative "../simulator/kv_vm_simulator"
 
-module RubyOnPlc
+module MrubycOnPlc
   class Pipeline
     # mrbc のパスを検索
     MRBC_CANDIDATES = [
@@ -26,7 +26,7 @@ module RubyOnPlc
     end
 
     def run
-      puts "=== RubyOnPlc Pipeline ==="
+      puts "=== mruby/c on PLC Pipeline ==="
       puts "Source: #{@source_path}"
       puts
 
@@ -124,6 +124,6 @@ if __FILE__ == $0
     mrbc = ARGV[idx + 1]
   end
 
-  pipeline = RubyOnPlc::Pipeline.new(source, mrbc_path: mrbc)
+  pipeline = MrubycOnPlc::Pipeline.new(source, mrbc_path: mrbc)
   pipeline.run
 end

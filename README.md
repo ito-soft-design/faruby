@@ -1,4 +1,4 @@
-# RubyOnPlc
+# mruby/c on PLC
 
 PLC 上で Ruby (mruby/c) を動作させる実験的プロジェクトです。
 
@@ -35,7 +35,7 @@ EM レジスタ値リスト ──通信──>  EM メモリに格納
 ## ディレクトリ構成
 
 ```
-RubyOnPlc/
+mrubycOnPlc/
 ├── tools/          PC側ツール (Ruby)
 ├── simulator/      PC側 VM シミュレータ
 ├── plc/keyence/    KV スクリプト VM

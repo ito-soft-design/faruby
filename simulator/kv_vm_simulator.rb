@@ -10,7 +10,7 @@ require_relative "../tools/mrb_parser"
 require_relative "../tools/disasm"
 require_relative "../tools/plc_codegen"
 
-module RubyOnPlc
+module MrubycOnPlc
   class KvVmSimulator
     include MemoryMap
 
@@ -246,14 +246,14 @@ if __FILE__ == $0
   end
 
   data = File.binread(ARGV[0])
-  parser = RubyOnPlc::MrbParser.new(data).parse
+  parser = MrubycOnPlc::MrbParser.new(data).parse
 
   puts "=== Disassembly ==="
-  disasm = RubyOnPlc::Disassembler.new(parser.irep)
+  disasm = MrubycOnPlc::Disassembler.new(parser.irep)
   puts disasm.disassemble_to_s
   puts
 
-  sim = RubyOnPlc::KvVmSimulator.new
+  sim = MrubycOnPlc::KvVmSimulator.new
   steps = sim.load_irep_and_run(parser.irep)
 
   puts "Executed #{steps} instructions"

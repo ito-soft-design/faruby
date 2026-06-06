@@ -12,5 +12,5 @@ EM5 = 50     ' STEPS_PER_CYCLE = 50
 
 ' レジスタファイルクリア (EM100-EM259)
 FOR Z1 = 100 TO 259
-    EM[Z1] = 0
+    EM0:Z1 = 0
 NEXT

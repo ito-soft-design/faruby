@@ -21,7 +21,7 @@ IF EM1 = 1 THEN
 
         ' === FETCH OPCODE ===
         Z1 = EM0 + 1000
-        EM6 = EM[Z1]
+        EM6 = EM0:Z1
         EM0 = EM0 + 1
 
         ' === DECODE & EXECUTE ===
@@ -32,262 +32,262 @@ IF EM1 = 1 THEN
         ELSE IF EM6 = 1 THEN
             ' OP_MOVE (BB): R[a] = R[b]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = EM8 * 2 + 100
-            EM[Z1].L = EM[Z2].L
+            EM0:Z1.L = EM0:Z2.L
 
         ELSE IF EM6 = 2 THEN
             ' OP_LOADL (BB): R[a] = Pool[b]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = EM8 * 2 + 4000
-            EM[Z1].L = EM[Z2].L
+            EM0:Z1.L = EM0:Z2.L
 
         ELSE IF EM6 = 3 THEN
             ' OP_LOADI8 (BB): R[a] = signed(b)
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             IF EM8 >= 128 THEN
                 EM8 = EM8 - 256
             END IF
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = EM8
+            EM0:Z1.L = EM8
 
         ELSE IF EM6 = 4 THEN
             ' OP_LOADINEG (BB): R[a] = -b
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 0 - EM8
+            EM0:Z1.L = 0 - EM8
 
         ELSE IF EM6 = 5 THEN
             ' OP_LOADI__1 (B): R[a] = -1
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = -1
+            EM0:Z1.L = -1
 
         ELSE IF EM6 = 6 THEN
             ' OP_LOADI_0 (B): R[a] = 0
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 0
+            EM0:Z1.L = 0
 
         ELSE IF EM6 = 7 THEN
             ' OP_LOADI_1 (B): R[a] = 1
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 1
+            EM0:Z1.L = 1
 
         ELSE IF EM6 = 8 THEN
             ' OP_LOADI_2 (B): R[a] = 2
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 2
+            EM0:Z1.L = 2
 
         ELSE IF EM6 = 9 THEN
             ' OP_LOADI_3 (B): R[a] = 3
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 3
+            EM0:Z1.L = 3
 
         ELSE IF EM6 = 10 THEN
             ' OP_LOADI_4 (B): R[a] = 4
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 4
+            EM0:Z1.L = 4
 
         ELSE IF EM6 = 11 THEN
             ' OP_LOADI_5 (B): R[a] = 5
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 5
+            EM0:Z1.L = 5
 
         ELSE IF EM6 = 12 THEN
             ' OP_LOADI_6 (B): R[a] = 6
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 6
+            EM0:Z1.L = 6
 
         ELSE IF EM6 = 13 THEN
             ' OP_LOADI_7 (B): R[a] = 7
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 7
+            EM0:Z1.L = 7
 
         ELSE IF EM6 = 14 THEN
             ' OP_LOADI16 (BS): R[a] = signed16(b)
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
-            Z3 = EM[Z1]
+            Z3 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            Z4 = EM[Z1]
+            Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             IF EM8 >= 32768 THEN
                 EM8 = EM8 - 65536
             END IF
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = EM8
+            EM0:Z1.L = EM8
 
         ELSE IF EM6 = 15 THEN
             ' OP_LOADI32 (BSS): R[a] = (b<<16)+c
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' b (16bit)
             Z1 = EM0 + 1000
-            Z3 = EM[Z1]
+            Z3 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            Z4 = EM[Z1]
+            Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             ' c (16bit)
             Z1 = EM0 + 1000
-            Z3 = EM[Z1]
+            Z3 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            Z4 = EM[Z1]
+            Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM9 = Z3 * 256 + Z4
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = EM8 * 65536 + EM9
+            EM0:Z1.L = EM8 * 65536 + EM9
 
         ELSE IF EM6 = 18 THEN
             ' OP_LOADSELF (B): R[a] = self (=0)
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = 0
+            EM0:Z1.L = 0
 
         ELSE IF EM6 = 56 THEN
             ' OP_RETURN (B): トップレベルでは VM 停止
             EM0 = EM0 + 1
             EM1 = 2
-            EXIT
+            BREAK
 
         ELSE IF EM6 = 60 THEN
             ' OP_ADD (B): R[a] = R[a] + R[a+1]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = (EM7 + 1) * 2 + 100
-            EM[Z1].L = EM[Z1].L + EM[Z2].L
+            EM0:Z1.L = EM0:Z1.L + EM0:Z2.L
 
         ELSE IF EM6 = 61 THEN
             ' OP_ADDI (BB): R[a] = R[a] + b
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = EM[Z1].L + EM8
+            EM0:Z1.L = EM0:Z1.L + EM8
 
         ELSE IF EM6 = 62 THEN
             ' OP_SUB (B): R[a] = R[a] - R[a+1]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = (EM7 + 1) * 2 + 100
-            EM[Z1].L = EM[Z1].L - EM[Z2].L
+            EM0:Z1.L = EM0:Z1.L - EM0:Z2.L
 
         ELSE IF EM6 = 63 THEN
             ' OP_SUBI (BB): R[a] = R[a] - b
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
-            EM8 = EM[Z1]
+            EM8 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
-            EM[Z1].L = EM[Z1].L - EM8
+            EM0:Z1.L = EM0:Z1.L - EM8
 
         ELSE IF EM6 = 64 THEN
             ' OP_MUL (B): R[a] = R[a] * R[a+1]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = (EM7 + 1) * 2 + 100
-            EM[Z1].L = EM[Z1].L * EM[Z2].L
+            EM0:Z1.L = EM0:Z1.L * EM0:Z2.L
 
         ELSE IF EM6 = 65 THEN
             ' OP_DIV (B): R[a] = R[a] / R[a+1]
             Z1 = EM0 + 1000
-            EM7 = EM[Z1]
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM7 * 2 + 100
             Z2 = (EM7 + 1) * 2 + 100
-            IF EM[Z2].L <> 0 THEN
-                EM[Z1].L = EM[Z1].L / EM[Z2].L
+            IF EM0:Z2.L <> 0 THEN
+                EM0:Z1.L = EM0:Z1.L / EM0:Z2.L
             ELSE
                 EM1 = 3
                 EM2 = 1
-                EXIT
+                BREAK
             END IF
 
         ELSE IF EM6 = 105 THEN
             ' OP_STOP (Z): VM 停止
             EM1 = 2
-            EXIT
+            BREAK
 
         ELSE
             ' 未知のオペコード: エラー
             EM1 = 3
             EM2 = EM6
-            EXIT
+            BREAK
 
         END IF
 
         ' バイトコード範囲チェック
         IF EM0 >= EM10 THEN
             EM1 = 2
-            EXIT
+            BREAK
         END IF
 
     NEXT

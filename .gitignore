@@ -20,6 +20,10 @@ Gemfile.lock
 *.swp
 *.swo
 
+# KV Studio temp/backup files
+*.bak
+*.old
+
 # OS
 .DS_Store
 Thumbs.db
