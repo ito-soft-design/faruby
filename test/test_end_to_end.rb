@@ -56,6 +56,50 @@ class TestEndToEnd < Minitest::Test
     assert_equal 2000, result[:locals]["b"]
   end
 
+  def test_if_true_branch
+    source = <<~RUBY
+      a = 5
+      b = 0
+      if a > 3
+        b = 1
+      else
+        b = 2
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 5, result[:locals]["a"]
+    assert_equal 1, result[:locals]["b"]
+  end
+
+  def test_if_false_branch
+    source = <<~RUBY
+      a = 1
+      b = 0
+      if a > 3
+        b = 1
+      else
+        b = 2
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 1, result[:locals]["a"]
+    assert_equal 2, result[:locals]["b"]
+  end
+
+  def test_while_loop
+    source = <<~RUBY
+      a = 0
+      i = 0
+      while i < 5
+        a = a + i
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 10, result[:locals]["a"]  # 0+1+2+3+4 = 10
+    assert_equal 5, result[:locals]["i"]
+  end
+
   private
 
   def find_mrbc
@@ -88,7 +132,7 @@ class TestEndToEnd < Minitest::Test
       assert_equal 2, sim.status, "VM should finish (status=2)"
 
       # ローカル変数名を推測 (R[1]から順に source 内の代入文の左辺)
-      var_names = source.scan(/^(\w+)\s*=/).flatten
+      var_names = source.scan(/^\s*(\w+)\s*=/).flatten.uniq
       locals = {}
       var_names.each_with_index do |name, i|
         locals[name] = sim.reg(i + 1)  # R[0]=self, R[1]=first local

@@ -202,6 +202,96 @@ IF EM1 = 1 THEN
             Z1 = EM7 * 2 + 100
             EM0:Z1.L = 0
 
+        ELSE IF EM6 = 19 THEN
+            ' OP_LOADTRUE (B): R[a] = 1
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            EM0:Z1.L = 1
+
+        ELSE IF EM6 = 20 THEN
+            ' OP_LOADFALSE (B): R[a] = 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            EM0:Z1.L = 0
+
+        ELSE IF EM6 = 37 THEN
+            ' OP_JMP (S): 無条件ジャンプ PC += signed16(a)
+            Z1 = EM0 + 1000
+            Z3 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z4 = EM0:Z1
+            EM0 = EM0 + 1
+            EM8 = Z3 * 256 + Z4
+            IF EM8 >= 32768 THEN
+                EM8 = EM8 - 65536
+            END IF
+            EM0 = EM0 + EM8
+
+        ELSE IF EM6 = 38 THEN
+            ' OP_JMPIF (BS): if R[a] != 0 then PC += signed16(b)
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z3 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z4 = EM0:Z1
+            EM0 = EM0 + 1
+            EM8 = Z3 * 256 + Z4
+            IF EM8 >= 32768 THEN
+                EM8 = EM8 - 65536
+            END IF
+            Z1 = EM7 * 2 + 100
+            IF EM0:Z1.L <> 0 THEN
+                EM0 = EM0 + EM8
+            END IF
+
+        ELSE IF EM6 = 39 THEN
+            ' OP_JMPNOT (BS): if R[a] == 0 then PC += signed16(b)
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z3 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z4 = EM0:Z1
+            EM0 = EM0 + 1
+            EM8 = Z3 * 256 + Z4
+            IF EM8 >= 32768 THEN
+                EM8 = EM8 - 65536
+            END IF
+            Z1 = EM7 * 2 + 100
+            IF EM0:Z1.L = 0 THEN
+                EM0 = EM0 + EM8
+            END IF
+
+        ELSE IF EM6 = 40 THEN
+            ' OP_JMPNIL (BS): if R[a] == 0 (nil) then PC += signed16(b)
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z3 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM0 + 1000
+            Z4 = EM0:Z1
+            EM0 = EM0 + 1
+            EM8 = Z3 * 256 + Z4
+            IF EM8 >= 32768 THEN
+                EM8 = EM8 - 65536
+            END IF
+            Z1 = EM7 * 2 + 100
+            IF EM0:Z1.L = 0 THEN
+                EM0 = EM0 + EM8
+            END IF
+
         ELSE IF EM6 = 56 THEN
             ' OP_RETURN (B): トップレベルでは VM 停止
             EM0 = EM0 + 1
@@ -270,6 +360,71 @@ IF EM1 = 1 THEN
                 EM1 = 3
                 EM2 = 1
                 BREAK
+            END IF
+
+        ELSE IF EM6 = 66 THEN
+            ' OP_EQ (B): R[a] = (R[a] == R[a+1]) ? 1 : 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            Z2 = (EM7 + 1) * 2 + 100
+            IF EM0:Z1.L = EM0:Z2.L THEN
+                EM0:Z1.L = 1
+            ELSE
+                EM0:Z1.L = 0
+            END IF
+
+        ELSE IF EM6 = 67 THEN
+            ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? 1 : 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            Z2 = (EM7 + 1) * 2 + 100
+            IF EM0:Z1.L < EM0:Z2.L THEN
+                EM0:Z1.L = 1
+            ELSE
+                EM0:Z1.L = 0
+            END IF
+
+        ELSE IF EM6 = 68 THEN
+            ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? 1 : 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            Z2 = (EM7 + 1) * 2 + 100
+            IF EM0:Z1.L <= EM0:Z2.L THEN
+                EM0:Z1.L = 1
+            ELSE
+                EM0:Z1.L = 0
+            END IF
+
+        ELSE IF EM6 = 69 THEN
+            ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? 1 : 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            Z2 = (EM7 + 1) * 2 + 100
+            IF EM0:Z1.L > EM0:Z2.L THEN
+                EM0:Z1.L = 1
+            ELSE
+                EM0:Z1.L = 0
+            END IF
+
+        ELSE IF EM6 = 70 THEN
+            ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? 1 : 0
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
+            EM0 = EM0 + 1
+            Z1 = EM7 * 2 + 100
+            Z2 = (EM7 + 1) * 2 + 100
+            IF EM0:Z1.L >= EM0:Z2.L THEN
+                EM0:Z1.L = 1
+            ELSE
+                EM0:Z1.L = 0
             END IF
 
         ELSE IF EM6 = 105 THEN

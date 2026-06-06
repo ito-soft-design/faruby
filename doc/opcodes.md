@@ -24,7 +24,10 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 | 0x0D | 13 | OP_LOADI_7 | B | R[a] = 7 |
 | 0x0E | 14 | OP_LOADI16 | BS | R[a] = signed_int16(b) |
 | 0x0F | 15 | OP_LOADI32 | BSS | R[a] = (b << 16) + c |
+| 0x11 | 17 | OP_LOADNIL | B | R[a] = nil (= 0) |
 | 0x12 | 18 | OP_LOADSELF | B | R[a] = self (トップレベルでは 0) |
+| 0x13 | 19 | OP_LOADTRUE | B | R[a] = true (= 1) |
+| 0x14 | 20 | OP_LOADFALSE | B | R[a] = false (= 0) |
 
 ### 演算系
 
@@ -36,6 +39,29 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 | 0x3F | 63 | OP_SUBI | BB | R[a] = R[a] - int(b) |
 | 0x40 | 64 | OP_MUL | B | R[a] = R[a] * R[a+1] |
 | 0x41 | 65 | OP_DIV | B | R[a] = R[a] / R[a+1] |
+
+### 比較演算系
+
+| # (hex) | # (dec) | 名前 | 形式 | 動作 |
+|---------|---------|------|------|------|
+| 0x42 | 66 | OP_EQ | B | R[a] = (R[a] == R[a+1]) ? 1 : 0 |
+| 0x43 | 67 | OP_LT | B | R[a] = (R[a] < R[a+1]) ? 1 : 0 |
+| 0x44 | 68 | OP_LE | B | R[a] = (R[a] <= R[a+1]) ? 1 : 0 |
+| 0x45 | 69 | OP_GT | B | R[a] = (R[a] > R[a+1]) ? 1 : 0 |
+| 0x46 | 70 | OP_GE | B | R[a] = (R[a] >= R[a+1]) ? 1 : 0 |
+
+比較結果は整数 1 (true) / 0 (false) で表現します。
+
+### ジャンプ系
+
+| # (hex) | # (dec) | 名前 | 形式 | 動作 |
+|---------|---------|------|------|------|
+| 0x25 | 37 | OP_JMP | S | PC += signed_int16(a) |
+| 0x26 | 38 | OP_JMPIF | BS | if R[a] != 0 then PC += signed_int16(b) |
+| 0x27 | 39 | OP_JMPNOT | BS | if R[a] == 0 then PC += signed_int16(b) |
+| 0x28 | 40 | OP_JMPNIL | BS | if R[a] == 0 then PC += signed_int16(b) |
+
+オフセットは符号付き16ビットの相対値です。基点は全オペランドを読み終えた後の PC です。ループ (while) では負のオフセットで後方ジャンプします。
 
 ### 制御系
 
@@ -60,3 +86,4 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 - 上記の番号は mruby 3.x 系のものです
 - `OP_ADD` 等の算術演算は R[a] と R[a+1] を使い、結果を R[a] に格納します
 - mrbc はコンパイル時に定数畳み込みを行うことがあります (例: `1 + 2` が `3` に最適化される)
+- 真偽値は整数で表現: true = 1, false/nil = 0。条件判定では 0 が偽、非0 が真

@@ -150,7 +150,40 @@ module MrubycOnPlc
 
       when 0x11 # OP_LOADNIL (B)
         a = fetch_byte
-        write_reg(a, 0)  # nil = 0 (マイルストーン1)
+        write_reg(a, 0)  # nil = 0
+
+      when 0x13 # OP_LOADTRUE (B)
+        a = fetch_byte
+        write_reg(a, 1)  # true = 1
+
+      when 0x14 # OP_LOADFALSE (B)
+        a = fetch_byte
+        write_reg(a, 0)  # false = 0
+
+      when 0x25 # OP_JMP (S)
+        offset = fetch_s16
+        @em.write_u16(PC_ADDR, pc + offset)
+
+      when 0x26 # OP_JMPIF (BS)
+        a = fetch_byte
+        offset = fetch_s16
+        if read_reg(a) != 0
+          @em.write_u16(PC_ADDR, pc + offset)
+        end
+
+      when 0x27 # OP_JMPNOT (BS)
+        a = fetch_byte
+        offset = fetch_s16
+        if read_reg(a) == 0
+          @em.write_u16(PC_ADDR, pc + offset)
+        end
+
+      when 0x28 # OP_JMPNIL (BS)
+        a = fetch_byte
+        offset = fetch_s16
+        if read_reg(a) == 0
+          @em.write_u16(PC_ADDR, pc + offset)
+        end
 
       when 0x38 # OP_RETURN (B)
         _a = fetch_byte
@@ -192,6 +225,26 @@ module MrubycOnPlc
           result = read_reg(a) / divisor
           write_reg(a, result)
         end
+
+      when 0x42 # OP_EQ (B)
+        a = fetch_byte
+        write_reg(a, read_reg(a) == read_reg(a + 1) ? 1 : 0)
+
+      when 0x43 # OP_LT (B)
+        a = fetch_byte
+        write_reg(a, read_reg(a) < read_reg(a + 1) ? 1 : 0)
+
+      when 0x44 # OP_LE (B)
+        a = fetch_byte
+        write_reg(a, read_reg(a) <= read_reg(a + 1) ? 1 : 0)
+
+      when 0x45 # OP_GT (B)
+        a = fetch_byte
+        write_reg(a, read_reg(a) > read_reg(a + 1) ? 1 : 0)
+
+      when 0x46 # OP_GE (B)
+        a = fetch_byte
+        write_reg(a, read_reg(a) >= read_reg(a + 1) ? 1 : 0)
 
       when 0x69 # OP_STOP (Z)
         @em.write_u16(STATUS_ADDR, VM_FINISHED)

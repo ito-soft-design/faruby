@@ -125,6 +125,67 @@ KV スクリプトでは Z1-Z12 を間接アドレッシングに使用します
 - STEPS_PER_CYCLE が大きすぎるとスキャンタイムが延びます
 - 推奨初期値: 50
 
+## 対応オペコード
+
+### マイルストーン1: 整数四則演算
+
+| Opcode | Code | Format | 動作 |
+|--------|------|--------|------|
+| OP_NOP | 0x00 | Z | 何もしない |
+| OP_MOVE | 0x01 | BB | R[a] = R[b] |
+| OP_LOADL | 0x02 | BB | R[a] = Pool[b] |
+| OP_LOADI8 | 0x03 | BB | R[a] = signed(b) |
+| OP_LOADINEG | 0x04 | BB | R[a] = -b |
+| OP_LOADI__1 | 0x05 | B | R[a] = -1 |
+| OP_LOADI_0..7 | 0x06-0x0D | B | R[a] = 0..7 |
+| OP_LOADI16 | 0x0E | BS | R[a] = signed16(b) |
+| OP_LOADI32 | 0x0F | BSS | R[a] = (b<<16)\|c |
+| OP_LOADSELF | 0x12 | B | R[a] = self (=0) |
+| OP_LOADNIL | 0x11 | B | R[a] = 0 |
+| OP_RETURN | 0x38 | B | VM 停止 (トップレベル) |
+| OP_ADD | 0x3C | B | R[a] = R[a] + R[a+1] |
+| OP_ADDI | 0x3D | BB | R[a] = R[a] + b |
+| OP_SUB | 0x3E | B | R[a] = R[a] - R[a+1] |
+| OP_SUBI | 0x3F | BB | R[a] = R[a] - b |
+| OP_MUL | 0x40 | B | R[a] = R[a] * R[a+1] |
+| OP_DIV | 0x41 | B | R[a] = R[a] / R[a+1] |
+| OP_STOP | 0x69 | Z | VM 停止 |
+
+### マイルストーン2: 条件分岐・ループ
+
+#### 真偽値の表現
+
+- true = 1 (整数)、false/nil = 0 (整数)
+- 条件判定: 0 は偽、非0 は真
+
+#### ブーリアン値ロード
+
+| Opcode | Code | Format | 動作 |
+|--------|------|--------|------|
+| OP_LOADTRUE | 0x13 | B | R[a] = 1 |
+| OP_LOADFALSE | 0x14 | B | R[a] = 0 |
+
+#### 比較演算
+
+| Opcode | Code | Format | 動作 |
+|--------|------|--------|------|
+| OP_EQ | 0x42 | B | R[a] = (R[a] == R[a+1]) ? 1 : 0 |
+| OP_LT | 0x43 | B | R[a] = (R[a] < R[a+1]) ? 1 : 0 |
+| OP_LE | 0x44 | B | R[a] = (R[a] <= R[a+1]) ? 1 : 0 |
+| OP_GT | 0x45 | B | R[a] = (R[a] > R[a+1]) ? 1 : 0 |
+| OP_GE | 0x46 | B | R[a] = (R[a] >= R[a+1]) ? 1 : 0 |
+
+#### ジャンプ
+
+| Opcode | Code | Format | 動作 |
+|--------|------|--------|------|
+| OP_JMP | 0x25 | S | PC += signed16(a) |
+| OP_JMPIF | 0x26 | BS | if R[a] != 0 then PC += signed16(b) |
+| OP_JMPNOT | 0x27 | BS | if R[a] == 0 then PC += signed16(b) |
+| OP_JMPNIL | 0x28 | BS | if R[a] == 0 then PC += signed16(b) |
+
+ジャンプオフセットは**相対値** (符号付き16ビット)。オフセットの基点は全オペランドを読み終えた後の PC。ループ (while) では負のオフセットで後方ジャンプする。
+
 ## mruby バージョン対応
 
 ### 現在の対応バージョン

@@ -307,6 +307,225 @@ class TestVmSimulator < Minitest::Test
     assert_equal(-42, @sim.reg(1))
   end
 
+  # === OP_LOADTRUE / OP_LOADFALSE ===
+  def test_loadtrue
+    load_bytecode([
+      0x13, 0x01,       # OP_LOADTRUE R[1]
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  def test_loadfalse
+    load_bytecode([
+      0x14, 0x01,       # OP_LOADFALSE R[1]
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 0, @sim.reg(1)
+  end
+
+  # === OP_EQ ===
+  def test_eq_true
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]
+      0x09, 0x02,       # OP_LOADI_3 R[2]
+      0x42, 0x01,       # OP_EQ R[1]  (R[1] == R[2])
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  def test_eq_false
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]
+      0x0A, 0x02,       # OP_LOADI_4 R[2]
+      0x42, 0x01,       # OP_EQ R[1]  (R[1] == R[2])
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(1)
+  end
+
+  # === OP_LT ===
+  def test_lt_true
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]  (3)
+      0x0A, 0x02,       # OP_LOADI_4 R[2]  (4)
+      0x43, 0x01,       # OP_LT R[1]  (3 < 4)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  def test_lt_false
+    load_bytecode([
+      0x0A, 0x01,       # OP_LOADI_4 R[1]  (4)
+      0x09, 0x02,       # OP_LOADI_3 R[2]  (3)
+      0x43, 0x01,       # OP_LT R[1]  (4 < 3)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(1)
+  end
+
+  # === OP_LE ===
+  def test_le_true
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]  (3)
+      0x0A, 0x02,       # OP_LOADI_4 R[2]  (4)
+      0x44, 0x01,       # OP_LE R[1]  (3 <= 4)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  def test_le_equal
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]  (3)
+      0x09, 0x02,       # OP_LOADI_3 R[2]  (3)
+      0x44, 0x01,       # OP_LE R[1]  (3 <= 3)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  def test_le_false
+    load_bytecode([
+      0x0A, 0x01,       # OP_LOADI_4 R[1]  (4)
+      0x09, 0x02,       # OP_LOADI_3 R[2]  (3)
+      0x44, 0x01,       # OP_LE R[1]  (4 <= 3)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(1)
+  end
+
+  # === OP_GT ===
+  def test_gt_true
+    load_bytecode([
+      0x0A, 0x01,       # OP_LOADI_4 R[1]  (4)
+      0x09, 0x02,       # OP_LOADI_3 R[2]  (3)
+      0x45, 0x01,       # OP_GT R[1]  (4 > 3)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  # === OP_GE ===
+  def test_ge_true
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]  (3)
+      0x09, 0x02,       # OP_LOADI_3 R[2]  (3)
+      0x46, 0x01,       # OP_GE R[1]  (3 >= 3)
+      0x69,             # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 1, @sim.reg(1)
+  end
+
+  # === OP_JMP ===
+  def test_jmp_forward
+    # JMP で OP_LOADI_0 をスキップ
+    # JMP at offset 2: after reading S operand → PC=5
+    # offset=2 → target=5+2=7 (OP_STOP)
+    load_bytecode([
+      0x0B, 0x01,       # 0,1: OP_LOADI_5 R[1]
+      0x25, 0x00, 0x02, # 2,3,4: OP_JMP offset=2 → PC=5+2=7
+      0x06, 0x01,       # 5,6: OP_LOADI_0 R[1] (skipped)
+      0x69,             # 7: OP_STOP
+    ])
+    @sim.run
+    assert_equal 5, @sim.reg(1), "LOADI_0 should be skipped"
+    assert_equal VM_FINISHED, @sim.status
+  end
+
+  # === OP_JMPNOT ===
+  def test_jmpnot_taken
+    # R[1]=0 (false), JMPNOT should jump
+    # JMPNOT at offset 2: after reading BS operands → PC=6
+    # offset=2 → target=6+2=8 (OP_STOP)
+    load_bytecode([
+      0x06, 0x01,             # 0,1: OP_LOADI_0 R[1] (false)
+      0x27, 0x01, 0x00, 0x02, # 2,3,4,5: OP_JMPNOT R[1], offset=2 → PC=6+2=8
+      0x0B, 0x02,             # 6,7: OP_LOADI_5 R[2] (skipped)
+      0x69,                   # 8: OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(2), "LOADI_5 should be skipped"
+  end
+
+  def test_jmpnot_not_taken
+    # R[1]=1 (true), JMPNOT should NOT jump
+    load_bytecode([
+      0x07, 0x01,             # 0,1: OP_LOADI_1 R[1] (true)
+      0x27, 0x01, 0x00, 0x02, # 2,3,4,5: OP_JMPNOT R[1], offset=2 → not taken
+      0x0B, 0x02,             # 6,7: OP_LOADI_5 R[2] (executed)
+      0x69,                   # 8: OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 5, @sim.reg(2), "LOADI_5 should execute"
+  end
+
+  # === OP_JMPIF ===
+  def test_jmpif_taken
+    # R[1]=1 (true), JMPIF should jump
+    # JMPIF at offset 2: after reading BS operands → PC=6
+    # offset=2 → target=6+2=8 (OP_STOP)
+    load_bytecode([
+      0x07, 0x01,             # 0,1: OP_LOADI_1 R[1]
+      0x26, 0x01, 0x00, 0x02, # 2,3,4,5: OP_JMPIF R[1], offset=2 → PC=6+2=8
+      0x0B, 0x02,             # 6,7: OP_LOADI_5 R[2] (skipped)
+      0x69,                   # 8: OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(2), "LOADI_5 should be skipped"
+  end
+
+  # === While ループ (後方ジャンプ) ===
+  def test_while_loop
+    # i = 0; while i < 3 do i = i + 1 end
+    # Expected: i=3
+    #
+    # Bytecode layout:
+    #  0,1:       OP_LOADI_0 R[1]       ; i = 0
+    #  2,3,4:     OP_JMP offset=4       ; PC=5+4=9 → condition
+    #  -- body: --
+    #  5,6,7:     OP_ADDI R[1], 1       ; i += 1
+    #  8:         OP_NOP (padding)
+    #  -- condition: --
+    #  9,10,11:   OP_MOVE R[2], R[1]    ; R[2] = i
+    #  12,13:     OP_LOADI_3 R[3]       ; R[3] = 3
+    #  14,15:     OP_LT R[2]           ; R[2] = (i < 3)
+    #  16,17,18,19: OP_JMPIF R[2], offset=-15 ; PC=20+(-15)=5 → body
+    #  20:        OP_STOP
+    offset_back = -15
+    offset_u16 = offset_back & 0xFFFF  # 0xFFF1
+    hi = (offset_u16 >> 8) & 0xFF     # 0xFF
+    lo = offset_u16 & 0xFF            # 0xF1
+
+    load_bytecode([
+      0x06, 0x01,             #  0,1:     OP_LOADI_0 R[1]       ; i = 0
+      0x25, 0x00, 0x04,       #  2,3,4:   OP_JMP offset=4       ; PC=5+4=9
+      0x3D, 0x01, 0x01,       #  5,6,7:   OP_ADDI R[1], 1       ; i += 1
+      0x00,                   #  8:       OP_NOP (padding)
+      0x01, 0x02, 0x01,       #  9,10,11: OP_MOVE R[2], R[1]    ; R[2] = i
+      0x09, 0x03,             # 12,13:    OP_LOADI_3 R[3]       ; R[3] = 3
+      0x43, 0x02,             # 14,15:    OP_LT R[2]            ; R[2] = (i < 3)
+      0x26, 0x02, hi, lo,    # 16,17,18,19: OP_JMPIF R[2], offset=-15 → PC=5
+      0x69,                   # 20:       OP_STOP
+    ], nregs: 5)
+    @sim.run
+    assert_equal 3, @sim.reg(1), "i should be 3 after while loop"
+    assert_equal VM_FINISHED, @sim.status
+  end
+
   # === 未知のオペコード ===
   def test_unknown_opcode_causes_error
     load_bytecode([
