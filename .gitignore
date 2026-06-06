@@ -24,6 +24,9 @@ Gemfile.lock
 *.bak
 *.old
 
+# User config (use mrubycOnPlc.yml.example as template)
+mrubycOnPlc.yml
+
 # OS
 .DS_Store
 Thumbs.db
