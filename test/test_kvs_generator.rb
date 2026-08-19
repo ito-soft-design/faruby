@@ -132,6 +132,35 @@ class TestKvsGenerator < Minitest::Test
     assert_empty bad, "ビットデバイスに幅サフィックスが付いています: #{bad.first(3).inspect}"
   end
 
+  # === 定義表とエミッタの境界 ===
+
+  # オペコード定義表には PLC 機種固有の名前を書かない。
+  # 格納先の実体 (EM7 等) はエミッタが決め、表は e.operand(:b) 経由で参照する。
+  # この境界を保っておくと、機種が増えたときにエミッタだけ差し替えられる。
+  def test_opcode_table_has_no_device_names
+    path = File.expand_path("../tools/opcode_table.rb", __dir__)
+    offenders = File.readlines(path, encoding: "UTF-8").each_with_index.filter_map do |l, i|
+      next if l.strip.start_with?("#")            # コメントは対象外
+      next unless l =~ /\b(EM|DM|ZF|MR)\d+\b|\bZ\d+\b/
+
+      "#{i + 1}: #{l.strip}"
+    end
+
+    assert_empty offenders,
+                 "オペコード定義表に機種固有のデバイス名が直接書かれています。" \
+                 "エミッタのアクセサ (operand / reg / scratch_lo 等) を使ってください:\n" +
+                 offenders.join("\n")
+  end
+
+  # 逆に、デバイス構文はエミッタに集約されている
+  def test_emitter_owns_device_syntax
+    path = File.expand_path("../tools/kvs_generator.rb", __dir__)
+    src = File.read(path, encoding: "UTF-8")
+    assert_includes src, "OPERAND_VARS"
+    assert_includes src, "WORD_DEVICES"
+    assert_includes src, "BIT_DEVICES"
+  end
+
   # === 構造の健全性 ===
 
   def test_if_and_end_if_are_balanced

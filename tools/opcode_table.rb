@@ -12,9 +12,15 @@
 #   format  : 命令形式 (:Z :B :BB :BBB :S :BS :BSS)
 #             オペランドのフェッチコードは形式から自動生成されます。
 #             B=1バイト、S=2バイト(ビッグエンディアン)。
-#             オペランドは順に EM7 (a), EM8 (b), EM9 (c) へ格納されます。
+#             オペランドは順に a, b, c として参照できます。
 #   summary : 生成コードに入れるコメント
-#   body    : KV スクリプトを組み立てるブロック (KvsEmitter を受け取る)
+#   body    : 命令の動作を組み立てるブロック (エミッタを受け取る)
+#
+# この表には PLC 機種固有の名前 (デバイス名・インデックスレジスタ) を
+# 書かないでください。格納先の実体はエミッタ側が決めます。
+#   悪い例: e.line "EM16 = EM8"
+#   良い例: e.line "#{e.scratch_lo} = #{e.operand(:b)}"
+# test_kvs_generator.rb がこの規約を検証します。
 
 require_relative "memory_map"
 
@@ -65,21 +71,16 @@ module MrubycOnPlc
 
       defs << OpcodeDef.new(0x03, :OP_LOADI8, :BB, "R[a] = signed(b)") do |e|
         e.comment "8ビット値を符号拡張して32ビットスクラッチに置く"
-        e.comment "EM は無サフィックスだと16ビット符号なしのため直接引き算できない"
-        e.line "#{e.scratch_lo} = EM8"
-        e.line "#{e.scratch_hi} = 0"
-        e.if_block("EM8 >= 128") do
-          e.line "#{e.scratch_lo} = EM8 + 65280"
-          e.line "#{e.scratch_hi} = 65535"
-        end
+        e.comment "16ビット符号なしのまま引き算すると桁が壊れるため"
+        e.sign_extend_to_scratch(:b, 8)
         e.line "#{e.reg(1, :a)} = #{e.scratch32}"
       end
 
       defs << OpcodeDef.new(0x04, :OP_LOADINEG, :BB, "R[a] = -b") do |e|
         e.comment "2の補数を32ビットで組み立てる"
-        e.line "#{e.scratch_lo} = 0 - EM8"
+        e.line "#{e.scratch_lo} = 0 - #{e.operand(:b)}"
         e.line "#{e.scratch_hi} = 0"
-        e.if_block("EM8 <> 0") { e.line "#{e.scratch_hi} = 65535" }
+        e.if_block("#{e.operand(:b)} <> 0") { e.line "#{e.scratch_hi} = 65535" }
         e.line "#{e.reg(1, :a)} = #{e.scratch32}"
       end
 
@@ -96,17 +97,15 @@ module MrubycOnPlc
 
       defs << OpcodeDef.new(0x0E, :OP_LOADI16, :BS, "R[a] = signed16(b)") do |e|
         e.comment "下位ワードは既に2の補数のビット列なので符号拡張のみ行う"
-        e.line "#{e.scratch_lo} = EM8"
-        e.line "#{e.scratch_hi} = 0"
-        e.if_block("EM8 >= 32768") { e.line "#{e.scratch_hi} = 65535" }
+        e.sign_extend_to_scratch(:b, 16)
         e.line "#{e.reg(1, :a)} = #{e.scratch32}"
       end
 
       defs << OpcodeDef.new(0x0F, :OP_LOADI32, :BSS, "R[a] = (b<<16)+c") do |e|
-        e.comment "EM8 * 65536 は16ビット演算になり桁上がりが落ちるため、"
+        e.comment "b * 65536 は16ビット演算になり桁上がりが落ちるため、"
         e.comment "下位/上位ワードを並べて32ビットとして読む"
-        e.line "#{e.scratch_lo} = EM9"
-        e.line "#{e.scratch_hi} = EM8"
+        e.line "#{e.scratch_lo} = #{e.operand(:c)}"
+        e.line "#{e.scratch_hi} = #{e.operand(:b)}"
         e.line "#{e.reg(1, :a)} = #{e.scratch32}"
       end
 
@@ -129,40 +128,37 @@ module MrubycOnPlc
       defs << OpcodeDef.new(0x15, :OP_GETGV, :BB, "R[a] = global[symbols[b]]") do |e|
         e.device_table_lookup(:b)
         e.comment "レジスタアドレス"
-        e.reg(2, :a)
-        e.device_dispatch(:read, reg: "EM0.L:Z2", error_code: 0x15)
+        e.device_dispatch(:read, reg: e.reg(2, :a), error_code: 0x15)
       end
 
       defs << OpcodeDef.new(0x16, :OP_SETGV, :BB, "global[symbols[b]] = R[a]") do |e|
         e.device_table_lookup(:b)
         e.comment "レジスタアドレス"
-        e.reg(2, :a)
-        e.device_dispatch(:write, reg: "EM0.L:Z2", error_code: 0x16)
+        e.device_dispatch(:write, reg: e.reg(2, :a), error_code: 0x16)
       end
 
       defs << OpcodeDef.new(0x25, :OP_JMP, :S, "PC += signed16(a)") do |e|
-        e.signed16("EM7")
-        e.line "EM0 = EM0 + EM7"
+        e.signed16(:a)
+        e.jump_relative(:a)
       end
 
       defs << OpcodeDef.new(0x26, :OP_JMPIF, :BS, "if R[a] <> 0 then PC += signed16(b)") do |e|
-        e.signed16("EM8")
-        e.if_block("#{e.reg(1, :a)} <> 0") { e.line "EM0 = EM0 + EM8" }
+        e.signed16(:b)
+        e.if_block("#{e.reg(1, :a)} <> 0") { e.jump_relative(:b) }
       end
 
       defs << OpcodeDef.new(0x27, :OP_JMPNOT, :BS, "if R[a] = 0 then PC += signed16(b)") do |e|
-        e.signed16("EM8")
-        e.if_block("#{e.reg(1, :a)} = 0") { e.line "EM0 = EM0 + EM8" }
+        e.signed16(:b)
+        e.if_block("#{e.reg(1, :a)} = 0") { e.jump_relative(:b) }
       end
 
       defs << OpcodeDef.new(0x28, :OP_JMPNIL, :BS, "if R[a] = 0 (nil) then PC += signed16(b)") do |e|
-        e.signed16("EM8")
-        e.if_block("#{e.reg(1, :a)} = 0") { e.line "EM0 = EM0 + EM8" }
+        e.signed16(:b)
+        e.if_block("#{e.reg(1, :a)} = 0") { e.jump_relative(:b) }
       end
 
       defs << OpcodeDef.new(0x38, :OP_RETURN, :B, "トップレベルでは VM 停止") do |e|
-        e.line "EM1 = #{MemoryMap::VM_FINISHED}"
-        e.line "BREAK"
+        e.vm_finish
       end
 
       # 二項算術: R[a] = R[a] <op> R[a+1]
@@ -185,7 +181,7 @@ module MrubycOnPlc
       }.each do |code, (name, op)|
         defs << OpcodeDef.new(code, name, :BB, "R[a] = R[a] #{op} b") do |e|
           lhs = e.reg(1, :a)
-          e.line "#{lhs} = #{lhs} #{op} EM8"
+          e.line "#{lhs} = #{lhs} #{op} #{e.operand(:b)}"
         end
       end
 
@@ -217,8 +213,7 @@ module MrubycOnPlc
       end
 
       defs << OpcodeDef.new(0x69, :OP_STOP, :Z, "VM 停止") do |e|
-        e.line "EM1 = #{MemoryMap::VM_FINISHED}"
-        e.line "BREAK"
+        e.vm_finish
       end
 
       defs

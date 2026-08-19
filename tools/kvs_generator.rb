@@ -101,6 +101,39 @@ module MrubycOnPlc
       line "END IF"
     end
 
+    # --- VM 状態・オペランドへの参照 ---
+    #
+    # 定義表 (opcode_table.rb) が EM7 などの機種固有の名前を直接書かずに
+    # 済むよう、参照はすべてここを経由します。
+
+    # オペランド a / b / c の格納先
+    def operand(name)
+      OPERAND_VARS.fetch(name)
+    end
+
+    def pc     = MemoryMap.device(PC_ADDR)
+    def status = MemoryMap.device(STATUS_ADDR)
+
+    # VM を正常終了させる
+    def vm_finish
+      line "#{status} = #{VM_FINISHED}"
+      line "BREAK"
+    end
+
+    # VM をエラー停止させる
+    def vm_error(code)
+      line "#{status} = #{VM_ERROR}"
+      line "#{MemoryMap.device(ERROR_ADDR)} = #{code}"
+      line "BREAK"
+    end
+
+    # PC を相対ジャンプさせる
+    # PC も16ビット符号なしのため、加算が16ビットの剰余演算になることで
+    # 後方ジャンプ (負のオフセット) が成立する
+    def jump_relative(name)
+      line "#{pc} = #{pc} + #{operand(name)}"
+    end
+
     # --- 値スロットへのアクセス (イディオムの集約点) ---
 
     # R[operand] の値を Z<z> 経由で参照する式を返す
@@ -135,8 +168,23 @@ module MrubycOnPlc
     # 16ビットオペランドを符号付きとして解釈する
     # EM は16ビット符号なしのため引き算しても同じビット列だが、
     # PC への加算が16ビットの剰余演算になることで後方ジャンプが成立する
-    def signed16(var)
+    def signed16(name)
+      var = operand(name)
       if_block("#{var} >= 32768") { line "#{var} = #{var} - 65536" }
+    end
+
+    # オペランドを符号拡張して32ビットスクラッチに置く
+    # bits: 元の値のビット幅 (8 または 16)
+    def sign_extend_to_scratch(name, bits)
+      var = operand(name)
+      threshold = 1 << (bits - 1)
+      line "#{scratch_lo} = #{var}"
+      line "#{scratch_hi} = 0"
+      if_block("#{var} >= #{threshold}") do
+        # 8ビットの場合は下位ワードも16ビットへ符号拡張する必要がある
+        line "#{scratch_lo} = #{var} + #{0x1_0000 - (1 << bits)}" if bits < 16
+        line "#{scratch_hi} = 65535"
+      end
     end
 
     # --- デバイスアクセス ---
@@ -187,13 +235,6 @@ module MrubycOnPlc
       line "END IF"
     end
 
-    # VM をエラー停止させる
-    def vm_error(code)
-      line "EM1 = #{VM_ERROR}"
-      line "EM2 = #{code}"
-      line "BREAK"
-    end
-
     private
 
     # レジスタ/プールの「値ワード」の先頭アドレス
@@ -210,21 +251,22 @@ module MrubycOnPlc
       "#{DEVICE_NAME}0.L:Z#{z}"
     end
 
+    # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
+    def read_bytecode_into(dest)
+      line "Z1 = #{pc} + #{BYTECODE_BASE}"
+      line "#{dest} = #{DEVICE_NAME}0:Z1"
+      line "#{pc} = #{pc} + 1"
+    end
+
     def fetch_byte(target)
-      line "Z1 = EM0 + #{BYTECODE_BASE}"
-      line "#{target} = EM0:Z1"
-      line "EM0 = EM0 + 1"
+      read_bytecode_into(target)
     end
 
     # 16ビットビッグエンディアン (上位バイトが先)
     def fetch_u16(target)
       comment "16bit big-endian: hi byte, lo byte"
-      line "Z1 = EM0 + #{BYTECODE_BASE}"
-      line "Z3 = EM0:Z1"
-      line "EM0 = EM0 + 1"
-      line "Z1 = EM0 + #{BYTECODE_BASE}"
-      line "Z4 = EM0:Z1"
-      line "EM0 = EM0 + 1"
+      read_bytecode_into("Z3")
+      read_bytecode_into("Z4")
       line "#{target} = Z3 * 256 + Z4"
     end
 
