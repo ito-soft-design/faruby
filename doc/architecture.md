@@ -394,26 +394,64 @@ KV スクリプトでは Z1-Z12 を間接アドレッシングに使用します
 
 オペランド `b` は IREP シンボルテーブルのインデックス。デバイスマッピングテーブル (EM5000+) を参照し、対応する PLC デバイスにアクセスする。ワードデバイスは `access_type` に応じて `.S` / `.U` / `.L` / `.D` を選択する (既定は `.S`)。
 
-## vm_core.kvs の自動生成
+## オペコード定義表と 2 つのバックエンド
 
-**`plc/keyence/vm_core.kvs` は生成物です。直接編集しないでください。**
+命令の定義は [tools/opcode_table.rb](../tools/opcode_table.rb) に一本化されています。
+ここから PLC 側 VM・シミュレータ・逆アセンブラのすべてが導かれます。
+
+```
+              tools/opcode_table.rb   ← 命令の定義 (唯一の情報源)
+                       │
+        ┌──────────────┼──────────────┐
+        ▼              ▼              ▼
+   KvsEmitter       SimVm       MRUBY_OPCODES
+  (文字列を組立)   (実際に実行)    (名前と形式)
+        │              │              │
+        ▼              ▼              ▼
+  vm_core.kvs   kv_vm_simulator    disasm.rb
+```
 
 | ファイル | 役割 |
 |---------|------|
-| [tools/opcode_table.rb](../tools/opcode_table.rb) | オペコード定義表 (唯一の情報源) |
-| [tools/kvs_generator.rb](../tools/kvs_generator.rb) | KV スクリプト生成器 |
+| [tools/opcode_table.rb](../tools/opcode_table.rb) | 命令定義 (唯一の情報源) |
+| [tools/kvs_generator.rb](../tools/kvs_generator.rb) | KV スクリプトを組み立てるバックエンド |
+| [simulator/sim_vm.rb](../simulator/sim_vm.rb) | EM メモリ上で実行するバックエンド |
 | `plc/keyence/vm_core.kvs` | 生成物 (コミット対象) |
 
-命令を追加・変更する場合は `opcode_table.rb` を直してから再生成します。
-
-```
-rake vm_core
-```
+**`plc/keyence/vm_core.kvs` は生成物です。直接編集しないでください。**
+命令を追加・変更する場合は `opcode_table.rb` を直してから `rake vm_core` で再生成します。
 
 生成物をコミットするのは、KV Studio に取り込む実体が必要なことと、
 差分レビューができることの 2 点が理由です。手で編集していないことは
 [test/test_kvs_generator.rb](../test/test_kvs_generator.rb) が検証します
 (生成結果とコミット済みファイルのバイト一致)。
+
+### 同じ定義を 2 通りに解釈する
+
+命令定義の本体は「バックエンド」を 1 つ受け取ります。
+
+```ruby
+OpcodeDef.new(0x3C, "R[a] = R[a] + R[a+1]") do |vm|
+  vm.set_reg(:a, vm.binop(:add, vm.reg(:a), vm.reg_next(:a)))
+end
+```
+
+- `KvsEmitter` に渡すと、`vm.reg(:a)` は文字列 `"EM0.L:Z1"` を返し、
+  副作用としてアドレス計算の行を出力します
+- `SimVm` に渡すと、`vm.reg(:a)` は EM メモリから読んだ整数を返します
+
+`vm.if_(cond) { ... }` も同様で、KV 側は常にブロックを実行して `IF...END IF` を
+出力し、シミュレータ側は条件が真のときだけブロックを実行します。
+
+この仕組みにより、**片方にだけ命令があるという食い違いが構造的に起きません**。
+以前は `OP_LOADNIL` が `vm_core.kvs` にだけ無く、実機で `while` を動かすまで
+気づけませんでした。両者を突き合わせる `test_vm_core_parity.rb` も不要になり、
+[test/test_opcode_table.rb](../test/test_opcode_table.rb) が
+「全命令が両バックエンドで実行できること」を直接検証します。
+
+命令本体には **PLC 機種固有の名前を書きません**。デバイス名・インデックス
+レジスタ・型サフィックスはバックエンドの管轄です。この境界は
+`test_opcode_table_has_no_device_names` が守ります。
 
 ### なぜ生成にしたか
 
@@ -490,16 +528,11 @@ mruby 4.0.0 (2026年4月リリース) では以下の非互換変更があり、
 
 リネーム: `OP_LOADT` → `OP_LOADTRUE`, `OP_LOADF` → `OP_LOADFALSE`
 
-**影響箇所** (オペコード番号がハードコードされている):
+**影響箇所**: [tools/opcode_table.rb](../tools/opcode_table.rb) の `MRUBY_OPCODES` のみ。
 
-1. `tools/opcode_table.rb` — オペコード定義表 (ここを直せば `vm_core.kvs` は再生成で追従)
-2. `tools/disasm.rb` — OPCODES テーブル
-3. `simulator/kv_vm_simulator.rb` — fetch-decode-execute のオペコード判定
-
-`plc/keyence/vm_core.kvs` は 1 からの生成物なので直接の修正は不要です。
-2 と 3 はまだ独立した定義を持っており、[test/test_vm_core_parity.rb](../test/test_vm_core_parity.rb)
-が 1 と 3 の食い違いを検出します。これらも定義表から生成すれば
-情報源が 1 つになりますが、未着手です (自動生成の第 2 段階)。
+オペコード番号はここにしか書かれていません。PLC 側 VM・シミュレータ・
+逆アセンブラはすべてこの表から導かれるため、番号を直して `rake vm_core` を
+実行すれば全体が追従します。
 
 #### OP_ENTER の変更
 
@@ -507,7 +540,7 @@ mruby 4.0.0 (2026年4月リリース) では以下の非互換変更があり、
 
 #### 対応方針
 
-1. ~~**vm_core.kvs の自動生成**~~ — **実装済み**。`tools/opcode_table.rb` から生成する
-2. **オペコード定義の分離**: バージョン別の定義表を用意し、RITE ヘッダーのバージョンで自動切替
-3. **シミュレータ・disasm も定義表から生成** (自動生成の第 2 段階)。情報源が 1 つになり `test_vm_core_parity.rb` が不要になる
-4. **ops.h からの自動生成**: mruby ソースの `include/mruby/ops.h` を解析して定義表を自動生成する方式も検討
+1. ~~**vm_core.kvs の自動生成**~~ — **実装済み** (第 1 段階)
+2. ~~**シミュレータ・disasm も定義表から**~~ — **実装済み** (第 2 段階)。情報源が 1 つになり `test_vm_core_parity.rb` は削除
+3. **オペコード定義の分離**: バージョン別の `MRUBY_OPCODES` を用意し、RITE ヘッダーのバージョンで自動切替
+4. **ops.h からの自動生成**: mruby ソースの `include/mruby/ops.h` を解析して `MRUBY_OPCODES` を生成する方式も検討
