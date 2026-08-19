@@ -26,11 +26,7 @@ module MrubycOnPlc
       # memory_image Hash を PLC に書き込む
       # 連続アドレスをグループ化して一括転送する
       def write_image(image)
-        # load 時は STATUS=STOPPED に上書き (run で明示的に開始)
-        image = image.dup
-        image[STATUS_ADDR] = VM_STOPPED
-
-        runs = group_consecutive(image)
+        runs = group_consecutive(normalize_image(image))
         total = 0
         runs.each do |start_addr, values|
           @adapter.write_words(start_addr, values)
@@ -70,11 +66,14 @@ module MrubycOnPlc
         nregs = [nregs, MAX_REGS].min
         nlocals ||= 0
 
-        words = @adapter.read_words(REG_FILE_BASE, nregs * 2)
+        # 値スロット (SLOT_WORDS ワード/レジスタ) をまとめて読む
+        words = @adapter.read_words(REG_FILE_BASE, nregs * SLOT_WORDS)
         regs = []
         nregs.times do |i|
-          lo = words[i * 2] & 0xFFFF
-          hi = words[i * 2 + 1] & 0xFFFF
+          slot = i * SLOT_WORDS
+          type = words[slot + SLOT_TYPE_OFFSET] & 0xFFFF
+          lo = words[slot + SLOT_VALUE_OFFSET] & 0xFFFF
+          hi = words[slot + SLOT_VALUE_OFFSET + 1] & 0xFFFF
           val = (hi << 16) | lo
           val -= 0x1_0000_0000 if val >= 0x8000_0000
 
@@ -85,7 +84,7 @@ module MrubycOnPlc
                   else
                     "temp"
                   end
-          regs << { index: i, value: val, label: label }
+          regs << { index: i, value: val, label: label, type: type }
         end
         regs
       end
@@ -98,6 +97,9 @@ module MrubycOnPlc
       # メモリイメージと PLC 上のデータを比較する
       # 戻り値: { match: true/false, total: N, mismatches: [{addr:, expected:, actual:}] }
       def verify_image(image)
+        # write_image と同じ正規化を通してから比較する
+        # (正規化しないと STATUS が必ず不一致になる)
+        image = normalize_image(image)
         mismatches = []
         runs = group_consecutive(image)
 
@@ -120,6 +122,14 @@ module MrubycOnPlc
       end
 
       private
+
+      # PLC に書き込む形へイメージを正規化する
+      # load 時は STATUS=STOPPED にする (run で明示的に開始するため)
+      def normalize_image(image)
+        image = image.dup
+        image[STATUS_ADDR] = VM_STOPPED
+        image
+      end
 
       # {addr => val} を連続するアドレスのグループに分割
       # [[start_addr, [val1, val2, ...]], ...]

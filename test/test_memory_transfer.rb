@@ -139,41 +139,64 @@ class TestMemoryTransfer < Minitest::Test
 
   # === read_registers テスト ===
 
+  # レジスタスロット (4ワード) に値を書き込むヘルパー
+  def write_reg_slot(index, lo, hi = 0, type = TT_EMPTY)
+    @adapter.memory[MrubycOnPlc::MemoryMap.reg_type_addr(index)] = type
+    addr = MrubycOnPlc::MemoryMap.reg_addr(index)
+    @adapter.memory[addr] = lo
+    @adapter.memory[addr + 1] = hi
+  end
+
   def test_read_registers
     @adapter.memory[NREGS_ADDR] = 3
     @adapter.memory[NLOCALS_ADDR] = 2
 
-    # R[0] = 0 (self)
-    @adapter.memory[REG_FILE_BASE] = 0
-    @adapter.memory[REG_FILE_BASE + 1] = 0
-
-    # R[1] = 42 (local)
-    @adapter.memory[REG_FILE_BASE + 2] = 42
-    @adapter.memory[REG_FILE_BASE + 3] = 0
-
-    # R[2] = 100 (temp)
-    @adapter.memory[REG_FILE_BASE + 4] = 100
-    @adapter.memory[REG_FILE_BASE + 5] = 0
+    write_reg_slot(0, 0)     # R[0] = 0 (self)
+    write_reg_slot(1, 42)    # R[1] = 42 (local)
+    write_reg_slot(2, 100)   # R[2] = 100 (temp)
 
     regs = @transfer.read_registers
 
     assert_equal 3, regs.size
-    assert_equal({ index: 0, value: 0, label: "self" }, regs[0])
-    assert_equal({ index: 1, value: 42, label: "local" }, regs[1])
-    assert_equal({ index: 2, value: 100, label: "temp" }, regs[2])
+    assert_equal({ index: 0, value: 0, label: "self", type: TT_EMPTY }, regs[0])
+    assert_equal({ index: 1, value: 42, label: "local", type: TT_EMPTY }, regs[1])
+    assert_equal({ index: 2, value: 100, label: "temp", type: TT_EMPTY }, regs[2])
+  end
+
+  # スロット先頭の型タグが値と独立に読み出せること
+  def test_read_registers_type_tag
+    @adapter.memory[NREGS_ADDR] = 2
+    @adapter.memory[NLOCALS_ADDR] = 2
+
+    write_reg_slot(0, 0)
+    write_reg_slot(1, 42, 0, TT_INTEGER)
+
+    regs = @transfer.read_registers
+
+    assert_equal TT_INTEGER, regs[1][:type]
+    assert_equal 42, regs[1][:value]
+  end
+
+  # 隣接スロットが値を侵食しないこと (ストライド 4 の確認)
+  def test_read_registers_slots_are_independent
+    @adapter.memory[NREGS_ADDR] = 2
+    @adapter.memory[NLOCALS_ADDR] = 2
+
+    write_reg_slot(0, 0xFFFF, 0xFFFF)  # R[0] = -1
+    write_reg_slot(1, 7)               # R[1] = 7
+
+    regs = @transfer.read_registers
+
+    assert_equal(-1, regs[0][:value])
+    assert_equal 7, regs[1][:value]
   end
 
   def test_read_registers_negative_value
     @adapter.memory[NREGS_ADDR] = 2
     @adapter.memory[NLOCALS_ADDR] = 2
 
-    # R[0] = 0
-    @adapter.memory[REG_FILE_BASE] = 0
-    @adapter.memory[REG_FILE_BASE + 1] = 0
-
-    # R[1] = -1 (0xFFFFFFFF)
-    @adapter.memory[REG_FILE_BASE + 2] = 0xFFFF
-    @adapter.memory[REG_FILE_BASE + 3] = 0xFFFF
+    write_reg_slot(0, 0)
+    write_reg_slot(1, 0xFFFF, 0xFFFF)  # R[1] = -1 (0xFFFFFFFF)
 
     regs = @transfer.read_registers
 
@@ -184,13 +207,8 @@ class TestMemoryTransfer < Minitest::Test
     @adapter.memory[NREGS_ADDR] = 2
     @adapter.memory[NLOCALS_ADDR] = 2
 
-    # R[0] = 0
-    @adapter.memory[REG_FILE_BASE] = 0
-    @adapter.memory[REG_FILE_BASE + 1] = 0
-
-    # R[1] = 100000 (0x000186A0)
-    @adapter.memory[REG_FILE_BASE + 2] = 0x86A0  # lo
-    @adapter.memory[REG_FILE_BASE + 3] = 0x0001  # hi
+    write_reg_slot(0, 0)
+    write_reg_slot(1, 0x86A0, 0x0001)  # R[1] = 100000 (0x000186A0)
 
     regs = @transfer.read_registers
 

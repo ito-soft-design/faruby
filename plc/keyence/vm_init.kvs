@@ -13,8 +13,9 @@ IF EM13 = 1 THEN
     EM2 = 0      ' ERROR = none
     EM3.L = 0    ' STEP_COUNT = 0
 
-    ' レジスタファイルクリア (EM100-EM259)
-    FOR Z1 = 100 TO 259
+    ' レジスタファイルクリア (EM100-EM419: 80スロット × 4ワード)
+    ' スロット先頭の型タグも 0 (TT_EMPTY) になる
+    FOR Z1 = 100 TO 419
         EM0:Z1 = 0
     NEXT
 

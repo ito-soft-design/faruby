@@ -128,6 +128,59 @@ class TestVmSimulator < Minitest::Test
     assert_equal(-500, @sim.reg(1))
   end
 
+  # === OP_LOADL (定数プール) ===
+  def test_loadl
+    # R[1] = Pool[0]; STOP
+    load_bytecode([
+      0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
+      0x69,             # OP_STOP
+    ])
+    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(0), 123456)
+    @sim.run
+    assert_equal 123456, @sim.reg(1)
+  end
+
+  # プールスロットは 4 ワード間隔で独立している (型タグが値を侵食しない)
+  def test_loadl_slots_are_independent
+    load_bytecode([
+      0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
+      0x02, 0x02, 0x01, # OP_LOADL R[2], Pool[1]
+      0x69,             # OP_STOP
+    ])
+    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(0), -1)
+    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(1), TT_INTEGER)
+    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(1), 222)
+    @sim.run
+    assert_equal(-1, @sim.reg(1))
+    assert_equal 222, @sim.reg(2)
+    # 型タグが -1 の上位ワードで潰されていないこと
+    assert_equal TT_INTEGER, @sim.em.read_u16(MrubycOnPlc::MemoryMap.pool_type_addr(1))
+  end
+
+  # === 値スロットのレイアウト (ストライド 4) ===
+  def test_register_slot_layout
+    # R[1] = 100000 (32ビット値), R[2] = 1
+    load_bytecode([
+      0x0F, 0x01, 0x00, 0x01, 0x86, 0xA0, # OP_LOADI32 R[1], 100000
+      0x07, 0x02,                          # OP_LOADI_1 R[2]
+      0x69,                                # OP_STOP
+    ])
+    @sim.run
+
+    # 32ビット値は値ワード (スロット先頭+1) に格納される
+    assert_equal 100000, @sim.em.read_s32(MrubycOnPlc::MemoryMap.reg_addr(1))
+    # 隣接スロットが侵食されない
+    assert_equal 1, @sim.reg(2)
+    # 型タグ領域は未使用 (TT_EMPTY)
+    assert_equal TT_EMPTY, @sim.em.read_u16(MrubycOnPlc::MemoryMap.reg_type_addr(1))
+    assert_equal TT_EMPTY, @sim.em.read_u16(MrubycOnPlc::MemoryMap.reg_type_addr(2))
+    # スロット間隔が SLOT_WORDS であること
+    assert_equal SLOT_WORDS,
+                 MrubycOnPlc::MemoryMap.reg_slot_addr(2) - MrubycOnPlc::MemoryMap.reg_slot_addr(1)
+  end
+
   # === OP_MOVE ===
   def test_move
     # R[1] = 5; R[2] = R[1]; STOP

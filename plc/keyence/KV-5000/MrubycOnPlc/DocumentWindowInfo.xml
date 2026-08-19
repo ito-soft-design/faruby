@@ -2,7 +2,7 @@
 <DocumentWindowInfoForTab xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <All>
     <DocumentWindowInfoForTabElement>
-      <Name>mruby_vm</Name>
+      <Name>mruby_vm(照合不一致)</Name>
       <SaveKey>[Ladder]mruby_vm</SaveKey>
       <DockingBarState>
         <Key>Document@Ladder-195890960</Key>
@@ -13,8 +13,8 @@
           <DockingSide>Left</DockingSide>
           <IsAutoHide>false</IsAutoHide>
           <Size>
-            <Width>1028</Width>
-            <Height>469</Height>
+            <Width>1053</Width>
+            <Height>470</Height>
           </Size>
           <LeftIndex>-1</LeftIndex>
           <TopIndex>-1</TopIndex>

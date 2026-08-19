@@ -21,13 +21,24 @@ module MrubycOnPlc
       @mem[addr] = val & 0xFFFF
     end
 
+    # 16ビット符号付き読み取り (.S 相当)
+    def read_s16(addr)
+      val = @mem[addr] & 0xFFFF
+      val >= 0x8000 ? val - 0x1_0000 : val
+    end
+
+    # 16ビット符号付き書き込み (.S 相当) — 格納形式は .U と同じ
+    def write_s16(addr, val)
+      val = val.to_i
+      val += 0x1_0000 if val.negative?
+      @mem[addr] = val & 0xFFFF
+    end
+
     # 32ビット符号付き読み取り (.L 相当)
     # Keyence の .L は連続する2ワードを使用
     # 下位ワードが addr、上位ワードが addr+1
     def read_s32(addr)
-      lo = @mem[addr] & 0xFFFF
-      hi = @mem[addr + 1] & 0xFFFF
-      val = (hi << 16) | lo
+      val = read_u32(addr)
       val -= 0x1_0000_0000 if val >= 0x8000_0000
       val
     end
@@ -36,7 +47,20 @@ module MrubycOnPlc
     def write_s32(addr, val)
       val = val.to_i
       # 負数の場合は2の補数に変換
-      val += 0x1_0000_0000 if val < 0
+      val += 0x1_0000_0000 if val.negative?
+      write_u32(addr, val)
+    end
+
+    # 32ビット符号なし読み取り (.D 相当)
+    def read_u32(addr)
+      lo = @mem[addr] & 0xFFFF
+      hi = @mem[addr + 1] & 0xFFFF
+      (hi << 16) | lo
+    end
+
+    # 32ビット符号なし書き込み (.D 相当)
+    def write_u32(addr, val)
+      val = val.to_i & 0xFFFF_FFFF
       @mem[addr] = val & 0xFFFF
       @mem[addr + 1] = (val >> 16) & 0xFFFF
     end

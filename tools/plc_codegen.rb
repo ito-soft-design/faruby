@@ -8,6 +8,9 @@ require_relative "memory_map"
 require "plc_access"
 
 module MrubycOnPlc
+  # 生成対象が EM のメモリマップに収まらない場合に発生
+  class CodegenError < StandardError; end
+
   class PlcCodegen
     include MemoryMap
 
@@ -16,8 +19,21 @@ module MrubycOnPlc
       @steps_per_cycle = steps_per_cycle
     end
 
+    # 各領域が上限を超えていないか検証する
+    # 超えたまま生成すると隣接領域 (定数プール → デバイステーブル等) を
+    # 破壊するため、生成前に必ず呼ぶ。
+    def validate!
+      check_limit("レジスタ数", @irep.nregs, MAX_REGS)
+      check_limit("バイトコード長", @irep.ilen, MAX_BYTECODE)
+      check_limit("定数プールのエントリ数", @irep.pool.size, MAX_POOL)
+      check_limit("シンボル数", @irep.symbols.size, MAX_SYMBOLS)
+      check_unsupported_access
+      self
+    end
+
     # EM レジスタ初期化用の KV スクリプトを生成
     def generate
+      validate!
       lines = []
       lines << "' ======================================="
       lines << "' mruby/c VM - Memory Initialization"
@@ -39,6 +55,7 @@ module MrubycOnPlc
     # メモリイメージを Hash として返す (シミュレータ用)
     # { address => value, ... }
     def memory_image
+      validate!
       image = {}
 
       # VM 状態
@@ -57,52 +74,102 @@ module MrubycOnPlc
         image[BYTECODE_BASE + i] = b
       end
 
-      # 定数プール
+      # 定数プール (値スロット: 型タグ + 32ビット値)
       @irep.pool.each_with_index do |entry, i|
-        addr = POOL_BASE + i * 2
-        case entry.type
-        when :int32
-          lo = entry.value & 0xFFFF
-          hi = (entry.value >> 16) & 0xFFFF
-          image[addr] = lo
-          image[addr + 1] = hi
-        when :int64
-          # 下位32ビットのみ使用
-          val = entry.value & 0xFFFFFFFF
-          lo = val & 0xFFFF
-          hi = (val >> 16) & 0xFFFF
-          image[addr] = lo
-          image[addr + 1] = hi
-        end
+        value = pool_slot_value(entry)
+        next unless value
+
+        image[MemoryMap.pool_type_addr(i)] = pool_type_tag(entry)
+        addr = MemoryMap.pool_addr(i)
+        image[addr]     = value & 0xFFFF
+        image[addr + 1] = (value >> 16) & 0xFFFF
       end
 
-      # レジスタファイル初期化 (全て0)
+      # レジスタファイル初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
       @irep.nregs.times do |i|
-        addr = REG_FILE_BASE + i * 2
-        image[addr] = 0
-        image[addr + 1] = 0
+        slot = MemoryMap.reg_slot_addr(i)
+        SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
       # デバイスマッピングテーブル
       image[NUM_SYMBOLS_ADDR] = @irep.symbols.size
-      general_global_next = GENERAL_GLOBAL_BASE
-      @irep.symbols.each_with_index do |sym, idx|
-        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
-        parsed = parse_device_symbol(sym)
-        if parsed
-          image[table_addr] = parsed[:device_type]
-          image[table_addr + 1] = parsed[:z_offset]
-        else
-          image[table_addr] = DEVICE_TYPE_EM
-          image[table_addr + 1] = general_global_next
-          general_global_next += 2
-        end
+      device_mappings.each do |m|
+        image[m[:table_addr]]     = m[:device_type]
+        image[m[:table_addr] + 1] = m[:z_offset]
+        image[m[:table_addr] + 2] = m[:access_type] || 0
+        image[m[:table_addr] + 3] = 0
+        # 汎用グローバルはスロット全体を 0 初期化
+        next unless m[:general]
+
+        slot = m[:z_offset] - SLOT_VALUE_OFFSET
+        SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
       image
     end
 
+    # シンボルごとのデバイス割り当てを解決する
+    # デバイス名にマッチするシンボル ($DM100 等) は該当デバイスへ、
+    # マッチしないシンボル ($foo 等) は汎用グローバル領域 (EM6000+) へ
+    # 出現順に割り当てる。
+    # z_offset は「値ワード」のアドレス (デバイスマッピングテーブルに格納する値)。
+    def device_mappings
+      slot_index = 0
+      @irep.symbols.each_with_index.map do |sym, idx|
+        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+        parsed = parse_device_symbol(sym)
+        if parsed
+          { symbol: sym, index: idx, table_addr: table_addr, general: false,
+            device_type: parsed[:device_type], device_name: parsed[:device_name],
+            address: parsed[:address], z_offset: parsed[:z_offset],
+            access_type: parsed[:access_type], bit: parsed[:bit] }
+        else
+          # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
+          value_addr = MemoryMap.general_global_addr(slot_index)
+          slot_index += 1
+          { symbol: sym, index: idx, table_addr: table_addr, general: true,
+            device_type: DEVICE_TYPE_EM, device_name: DEVICE_NAME,
+            address: value_addr.to_s, z_offset: value_addr,
+            access_type: ACCESS_L, bit: false }
+        end
+      end
+    end
+
     private
+
+    def check_limit(label, actual, limit)
+      return if actual <= limit
+
+      raise CodegenError, "#{label}が上限を超えています (#{actual} > #{limit})"
+    end
+
+    # 実数 (F サフィックス) は VM が型タグを扱えるようになるまで未対応
+    def check_unsupported_access
+      floats = device_mappings.select { |m| m[:access_type] == ACCESS_F }
+      return if floats.empty?
+
+      names = floats.map { |m| m[:symbol] }.join(", ")
+      raise CodegenError,
+            "実数デバイス (F サフィックス) は未実装です: #{names} " \
+            "(VM の型タグ実装が必要。整数は S/U/L/D が使えます)"
+    end
+
+    # プールエントリの型タグを返す
+    def pool_type_tag(entry)
+      case entry.type
+      when :int32, :int64 then TT_INTEGER
+      when :float         then TT_FLOAT
+      else                     TT_EMPTY
+      end
+    end
+
+    # プールエントリの 32ビット値を返す (未対応の型は nil)
+    def pool_slot_value(entry)
+      case entry.type
+      when :int32 then entry.value
+      when :int64 then entry.value & 0xFFFFFFFF  # 下位32ビットのみ使用
+      end
+    end
 
     def generate_vm_state
       lines = []
@@ -117,8 +184,8 @@ module MrubycOnPlc
       lines << "#{MemoryMap.device(NLOCALS_ADDR)} = #{@irep.nlocals}          ' NLOCALS"
       lines << "#{MemoryMap.device(RESET_REQ_ADDR)} = 0          ' RESET_REQ = off"
       lines << ""
-      lines << "' --- Clear Register File ---"
-      lines << "FOR Z1 = #{REG_FILE_BASE} TO #{REG_FILE_BASE + @irep.nregs * 2 - 1}"
+      lines << "' --- Clear Register File (#{SLOT_WORDS} words/slot) ---"
+      lines << "FOR Z1 = #{REG_FILE_BASE} TO #{MemoryMap.reg_slot_addr(@irep.nregs) - 1}"
       lines << "    EM0:Z1 = 0"
       lines << "NEXT"
       lines
@@ -142,10 +209,10 @@ module MrubycOnPlc
       lines << "' --- Constant Pool (#{@irep.pool.size} entries) ---"
 
       @irep.pool.each_with_index do |entry, i|
-        addr = POOL_BASE + i * 2
         case entry.type
         when :int32, :int64
-          lines << "#{MemoryMap.device_long(addr)} = #{entry.value}    ' Pool[#{i}]"
+          lines << "#{MemoryMap.device(MemoryMap.pool_type_addr(i))} = #{TT_INTEGER}    ' Pool[#{i}] type=integer"
+          lines << "#{MemoryMap.device_long(MemoryMap.pool_addr(i))} = #{entry.value}    ' Pool[#{i}]"
         when :float
           lines << "' Pool[#{i}] = #{entry.value} (float - not supported in milestone 1)"
         else
@@ -163,29 +230,52 @@ module MrubycOnPlc
       lines << "' --- Device Mapping Table (#{@irep.symbols.size} symbols) ---"
       lines << "#{MemoryMap.device(NUM_SYMBOLS_ADDR)} = #{@irep.symbols.size}    ' NUM_SYMBOLS"
 
-      general_global_next = GENERAL_GLOBAL_BASE
-      @irep.symbols.each_with_index do |sym, idx|
-        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
-        parsed = parse_device_symbol(sym)
-        if parsed
-          lines << "#{MemoryMap.device(table_addr)} = #{parsed[:device_type]}    ' #{sym} type=#{DEVICE_TYPE_NAMES[parsed[:device_type]]}"
-          lines << "#{MemoryMap.device(table_addr + 1)} = #{parsed[:z_offset]}    ' #{sym} Z offset"
+      mappings = device_mappings
+      mappings.each do |m|
+        table_addr = m[:table_addr]
+        kind = m[:bit] ? "ビット" : ACCESS_NAMES[m[:access_type]]
+        if m[:general]
+          lines << "#{MemoryMap.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
+          lines << "#{MemoryMap.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> EM#{m[:z_offset]}"
         else
-          lines << "#{MemoryMap.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{sym} type=EM (auto)"
-          lines << "#{MemoryMap.device(table_addr + 1)} = #{general_global_next}    ' #{sym} -> EM#{general_global_next}"
-          general_global_next += 2
+          lines << "#{MemoryMap.device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
+          lines << "#{MemoryMap.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
+        lines << "#{MemoryMap.device(table_addr + 2)} = #{m[:access_type] || 0}    ' #{m[:symbol]} access=#{kind}"
+        lines << "#{MemoryMap.device(table_addr + 3)} = 0    ' #{m[:symbol]} 予備"
       end
 
+      lines.concat(generate_general_global_clear(mappings))
       lines
     end
 
-    # デバイスパターン (MR を R より先にマッチさせる)
+    # 汎用グローバル変数のスロットを 0 初期化する
+    # (memory_image と同じ初期化を KV スクリプト側でも行う)
+    def generate_general_global_clear(mappings)
+      general = mappings.select { |m| m[:general] }
+      return [] if general.empty?
+
+      # 汎用グローバルは GENERAL_GLOBAL_BASE から連続して割り当てられる
+      first = general.first[:z_offset] - SLOT_VALUE_OFFSET
+      last  = general.last[:z_offset] - SLOT_VALUE_OFFSET + SLOT_WORDS - 1
+
+      ["",
+       "' --- Clear General Globals (#{general.size} slots × #{SLOT_WORDS} words) ---",
+       "FOR Z1 = #{first} TO #{last}",
+       "    EM0:Z1 = 0",
+       "NEXT"]
+    end
+
+    # ワードデバイス: 10進アドレス + アクセス幅サフィックス (省略時は16ビット符号付き)
+    #   $DM100 / $DM100S / $DM100U / $DM100L / $DM100D / $DM100F
+    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF)(\d+)([SULDF]?)$/i
+    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF)(\d+)([SULDF]?)$/i
+
+    # ビットデバイス: 幅の概念が無いためサフィックス無し
+    # MR を R より先にマッチさせる。B は16進アドレス (例: $B1F)、他は10進
     # CR はインデックス扱い不可のため非対応
-    # B は16進アドレス (例: $B1F), 他は10進
-    DEVICE_PATTERN = /^\$(EM|DM|ZF|MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
-    # dev コマンド用: $ なしパターン
-    DEVICE_PATTERN_BARE = /^(EM|DM|ZF|MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+    BIT_DEVICE_PATTERN      = /^\$(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+    BIT_DEVICE_PATTERN_BARE = /^(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
@@ -205,30 +295,39 @@ module MrubycOnPlc
       self.class.parse_device_symbol(sym)
     end
 
-    # シンボル名 ($DM100) からデバイス情報をパース
-    # address: 元のアドレス (PLC アダプタ通信用)
-    # z_offset: Z レジスタ用オフセット (マッピングテーブル・シミュレータ用)
+    # シンボル名 ($DM100, $DM100L) からデバイス情報をパース
+    # address:     元のアドレス (PLC アダプタ通信用)
+    # z_offset:    Z レジスタ用オフセット (マッピングテーブル・シミュレータ用)
+    # access_type: ACCESS_* (ビットデバイスは nil)
     def self.parse_device_symbol(sym)
-      return nil unless sym
-      m = sym.match(DEVICE_PATTERN)
-      return nil unless m
-      device_name = m[1].upcase
-      addr_str = m[2]
-      z_offset = device_z_offset(device_name, addr_str)
-      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
-        z_offset: z_offset, device_name: device_name }
+      parse_device(sym, WORD_DEVICE_PATTERN, BIT_DEVICE_PATTERN)
     end
 
-    # デバイス名 (DM100, $ なし) からデバイス情報をパース
+    # デバイス名 (DM100, DM100L, $ なし) からデバイス情報をパース
     def self.parse_device_name(name)
-      return nil unless name
-      m = name.match(DEVICE_PATTERN_BARE)
-      return nil unless m
+      parse_device(name, WORD_DEVICE_PATTERN_BARE, BIT_DEVICE_PATTERN_BARE)
+    end
+
+    # ワードデバイス → ビットデバイスの順にマッチを試みる
+    def self.parse_device(str, word_pattern, bit_pattern)
+      return nil unless str
+
+      if (m = str.match(word_pattern))
+        device_name = m[1].upcase
+        addr_str = m[2]
+        access_type = MemoryMap::ACCESS_SUFFIXES.fetch(m[3].to_s.upcase)
+        return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
+                 z_offset: device_z_offset(device_name, addr_str),
+                 device_name: device_name, access_type: access_type, bit: false }
+      end
+
+      return nil unless (m = str.match(bit_pattern))
+
       device_name = m[1].upcase
       addr_str = m[2]
-      z_offset = device_z_offset(device_name, addr_str)
       { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
-        z_offset: z_offset, device_name: device_name }
+        z_offset: device_z_offset(device_name, addr_str),
+        device_name: device_name, access_type: nil, bit: true }
     end
   end
 end

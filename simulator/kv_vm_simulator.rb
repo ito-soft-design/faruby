@@ -47,15 +47,13 @@ module MrubycOnPlc
       return nil unless @irep
       idx = @irep.symbols.index(sym_name)
       return nil unless idx
-      table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
-      device_type = @em.read_u16(table_addr)
-      device_addr = @em.read_u16(table_addr + 1)
+      device_type, device_addr, access_type = device_entry(idx)
       dev = device_memory(device_type)
       return nil unless dev
       if bit_device?(device_type)
         dev.read_u16(device_addr)
       else
-        dev.read_s32(device_addr)
+        read_word_device(dev, device_addr, access_type)
       end
     end
 
@@ -189,16 +187,14 @@ module MrubycOnPlc
       when 0x15 # OP_GETGV (BB)
         a = fetch_byte
         b = fetch_byte
-        table_addr = DEVICE_TABLE_BASE + b * DEVICE_TABLE_STRIDE
-        device_type = @em.read_u16(table_addr)
-        device_addr = @em.read_u16(table_addr + 1)
+        device_type, device_addr, access_type = device_entry(b)
         dev = device_memory(device_type)
         if dev
           if bit_device?(device_type)
             # ビットデバイス: 0 or 1 を読む
             write_reg(a, dev.read_u16(device_addr) != 0 ? 1 : 0)
           else
-            write_reg(a, dev.read_s32(device_addr))
+            write_reg(a, read_word_device(dev, device_addr, access_type))
           end
         else
           @em.write_u16(STATUS_ADDR, VM_ERROR)
@@ -209,16 +205,14 @@ module MrubycOnPlc
         a = fetch_byte
         b = fetch_byte
         val = read_reg(a)
-        table_addr = DEVICE_TABLE_BASE + b * DEVICE_TABLE_STRIDE
-        device_type = @em.read_u16(table_addr)
-        device_addr = @em.read_u16(table_addr + 1)
+        device_type, device_addr, access_type = device_entry(b)
         dev = device_memory(device_type)
         if dev
           if bit_device?(device_type)
             # ビットデバイス: 非0→1, 0→0
             dev.write_u16(device_addr, val != 0 ? 1 : 0)
           else
-            dev.write_s32(device_addr, val)
+            write_word_device(dev, device_addr, access_type, val)
           end
         else
           @em.write_u16(STATUS_ADDR, VM_ERROR)
@@ -352,6 +346,35 @@ module MrubycOnPlc
     # VM レジスタ書き込み
     def write_reg(n, val)
       @em.write_s32(MemoryMap.reg_addr(n), val)
+    end
+
+    # デバイスマッピングテーブルの 1 エントリを読む
+    # [device_type, device_address, access_type]
+    def device_entry(idx)
+      table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+      [@em.read_u16(table_addr),
+       @em.read_u16(table_addr + 1),
+       @em.read_u16(table_addr + 2)]
+    end
+
+    # ワードデバイスをアクセス幅に応じて読む
+    def read_word_device(dev, addr, access_type)
+      case access_type
+      when ACCESS_U then dev.read_u16(addr)
+      when ACCESS_L then dev.read_s32(addr)
+      when ACCESS_D then dev.read_u32(addr)
+      else               dev.read_s16(addr)  # ACCESS_S (既定)
+      end
+    end
+
+    # ワードデバイスをアクセス幅に応じて書く
+    def write_word_device(dev, addr, access_type, val)
+      case access_type
+      when ACCESS_U then dev.write_u16(addr, val)
+      when ACCESS_L then dev.write_s32(addr, val)
+      when ACCESS_D then dev.write_u32(addr, val)
+      else               dev.write_s16(addr, val)  # ACCESS_S (既定)
+      end
     end
 
     # ビットデバイスかどうか判定

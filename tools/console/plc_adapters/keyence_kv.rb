@@ -65,6 +65,17 @@ module MrubycOnPlc
           @plc["#{device_prefix}#{addr}"] = value
         end
 
+        def read_device_long(device_prefix, addr)
+          ensure_connected
+          lo, hi = @plc["#{device_prefix}#{addr}", 2]
+          compose_s32(lo, hi)
+        end
+
+        def write_device_long(device_prefix, addr, value)
+          ensure_connected
+          @plc["#{device_prefix}#{addr}", 2] = split_s32(value)
+        end
+
         private
 
         def ensure_connected
