@@ -8,10 +8,10 @@ require_relative "../tools/console/memory_transfer"
 # MemoryTransfer のユニットテスト
 # PLC 実機不要: モックアダプターを使用
 class TestMemoryTransfer < Minitest::Test
-  include MrubycOnPlc::MemoryMap
+  include FaRuby::MemoryMap
 
   # モックアダプター (PLC の代わりにメモリ上で動作)
-  class MockAdapter < MrubycOnPlc::Console::PlcAdapters::Base
+  class MockAdapter < FaRuby::Console::PlcAdapters::Base
     attr_reader :memory, :write_log
 
     def initialize
@@ -49,7 +49,7 @@ class TestMemoryTransfer < Minitest::Test
 
   def setup
     @adapter = MockAdapter.new
-    @transfer = MrubycOnPlc::Console::MemoryTransfer.new(@adapter)
+    @transfer = FaRuby::Console::MemoryTransfer.new(@adapter)
   end
 
   # === group_consecutive テスト ===
@@ -141,8 +141,8 @@ class TestMemoryTransfer < Minitest::Test
 
   # レジスタスロット (4ワード) に値を書き込むヘルパー
   def write_reg_slot(index, lo, hi = 0, type = TT_EMPTY)
-    @adapter.memory[MrubycOnPlc::MemoryMap.reg_type_addr(index)] = type
-    addr = MrubycOnPlc::MemoryMap.reg_addr(index)
+    @adapter.memory[FaRuby::MemoryMap.reg_type_addr(index)] = type
+    addr = FaRuby::MemoryMap.reg_addr(index)
     @adapter.memory[addr] = lo
     @adapter.memory[addr + 1] = hi
   end

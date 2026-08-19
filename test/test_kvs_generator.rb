@@ -8,12 +8,12 @@ require_relative "../tools/kvs_generator"
 
 # KV スクリプト生成器のテスト
 class TestKvsGenerator < Minitest::Test
-  include MrubycOnPlc::MemoryMap
+  include FaRuby::MemoryMap
 
   VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
 
   def setup
-    @source = MrubycOnPlc::KvsGenerator.new.source
+    @source = FaRuby::KvsGenerator.new.source
   end
 
   # コード行 (コメント・空行を除く)
@@ -33,7 +33,7 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_generate_returns_named_files
-    files = MrubycOnPlc::KvsGenerator.new.generate
+    files = FaRuby::KvsGenerator.new.generate
     assert_equal ["vm_core.kvs"], files.keys
     refute_empty files["vm_core.kvs"]
   end
@@ -75,7 +75,7 @@ class TestKvsGenerator < Minitest::Test
 
   def test_all_table_opcodes_are_emitted
     emitted = @source.scan(/IF EM6 = (\d+) THEN/).flatten.map(&:to_i).sort.uniq
-    assert_equal MrubycOnPlc::OpcodeTable.codes.sort, emitted
+    assert_equal FaRuby::OpcodeTable.codes.sort, emitted
   end
 
   def test_unknown_opcode_falls_through_to_error

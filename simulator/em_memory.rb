@@ -3,7 +3,7 @@
 # EM レジスタシミュレーション
 # Keyence PLC の EM デバイスメモリを Ruby でシミュレートします。
 
-module MrubycOnPlc
+module FaRuby
   class EmMemory
     SIZE = 65536  # EM0 ~ EM65535
 

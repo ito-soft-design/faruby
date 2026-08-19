@@ -296,9 +296,9 @@ class TestEndToEnd < Minitest::Test
 
     begin
       assert system(@mrbc, "-o", mrb_path, rb_file.path)
-      irep = MrubycOnPlc::MrbParser.new(File.binread(mrb_path)).parse.irep
-      err = assert_raises(MrubycOnPlc::CodegenError) do
-        MrubycOnPlc::PlcCodegen.new(irep).memory_image
+      irep = FaRuby::MrbParser.new(File.binread(mrb_path)).parse.irep
+      err = assert_raises(FaRuby::CodegenError) do
+        FaRuby::PlcCodegen.new(irep).memory_image
       end
       assert_match(/実数/, err.message)
       assert_match(/\$DM460F/, err.message)
@@ -323,16 +323,16 @@ class TestEndToEnd < Minitest::Test
 
     # スロット 0 と 1 に重なりなく格納されている (シンボル順は問わない)
     slot_values = [
-      sim.em.read_s32(MrubycOnPlc::MemoryMap.general_global_addr(0)),
-      sim.em.read_s32(MrubycOnPlc::MemoryMap.general_global_addr(1)),
+      sim.em.read_s32(FaRuby::MemoryMap.general_global_addr(0)),
+      sim.em.read_s32(FaRuby::MemoryMap.general_global_addr(1)),
     ]
     assert_equal [11, 22], slot_values.sort
 
     # 型タグ領域は未使用のまま
-    assert_equal MrubycOnPlc::MemoryMap::TT_EMPTY,
-                 sim.em.read_u16(MrubycOnPlc::MemoryMap.general_global_slot_addr(0))
-    assert_equal MrubycOnPlc::MemoryMap::TT_EMPTY,
-                 sim.em.read_u16(MrubycOnPlc::MemoryMap.general_global_slot_addr(1))
+    assert_equal FaRuby::MemoryMap::TT_EMPTY,
+                 sim.em.read_u16(FaRuby::MemoryMap.general_global_slot_addr(0))
+    assert_equal FaRuby::MemoryMap::TT_EMPTY,
+                 sim.em.read_u16(FaRuby::MemoryMap.general_global_slot_addr(1))
   end
 
   # デバイス名付きグローバルが混在しても汎用グローバルの採番は詰めて行われる
@@ -346,7 +346,7 @@ class TestEndToEnd < Minitest::Test
 
     assert_equal 99, sim.global_value("$foo")
     # $DM100 は汎用領域を消費しないので $foo はスロット 0
-    assert_equal 99, sim.em.read_s32(MrubycOnPlc::MemoryMap.general_global_addr(0))
+    assert_equal 99, sim.em.read_s32(FaRuby::MemoryMap.general_global_addr(0))
   end
 
   private
@@ -374,8 +374,8 @@ class TestEndToEnd < Minitest::Test
 
       # パースして実行
       data = File.binread(mrb_path)
-      parser = MrubycOnPlc::MrbParser.new(data).parse
-      sim = MrubycOnPlc::KvVmSimulator.new
+      parser = FaRuby::MrbParser.new(data).parse
+      sim = FaRuby::KvVmSimulator.new
       sim.load_irep_and_run(parser.irep)
 
       assert_equal 2, sim.status, "VM should finish (status=2)"

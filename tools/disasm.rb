@@ -6,7 +6,7 @@
 require_relative "mrb_parser"
 require_relative "opcode_table"
 
-module MrubycOnPlc
+module FaRuby
   class Disassembler
     # オペコード定義は tools/opcode_table.rb に一本化されている
     # (実装済みの命令より広い集合。未実装の命令も逆アセンブルできる)
@@ -198,12 +198,12 @@ if __FILE__ == $0
   end
 
   data = File.binread(ARGV[0])
-  parser = MrubycOnPlc::MrbParser.new(data).parse
+  parser = FaRuby::MrbParser.new(data).parse
 
   puts "=== #{parser.header} ==="
   puts parser.irep
   puts
 
-  disasm = MrubycOnPlc::Disassembler.new(parser.irep)
+  disasm = FaRuby::Disassembler.new(parser.irep)
   puts disasm.disassemble_to_s
 end

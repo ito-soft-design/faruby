@@ -1,4 +1,4 @@
-# mruby/c on PLC - Configuration
+# faRuby - Configuration
 plc:
   protocol: keyence_kv
   host: 192.168.0.10

@@ -18,7 +18,7 @@
 # 済むよう領域を予約しています。定数プールのみ、コンパイル時に型が
 # 確定するため codegen が実際の型タグを書き込みます。
 
-module MrubycOnPlc
+module FaRuby
   module MemoryMap
     # VM 状態領域
     VM_STATE_BASE     = 0

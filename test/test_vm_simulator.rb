@@ -7,10 +7,10 @@ require_relative "../simulator/em_memory"
 require_relative "../simulator/kv_vm_simulator"
 
 class TestVmSimulator < Minitest::Test
-  include MrubycOnPlc::MemoryMap
+  include FaRuby::MemoryMap
 
   def setup
-    @sim = MrubycOnPlc::KvVmSimulator.new
+    @sim = FaRuby::KvVmSimulator.new
   end
 
   # EM メモリにバイトコードをセットして VM を起動するヘルパー
@@ -33,7 +33,7 @@ class TestVmSimulator < Minitest::Test
 
     # レジスタクリア
     nregs.times do |i|
-      em.write_s32(MrubycOnPlc::MemoryMap.reg_addr(i), 0)
+      em.write_s32(FaRuby::MemoryMap.reg_addr(i), 0)
     end
   end
 
@@ -135,8 +135,8 @@ class TestVmSimulator < Minitest::Test
       0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(0), 123456)
+    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(0), 123456)
     @sim.run
     assert_equal 123456, @sim.reg(1)
   end
@@ -148,15 +148,15 @@ class TestVmSimulator < Minitest::Test
       0x02, 0x02, 0x01, # OP_LOADL R[2], Pool[1]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(0), -1)
-    @sim.em.write_u16(MrubycOnPlc::MemoryMap.pool_type_addr(1), TT_INTEGER)
-    @sim.em.write_s32(MrubycOnPlc::MemoryMap.pool_addr(1), 222)
+    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(0), -1)
+    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(1), TT_INTEGER)
+    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(1), 222)
     @sim.run
     assert_equal(-1, @sim.reg(1))
     assert_equal 222, @sim.reg(2)
     # 型タグが -1 の上位ワードで潰されていないこと
-    assert_equal TT_INTEGER, @sim.em.read_u16(MrubycOnPlc::MemoryMap.pool_type_addr(1))
+    assert_equal TT_INTEGER, @sim.em.read_u16(FaRuby::MemoryMap.pool_type_addr(1))
   end
 
   # === 値スロットのレイアウト (ストライド 4) ===
@@ -170,15 +170,15 @@ class TestVmSimulator < Minitest::Test
     @sim.run
 
     # 32ビット値は値ワード (スロット先頭+1) に格納される
-    assert_equal 100000, @sim.em.read_s32(MrubycOnPlc::MemoryMap.reg_addr(1))
+    assert_equal 100000, @sim.em.read_s32(FaRuby::MemoryMap.reg_addr(1))
     # 隣接スロットが侵食されない
     assert_equal 1, @sim.reg(2)
     # 型タグ領域は未使用 (TT_EMPTY)
-    assert_equal TT_EMPTY, @sim.em.read_u16(MrubycOnPlc::MemoryMap.reg_type_addr(1))
-    assert_equal TT_EMPTY, @sim.em.read_u16(MrubycOnPlc::MemoryMap.reg_type_addr(2))
+    assert_equal TT_EMPTY, @sim.em.read_u16(FaRuby::MemoryMap.reg_type_addr(1))
+    assert_equal TT_EMPTY, @sim.em.read_u16(FaRuby::MemoryMap.reg_type_addr(2))
     # スロット間隔が SLOT_WORDS であること
     assert_equal SLOT_WORDS,
-                 MrubycOnPlc::MemoryMap.reg_slot_addr(2) - MrubycOnPlc::MemoryMap.reg_slot_addr(1)
+                 FaRuby::MemoryMap.reg_slot_addr(2) - FaRuby::MemoryMap.reg_slot_addr(1)
   end
 
   # === OP_MOVE ===

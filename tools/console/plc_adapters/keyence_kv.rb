@@ -6,7 +6,7 @@
 require "plc_access"
 require_relative "base"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     module PlcAdapters
       class KeyenceKv < Base

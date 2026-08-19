@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
 # コンフィグファイル読み込み
-# mrubycOnPlc.yml から PLC 接続設定・mrbc パス等を読み込みます。
+# faruby.yml から PLC 接続設定・mrbc パス等を読み込みます。
 
 require "yaml"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class Config
       DEFAULTS = {
@@ -22,7 +22,7 @@ module MrubycOnPlc
         },
       }.freeze
 
-      CONFIG_FILENAME = "mrubycOnPlc.yml"
+      CONFIG_FILENAME = "faruby.yml"
 
       attr_reader :plc_protocol, :plc_host, :plc_port,
                   :mrbc_path, :steps_per_cycle

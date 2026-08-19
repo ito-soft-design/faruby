@@ -10,7 +10,7 @@
 
 require_relative "../tools/memory_map"
 
-module MrubycOnPlc
+module FaRuby
   class SimVm
     include MemoryMap
 

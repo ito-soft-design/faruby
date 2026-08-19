@@ -1,5 +1,5 @@
 ' =======================================
-' mruby/c VM Core - Fetch/Decode/Execute
+' faRuby VM Core - Fetch/Decode/Execute
 ' =======================================
 ' 【自動生成】このファイルを直接編集しないでください。
 '   定義: tools/opcode_table.rb

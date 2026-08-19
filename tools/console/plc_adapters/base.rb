@@ -5,7 +5,7 @@
 
 require_relative "../../memory_map"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     module PlcAdapters
       class Base

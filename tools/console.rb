@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-# mruby/c on PLC コンソール
+# faRuby コンソール
 # PLC と通信して Ruby プログラムのコンパイル・転送・実行を行う対話型ツール
 
 require "optparse"
@@ -9,10 +9,10 @@ require_relative "console/plc_connection"
 require_relative "console/memory_transfer"
 require_relative "console/commands"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class Repl
-      PROMPT = "mrubycOnPlc> "
+      PROMPT = "faruby> "
 
       COMMAND_MAP = {
         "compile" => :cmd_compile,
@@ -91,7 +91,7 @@ module MrubycOnPlc
       end
 
       def print_banner
-        puts "=== mruby/c on PLC Console ==="
+        puts "=== faRuby Console ==="
         puts "PLC   : #{@config.plc_protocol} @ #{@config.plc_host}:#{@config.plc_port}"
         puts "mrbc  : #{@config.mrbc_path}"
         puts "config: #{@config.config_path || '(default)'}"
@@ -109,5 +109,5 @@ if __FILE__ == $0
     opts.on("--config PATH", "Config file path") { |v| options[:config_path] = v }
   end.parse!
 
-  MrubycOnPlc::Console::Repl.new(**options).run
+  FaRuby::Console::Repl.new(**options).run
 end

@@ -7,7 +7,7 @@
 require_relative "../memory_map"
 require_relative "plc_adapters/base"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class MemoryTransfer
       include MemoryMap

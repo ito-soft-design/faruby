@@ -9,7 +9,7 @@ require_relative "../plc_codegen"
 require_relative "../memory_map"
 require_relative "../../simulator/kv_vm_simulator"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class Commands
       include MemoryMap
@@ -266,7 +266,7 @@ module MrubycOnPlc
       # help
       def cmd_help(args)
         puts <<~HELP
-          === mruby/c on PLC Console ===
+          === faRuby Console ===
           compile <file.rb>  Ruby ソースをコンパイル
           load               コンパイル済みプログラムを PLC に書き込み
           run                VM を開始 (STATUS=1)

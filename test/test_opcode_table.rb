@@ -15,7 +15,7 @@ require_relative "../simulator/sim_vm"
 # 以前は両者を突き合わせる test_vm_core_parity.rb が必要でしたが、
 # 情報源が1つになったため構造的に食い違わなくなりました。
 class TestOpcodeTable < Minitest::Test
-  Table = MrubycOnPlc::OpcodeTable
+  Table = FaRuby::OpcodeTable
 
   # === 定義表の健全性 ===
 
@@ -58,14 +58,14 @@ class TestOpcodeTable < Minitest::Test
   end
 
   def test_unknown_opcode_is_rejected
-    assert_raises(ArgumentError) { MrubycOnPlc::OpcodeDef.new(0xFF, "存在しない命令") }
+    assert_raises(ArgumentError) { FaRuby::OpcodeDef.new(0xFF, "存在しない命令") }
   end
 
   # === 逆アセンブラとの共有 ===
 
   def test_disassembler_uses_the_shared_table
-    assert_same Table::MRUBY_OPCODES, MrubycOnPlc::Disassembler::OPCODES
-    assert_same Table::FORMAT_SIZES, MrubycOnPlc::Disassembler::FORMAT_SIZES
+    assert_same Table::MRUBY_OPCODES, FaRuby::Disassembler::OPCODES
+    assert_same Table::FORMAT_SIZES, FaRuby::Disassembler::FORMAT_SIZES
   end
 
   # === 両バックエンドが同じ定義を解釈できる ===
@@ -93,7 +93,7 @@ class TestOpcodeTable < Minitest::Test
   private
 
   def emit_with_kvs(op)
-    e = MrubycOnPlc::KvsEmitter.new
+    e = FaRuby::KvsEmitter.new
     e.begin_instruction
     e.fetch_operands(op.operand_sizes)
     op.body&.call(e)
@@ -103,10 +103,10 @@ class TestOpcodeTable < Minitest::Test
   end
 
   def execute_with_sim(op)
-    em = MrubycOnPlc::EmMemory.new
-    devices = Array.new(10) { MrubycOnPlc::EmMemory.new }
+    em = FaRuby::EmMemory.new
+    devices = Array.new(10) { FaRuby::EmMemory.new }
     devices[0] = em
-    vm = MrubycOnPlc::SimVm.new(em, devices)
+    vm = FaRuby::SimVm.new(em, devices)
     vm.begin_instruction({ a: 1, b: 1, c: 1 })
     op.body&.call(vm)
   rescue NoMethodError => err

@@ -50,7 +50,7 @@
 #   if_(cond) { ... }
 #   note(text)                           生成コードへのコメント
 
-module MrubycOnPlc
+module FaRuby
   module OpcodeTable
     # mruby 3.x の全オペコード: コード => [名前, 命令形式]
     # 逆アセンブラは未実装の命令も表示するため、実装済みの命令より広い集合です。

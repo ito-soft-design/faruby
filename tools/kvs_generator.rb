@@ -16,7 +16,7 @@
 require_relative "memory_map"
 require_relative "opcode_table"
 
-module MrubycOnPlc
+module FaRuby
   class KvsEmitter
     include MemoryMap
 
@@ -413,7 +413,7 @@ module MrubycOnPlc
 
     def emit_header(e)
       e.note "======================================="
-      e.note "mruby/c VM Core - Fetch/Decode/Execute"
+      e.note "faRuby VM Core - Fetch/Decode/Execute"
       e.note "======================================="
       e.note "【自動生成】このファイルを直接編集しないでください。"
       e.note "  定義: tools/opcode_table.rb"
@@ -495,5 +495,5 @@ module MrubycOnPlc
 end
 
 if __FILE__ == $0
-  puts MrubycOnPlc::KvsGenerator.new.source
+  puts FaRuby::KvsGenerator.new.source
 end

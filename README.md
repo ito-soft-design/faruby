@@ -1,6 +1,14 @@
-# mruby/c on PLC
+# faRuby
 
-PLC 上で Ruby (mruby/c) を動作させる実験的プロジェクトです。
+PLC 上で Ruby を動作させる実験的プロジェクトです。
+
+名称は **FA (Factory Automation) + Ruby** に由来します。
+
+| 用途 | 表記 |
+|------|------|
+| 表示名 | `faRuby` |
+| Ruby モジュール | `FaRuby` |
+| リポジトリ・設定ファイル | `faruby` |
 
 ## 概要
 
@@ -35,7 +43,7 @@ EM レジスタ値リスト ──通信──>  EM メモリに格納
 ## ディレクトリ構成
 
 ```
-mrubycOnPlc/
+faruby/
 ├── tools/          PC側ツール (Ruby)
 ├── simulator/      PC側 VM シミュレータ
 ├── plc/keyence/    KV スクリプト VM
@@ -69,10 +77,10 @@ bundle install
 
 ### 設定ファイル
 
-`mrubycOnPlc.yml.example` をコピーして、環境に合わせて編集してください。
+`faruby.yml.example` をコピーして、環境に合わせて編集してください。
 
 ```bash
-cp mrubycOnPlc.yml.example mrubycOnPlc.yml
+cp faruby.yml.example faruby.yml
 ```
 
 ```yaml
@@ -119,12 +127,12 @@ rake console
 ### 使用例
 
 ```
-mrubycOnPlc> compile test.rb
-mrubycOnPlc> load
-mrubycOnPlc> verify
-mrubycOnPlc> run
-mrubycOnPlc> status
-mrubycOnPlc> regs
+faruby> compile test.rb
+faruby> load
+faruby> verify
+faruby> run
+faruby> status
+faruby> regs
 ```
 
 ### テストの実行
