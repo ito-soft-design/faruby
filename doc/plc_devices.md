@@ -87,7 +87,7 @@ mruby/c on PLC では Ruby のグローバル変数 (`$DM100`, `$MR10` 等) を�
 | `tools/plc_codegen.rb` | `WORD_DEVICE_PATTERN`, `BIT_DEVICE_PATTERN`, `DEVICE_NAME_TO_TYPE` にデバイス追加/削除 |
 | `tools/memory_map.rb` | `ACCESS_*` / `ACCESS_SUFFIXES` の調整 (機種で使える幅が違う場合) |
 | `simulator/kv_vm_simulator.rb` | `BIT_DEVICE_TYPES` の調整、デバイスメモリ数の調整 |
-| `plc/<機種>/vm_core.*` | 各デバイスの間接アクセスコード生成 |
+| `tools/kvs_generator.rb` | 各デバイスの間接アクセスコード生成 (`WORD_DEVICES` / `BIT_DEVICES`) |
 | `doc/plc_devices.md` | 本ドキュメントにセクション追加 |
 
 ### テンプレート

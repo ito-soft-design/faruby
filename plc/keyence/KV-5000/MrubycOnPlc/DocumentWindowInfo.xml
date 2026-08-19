@@ -2,7 +2,7 @@
 <DocumentWindowInfoForTab xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
   <All>
     <DocumentWindowInfoForTabElement>
-      <Name>mruby_vm(照合不一致)</Name>
+      <Name>mruby_vm</Name>
       <SaveKey>[Ladder]mruby_vm</SaveKey>
       <DockingBarState>
         <Key>Document@Ladder-195890960</Key>

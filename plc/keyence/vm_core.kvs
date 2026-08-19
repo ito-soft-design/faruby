@@ -1,6 +1,11 @@
 ' =======================================
 ' mruby/c VM Core - Fetch/Decode/Execute
 ' =======================================
+' 【自動生成】このファイルを直接編集しないでください。
+'   定義: tools/opcode_table.rb
+'   生成: tools/kvs_generator.rb  (rake vm_core)
+'   編集した場合 test_kvs_generator.rb が失敗します。
+'
 ' EM デバイスを使用。
 ' EM0  = PC (プログラムカウンタ)
 ' EM1  = STATUS (0=停止, 1=実行中, 2=完了, 3=エラー)
@@ -9,27 +14,16 @@
 ' EM6  = CURRENT_OPCODE (デバッグ用)
 ' EM7  = operand a
 ' EM8  = operand b
+' EM9  = operand c
 ' EM13 = RESET_REQ (1=リセット要求, vm_init で処理)
-' EM16 = 32ビット合成スクラッチ 下位ワード ┐ EM16.L で符号付き32ビット
-' EM17 = 32ビット合成スクラッチ 上位ワード ┘
+' EM16 = 32ビット合成スクラッチ 下位ワード
+' EM17 = 32ビット合成スクラッチ 上位ワード
 '        EM は無サフィックスだと16ビット符号なしのため、負値や
 '        65535 超の即値は一旦この2ワードに置いてから .L で読む
 ' EM100~ = レジスタファイル (値スロット 4ワード/レジスタ)
-'           EM(100+n*4)   = 型タグ TT_* (現状未使用、0=TT_EMPTY)
-'           EM(100+n*4+1) = 値 R[n] = EM(100+n*4+1).L
-'           EM(100+n*4+3) = 予備
 ' EM1000~ = バイトコード (1バイト/1EM)
 ' EM4000~ = 定数プール (値スロット 4ワード/エントリ)
-'           EM(4000+n*4)   = 型タグ TT_*
-'           EM(4000+n*4+1) = 値 Pool[n] = EM(4000+n*4+1).L
 ' EM5000~ = デバイスマッピングテーブル (4ワード/エントリ)
-'           EM(5000+idx*4)   = device_type (0=EM,1=DM,2=ZF,3=R,4=MR,5=B,6=L,8=T,9=C)
-'           EM(5000+idx*4+1) = device_address
-'           EM(5000+idx*4+2) = access_type (ワードデバイスのアクセス幅)
-'                              0=.S(16bit符号付き/既定) 1=.U(16bit符号なし)
-'                              2=.L(32bit符号付き)      3=.D(32bit符号なし)
-'                              4=.F(実数、未実装)
-'           EM(5000+idx*4+3) = 予備
 '
 ' Z1-Z8 を間接アドレッシングに使用
 '
@@ -38,7 +32,6 @@
 '   誤: EM0:Z1.L   .L がインデックスレジスタ Z1 に結合してしまい、
 '                  エラーにならないまま16ビットアクセスになる
 '   インデックスの刻み幅は .L でも 1 ワード。下位ワードが先。
-'   (実機検証: EM50.L:Z7 (Z7=1) → EM51=下位, EM52=上位)
 
 IF EM1 = 1 THEN
 
@@ -62,8 +55,8 @@ IF EM1 = 1 THEN
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
             Z2 = EM8 * 4 + 101
+            Z1 = EM7 * 4 + 101
             EM0.L:Z1 = EM0.L:Z2
 
         ELSE IF EM6 = 2 THEN
@@ -74,8 +67,8 @@ IF EM1 = 1 THEN
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
             Z2 = EM8 * 4 + 4001
+            Z1 = EM7 * 4 + 101
             EM0.L:Z1 = EM0.L:Z2
 
         ELSE IF EM6 = 3 THEN
@@ -86,8 +79,8 @@ IF EM1 = 1 THEN
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            ' 符号拡張して EM16.L (32ビット) で読む
-            ' EM は無サフィックスだと16ビット符号なしのため直接引き算できない
+            ' 8ビット値を符号拡張して32ビットスクラッチに置く
+            ' 16ビット符号なしのまま引き算すると桁が壊れるため
             EM16 = EM8
             EM17 = 0
             IF EM8 >= 128 THEN
@@ -105,7 +98,7 @@ IF EM1 = 1 THEN
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            ' 2の補数を 32ビットで組み立てる
+            ' 2の補数を32ビットで組み立てる
             EM16 = 0 - EM8
             EM17 = 0
             IF EM8 <> 0 THEN
@@ -199,7 +192,7 @@ IF EM1 = 1 THEN
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
-            ' 下位ワードは既に2の補数のビット列なので符号拡張のみ行う
+            ' 16ビット値を符号拡張して32ビットスクラッチに置く
             EM16 = EM8
             EM17 = 0
             IF EM8 >= 32768 THEN
@@ -213,7 +206,7 @@ IF EM1 = 1 THEN
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            ' b (16bit)
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
@@ -221,7 +214,7 @@ IF EM1 = 1 THEN
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
-            ' c (16bit)
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
@@ -229,8 +222,8 @@ IF EM1 = 1 THEN
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM9 = Z3 * 256 + Z4
-            ' EM8 * 65536 は16ビット演算になり桁上がりが落ちるため、
-            ' 下位/上位ワードを並べて EM16.L として読む
+            ' 上位 * 65536 は16ビット演算になり桁上がりが落ちるため、
+            ' 下位/上位ワードを並べて32ビットとして読む
             EM16 = EM9
             EM17 = EM8
             Z1 = EM7 * 4 + 101
@@ -270,11 +263,9 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 21 THEN
             ' OP_GETGV (BB): R[a] = global[symbols[b]]
-            ' fetch operand a
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            ' fetch operand b
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
@@ -289,8 +280,10 @@ IF EM1 = 1 THEN
             Z2 = EM7 * 4 + 101
             ' デバイスタイプ別読み取り
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
-            '   0=.S(16bit符号付き/既定) 1=.U(16bit符号なし)
-            '   2=.L(32bit符号付き)      3=.D(32bit符号なし)
+            '   2=.L(32bit符号付き)
+            '   1=.U(16bit符号なし)
+            '   3=.D(32bit符号なし)
+            '   それ以外=.S(16bit符号付き/既定)
             ' ビットデバイス (R, MR, B, L, T, C): 個別ビット → 0/1
             IF Z5 = 0 THEN
                 IF Z8 = 2 THEN
@@ -366,11 +359,9 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 22 THEN
             ' OP_SETGV (BB): global[symbols[b]] = R[a]
-            ' fetch operand a
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            ' fetch operand b
             Z1 = EM0 + 1000
             EM8 = EM0:Z1
             EM0 = EM0 + 1
@@ -385,8 +376,10 @@ IF EM1 = 1 THEN
             Z2 = EM7 * 4 + 101
             ' デバイスタイプ別書き込み
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
-            '   0=.S(16bit符号付き/既定) 1=.U(16bit符号なし)
-            '   2=.L(32bit符号付き)      3=.D(32bit符号なし)
+            '   2=.L(32bit符号付き)
+            '   1=.U(16bit符号なし)
+            '   3=.D(32bit符号なし)
+            '   それ以外=.S(16bit符号付き/既定)
             ' ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF
             IF Z5 = 0 THEN
                 IF Z8 = 2 THEN
@@ -461,24 +454,26 @@ IF EM1 = 1 THEN
             END IF
 
         ELSE IF EM6 = 37 THEN
-            ' OP_JMP (S): 無条件ジャンプ PC += signed16(a)
+            ' OP_JMP (S): PC += signed16(a)
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
             Z1 = EM0 + 1000
             Z4 = EM0:Z1
             EM0 = EM0 + 1
-            EM8 = Z3 * 256 + Z4
-            IF EM8 >= 32768 THEN
-                EM8 = EM8 - 65536
+            EM7 = Z3 * 256 + Z4
+            IF EM7 >= 32768 THEN
+                EM7 = EM7 - 65536
             END IF
-            EM0 = EM0 + EM8
+            EM0 = EM0 + EM7
 
         ELSE IF EM6 = 38 THEN
-            ' OP_JMPIF (BS): if R[a] != 0 then PC += signed16(b)
+            ' OP_JMPIF (BS): if R[a] <> 0 then PC += signed16(b)
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
@@ -495,10 +490,11 @@ IF EM1 = 1 THEN
             END IF
 
         ELSE IF EM6 = 39 THEN
-            ' OP_JMPNOT (BS): if R[a] == 0 then PC += signed16(b)
+            ' OP_JMPNOT (BS): if R[a] = 0 then PC += signed16(b)
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
@@ -515,10 +511,11 @@ IF EM1 = 1 THEN
             END IF
 
         ELSE IF EM6 = 40 THEN
-            ' OP_JMPNIL (BS): if R[a] == 0 (nil) then PC += signed16(b)
+            ' OP_JMPNIL (BS): if R[a] = 0 (nil) then PC += signed16(b)
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
+            ' 16bit big-endian: hi byte, lo byte
             Z1 = EM0 + 1000
             Z3 = EM0:Z1
             EM0 = EM0 + 1
@@ -536,6 +533,8 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 56 THEN
             ' OP_RETURN (B): トップレベルでは VM 停止
+            Z1 = EM0 + 1000
+            EM7 = EM0:Z1
             EM0 = EM0 + 1
             EM1 = 2
             BREAK
@@ -605,7 +604,7 @@ IF EM1 = 1 THEN
             END IF
 
         ELSE IF EM6 = 66 THEN
-            ' OP_EQ (B): R[a] = (R[a] == R[a+1]) ? 1 : 0
+            ' OP_EQ (B): R[a] = (R[a] = R[a+1]) ? 1 : 0
             Z1 = EM0 + 1000
             EM7 = EM0:Z1
             EM0 = EM0 + 1
