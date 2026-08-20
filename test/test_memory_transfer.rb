@@ -61,29 +61,29 @@ end
 
   # === group_consecutive テスト ===
 
+  # 連続するアドレスはまとめて 1 回で転送される
+  # アドレスは配置から導く (base が 0 とは限らないため)
   def test_write_image_groups_consecutive_addresses
+    pc = layout.pc_addr           # VM 状態の先頭。次が STATUS
+    far = layout.bytecode_base    # 離れた位置
+
     image = {
-      0 => 10, 1 => 20, 2 => 30,           # EM0-EM2 (連続)
-      100 => 40, 101 => 50, 102 => 60,      # EM100-EM102 (連続)
-      1000 => 70, 1001 => 80,               # EM1000-EM1001 (連続)
+      pc => 10, pc + 1 => 20, pc + 2 => 30,   # 連続
+      far => 70, far + 1 => 80,               # 離れた位置で連続
     }
 
     @transfer.write_image(image)
 
-    # 3つのグループに分割されるはず
-    assert_equal 3, @adapter.write_log.size
+    # 2つのグループに分割されるはず
+    assert_equal 2, @adapter.write_log.size
 
-    # グループ1: EM0-EM2 (STATUS は STOPPED に上書き)
-    assert_equal 0, @adapter.write_log[0][0]
+    # グループ1 (STATUS は STOPPED に上書きされる)
+    assert_equal pc, @adapter.write_log[0][0]
     assert_equal [10, VM_STOPPED, 30], @adapter.write_log[0][1]
 
-    # グループ2: EM100-EM102
-    assert_equal 100, @adapter.write_log[1][0]
-    assert_equal [40, 50, 60], @adapter.write_log[1][1]
-
-    # グループ3: EM1000-EM1001
-    assert_equal 1000, @adapter.write_log[2][0]
-    assert_equal [70, 80], @adapter.write_log[2][1]
+    # グループ2
+    assert_equal far, @adapter.write_log[1][0]
+    assert_equal [70, 80], @adapter.write_log[1][1]
   end
 
   def test_write_image_overrides_status_to_stopped
@@ -102,7 +102,9 @@ end
   end
 
   def test_write_image_returns_total_word_count
-    image = { 0 => 1, 1 => 2, 100 => 3, 101 => 4, 102 => 5 }
+    pc = layout.pc_addr
+    far = layout.bytecode_base
+    image = { pc => 1, pc + 1 => 2, far => 3, far + 1 => 4, far + 2 => 5 }
     count = @transfer.write_image(image)
     assert_equal 5, count
   end

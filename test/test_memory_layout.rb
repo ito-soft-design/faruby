@@ -47,6 +47,48 @@ class TestMemoryLayout < Minitest::Test
     assert_equal l.instance_size, l.regions.sum { |_, _, _, words| words }
   end
 
+  # === 端数の切り上げ ===
+
+  # ブロックサイズは align の倍数に切り上げられる
+  def test_instance_size_is_aligned
+    l = build(align: 1000)
+    assert_equal 0, l.instance_size % 1000
+    assert_operator l.instance_size, :>=, l.content_size
+    assert_equal l.instance_size - l.content_size, l.padding
+  end
+
+  # 開始と終了が区切りの良い値になる
+  def test_aligned_layout_has_round_boundaries
+    l = build(base: 15_000, align: 1000)
+    assert_equal 15_000, l.base
+    assert_equal 19_999, l.last_addr
+  end
+
+  # 複数インスタンスでも各ブロックが丸い境界に載る
+  def test_aligned_instances_start_on_round_boundaries
+    l = build(base: 15_000, align: 1000, instances: 3)
+    assert_equal [15_000, 20_000, 25_000], (0..2).map { |i| l.for_instance(i).origin }
+  end
+
+  # align: 1 なら切り上げない
+  def test_alignment_can_be_disabled
+    l = build(align: 1)
+    assert_equal l.content_size, l.instance_size
+    assert_equal 0, l.padding
+  end
+
+  # 切り上げ分は末尾の予備領域として現れ、他の領域を侵さない
+  def test_padding_is_reported_as_a_region
+    l = build(base: 0, align: 1000)
+    skip "端数なし" if l.padding.zero?
+
+    name, from, to, words = l.regions.last
+    assert_equal "予備 (端数調整)", name
+    assert_equal l.padding, words
+    assert_equal l.instance_size - 1, to
+    assert_operator from, :>, l.general_global_base
+  end
+
   # === base による移動 ===
 
   # base を変えると全アドレスが同じだけずれる
@@ -131,7 +173,7 @@ class TestMemoryLayout < Minitest::Test
   def test_default_comes_from_faruby_default_yml
     l = Layout.default
     assert_equal "EM", l.device_name
-    assert_equal 0, l.base
+    assert_operator l.base, :>=, 0
     assert_equal 1, l.instances
     assert_equal 80, l.max_regs
   end

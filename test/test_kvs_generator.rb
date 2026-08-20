@@ -11,11 +11,21 @@ require_relative "../tools/kvs_generator"
 class TestKvsGenerator < Minitest::Test
   include FaRuby::VmConstants
 
-# テストは既定レイアウト (faruby_default.yml) を使う。
-# 利用者の faruby.yml に影響されないようにするため。
-def layout
-  FaRuby::MemoryLayout.default
-end
+  # テストは既定レイアウト (faruby_default.yml) を使う。
+  # 利用者の faruby.yml に影響されないようにするため。
+  def layout = FaRuby::MemoryLayout.default
+
+  # 生成コードに現れるデバイス名は配置から決まるため、テストも配置から導く
+  def emitter      = @emitter ||= FaRuby::KvsEmitter.new(layout: layout)
+  def operand(name) = emitter.operand(name)
+  def pc           = emitter.pc
+  def indexed_base = emitter.indexed_base
+  def opcode_var   = layout.device(layout.current_opcode_addr)
+
+  # PC を1つ進める行の出現回数を数える
+  def count_pc_increments(body)
+    body.scan(/#{Regexp.escape("#{pc} = #{pc} + 1")}/).size
+  end
 
   VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
 
@@ -64,29 +74,29 @@ end
 
   # レジスタは「スロット先頭 + 値オフセット」を直接指す
   def test_register_address_matches_slot_layout
-    expected = "Z1 = EM7 * #{SLOT_WORDS} + #{layout.reg_file_base + SLOT_VALUE_OFFSET}"
+    expected = "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{layout.reg_file_base + SLOT_VALUE_OFFSET}"
     assert_includes @source, expected
   end
 
   def test_pool_address_matches_slot_layout
-    expected = "Z2 = EM8 * #{SLOT_WORDS} + #{layout.pool_base + SLOT_VALUE_OFFSET}"
+    expected = "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{layout.pool_base + SLOT_VALUE_OFFSET}"
     assert_includes @source, expected
   end
 
   def test_device_table_stride
-    expected = "Z3 = EM8 * #{DEVICE_TABLE_STRIDE} + #{layout.device_table_base}"
+    expected = "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{layout.device_table_base}"
     assert_includes @source, expected
   end
 
   # === オペコードの網羅 ===
 
   def test_all_table_opcodes_are_emitted
-    emitted = @source.scan(/IF EM6 = (\d+) THEN/).flatten.map(&:to_i).sort.uniq
+    emitted = @source.scan(/IF #{Regexp.escape(opcode_var)} = (\d+) THEN/).flatten.map(&:to_i).sort.uniq
     assert_equal FaRuby::OpcodeTable.codes.sort, emitted
   end
 
   def test_unknown_opcode_falls_through_to_error
-    assert_includes @source, "EM2 = EM6"
+    assert_includes @source, "#{layout.device(layout.error_addr)} = #{opcode_var}"
   end
 
   # === オペランドフェッチが命令形式から生成されている ===
@@ -94,22 +104,22 @@ end
   # OP_MOVE (BB) は 1 バイトオペランドを 2 つ読む
   def test_bb_format_fetches_two_bytes
     body = opcode_body(0x01)
-    assert_equal 2, body.scan(/EM0 = EM0 \+ 1/).size
-    assert_includes body, "EM7 = EM0:Z1"
-    assert_includes body, "EM8 = EM0:Z1"
+    assert_equal 2, count_pc_increments(body)
+    assert_includes body, "#{operand(:a)} = #{indexed_base}:Z1"
+    assert_includes body, "#{operand(:b)} = #{indexed_base}:Z1"
   end
 
   # OP_LOADI32 (BSS) は 1 バイト + 16ビット × 2 を読む
   def test_bss_format_fetches_byte_and_two_words
     body = opcode_body(0x0F)
-    assert_equal 5, body.scan(/EM0 = EM0 \+ 1/).size
-    assert_includes body, "EM8 = Z3 * 256 + Z4"
-    assert_includes body, "EM9 = Z3 * 256 + Z4"
+    assert_equal 5, count_pc_increments(body)
+    assert_includes body, "#{operand(:b)} = Z3 * 256 + Z4"
+    assert_includes body, "#{operand(:c)} = Z3 * 256 + Z4"
   end
 
   # OP_NOP (Z) はオペランドを読まない
   def test_z_format_fetches_nothing
-    refute_includes opcode_body(0x00), "EM0 = EM0 + 1"
+    refute_includes opcode_body(0x00), "#{pc} = #{pc} + 1"
   end
 
   # === デバイスアクセスの分岐 ===
@@ -193,14 +203,14 @@ end
 
   def opcode_body(code)
     lines = @source.lines
-    start = lines.index { |l| l.rstrip == "#{OPCODE_INDENT}IF EM6 = #{code} THEN" ||
-                              l.rstrip == "#{OPCODE_INDENT}ELSE IF EM6 = #{code} THEN" }
+    start = lines.index { |l| l.rstrip == "#{OPCODE_INDENT}IF #{opcode_var} = #{code} THEN" ||
+                              l.rstrip == "#{OPCODE_INDENT}ELSE IF #{opcode_var} = #{code} THEN" }
     refute_nil start, "オペコード #{code} の分岐が見つからない"
 
     rest = lines[(start + 1)..]
     stop = rest.index do |l|
       s = l.rstrip
-      s == "#{OPCODE_INDENT}ELSE" || s =~ /\A#{OPCODE_INDENT}ELSE IF EM6 = \d+ THEN\z/
+      s == "#{OPCODE_INDENT}ELSE" || s =~ /\A#{OPCODE_INDENT}ELSE IF #{Regexp.escape(opcode_var)} = \d+ THEN\z/
     end
     refute_nil stop, "オペコード #{code} の分岐の終端が見つからない"
     rest[0...stop].join

@@ -15,7 +15,14 @@ end
 desc "Regenerate plc/keyence/vm_core.kvs from tools/opcode_table.rb"
 task :vm_core do
   require_relative "tools/kvs_generator"
-  changed = FaRuby::KvsGenerator.new.write!
+  require_relative "tools/config"
+
+  # faruby.yml の上書きを反映する。上書きした場合、生成物はその設備専用に
+  # なるため、コミット済みの vm_core.kvs とは一致しなくなる (テストが検出する)。
+  config = FaRuby::Config.new
+  layout = config.layout
+  puts "配置: #{layout}"
+  changed = FaRuby::KvsGenerator.new(layout: layout).write!
   if changed.empty?
     puts "変更なし (生成結果は既存ファイルと同一)"
   else

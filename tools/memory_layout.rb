@@ -58,12 +58,12 @@ module FaRuby
     OFFSET_LOOP_COUNTER    = 20  # FOR ループのカウンタ
 
     DEFAULTS = {
-      "device" => "EM", "base" => 0, "instances" => 1,
+      "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 200, "max_symbols" => 100, "max_globals" => 100,
     }.freeze
 
-    attr_reader :device_name, :base, :instances, :instance_index,
+    attr_reader :device_name, :base, :instances, :instance_index, :align,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals
 
     # faruby_default.yml だけから作った配置
@@ -82,19 +82,20 @@ module FaRuby
       c = DEFAULTS.merge(config.transform_keys(&:to_s).compact)
       new(
         device_name: c["device"], base: c["base"], instances: c["instances"],
-        max_regs: c["max_regs"], max_bytecode: c["max_bytecode"],
+        align: c["align"], max_regs: c["max_regs"], max_bytecode: c["max_bytecode"],
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
         max_globals: c["max_globals"]
       )
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
-                   max_regs: 80, max_bytecode: 3000,
+                   align: 1000, max_regs: 80, max_bytecode: 3000,
                    max_pool: 200, max_symbols: 100, max_globals: 100)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
       @instance_index = Integer(instance_index)
+      @align          = Integer(align)
       @max_regs       = Integer(max_regs)
       @max_bytecode   = Integer(max_bytecode)
       @max_pool       = Integer(max_pool)
@@ -109,7 +110,7 @@ module FaRuby
 
       self.class.new(
         device_name: device_name, base: base, instances: instances, instance_index: index,
-        max_regs: max_regs, max_bytecode: max_bytecode,
+        align: align, max_regs: max_regs, max_bytecode: max_bytecode,
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals
       )
     end
@@ -126,12 +127,25 @@ module FaRuby
     def device_table_base   = pool_base + max_pool * SLOT_WORDS
     def general_global_base = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
 
-    # 1インスタンスが占有するワード数
-    def instance_size
+    # 各領域の合計 (パディングを含まない)
+    def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_bytecode +
         max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE +
         max_globals * SLOT_WORDS
     end
+
+    # 1インスタンスが占有するワード数
+    #
+    # align の倍数に切り上げる。開始・終了アドレスが区切りの良い値になり、
+    # 複数インスタンスの場合も各ブロックが丸い境界に載る。
+    def instance_size
+      return content_size if align <= 1
+
+      ((content_size + align - 1) / align) * align
+    end
+
+    # 切り上げによって生じた未使用ワード数
+    def padding = instance_size - content_size
 
     # 全インスタンスが占有するワード数
     def total_words = instance_size * instances
@@ -186,14 +200,16 @@ module FaRuby
 
     # 領域の一覧を [名前, 開始, 終了, ワード数] の配列で返す
     def regions
-      [
+      list = [
         ["VM状態",            vm_state_base,       reg_file_base - 1],
         ["レジスタファイル",  reg_file_base,       bytecode_base - 1],
         ["バイトコード",      bytecode_base,       pool_base - 1],
         ["定数プール",        pool_base,           device_table_base - 1],
         ["デバイステーブル",  device_table_base,   general_global_base - 1],
-        ["汎用グローバル変数", general_global_base, origin + instance_size - 1],
-      ].map { |name, from, to| [name, from, to, to - from + 1] }
+        ["汎用グローバル変数", general_global_base, general_global_base + max_globals * SLOT_WORDS - 1],
+      ]
+      list << ["予備 (端数調整)", origin + content_size, origin + instance_size - 1] if padding.positive?
+      list.map { |name, from, to| [name, from, to, to - from + 1] }
     end
 
     def to_s
