@@ -2,13 +2,20 @@
 
 require "minitest/autorun"
 
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 require_relative "../tools/console/memory_transfer"
 
 # MemoryTransfer のユニットテスト
 # PLC 実機不要: モックアダプターを使用
 class TestMemoryTransfer < Minitest::Test
-  include FaRuby::MemoryMap
+  include FaRuby::VmConstants
+
+# テストは既定レイアウト (faruby_default.yml) を使う。
+# 利用者の faruby.yml に影響されないようにするため。
+def layout
+  FaRuby::MemoryLayout.default
+end
 
   # モックアダプター (PLC の代わりにメモリ上で動作)
   class MockAdapter < FaRuby::Console::PlcAdapters::Base
@@ -80,18 +87,18 @@ class TestMemoryTransfer < Minitest::Test
   end
 
   def test_write_image_overrides_status_to_stopped
-    image = { STATUS_ADDR => VM_RUNNING }
+    image = { layout.status_addr => VM_RUNNING }
 
     @transfer.write_image(image)
 
-    assert_equal VM_STOPPED, @adapter.memory[STATUS_ADDR]
+    assert_equal VM_STOPPED, @adapter.memory[layout.status_addr]
   end
 
   def test_write_image_empty
     count = @transfer.write_image({})
     # 空でも STATUS=STOPPED が書き込まれる
     assert_equal 1, count
-    assert_equal VM_STOPPED, @adapter.memory[STATUS_ADDR]
+    assert_equal VM_STOPPED, @adapter.memory[layout.status_addr]
   end
 
   def test_write_image_returns_total_word_count
@@ -103,15 +110,15 @@ class TestMemoryTransfer < Minitest::Test
   # === read_vm_state テスト ===
 
   def test_read_vm_state
-    @adapter.memory[PC_ADDR] = 42
-    @adapter.memory[STATUS_ADDR] = VM_FINISHED
-    @adapter.memory[ERROR_ADDR] = 0
-    @adapter.memory[STEP_COUNT_ADDR] = 100
-    @adapter.memory[STEP_COUNT_ADDR + 1] = 0
-    @adapter.memory[STEPS_PER_CYCLE] = 50
-    @adapter.memory[BYTECODE_LEN_ADDR] = 20
-    @adapter.memory[NREGS_ADDR] = 5
-    @adapter.memory[NLOCALS_ADDR] = 3
+    @adapter.memory[layout.pc_addr] = 42
+    @adapter.memory[layout.status_addr] = VM_FINISHED
+    @adapter.memory[layout.error_addr] = 0
+    @adapter.memory[layout.step_count_addr] = 100
+    @adapter.memory[layout.step_count_addr + 1] = 0
+    @adapter.memory[layout.steps_per_cycle_addr] = 50
+    @adapter.memory[layout.bytecode_len_addr] = 20
+    @adapter.memory[layout.nregs_addr] = 5
+    @adapter.memory[layout.nlocals_addr] = 3
 
     state = @transfer.read_vm_state
 
@@ -127,8 +134,8 @@ class TestMemoryTransfer < Minitest::Test
   end
 
   def test_read_vm_state_error_status
-    @adapter.memory[STATUS_ADDR] = VM_ERROR
-    @adapter.memory[ERROR_ADDR] = 99
+    @adapter.memory[layout.status_addr] = VM_ERROR
+    @adapter.memory[layout.error_addr] = 99
 
     state = @transfer.read_vm_state
 
@@ -141,15 +148,15 @@ class TestMemoryTransfer < Minitest::Test
 
   # レジスタスロット (4ワード) に値を書き込むヘルパー
   def write_reg_slot(index, lo, hi = 0, type = TT_EMPTY)
-    @adapter.memory[FaRuby::MemoryMap.reg_type_addr(index)] = type
-    addr = FaRuby::MemoryMap.reg_addr(index)
+    @adapter.memory[layout.reg_type_addr(index)] = type
+    addr = layout.reg_addr(index)
     @adapter.memory[addr] = lo
     @adapter.memory[addr + 1] = hi
   end
 
   def test_read_registers
-    @adapter.memory[NREGS_ADDR] = 3
-    @adapter.memory[NLOCALS_ADDR] = 2
+    @adapter.memory[layout.nregs_addr] = 3
+    @adapter.memory[layout.nlocals_addr] = 2
 
     write_reg_slot(0, 0)     # R[0] = 0 (self)
     write_reg_slot(1, 42)    # R[1] = 42 (local)
@@ -165,8 +172,8 @@ class TestMemoryTransfer < Minitest::Test
 
   # スロット先頭の型タグが値と独立に読み出せること
   def test_read_registers_type_tag
-    @adapter.memory[NREGS_ADDR] = 2
-    @adapter.memory[NLOCALS_ADDR] = 2
+    @adapter.memory[layout.nregs_addr] = 2
+    @adapter.memory[layout.nlocals_addr] = 2
 
     write_reg_slot(0, 0)
     write_reg_slot(1, 42, 0, TT_INTEGER)
@@ -179,8 +186,8 @@ class TestMemoryTransfer < Minitest::Test
 
   # 隣接スロットが値を侵食しないこと (ストライド 4 の確認)
   def test_read_registers_slots_are_independent
-    @adapter.memory[NREGS_ADDR] = 2
-    @adapter.memory[NLOCALS_ADDR] = 2
+    @adapter.memory[layout.nregs_addr] = 2
+    @adapter.memory[layout.nlocals_addr] = 2
 
     write_reg_slot(0, 0xFFFF, 0xFFFF)  # R[0] = -1
     write_reg_slot(1, 7)               # R[1] = 7
@@ -192,8 +199,8 @@ class TestMemoryTransfer < Minitest::Test
   end
 
   def test_read_registers_negative_value
-    @adapter.memory[NREGS_ADDR] = 2
-    @adapter.memory[NLOCALS_ADDR] = 2
+    @adapter.memory[layout.nregs_addr] = 2
+    @adapter.memory[layout.nlocals_addr] = 2
 
     write_reg_slot(0, 0)
     write_reg_slot(1, 0xFFFF, 0xFFFF)  # R[1] = -1 (0xFFFFFFFF)
@@ -204,8 +211,8 @@ class TestMemoryTransfer < Minitest::Test
   end
 
   def test_read_registers_32bit_value
-    @adapter.memory[NREGS_ADDR] = 2
-    @adapter.memory[NLOCALS_ADDR] = 2
+    @adapter.memory[layout.nregs_addr] = 2
+    @adapter.memory[layout.nlocals_addr] = 2
 
     write_reg_slot(0, 0)
     write_reg_slot(1, 0x86A0, 0x0001)  # R[1] = 100000 (0x000186A0)
@@ -219,16 +226,16 @@ class TestMemoryTransfer < Minitest::Test
 
   def test_write_status
     @transfer.write_status(VM_RUNNING)
-    assert_equal VM_RUNNING, @adapter.memory[STATUS_ADDR]
+    assert_equal VM_RUNNING, @adapter.memory[layout.status_addr]
   end
 
   # === request_reset テスト ===
 
   def test_request_reset
-    @adapter.memory[RESET_REQ_ADDR] = 0
+    @adapter.memory[layout.reset_req_addr] = 0
 
     @transfer.request_reset
 
-    assert_equal 1, @adapter.memory[RESET_REQ_ADDR]
+    assert_equal 1, @adapter.memory[layout.reset_req_addr]
   end
 end

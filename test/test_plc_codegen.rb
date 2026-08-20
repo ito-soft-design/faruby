@@ -2,7 +2,8 @@
 
 require "minitest/autorun"
 
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 require_relative "../tools/mrb_parser"
 require_relative "../tools/plc_codegen"
 require_relative "../simulator/em_memory"
@@ -10,7 +11,13 @@ require_relative "../simulator/em_memory"
 # PlcCodegen のユニットテスト
 # 値スロット (4ワード = 型タグ + 32ビット値 + 予備) のレイアウトを検証します。
 class TestPlcCodegen < Minitest::Test
-  include FaRuby::MemoryMap
+  include FaRuby::VmConstants
+
+# テストは既定レイアウト (faruby_default.yml) を使う。
+# 利用者の faruby.yml に影響されないようにするため。
+def layout
+  FaRuby::MemoryLayout.default
+end
 
   # 合成 IREP を組み立てるヘルパー
   def build_irep(nregs: 3, nlocals: 2, pool: [], symbols: [], instructions: "\x69")
@@ -38,10 +45,10 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(pool: [[:int32, 123456], [:int32, 7]])
     em, = load_image(irep)
 
-    assert_equal TT_INTEGER, em.read_u16(FaRuby::MemoryMap.pool_type_addr(0))
-    assert_equal 123456, em.read_s32(FaRuby::MemoryMap.pool_addr(0))
-    assert_equal TT_INTEGER, em.read_u16(FaRuby::MemoryMap.pool_type_addr(1))
-    assert_equal 7, em.read_s32(FaRuby::MemoryMap.pool_addr(1))
+    assert_equal TT_INTEGER, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 123456, em.read_s32(layout.pool_addr(0))
+    assert_equal TT_INTEGER, em.read_u16(layout.pool_type_addr(1))
+    assert_equal 7, em.read_s32(layout.pool_addr(1))
   end
 
   # 32ビット値がスロット境界をまたいで隣のエントリを壊さないこと
@@ -49,16 +56,16 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(pool: [[:int32, -1], [:int32, 42]])
     em, = load_image(irep)
 
-    assert_equal(-1, em.read_s32(FaRuby::MemoryMap.pool_addr(0)))
-    assert_equal 42, em.read_s32(FaRuby::MemoryMap.pool_addr(1))
-    assert_equal TT_INTEGER, em.read_u16(FaRuby::MemoryMap.pool_type_addr(1))
+    assert_equal(-1, em.read_s32(layout.pool_addr(0)))
+    assert_equal 42, em.read_s32(layout.pool_addr(1))
+    assert_equal TT_INTEGER, em.read_u16(layout.pool_type_addr(1))
   end
 
   def test_pool_stride_is_slot_words
     assert_equal SLOT_WORDS,
-                 FaRuby::MemoryMap.pool_slot_addr(1) - FaRuby::MemoryMap.pool_slot_addr(0)
-    assert_equal FaRuby::MemoryMap.pool_slot_addr(0) + SLOT_VALUE_OFFSET,
-                 FaRuby::MemoryMap.pool_addr(0)
+                 layout.pool_slot_addr(1) - layout.pool_slot_addr(0)
+    assert_equal layout.pool_slot_addr(0) + SLOT_VALUE_OFFSET,
+                 layout.pool_addr(0)
   end
 
   # int64 は下位32ビットのみ使用する (従来の挙動を維持)
@@ -66,8 +73,8 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(pool: [[:int64, 0x1_0000_0007]])
     em, = load_image(irep)
 
-    assert_equal TT_INTEGER, em.read_u16(FaRuby::MemoryMap.pool_type_addr(0))
-    assert_equal 7, em.read_s32(FaRuby::MemoryMap.pool_addr(0))
+    assert_equal TT_INTEGER, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 7, em.read_s32(layout.pool_addr(0))
   end
 
   # 未対応の型 (float) はスロットを書かない
@@ -75,36 +82,36 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(pool: [[:float, 1.5]])
     _em, image = load_image(irep)
 
-    refute image.key?(FaRuby::MemoryMap.pool_addr(0))
-    refute image.key?(FaRuby::MemoryMap.pool_type_addr(0))
+    refute image.key?(layout.pool_addr(0))
+    refute image.key?(layout.pool_type_addr(0))
   end
 
   # プール領域がデバイスマッピングテーブル (EM5000) を侵さないこと
   def test_pool_region_fits_before_device_table
-    last = FaRuby::MemoryMap.pool_slot_addr(MAX_POOL - 1) + SLOT_WORDS - 1
-    assert_operator last, :<, DEVICE_TABLE_BASE
+    last = layout.pool_slot_addr(layout.max_pool - 1) + SLOT_WORDS - 1
+    assert_operator last, :<, layout.device_table_base
   end
 
   # === 領域あふれ検証 ===
 
   def test_validate_rejects_pool_overflow
-    irep = build_irep(pool: Array.new(MAX_POOL + 1) { [:int32, 1] })
+    irep = build_irep(pool: Array.new(layout.max_pool + 1) { [:int32, 1] })
     err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
     assert_match(/定数プール/, err.message)
   end
 
   def test_validate_rejects_register_overflow
-    irep = build_irep(nregs: MAX_REGS + 1)
+    irep = build_irep(nregs: layout.max_regs + 1)
     assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).generate }
   end
 
   def test_validate_rejects_symbol_overflow
-    irep = build_irep(symbols: Array.new(MAX_SYMBOLS + 1) { |i| "$v#{i}" })
+    irep = build_irep(symbols: Array.new(layout.max_symbols + 1) { |i| "$v#{i}" })
     assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
   end
 
   def test_validate_accepts_limits
-    irep = build_irep(nregs: MAX_REGS, pool: Array.new(MAX_POOL) { [:int32, 1] })
+    irep = build_irep(nregs: layout.max_regs, pool: Array.new(layout.max_pool) { [:int32, 1] })
     assert_equal FaRuby::PlcCodegen, FaRuby::PlcCodegen.new(irep).validate!.class
   end
 
@@ -115,7 +122,7 @@ class TestPlcCodegen < Minitest::Test
     _em, image = load_image(irep)
 
     3.times do |i|
-      slot = FaRuby::MemoryMap.reg_slot_addr(i)
+      slot = layout.reg_slot_addr(i)
       SLOT_WORDS.times do |w|
         assert image.key?(slot + w), "EM#{slot + w} (R[#{i}] slot word #{w}) が初期化されていない"
         assert_equal 0, image[slot + w]
@@ -125,8 +132,8 @@ class TestPlcCodegen < Minitest::Test
 
   # レジスタ領域がバイトコード領域を侵さないこと
   def test_register_region_fits_before_bytecode
-    last = FaRuby::MemoryMap.reg_slot_addr(MAX_REGS - 1) + SLOT_WORDS - 1
-    assert_operator last, :<, BYTECODE_BASE
+    last = layout.reg_slot_addr(layout.max_regs - 1) + SLOT_WORDS - 1
+    assert_operator last, :<, layout.bytecode_base
   end
 
   # === シンボル解析 (アクセス幅サフィックス) ===
@@ -185,11 +192,11 @@ class TestPlcCodegen < Minitest::Test
     _em, image = load_image(irep)
 
     [[0, ACCESS_S], [1, ACCESS_L]].each do |idx, expected|
-      addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+      addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
       assert_equal expected, image[addr + 2], "シンボル #{idx} の access_type"
     end
     # ビットデバイスは 0 (未使用)
-    assert_equal 0, image[DEVICE_TABLE_BASE + 2 * DEVICE_TABLE_STRIDE + 2]
+    assert_equal 0, image[layout.device_table_base + 2 * DEVICE_TABLE_STRIDE + 2]
   end
 
   # 汎用グローバルは Ruby の値を持つので常に32ビット
@@ -209,8 +216,8 @@ class TestPlcCodegen < Minitest::Test
 
   # デバイステーブルが汎用グローバル領域を侵さないこと
   def test_device_table_fits_before_general_globals
-    last = DEVICE_TABLE_BASE + (MAX_SYMBOLS - 1) * DEVICE_TABLE_STRIDE + DEVICE_TABLE_STRIDE - 1
-    assert_operator last, :<, GENERAL_GLOBAL_BASE
+    last = layout.device_table_base + (layout.max_symbols - 1) * DEVICE_TABLE_STRIDE + DEVICE_TABLE_STRIDE - 1
+    assert_operator last, :<, layout.general_global_base
   end
 
   # === デバイスマッピング ===
@@ -220,10 +227,10 @@ class TestPlcCodegen < Minitest::Test
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [true, true], mappings.map { |m| m[:general] }
-    assert_equal FaRuby::MemoryMap.general_global_addr(0), mappings[0][:z_offset]
-    assert_equal FaRuby::MemoryMap.general_global_addr(1), mappings[1][:z_offset]
+    assert_equal layout.general_global_addr(0), mappings[0][:z_offset]
+    assert_equal layout.general_global_addr(1), mappings[1][:z_offset]
     # 値ワードのアドレスなのでスロット先頭ではない
-    assert_equal GENERAL_GLOBAL_BASE + SLOT_VALUE_OFFSET, mappings[0][:z_offset]
+    assert_equal layout.general_global_base + SLOT_VALUE_OFFSET, mappings[0][:z_offset]
   end
 
   # デバイス名付きシンボルは汎用領域を消費しない
@@ -232,8 +239,8 @@ class TestPlcCodegen < Minitest::Test
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [false, true, false, true], mappings.map { |m| m[:general] }
-    assert_equal FaRuby::MemoryMap.general_global_addr(0), mappings[1][:z_offset]
-    assert_equal FaRuby::MemoryMap.general_global_addr(1), mappings[3][:z_offset]
+    assert_equal layout.general_global_addr(0), mappings[1][:z_offset]
+    assert_equal layout.general_global_addr(1), mappings[3][:z_offset]
     assert_equal DEVICE_TYPE_DM, mappings[0][:device_type]
     assert_equal DEVICE_TYPE_MR, mappings[2][:device_type]
   end
@@ -243,7 +250,7 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(symbols: ["$foo"])
     _em, image = load_image(irep)
 
-    slot = FaRuby::MemoryMap.general_global_slot_addr(0)
+    slot = layout.general_global_slot_addr(0)
     SLOT_WORDS.times do |w|
       assert image.key?(slot + w), "EM#{slot + w} が初期化されていない"
       assert_equal 0, image[slot + w]
@@ -255,9 +262,9 @@ class TestPlcCodegen < Minitest::Test
     irep = build_irep(symbols: ["$foo"])
     _em, image = load_image(irep)
 
-    table_addr = DEVICE_TABLE_BASE
+    table_addr = layout.device_table_base
     assert_equal DEVICE_TYPE_EM, image[table_addr]
-    assert_equal FaRuby::MemoryMap.general_global_addr(0), image[table_addr + 1]
+    assert_equal layout.general_global_addr(0), image[table_addr + 1]
   end
 
   # === 生成される KV スクリプト ===
@@ -267,9 +274,9 @@ class TestPlcCodegen < Minitest::Test
     script = FaRuby::PlcCodegen.new(irep).generate
 
     # プールの型タグと値がそれぞれのアドレスに出力される
-    assert_includes script, "EM#{FaRuby::MemoryMap.pool_type_addr(0)} = #{TT_INTEGER}"
-    assert_includes script, "EM#{FaRuby::MemoryMap.pool_addr(0)}.L = 99"
+    assert_includes script, "EM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
+    assert_includes script, "EM#{layout.pool_addr(0)}.L = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
-    assert_includes script, "FOR Z1 = #{REG_FILE_BASE} TO #{REG_FILE_BASE + 2 * SLOT_WORDS - 1}"
+    assert_includes script, "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_file_base + 2 * SLOT_WORDS - 1}"
   end
 end

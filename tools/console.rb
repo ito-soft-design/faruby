@@ -4,7 +4,7 @@
 # PLC と通信して Ruby プログラムのコンパイル・転送・実行を行う対話型ツール
 
 require "optparse"
-require_relative "console/config"
+require_relative "config"
 require_relative "console/plc_connection"
 require_relative "console/memory_transfer"
 require_relative "console/commands"
@@ -25,6 +25,7 @@ module FaRuby
         "stop"    => :cmd_stop,
         "reset"   => :cmd_reset,
         "verify"  => :cmd_verify,
+        "memmap"  => :cmd_memmap,
         "disasm"  => :cmd_disasm,
         "sim"     => :cmd_sim,
         "connect" => :cmd_connect,

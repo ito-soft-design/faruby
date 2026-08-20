@@ -4,29 +4,33 @@
 # 解析済み IREP から KV スクリプト用のメモリ初期化コードを生成します。
 
 require_relative "mrb_parser"
-require_relative "memory_map"
+require_relative "vm_constants"
+require_relative "memory_layout"
 require "plc_access"
 
 module FaRuby
-  # 生成対象が EM のメモリマップに収まらない場合に発生
+  # 生成対象がメモリ配置に収まらない場合に発生
   class CodegenError < StandardError; end
 
   class PlcCodegen
-    include MemoryMap
+    include VmConstants
 
-    def initialize(irep, steps_per_cycle: 50)
+    attr_reader :layout
+
+    def initialize(irep, steps_per_cycle: 50, layout: MemoryLayout.default)
       @irep = irep
       @steps_per_cycle = steps_per_cycle
+      @layout = layout
     end
 
     # 各領域が上限を超えていないか検証する
     # 超えたまま生成すると隣接領域 (定数プール → デバイステーブル等) を
     # 破壊するため、生成前に必ず呼ぶ。
     def validate!
-      check_limit("レジスタ数", @irep.nregs, MAX_REGS)
-      check_limit("バイトコード長", @irep.ilen, MAX_BYTECODE)
-      check_limit("定数プールのエントリ数", @irep.pool.size, MAX_POOL)
-      check_limit("シンボル数", @irep.symbols.size, MAX_SYMBOLS)
+      check_limit("レジスタ数", @irep.nregs, layout.max_regs)
+      check_limit("バイトコード長", @irep.ilen, layout.max_bytecode)
+      check_limit("定数プールのエントリ数", @irep.pool.size, layout.max_pool)
+      check_limit("シンボル数", @irep.symbols.size, layout.max_symbols)
       check_unsupported_access
       self
     end
@@ -59,19 +63,19 @@ module FaRuby
       image = {}
 
       # VM 状態
-      image[PC_ADDR] = 0
-      image[STATUS_ADDR] = VM_RUNNING
-      image[ERROR_ADDR] = 0
-      image[STEP_COUNT_ADDR] = 0
-      image[STEP_COUNT_ADDR + 1] = 0
-      image[STEPS_PER_CYCLE] = @steps_per_cycle
-      image[BYTECODE_LEN_ADDR] = @irep.ilen
-      image[NREGS_ADDR] = @irep.nregs
-      image[NLOCALS_ADDR] = @irep.nlocals
+      image[layout.pc_addr] = 0
+      image[layout.status_addr] = VM_RUNNING
+      image[layout.error_addr] = 0
+      image[layout.step_count_addr] = 0
+      image[layout.step_count_addr + 1] = 0
+      image[layout.steps_per_cycle_addr] = @steps_per_cycle
+      image[layout.bytecode_len_addr] = @irep.ilen
+      image[layout.nregs_addr] = @irep.nregs
+      image[layout.nlocals_addr] = @irep.nlocals
 
       # バイトコード
       @irep.instructions.each_byte.each_with_index do |b, i|
-        image[BYTECODE_BASE + i] = b
+        image[layout.bytecode_base + i] = b
       end
 
       # 定数プール (値スロット: 型タグ + 32ビット値)
@@ -79,20 +83,20 @@ module FaRuby
         value = pool_slot_value(entry)
         next unless value
 
-        image[MemoryMap.pool_type_addr(i)] = pool_type_tag(entry)
-        addr = MemoryMap.pool_addr(i)
+        image[layout.pool_type_addr(i)] = pool_type_tag(entry)
+        addr = layout.pool_addr(i)
         image[addr]     = value & 0xFFFF
         image[addr + 1] = (value >> 16) & 0xFFFF
       end
 
       # レジスタファイル初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
       @irep.nregs.times do |i|
-        slot = MemoryMap.reg_slot_addr(i)
+        slot = layout.reg_slot_addr(i)
         SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
       # デバイスマッピングテーブル
-      image[NUM_SYMBOLS_ADDR] = @irep.symbols.size
+      image[layout.num_symbols_addr] = @irep.symbols.size
       device_mappings.each do |m|
         image[m[:table_addr]]     = m[:device_type]
         image[m[:table_addr] + 1] = m[:z_offset]
@@ -110,13 +114,12 @@ module FaRuby
 
     # シンボルごとのデバイス割り当てを解決する
     # デバイス名にマッチするシンボル ($DM100 等) は該当デバイスへ、
-    # マッチしないシンボル ($foo 等) は汎用グローバル領域 (EM6000+) へ
-    # 出現順に割り当てる。
+    # マッチしないシンボル ($foo 等) は汎用グローバル領域へ出現順に割り当てる。
     # z_offset は「値ワード」のアドレス (デバイスマッピングテーブルに格納する値)。
     def device_mappings
       slot_index = 0
       @irep.symbols.each_with_index.map do |sym, idx|
-        table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+        table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
         parsed = parse_device_symbol(sym)
         if parsed
           { symbol: sym, index: idx, table_addr: table_addr, general: false,
@@ -125,10 +128,10 @@ module FaRuby
             access_type: parsed[:access_type], bit: parsed[:bit] }
         else
           # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
-          value_addr = MemoryMap.general_global_addr(slot_index)
+          value_addr = layout.general_global_addr(slot_index)
           slot_index += 1
           { symbol: sym, index: idx, table_addr: table_addr, general: true,
-            device_type: DEVICE_TYPE_EM, device_name: DEVICE_NAME,
+            device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
             address: value_addr.to_s, z_offset: value_addr,
             access_type: ACCESS_L, bit: false }
         end
@@ -174,19 +177,19 @@ module FaRuby
     def generate_vm_state
       lines = []
       lines << "' --- VM State ---"
-      lines << "#{MemoryMap.device(PC_ADDR)} = 0           ' PC = 0"
-      lines << "#{MemoryMap.device(STATUS_ADDR)} = #{VM_RUNNING}           ' STATUS = running"
-      lines << "#{MemoryMap.device(ERROR_ADDR)} = 0           ' ERROR = none"
-      lines << "#{MemoryMap.device_long(STEP_COUNT_ADDR)} = 0     ' STEP_COUNT = 0"
-      lines << "#{MemoryMap.device(STEPS_PER_CYCLE)} = #{@steps_per_cycle}          ' STEPS_PER_CYCLE"
-      lines << "#{MemoryMap.device(BYTECODE_LEN_ADDR)} = #{@irep.ilen}         ' BYTECODE_LEN"
-      lines << "#{MemoryMap.device(NREGS_ADDR)} = #{@irep.nregs}          ' NREGS"
-      lines << "#{MemoryMap.device(NLOCALS_ADDR)} = #{@irep.nlocals}          ' NLOCALS"
-      lines << "#{MemoryMap.device(RESET_REQ_ADDR)} = 0          ' RESET_REQ = off"
+      lines << "#{layout.device(layout.pc_addr)} = 0           ' PC = 0"
+      lines << "#{layout.device(layout.status_addr)} = #{VM_RUNNING}           ' STATUS = running"
+      lines << "#{layout.device(layout.error_addr)} = 0           ' ERROR = none"
+      lines << "#{layout.device_long(layout.step_count_addr)} = 0     ' STEP_COUNT = 0"
+      lines << "#{layout.device(layout.steps_per_cycle_addr)} = #{@steps_per_cycle}          ' STEPS_PER_CYCLE"
+      lines << "#{layout.device(layout.bytecode_len_addr)} = #{@irep.ilen}         ' BYTECODE_LEN"
+      lines << "#{layout.device(layout.nregs_addr)} = #{@irep.nregs}          ' NREGS"
+      lines << "#{layout.device(layout.nlocals_addr)} = #{@irep.nlocals}          ' NLOCALS"
+      lines << "#{layout.device(layout.reset_req_addr)} = 0          ' RESET_REQ = off"
       lines << ""
       lines << "' --- Clear Register File (#{SLOT_WORDS} words/slot) ---"
-      lines << "FOR Z1 = #{REG_FILE_BASE} TO #{MemoryMap.reg_slot_addr(@irep.nregs) - 1}"
-      lines << "    EM0:Z1 = 0"
+      lines << "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_slot_addr(@irep.nregs) - 1}"
+      lines << "    #{layout.device_name}0:Z1 = 0"
       lines << "NEXT"
       lines
     end
@@ -196,7 +199,7 @@ module FaRuby
       lines << "' --- Bytecode (#{@irep.ilen} bytes) ---"
 
       @irep.instructions.each_byte.each_with_index do |b, i|
-        lines << "#{MemoryMap.device(BYTECODE_BASE + i)} = #{b}"
+        lines << "#{layout.device(layout.bytecode_base + i)} = #{b}"
       end
 
       lines
@@ -211,8 +214,8 @@ module FaRuby
       @irep.pool.each_with_index do |entry, i|
         case entry.type
         when :int32, :int64
-          lines << "#{MemoryMap.device(MemoryMap.pool_type_addr(i))} = #{TT_INTEGER}    ' Pool[#{i}] type=integer"
-          lines << "#{MemoryMap.device_long(MemoryMap.pool_addr(i))} = #{entry.value}    ' Pool[#{i}]"
+          lines << "#{layout.device(layout.pool_type_addr(i))} = #{TT_INTEGER}    ' Pool[#{i}] type=integer"
+          lines << "#{layout.device_long(layout.pool_addr(i))} = #{entry.value}    ' Pool[#{i}]"
         when :float
           lines << "' Pool[#{i}] = #{entry.value} (float - not supported in milestone 1)"
         else
@@ -228,21 +231,21 @@ module FaRuby
 
       lines = []
       lines << "' --- Device Mapping Table (#{@irep.symbols.size} symbols) ---"
-      lines << "#{MemoryMap.device(NUM_SYMBOLS_ADDR)} = #{@irep.symbols.size}    ' NUM_SYMBOLS"
+      lines << "#{layout.device(layout.num_symbols_addr)} = #{@irep.symbols.size}    ' NUM_SYMBOLS"
 
       mappings = device_mappings
       mappings.each do |m|
         table_addr = m[:table_addr]
         kind = m[:bit] ? "ビット" : ACCESS_NAMES[m[:access_type]]
         if m[:general]
-          lines << "#{MemoryMap.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
-          lines << "#{MemoryMap.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> EM#{m[:z_offset]}"
+          lines << "#{layout.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
+          lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> #{layout.device(m[:z_offset])}"
         else
-          lines << "#{MemoryMap.device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
-          lines << "#{MemoryMap.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
+          lines << "#{layout.device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
+          lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
-        lines << "#{MemoryMap.device(table_addr + 2)} = #{m[:access_type] || 0}    ' #{m[:symbol]} access=#{kind}"
-        lines << "#{MemoryMap.device(table_addr + 3)} = 0    ' #{m[:symbol]} 予備"
+        lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || 0}    ' #{m[:symbol]} access=#{kind}"
+        lines << "#{layout.device(table_addr + 3)} = 0    ' #{m[:symbol]} 予備"
       end
 
       lines.concat(generate_general_global_clear(mappings))
@@ -255,7 +258,7 @@ module FaRuby
       general = mappings.select { |m| m[:general] }
       return [] if general.empty?
 
-      # 汎用グローバルは GENERAL_GLOBAL_BASE から連続して割り当てられる
+      # 汎用グローバルは汎用グローバル領域の先頭から連続して割り当てられる
       first = general.first[:z_offset] - SLOT_VALUE_OFFSET
       last  = general.last[:z_offset] - SLOT_VALUE_OFFSET + SLOT_WORDS - 1
 
@@ -315,7 +318,7 @@ module FaRuby
       if (m = str.match(word_pattern))
         device_name = m[1].upcase
         addr_str = m[2]
-        access_type = MemoryMap::ACCESS_SUFFIXES.fetch(m[3].to_s.upcase)
+        access_type = VmConstants::ACCESS_SUFFIXES.fetch(m[3].to_s.upcase)
         return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
                  z_offset: device_z_offset(device_name, addr_str),
                  device_name: device_name, access_type: access_type, bit: false }

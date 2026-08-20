@@ -20,10 +20,10 @@
 ' EM17 = 32ビット合成スクラッチ 上位ワード
 '        EM は無サフィックスだと16ビット符号なしのため、負値や
 '        65535 超の即値は一旦この2ワードに置いてから .L で読む
-' EM100~ = レジスタファイル (値スロット 4ワード/レジスタ)
-' EM1000~ = バイトコード (1バイト/1EM)
-' EM4000~ = 定数プール (値スロット 4ワード/エントリ)
-' EM5000~ = デバイスマッピングテーブル (4ワード/エントリ)
+' EM32~ = レジスタファイル (値スロット 4ワード/レジスタ)
+' EM352~ = バイトコード (1バイト/1ワード)
+' EM3352~ = 定数プール (値スロット 4ワード/エントリ)
+' EM4152~ = デバイスマッピングテーブル (4ワード/エントリ)
 '
 ' Z1-Z8 を間接アドレッシングに使用
 '
@@ -38,7 +38,7 @@ IF EM1 = 1 THEN
     FOR EM20 = 1 TO EM5
 
         ' === FETCH OPCODE ===
-        Z1 = EM0 + 1000
+        Z1 = EM0 + 352
         EM6 = EM0:Z1
         EM0 = EM0 + 1
 
@@ -49,34 +49,34 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 1 THEN
             ' OP_MOVE (BB): R[a] = R[b]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z2 = EM8 * 4 + 101
-            Z1 = EM7 * 4 + 101
+            Z2 = EM8 * 4 + 33
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM0.L:Z2
 
         ELSE IF EM6 = 2 THEN
             ' OP_LOADL (BB): R[a] = Pool[b]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z2 = EM8 * 4 + 4001
-            Z1 = EM7 * 4 + 101
+            Z2 = EM8 * 4 + 3353
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM0.L:Z2
 
         ELSE IF EM6 = 3 THEN
             ' OP_LOADI8 (BB): R[a] = signed(b)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
             ' 8ビット値を符号拡張して32ビットスクラッチに置く
@@ -87,15 +87,15 @@ IF EM1 = 1 THEN
                 EM16 = EM8 + 65280
                 EM17 = 65535
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM16.L
 
         ELSE IF EM6 = 4 THEN
             ' OP_LOADINEG (BB): R[a] = -b
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
             ' 2の補数を32ビットで組み立てる
@@ -104,91 +104,91 @@ IF EM1 = 1 THEN
             IF EM8 <> 0 THEN
                 EM17 = 65535
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM16.L
 
         ELSE IF EM6 = 5 THEN
             ' OP_LOADI__1 (B): R[a] = -1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = -1
 
         ELSE IF EM6 = 6 THEN
             ' OP_LOADI_0 (B): R[a] = 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 0
 
         ELSE IF EM6 = 7 THEN
             ' OP_LOADI_1 (B): R[a] = 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 1
 
         ELSE IF EM6 = 8 THEN
             ' OP_LOADI_2 (B): R[a] = 2
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 2
 
         ELSE IF EM6 = 9 THEN
             ' OP_LOADI_3 (B): R[a] = 3
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 3
 
         ELSE IF EM6 = 10 THEN
             ' OP_LOADI_4 (B): R[a] = 4
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 4
 
         ELSE IF EM6 = 11 THEN
             ' OP_LOADI_5 (B): R[a] = 5
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 5
 
         ELSE IF EM6 = 12 THEN
             ' OP_LOADI_6 (B): R[a] = 6
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 6
 
         ELSE IF EM6 = 13 THEN
             ' OP_LOADI_7 (B): R[a] = 7
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 7
 
         ELSE IF EM6 = 14 THEN
             ' OP_LOADI16 (BS): R[a] = signed16(b)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
@@ -198,27 +198,27 @@ IF EM1 = 1 THEN
             IF EM8 >= 32768 THEN
                 EM17 = 65535
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM16.L
 
         ELSE IF EM6 = 15 THEN
             ' OP_LOADI32 (BSS): R[a] = (b<<16)+c
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM9 = Z3 * 256 + Z4
@@ -226,58 +226,58 @@ IF EM1 = 1 THEN
             ' 下位/上位ワードを並べて32ビットとして読む
             EM16 = EM9
             EM17 = EM8
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM16.L
 
         ELSE IF EM6 = 17 THEN
             ' OP_LOADNIL (B): R[a] = nil (=0)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 0
 
         ELSE IF EM6 = 18 THEN
             ' OP_LOADSELF (B): R[a] = self (=0)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 0
 
         ELSE IF EM6 = 19 THEN
             ' OP_LOADTRUE (B): R[a] = 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 1
 
         ELSE IF EM6 = 20 THEN
             ' OP_LOADFALSE (B): R[a] = 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = 0
 
         ELSE IF EM6 = 21 THEN
             ' OP_GETGV (BB): R[a] = global[symbols[b]]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
             ' デバイスマッピングテーブル参照 (4ワード/エントリ)
-            Z3 = EM8 * 4 + 5000
+            Z3 = EM8 * 4 + 4152
             Z4 = Z3 + 1
             Z5 = EM0:Z3
             Z6 = EM0:Z4
             Z7 = Z3 + 2
             Z8 = EM0:Z7
             ' レジスタアドレス
-            Z2 = EM7 * 4 + 101
+            Z2 = EM7 * 4 + 33
             ' デバイスタイプ別読み取り
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
             '   2=.L(32bit符号付き)
@@ -359,21 +359,21 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 22 THEN
             ' OP_SETGV (BB): global[symbols[b]] = R[a]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
             ' デバイスマッピングテーブル参照 (4ワード/エントリ)
-            Z3 = EM8 * 4 + 5000
+            Z3 = EM8 * 4 + 4152
             Z4 = Z3 + 1
             Z5 = EM0:Z3
             Z6 = EM0:Z4
             Z7 = Z3 + 2
             Z8 = EM0:Z7
             ' レジスタアドレス
-            Z2 = EM7 * 4 + 101
+            Z2 = EM7 * 4 + 33
             ' デバイスタイプ別書き込み
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
             '   2=.L(32bit符号付き)
@@ -456,10 +456,10 @@ IF EM1 = 1 THEN
         ELSE IF EM6 = 37 THEN
             ' OP_JMP (S): PC += signed16(a)
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM7 = Z3 * 256 + Z4
@@ -470,70 +470,70 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 38 THEN
             ' OP_JMPIF (BS): if R[a] <> 0 then PC += signed16(b)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             IF EM8 >= 32768 THEN
                 EM8 = EM8 - 65536
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             IF EM0.L:Z1 <> 0 THEN
                 EM0 = EM0 + EM8
             END IF
 
         ELSE IF EM6 = 39 THEN
             ' OP_JMPNOT (BS): if R[a] = 0 then PC += signed16(b)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             IF EM8 >= 32768 THEN
                 EM8 = EM8 - 65536
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             IF EM0.L:Z1 = 0 THEN
                 EM0 = EM0 + EM8
             END IF
 
         ELSE IF EM6 = 40 THEN
             ' OP_JMPNIL (BS): if R[a] = 0 (nil) then PC += signed16(b)
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z3 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             Z4 = EM0:Z1
             EM0 = EM0 + 1
             EM8 = Z3 * 256 + Z4
             IF EM8 >= 32768 THEN
                 EM8 = EM8 - 65536
             END IF
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             IF EM0.L:Z1 = 0 THEN
                 EM0 = EM0 + EM8
             END IF
 
         ELSE IF EM6 = 56 THEN
             ' OP_RETURN (B): トップレベルでは VM 停止
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
             EM1 = 2
@@ -541,60 +541,60 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 60 THEN
             ' OP_ADD (B): R[a] = R[a] + R[a+1]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             EM0.L:Z1 = EM0.L:Z1 + EM0.L:Z2
 
         ELSE IF EM6 = 61 THEN
             ' OP_ADDI (BB): R[a] = R[a] + b
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM0.L:Z1 + EM8
 
         ELSE IF EM6 = 62 THEN
             ' OP_SUB (B): R[a] = R[a] - R[a+1]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             EM0.L:Z1 = EM0.L:Z1 - EM0.L:Z2
 
         ELSE IF EM6 = 63 THEN
             ' OP_SUBI (BB): R[a] = R[a] - b
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM8 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
+            Z1 = EM7 * 4 + 33
             EM0.L:Z1 = EM0.L:Z1 - EM8
 
         ELSE IF EM6 = 64 THEN
             ' OP_MUL (B): R[a] = R[a] * R[a+1]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             EM0.L:Z1 = EM0.L:Z1 * EM0.L:Z2
 
         ELSE IF EM6 = 65 THEN
             ' OP_DIV (B): R[a] = R[a] / R[a+1]
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z2 <> 0 THEN
                 EM0.L:Z1 = EM0.L:Z1 / EM0.L:Z2
             ELSE
@@ -605,11 +605,11 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 66 THEN
             ' OP_EQ (B): R[a] = (R[a] = R[a+1]) ? 1 : 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z1 = EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
@@ -618,11 +618,11 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 67 THEN
             ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? 1 : 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z1 < EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
@@ -631,11 +631,11 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 68 THEN
             ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? 1 : 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z1 <= EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
@@ -644,11 +644,11 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 69 THEN
             ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? 1 : 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z1 > EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
@@ -657,11 +657,11 @@ IF EM1 = 1 THEN
 
         ELSE IF EM6 = 70 THEN
             ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? 1 : 0
-            Z1 = EM0 + 1000
+            Z1 = EM0 + 352
             EM7 = EM0:Z1
             EM0 = EM0 + 1
-            Z1 = EM7 * 4 + 101
-            Z2 = (EM7 + 1) * 4 + 101
+            Z1 = EM7 * 4 + 33
+            Z2 = (EM7 + 1) * 4 + 33
             IF EM0.L:Z1 >= EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE

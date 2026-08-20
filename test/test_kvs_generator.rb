@@ -2,13 +2,20 @@
 
 require "minitest/autorun"
 
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/kvs_generator"
 
 # KV スクリプト生成器のテスト
 class TestKvsGenerator < Minitest::Test
-  include FaRuby::MemoryMap
+  include FaRuby::VmConstants
+
+# テストは既定レイアウト (faruby_default.yml) を使う。
+# 利用者の faruby.yml に影響されないようにするため。
+def layout
+  FaRuby::MemoryLayout.default
+end
 
   VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
 
@@ -57,17 +64,17 @@ class TestKvsGenerator < Minitest::Test
 
   # レジスタは「スロット先頭 + 値オフセット」を直接指す
   def test_register_address_matches_slot_layout
-    expected = "Z1 = EM7 * #{SLOT_WORDS} + #{REG_FILE_BASE + SLOT_VALUE_OFFSET}"
+    expected = "Z1 = EM7 * #{SLOT_WORDS} + #{layout.reg_file_base + SLOT_VALUE_OFFSET}"
     assert_includes @source, expected
   end
 
   def test_pool_address_matches_slot_layout
-    expected = "Z2 = EM8 * #{SLOT_WORDS} + #{POOL_BASE + SLOT_VALUE_OFFSET}"
+    expected = "Z2 = EM8 * #{SLOT_WORDS} + #{layout.pool_base + SLOT_VALUE_OFFSET}"
     assert_includes @source, expected
   end
 
   def test_device_table_stride
-    expected = "Z3 = EM8 * #{DEVICE_TABLE_STRIDE} + #{DEVICE_TABLE_BASE}"
+    expected = "Z3 = EM8 * #{DEVICE_TABLE_STRIDE} + #{layout.device_table_base}"
     assert_includes @source, expected
   end
 
@@ -156,7 +163,7 @@ class TestKvsGenerator < Minitest::Test
   def test_emitter_owns_device_syntax
     path = File.expand_path("../tools/kvs_generator.rb", __dir__)
     src = File.read(path, encoding: "UTF-8")
-    assert_includes src, "OPERAND_VARS"
+    assert_includes src, "OPERAND_NAMES"
     assert_includes src, "WORD_DEVICES"
     assert_includes src, "BIT_DEVICES"
   end

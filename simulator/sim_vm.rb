@@ -8,11 +8,12 @@
 #
 # 両者が同じ定義を使うため、片方にだけ命令があるという食い違いが起きません。
 
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 
 module FaRuby
   class SimVm
-    include MemoryMap
+    include VmConstants
 
     # ビットデバイスタイプ (R, MR, B, L, T, C)
     # CR はインデックス扱い不可のため非対応
@@ -32,9 +33,12 @@ module FaRuby
       gt: ->(a, b) { a > b },   ge: ->(a, b) { a >= b },
     }.freeze
 
-    def initialize(em, devices)
+    attr_reader :layout
+
+    def initialize(em, devices, layout: MemoryLayout.default)
       @em = em
       @devices = devices
+      @layout = layout
       @operands = {}
     end
 
@@ -50,7 +54,7 @@ module FaRuby
 
     def reg(name)      = read_reg(operand(name))
     def reg_next(name) = read_reg(operand(name) + 1)
-    def pool(name)     = @em.read_s32(MemoryMap.pool_addr(operand(name)))
+    def pool(name)     = @em.read_s32(layout.pool_addr(operand(name)))
 
     def binop(op, lhs, rhs) = ARITHMETIC.fetch(op).call(lhs, rhs)
     def cmp(op, lhs, rhs)   = COMPARISON.fetch(op).call(lhs, rhs)
@@ -115,16 +119,16 @@ module FaRuby
     end
 
     def jump_relative(name)
-      @em.write_u16(PC_ADDR, pc + operand(name))
+      @em.write_u16(layout.pc_addr, pc + operand(name))
     end
 
     def vm_finish
-      @em.write_u16(STATUS_ADDR, VM_FINISHED)
+      @em.write_u16(layout.status_addr, VM_FINISHED)
     end
 
     def vm_error(code)
-      @em.write_u16(STATUS_ADDR, VM_ERROR)
-      @em.write_u16(ERROR_ADDR, code)
+      @em.write_u16(layout.status_addr, VM_ERROR)
+      @em.write_u16(layout.error_addr, code)
     end
 
     # 条件が真のときだけブロックを実行する
@@ -138,16 +142,16 @@ module FaRuby
 
     # --- メモリアクセス ---
 
-    def pc = @em.read_u16(PC_ADDR)
+    def pc = @em.read_u16(layout.pc_addr)
 
-    def read_reg(index)  = @em.read_s32(MemoryMap.reg_addr(index))
-    def write_reg(index, value) = @em.write_s32(MemoryMap.reg_addr(index), value)
+    def read_reg(index)  = @em.read_s32(layout.reg_addr(index))
+    def write_reg(index, value) = @em.write_s32(layout.reg_addr(index), value)
 
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte
       current = pc
-      value = @em.read_u16(MemoryMap.bytecode_addr(current))
-      @em.write_u16(PC_ADDR, current + 1)
+      value = @em.read_u16(layout.bytecode_addr(current))
+      @em.write_u16(layout.pc_addr, current + 1)
       value & 0xFF
     end
 
@@ -167,7 +171,7 @@ module FaRuby
     end
 
     def device_entry(idx)
-      table_addr = DEVICE_TABLE_BASE + idx * DEVICE_TABLE_STRIDE
+      table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
       [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2)]
     end
 

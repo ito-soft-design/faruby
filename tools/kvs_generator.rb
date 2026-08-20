@@ -13,17 +13,18 @@
 # 「型サフィックスはデバイス側に付ける (EM0.L:Z1)」という規則も
 # ここだけで守れば全命令に反映されます。
 
-require_relative "memory_map"
+require_relative "vm_constants"
+require_relative "memory_layout"
 require_relative "opcode_table"
 
 module FaRuby
   class KvsEmitter
-    include MemoryMap
+    include VmConstants
 
     INDENT = "    "
 
-    # オペランド a / b / c の格納先
-    OPERAND_VARS = { a: "EM7", b: "EM8", c: "EM9" }.freeze
+    # オペランドの並び (格納先アドレスは配置から決まる)
+    OPERAND_NAMES = %i[a b c].freeze
 
     # インデックスレジスタの割り当て
     # Z1 = 主オペランド (通常は代入先の R[a])、Z2 = 副オペランド
@@ -49,13 +50,19 @@ module FaRuby
     COMPARISON = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }.freeze
     ARITHMETIC = { add: "+", sub: "-", mul: "*", div: "/" }.freeze
 
-    attr_reader :lines
+    attr_reader :lines, :layout
 
-    def initialize(level: 0)
+    def initialize(level: 0, layout: MemoryLayout.default)
       @lines = []
       @level = level
+      @layout = layout
       @slot_cache = {}
     end
+
+    # インデックス修飾の基点 (例: "EM0")
+    # PC を指す layout.pc_addr とは別物なので混同しないこと。
+    # デバイス番号 0 からの相対を Z レジスタで指定する書き方に使う。
+    def indexed_base = "#{layout.device_name}0"
 
     # --- 行の組み立て ---
 
@@ -107,8 +114,14 @@ module FaRuby
 
     # --- 値 (KV スクリプトの式文字列を返す) ---
 
-    def operand(name) = OPERAND_VARS.fetch(name)
-    def const(n)      = n.to_s
+    # オペランド a / b / c の格納先デバイス
+    def operand(name)
+      index = OPERAND_NAMES.index(name) or raise ArgumentError, "不明なオペランド: #{name}"
+
+      layout.device(layout.operand_a_addr + index)
+    end
+
+    def const(n) = n.to_s
 
     def reg(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_value_base)
     def reg_next(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", reg_value_base)
@@ -202,24 +215,24 @@ module FaRuby
 
     def vm_error(code)
       line "#{status} = #{VM_ERROR}"
-      line "#{MemoryMap.device(ERROR_ADDR)} = #{code}"
+      line "#{layout.device(layout.error_addr)} = #{code}"
       line "BREAK"
     end
 
     # --- VM 状態・スクラッチ ---
 
-    def pc     = MemoryMap.device(PC_ADDR)
-    def status = MemoryMap.device(STATUS_ADDR)
+    def pc     = layout.device(layout.pc_addr)
+    def status = layout.device(layout.status_addr)
 
-    def scratch_lo = MemoryMap.device(TEMP32_ADDR)
-    def scratch_hi = MemoryMap.device(TEMP32_ADDR + 1)
-    def scratch32  = MemoryMap.device_long(TEMP32_ADDR)
+    def scratch_lo = layout.device(layout.temp32_addr)
+    def scratch_hi = layout.device(layout.temp32_addr + 1)
+    def scratch32  = layout.device_long(layout.temp32_addr)
 
     # --- オペランドフェッチ (命令形式から生成) ---
 
     def fetch_operands(sizes)
       sizes.each_with_index do |bytes, i|
-        target = OPERAND_VARS.values[i]
+        target = operand(OPERAND_NAMES[i])
         bytes == 1 ? fetch_byte(target) : fetch_u16(target)
       end
     end
@@ -229,12 +242,12 @@ module FaRuby
     # デバイスマッピングテーブルから type / address / access_type を読む
     def device_table_lookup(name)
       note "デバイスマッピングテーブル参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
-      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{DEVICE_TABLE_BASE}"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{layout.device_table_base}"
       line "Z4 = Z3 + 1"
-      line "Z5 = EM0:Z3"
-      line "Z6 = EM0:Z4"
+      line "Z5 = #{indexed_base}:Z3"
+      line "Z6 = #{indexed_base}:Z4"
       line "Z7 = Z3 + 2"
-      line "Z8 = EM0:Z7"
+      line "Z8 = #{indexed_base}:Z7"
     end
 
     # デバイス種別 × アクセス幅の分岐を生成する
@@ -277,8 +290,8 @@ module FaRuby
       slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_value_base, z: Z_SECONDARY)
     end
 
-    def reg_value_base  = REG_FILE_BASE + SLOT_VALUE_OFFSET
-    def pool_value_base = POOL_BASE + SLOT_VALUE_OFFSET
+    def reg_value_base  = layout.reg_file_base + SLOT_VALUE_OFFSET
+    def pool_value_base = layout.pool_base + SLOT_VALUE_OFFSET
 
     # 値スロットのアドレスを Z に設定し、32ビットアクセス式を返す
     # 同じスロットを同一命令内で複数回参照しても Z 設定は1度だけ出力する
@@ -291,13 +304,13 @@ module FaRuby
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
       line "Z#{z} = #{index_expr} + #{base}"
-      @slot_cache[key] = "#{DEVICE_NAME}0.L:Z#{z}"
+      @slot_cache[key] = "#{indexed_base}.L:Z#{z}"
     end
 
     # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
     def read_bytecode_into(dest)
-      line "Z1 = #{pc} + #{BYTECODE_BASE}"
-      line "#{dest} = #{DEVICE_NAME}0:Z1"
+      line "Z1 = #{pc} + #{layout.bytecode_base}"
+      line "#{dest} = #{indexed_base}:Z1"
       line "#{pc} = #{pc} + 1"
     end
 
@@ -360,14 +373,20 @@ module FaRuby
   # KV Studio がスクリプトの大きさで変換できなくなった場合に分割できるよう
   # 複数ファイルを返せる形にしてあります。
   class KvsGenerator
-    include MemoryMap
+    include VmConstants
 
     OUTPUT_NAME = "vm_core.kvs"
     OUTPUT_DIR  = File.expand_path("../plc/keyence", __dir__)
 
-    def initialize(opcodes = OpcodeTable.all)
+    attr_reader :layout
+
+    def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default)
       @opcodes = opcodes
+      @layout = layout
     end
+
+    # デコード対象のオペコードを保持するデバイス
+    def opcode_var = layout.device(layout.current_opcode_addr)
 
     def generate
       { OUTPUT_NAME => build_source }
@@ -391,13 +410,13 @@ module FaRuby
     private
 
     def build_source
-      e = KvsEmitter.new
+      e = KvsEmitter.new(layout: layout)
       emit_header(e)
       e.blank
-      e.line "IF EM1 = #{VM_RUNNING} THEN"
+      e.line "IF #{e.status} = #{VM_RUNNING} THEN"
       e.blank
       e.indent
-      e.line "FOR EM20 = 1 TO #{MemoryMap.device(STEPS_PER_CYCLE)}"
+      e.line "FOR #{layout.device(layout.loop_counter_addr)} = 1 TO #{layout.device(layout.steps_per_cycle_addr)}"
       e.blank
       e.indent
       emit_fetch(e)
@@ -421,23 +440,23 @@ module FaRuby
       e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
       e.note ""
       e.note "EM デバイスを使用。"
-      e.note "EM0  = PC (プログラムカウンタ)"
-      e.note "EM1  = STATUS (0=停止, 1=実行中, 2=完了, 3=エラー)"
-      e.note "EM2  = ERROR"
-      e.note "EM5  = STEPS_PER_CYCLE"
-      e.note "EM6  = CURRENT_OPCODE (デバッグ用)"
-      e.note "EM7  = operand a"
-      e.note "EM8  = operand b"
-      e.note "EM9  = operand c"
-      e.note "EM13 = RESET_REQ (1=リセット要求, vm_init で処理)"
-      e.note "EM#{TEMP32_ADDR} = 32ビット合成スクラッチ 下位ワード"
-      e.note "EM#{TEMP32_ADDR + 1} = 32ビット合成スクラッチ 上位ワード"
+      e.note "#{layout.device(layout.pc_addr)}  = PC (プログラムカウンタ)"
+      e.note "#{layout.device(layout.status_addr)}  = STATUS (0=停止, 1=実行中, 2=完了, 3=エラー)"
+      e.note "#{layout.device(layout.error_addr)}  = ERROR"
+      e.note "#{layout.device(layout.steps_per_cycle_addr)}  = STEPS_PER_CYCLE"
+      e.note "#{layout.device(layout.current_opcode_addr)}  = CURRENT_OPCODE (デバッグ用)"
+      e.note "#{e.operand(:a)}  = operand a"
+      e.note "#{e.operand(:b)}  = operand b"
+      e.note "#{e.operand(:c)}  = operand c"
+      e.note "#{layout.device(layout.reset_req_addr)} = RESET_REQ (1=リセット要求, vm_init で処理)"
+      e.note "#{e.scratch_lo} = 32ビット合成スクラッチ 下位ワード"
+      e.note "#{e.scratch_hi} = 32ビット合成スクラッチ 上位ワード"
       e.note "       EM は無サフィックスだと16ビット符号なしのため、負値や"
       e.note "       65535 超の即値は一旦この2ワードに置いてから .L で読む"
-      e.note "EM#{REG_FILE_BASE}~ = レジスタファイル (値スロット #{SLOT_WORDS}ワード/レジスタ)"
-      e.note "EM#{BYTECODE_BASE}~ = バイトコード (1バイト/1EM)"
-      e.note "EM#{POOL_BASE}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
-      e.note "EM#{DEVICE_TABLE_BASE}~ = デバイスマッピングテーブル (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      e.note "#{layout.device(layout.reg_file_base)}~ = レジスタファイル (値スロット #{SLOT_WORDS}ワード/レジスタ)"
+      e.note "#{layout.device(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
+      e.note "#{layout.device(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
+      e.note "#{layout.device(layout.device_table_base)}~ = デバイスマッピングテーブル (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
       e.note ""
       e.note "Z1-Z8 を間接アドレッシングに使用"
       e.note ""
@@ -450,9 +469,9 @@ module FaRuby
 
     def emit_fetch(e)
       e.note "=== FETCH OPCODE ==="
-      e.line "Z1 = EM0 + #{BYTECODE_BASE}"
-      e.line "EM6 = EM0:Z1"
-      e.line "EM0 = EM0 + 1"
+      e.line "Z1 = #{e.pc} + #{layout.bytecode_base}"
+      e.line "#{layout.device(layout.current_opcode_addr)} = #{e.indexed_base}:Z1"
+      e.line "#{e.pc} = #{e.pc} + 1"
       e.blank
     end
 
@@ -461,7 +480,7 @@ module FaRuby
       e.blank
 
       @opcodes.each_with_index do |op, i|
-        e.line(i.zero? ? "IF EM6 = #{op.code} THEN" : "ELSE IF EM6 = #{op.code} THEN")
+        e.line(i.zero? ? "IF #{opcode_var} = #{op.code} THEN" : "ELSE IF #{opcode_var} = #{op.code} THEN")
         e.indent
         e.begin_instruction
         e.note op.header_comment
@@ -474,8 +493,8 @@ module FaRuby
       e.line "ELSE"
       e.indent
       e.note "未知のオペコード: エラー"
-      e.line "EM1 = #{VM_ERROR}"
-      e.line "EM2 = EM6"
+      e.line "#{e.status} = #{VM_ERROR}"
+      e.line "#{layout.device(layout.error_addr)} = #{opcode_var}"
       e.line "BREAK"
       e.dedent
       e.blank
@@ -485,8 +504,8 @@ module FaRuby
 
     def emit_range_check(e)
       e.note "バイトコード範囲チェック"
-      e.if_("EM0 >= #{MemoryMap.device(BYTECODE_LEN_ADDR)}") do
-        e.line "EM1 = #{VM_FINISHED}"
+      e.if_("#{e.pc} >= #{layout.device(layout.bytecode_len_addr)}") do
+        e.line "#{e.status} = #{VM_FINISHED}"
         e.line "BREAK"
       end
       e.blank

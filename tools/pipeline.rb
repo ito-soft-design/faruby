@@ -6,7 +6,8 @@
 
 require_relative "mrb_parser"
 require_relative "disasm"
-require_relative "memory_map"
+require_relative "vm_constants"
+require_relative "memory_layout"
 require_relative "plc_codegen"
 require_relative "../simulator/kv_vm_simulator"
 

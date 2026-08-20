@@ -3,7 +3,8 @@
 # PLC アダプター基底クラス
 # 各 PLC メーカーのアダプターはこのクラスを継承して実装します。
 
-require_relative "../../memory_map"
+require_relative "../../vm_constants"
+require_relative "../../memory_layout"
 
 module FaRuby
   module Console
@@ -70,11 +71,11 @@ module FaRuby
         # VM (GETGV) と同じ幅で読むことでコンソール表示を一致させる
         def read_device_width(device_prefix, addr, access_type)
           case access_type
-          when MemoryMap::ACCESS_U
+          when VmConstants::ACCESS_U
             read_device(device_prefix, addr)
-          when MemoryMap::ACCESS_L
+          when VmConstants::ACCESS_L
             read_device_long(device_prefix, addr)
-          when MemoryMap::ACCESS_D
+          when VmConstants::ACCESS_D
             read_device_long(device_prefix, addr) & 0xFFFF_FFFF
           else # ACCESS_S
             v = read_device(device_prefix, addr)
@@ -85,7 +86,7 @@ module FaRuby
         # ACCESS_* のアクセス幅でワードデバイスに書く
         def write_device_width(device_prefix, addr, access_type, value)
           case access_type
-          when MemoryMap::ACCESS_L, MemoryMap::ACCESS_D
+          when VmConstants::ACCESS_L, VmConstants::ACCESS_D
             write_device_long(device_prefix, addr, value)
           else # ACCESS_S / ACCESS_U
             write_device(device_prefix, addr, value.to_i & 0xFFFF)

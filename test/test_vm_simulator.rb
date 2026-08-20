@@ -2,12 +2,19 @@
 
 require "minitest/autorun"
 
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 require_relative "../simulator/em_memory"
 require_relative "../simulator/kv_vm_simulator"
 
 class TestVmSimulator < Minitest::Test
-  include FaRuby::MemoryMap
+  include FaRuby::VmConstants
+
+# テストは既定レイアウト (faruby_default.yml) を使う。
+# 利用者の faruby.yml に影響されないようにするため。
+def layout
+  FaRuby::MemoryLayout.default
+end
 
   def setup
     @sim = FaRuby::KvVmSimulator.new
@@ -18,22 +25,22 @@ class TestVmSimulator < Minitest::Test
     em = @sim.em
 
     # VM 状態
-    em.write_u16(PC_ADDR, 0)
-    em.write_u16(STATUS_ADDR, VM_RUNNING)
-    em.write_u16(ERROR_ADDR, 0)
-    em.write_u16(STEPS_PER_CYCLE, 1000)
-    em.write_u16(BYTECODE_LEN_ADDR, bytecode.size)
-    em.write_u16(NREGS_ADDR, nregs)
-    em.write_u16(NLOCALS_ADDR, nlocals)
+    em.write_u16(layout.pc_addr, 0)
+    em.write_u16(layout.status_addr, VM_RUNNING)
+    em.write_u16(layout.error_addr, 0)
+    em.write_u16(layout.steps_per_cycle_addr, 1000)
+    em.write_u16(layout.bytecode_len_addr, bytecode.size)
+    em.write_u16(layout.nregs_addr, nregs)
+    em.write_u16(layout.nlocals_addr, nlocals)
 
     # バイトコード
     bytecode.each_with_index do |b, i|
-      em.write_u16(BYTECODE_BASE + i, b)
+      em.write_u16(layout.bytecode_base + i, b)
     end
 
     # レジスタクリア
     nregs.times do |i|
-      em.write_s32(FaRuby::MemoryMap.reg_addr(i), 0)
+      em.write_s32(layout.reg_addr(i), 0)
     end
   end
 
@@ -135,8 +142,8 @@ class TestVmSimulator < Minitest::Test
       0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(0), 123456)
+    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(layout.pool_addr(0), 123456)
     @sim.run
     assert_equal 123456, @sim.reg(1)
   end
@@ -148,15 +155,15 @@ class TestVmSimulator < Minitest::Test
       0x02, 0x02, 0x01, # OP_LOADL R[2], Pool[1]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(0), -1)
-    @sim.em.write_u16(FaRuby::MemoryMap.pool_type_addr(1), TT_INTEGER)
-    @sim.em.write_s32(FaRuby::MemoryMap.pool_addr(1), 222)
+    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.em.write_s32(layout.pool_addr(0), -1)
+    @sim.em.write_u16(layout.pool_type_addr(1), TT_INTEGER)
+    @sim.em.write_s32(layout.pool_addr(1), 222)
     @sim.run
     assert_equal(-1, @sim.reg(1))
     assert_equal 222, @sim.reg(2)
     # 型タグが -1 の上位ワードで潰されていないこと
-    assert_equal TT_INTEGER, @sim.em.read_u16(FaRuby::MemoryMap.pool_type_addr(1))
+    assert_equal TT_INTEGER, @sim.em.read_u16(layout.pool_type_addr(1))
   end
 
   # === 値スロットのレイアウト (ストライド 4) ===
@@ -170,15 +177,15 @@ class TestVmSimulator < Minitest::Test
     @sim.run
 
     # 32ビット値は値ワード (スロット先頭+1) に格納される
-    assert_equal 100000, @sim.em.read_s32(FaRuby::MemoryMap.reg_addr(1))
+    assert_equal 100000, @sim.em.read_s32(layout.reg_addr(1))
     # 隣接スロットが侵食されない
     assert_equal 1, @sim.reg(2)
     # 型タグ領域は未使用 (TT_EMPTY)
-    assert_equal TT_EMPTY, @sim.em.read_u16(FaRuby::MemoryMap.reg_type_addr(1))
-    assert_equal TT_EMPTY, @sim.em.read_u16(FaRuby::MemoryMap.reg_type_addr(2))
+    assert_equal TT_EMPTY, @sim.em.read_u16(layout.reg_type_addr(1))
+    assert_equal TT_EMPTY, @sim.em.read_u16(layout.reg_type_addr(2))
     # スロット間隔が SLOT_WORDS であること
     assert_equal SLOT_WORDS,
-                 FaRuby::MemoryMap.reg_slot_addr(2) - FaRuby::MemoryMap.reg_slot_addr(1)
+                 layout.reg_slot_addr(2) - layout.reg_slot_addr(1)
   end
 
   # === OP_MOVE ===
@@ -583,7 +590,7 @@ class TestVmSimulator < Minitest::Test
 
   # デバイスマッピングテーブルにエントリを設定するヘルパー
   def setup_device_mapping(sym_index, device_type, device_addr)
-    table_addr = DEVICE_TABLE_BASE + sym_index * DEVICE_TABLE_STRIDE
+    table_addr = layout.device_table_base + sym_index * DEVICE_TABLE_STRIDE
     @sim.em.write_u16(table_addr, device_type)
     @sim.em.write_u16(table_addr + 1, device_addr)
   end

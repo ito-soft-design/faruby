@@ -10,7 +10,8 @@
 
 require_relative "em_memory"
 require_relative "sim_vm"
-require_relative "../tools/memory_map"
+require_relative "../tools/vm_constants"
+require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/mrb_parser"
 require_relative "../tools/disasm"
@@ -18,18 +19,19 @@ require_relative "../tools/plc_codegen"
 
 module FaRuby
   class KvVmSimulator
-    include MemoryMap
+    include VmConstants
 
     # 後方互換: 以前はこの定数をシミュレータが持っていた
     BIT_DEVICE_TYPES = SimVm::BIT_DEVICE_TYPES
 
-    attr_reader :em, :devices
+    attr_reader :em, :devices, :layout
 
-    def initialize
+    def initialize(layout: MemoryLayout.default)
+      @layout = layout
       @em = EmMemory.new
       @devices = Array.new(10) { EmMemory.new }
       @devices[0] = @em  # EM はメインメモリを共用
-      @vm = SimVm.new(@em, @devices)
+      @vm = SimVm.new(@em, @devices, layout: layout)
       @irep = nil
     end
 
@@ -42,7 +44,7 @@ module FaRuby
     # IREP から直接ロードして実行
     def load_irep_and_run(irep, max_steps: 10000)
       @irep = irep
-      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps)
+      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout)
       load_and_run(codegen.memory_image, max_steps: max_steps)
     end
 
@@ -75,16 +77,16 @@ module FaRuby
     end
 
     # VM レジスタ R[n] の値を読む
-    def reg(n) = @em.read_s32(MemoryMap.reg_addr(n))
+    def reg(n) = @em.read_s32(layout.reg_addr(n))
 
-    def status = @em.read_u16(STATUS_ADDR)
-    def pc     = @em.read_u16(PC_ADDR)
+    def status = @em.read_u16(layout.status_addr)
+    def pc     = @em.read_u16(layout.pc_addr)
 
     # レジスタダンプ
     def dump_registers(count = nil)
-      count ||= @em.read_u16(NREGS_ADDR)
-      count = [count, MAX_REGS].min
-      nlocals = @em.read_u16(NLOCALS_ADDR)
+      count ||= @em.read_u16(layout.nregs_addr)
+      count = [count, layout.max_regs].min
+      nlocals = @em.read_u16(layout.nlocals_addr)
       puts "=== VM Registers ==="
       count.times do |i|
         label = case i
@@ -103,8 +105,8 @@ module FaRuby
                        VM_FINISHED => "FINISHED", VM_ERROR => "ERROR" }
       puts "  PC     = #{pc}"
       puts "  STATUS = #{status_names[status] || status}"
-      puts "  ERROR  = #{@em.read_u16(ERROR_ADDR)}"
-      puts "  OPCODE = #{@em.read_u16(CURRENT_OPCODE)}"
+      puts "  ERROR  = #{@em.read_u16(layout.error_addr)}"
+      puts "  OPCODE = #{@em.read_u16(layout.current_opcode_addr)}"
     end
 
     private
@@ -114,13 +116,13 @@ module FaRuby
     # vm_core.kvs の FETCH / DECODE / EXECUTE と同じ構造
     def execute_one_instruction
       opcode = @vm.fetch_byte
-      @em.write_u16(CURRENT_OPCODE, opcode)
+      @em.write_u16(layout.current_opcode_addr, opcode)
 
       op = OpcodeTable.lookup[opcode]
       unless op
         # 未実装オペコード (vm_core.kvs 側の ELSE 節に対応)
-        @em.write_u16(STATUS_ADDR, VM_ERROR)
-        @em.write_u16(ERROR_ADDR, opcode)
+        @em.write_u16(layout.status_addr, VM_ERROR)
+        @em.write_u16(layout.error_addr, opcode)
         return
       end
 

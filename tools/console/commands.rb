@@ -1,4 +1,4 @@
-﻿# frozen_string_literal: true
+# frozen_string_literal: true
 
 # コンソールコマンド定義
 # 各コマンドの実行ロジックを定義します。
@@ -6,18 +6,22 @@
 require_relative "../mrb_parser"
 require_relative "../disasm"
 require_relative "../plc_codegen"
-require_relative "../memory_map"
+require_relative "../vm_constants"
+require_relative "../memory_layout"
 require_relative "../../simulator/kv_vm_simulator"
 
 module FaRuby
   module Console
     class Commands
-      include MemoryMap
+      include VmConstants
+
+      attr_reader :layout
 
       def initialize(config:, adapter:, transfer:)
         @config = config
         @adapter = adapter
         @transfer = transfer
+        @layout = config.layout
         @last_irep = nil
         @last_source = nil
         @last_disasm = nil
@@ -74,7 +78,7 @@ module FaRuby
           return
         end
 
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
         image = codegen.memory_image
         count = @transfer.write_image(image)
         puts "OK: #{count} ワードを PLC に書き込みました"
@@ -139,7 +143,7 @@ module FaRuby
           return
         end
 
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
         image = codegen.memory_image
 
         result = @transfer.verify_image(image)
@@ -152,9 +156,26 @@ module FaRuby
           puts "  %-8s  %-10s  %-10s  %-10s" % ["ADDR", "DEVICE", "EXPECTED", "ACTUAL"]
           puts "  #{'-' * 42}"
           result[:mismatches].each do |m|
-            puts "  %-8d  %-10s  %-10d  %-10d" % [m[:addr], MemoryMap.device(m[:addr]), m[:expected], m[:actual]]
+            puts "  %-8d  %-10s  %-10d  %-10d" % [m[:addr], layout.device(m[:addr]), m[:expected], m[:actual]]
           end
         end
+      end
+
+      # memmap
+      def cmd_memmap(args)
+        puts "=== メモリ配置 ==="
+        puts "  設定: #{@config.config_path || '(既定のみ)'}"
+        puts "  全体: #{layout}"
+        puts ""
+        puts format("  %-20s %-10s %-10s %s", "領域", "開始", "終了", "ワード数")
+        puts "  #{'-' * 52}"
+        layout.regions.each do |name, from, to, words|
+          puts format("  %-20s %-10s %-10s %d", name, layout.device(from), layout.device(to), words)
+        end
+        puts ""
+        puts "  ラダーがこの範囲を使用していないことを確認してください。"
+        puts "  範囲を変えるには faruby.yml の memory 節を編集し、"
+        puts "  `rake vm_core` で再生成して KV Studio に取り込み直します。"
       end
 
       # disasm
@@ -176,7 +197,7 @@ module FaRuby
         end
 
         puts "=== Simulator ==="
-        @last_sim = KvVmSimulator.new
+        @last_sim = KvVmSimulator.new(layout: layout)
         steps = @last_sim.load_irep_and_run(@last_irep)
         puts "#{steps} 命令実行"
         puts
@@ -199,7 +220,7 @@ module FaRuby
         end
 
         puts "=== Global Variables ==="
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
 
         # 割り当ては codegen と同一のロジックを使う (汎用グローバルの採番を含む)
         codegen.device_mappings.each do |m|
@@ -259,6 +280,8 @@ module FaRuby
           return
         end
 
+        # IP アドレス等は既定値を持てないため、接続前に検証する
+        @config.validate_connection!
         @adapter.connect
         puts "OK: #{@config.plc_protocol} @ #{@config.plc_host}:#{@config.plc_port} に接続しました"
       end
@@ -278,6 +301,7 @@ module FaRuby
           stop               VM を停止 (STATUS=0)
           reset              VM をリセット
           verify             PLC メモリとバイナリを比較
+          memmap             メモリ配置を表示
           disasm             逆アセンブリ表示
           sim                シミュレータで実行
           connect            PLC に接続
