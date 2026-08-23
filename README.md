@@ -253,7 +253,14 @@ KV スクリプトでしか起きないため、[test/ruby_programs/](test/ruby_
 メソッド定義・呼び出し、配列、文字列は未対応です。
 `%` も未対応です (mruby ではメソッド呼び出しにコンパイルされるため)。
 
-詳細は [doc/architecture.md](doc/architecture.md) を参照してください。
+## ドキュメント
+
+| 文書 | 内容 |
+|------|------|
+| [doc/architecture.md](doc/architecture.md) | VM の仕組み、メモリ配置、コード生成 |
+| [doc/ruby_and_plc.md](doc/ruby_and_plc.md) | Ruby と PLC で意味が違う箇所とその埋め方。新しい機種に対応する際の確認項目 |
+| [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
+| [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
 
 ## ライセンス
 
