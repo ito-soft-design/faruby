@@ -259,7 +259,8 @@ class TestMemoryLayout < Minitest::Test
 
   # 生成される KV スクリプトが配置に追従すること
   def test_generated_script_follows_the_layout
-    layout = build(base: 20_000)
+    # 既定と必ず異なる base を使う (既定値を変えてもテストが壊れないように)
+    layout = build(base: Layout.default.base + 12_345)
     source = FaRuby::KvsGenerator.new(layout: layout).source
 
     # レジスタアドレスの計算が新しい配置になっている

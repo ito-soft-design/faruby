@@ -7,23 +7,23 @@
 '   編集した場合 test_kvs_generator.rb が失敗します。
 '
 ' EM デバイスを使用。
-' EM15000  = PC (プログラムカウンタ)
-' EM15001  = STATUS (0=停止, 1=実行中, 2=完了, 3=エラー)
-' EM15002  = ERROR
-' EM15005  = STEPS_PER_CYCLE
-' EM15006  = CURRENT_OPCODE (デバッグ用)
-' EM15007  = operand a
-' EM15008  = operand b
-' EM15009  = operand c
-' EM15013 = RESET_REQ (1=リセット要求, vm_init で処理)
-' EM15016 = 32ビット合成スクラッチ 下位ワード
-' EM15017 = 32ビット合成スクラッチ 上位ワード
+' EM20000  = PC (プログラムカウンタ)
+' EM20001  = STATUS (0=停止, 1=実行中, 2=完了, 3=エラー)
+' EM20002  = ERROR
+' EM20005  = STEPS_PER_CYCLE
+' EM20006  = CURRENT_OPCODE (デバッグ用)
+' EM20007  = operand a
+' EM20008  = operand b
+' EM20009  = operand c
+' EM20013 = RESET_REQ (1=リセット要求, vm_init で処理)
+' EM20016 = 32ビット合成スクラッチ 下位ワード
+' EM20017 = 32ビット合成スクラッチ 上位ワード
 '        EM は無サフィックスだと16ビット符号なしのため、負値や
 '        65535 超の即値は一旦この2ワードに置いてから .L で読む
-' EM15032~ = レジスタファイル (値スロット 4ワード/レジスタ)
-' EM15352~ = バイトコード (1バイト/1ワード)
-' EM18352~ = 定数プール (値スロット 4ワード/エントリ)
-' EM19152~ = デバイスマッピングテーブル (4ワード/エントリ)
+' EM20032~ = レジスタファイル (値スロット 4ワード/レジスタ)
+' EM20352~ = バイトコード (1バイト/1ワード)
+' EM23352~ = 定数プール (値スロット 4ワード/エントリ)
+' EM24152~ = デバイスマッピングテーブル (4ワード/エントリ)
 '
 ' Z1-Z8 を間接アドレッシングに使用
 '
@@ -33,251 +33,251 @@
 '                  エラーにならないまま16ビットアクセスになる
 '   インデックスの刻み幅は .L でも 1 ワード。下位ワードが先。
 
-IF EM15001 = 1 THEN
+IF EM20001 = 1 THEN
 
-    FOR EM15020 = 1 TO EM15005
+    FOR EM20020 = 1 TO EM20005
 
         ' === FETCH OPCODE ===
-        Z1 = EM15000 + 15352
-        EM15006 = EM0:Z1
-        EM15000 = EM15000 + 1
+        Z1 = EM20000 + 20352
+        EM20006 = EM0:Z1
+        EM20000 = EM20000 + 1
 
         ' === DECODE & EXECUTE ===
 
-        IF EM15006 = 0 THEN
+        IF EM20006 = 0 THEN
             ' OP_NOP (Z): 何もしない
 
-        ELSE IF EM15006 = 1 THEN
+        ELSE IF EM20006 = 1 THEN
             ' OP_MOVE (BB): R[a] = R[b]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z2 = EM15008 * 4 + 15033
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z2 = EM20008 * 4 + 20033
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = EM0.L:Z2
 
-        ELSE IF EM15006 = 2 THEN
+        ELSE IF EM20006 = 2 THEN
             ' OP_LOADL (BB): R[a] = Pool[b]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z2 = EM15008 * 4 + 18353
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z2 = EM20008 * 4 + 23353
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = EM0.L:Z2
 
-        ELSE IF EM15006 = 3 THEN
+        ELSE IF EM20006 = 3 THEN
             ' OP_LOADI8 (BB): R[a] = signed(b)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 8ビット値を符号拡張して32ビットスクラッチに置く
             ' 16ビット符号なしのまま引き算すると桁が壊れるため
-            EM15016 = EM15008
-            EM15017 = 0
-            IF EM15008 >= 128 THEN
-                EM15016 = EM15008 + 65280
-                EM15017 = 65535
+            EM20016 = EM20008
+            EM20017 = 0
+            IF EM20008 >= 128 THEN
+                EM20016 = EM20008 + 65280
+                EM20017 = 65535
             END IF
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM15016.L
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM20016.L
 
-        ELSE IF EM15006 = 4 THEN
+        ELSE IF EM20006 = 4 THEN
             ' OP_LOADINEG (BB): R[a] = -b
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 2の補数を32ビットで組み立てる
-            EM15016 = 0 - EM15008
-            EM15017 = 0
-            IF EM15008 <> 0 THEN
-                EM15017 = 65535
+            EM20016 = 0 - EM20008
+            EM20017 = 0
+            IF EM20008 <> 0 THEN
+                EM20017 = 65535
             END IF
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM15016.L
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM20016.L
 
-        ELSE IF EM15006 = 5 THEN
+        ELSE IF EM20006 = 5 THEN
             ' OP_LOADI__1 (B): R[a] = -1
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = -1
 
-        ELSE IF EM15006 = 6 THEN
+        ELSE IF EM20006 = 6 THEN
             ' OP_LOADI_0 (B): R[a] = 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 0
 
-        ELSE IF EM15006 = 7 THEN
+        ELSE IF EM20006 = 7 THEN
             ' OP_LOADI_1 (B): R[a] = 1
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 1
 
-        ELSE IF EM15006 = 8 THEN
+        ELSE IF EM20006 = 8 THEN
             ' OP_LOADI_2 (B): R[a] = 2
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 2
 
-        ELSE IF EM15006 = 9 THEN
+        ELSE IF EM20006 = 9 THEN
             ' OP_LOADI_3 (B): R[a] = 3
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 3
 
-        ELSE IF EM15006 = 10 THEN
+        ELSE IF EM20006 = 10 THEN
             ' OP_LOADI_4 (B): R[a] = 4
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 4
 
-        ELSE IF EM15006 = 11 THEN
+        ELSE IF EM20006 = 11 THEN
             ' OP_LOADI_5 (B): R[a] = 5
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 5
 
-        ELSE IF EM15006 = 12 THEN
+        ELSE IF EM20006 = 12 THEN
             ' OP_LOADI_6 (B): R[a] = 6
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 6
 
-        ELSE IF EM15006 = 13 THEN
+        ELSE IF EM20006 = 13 THEN
             ' OP_LOADI_7 (B): R[a] = 7
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 7
 
-        ELSE IF EM15006 = 14 THEN
+        ELSE IF EM20006 = 14 THEN
             ' OP_LOADI16 (BS): R[a] = signed16(b)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15008 = Z3 * 256 + Z4
+            EM20000 = EM20000 + 1
+            EM20008 = Z3 * 256 + Z4
             ' 16ビット値を符号拡張して32ビットスクラッチに置く
-            EM15016 = EM15008
-            EM15017 = 0
-            IF EM15008 >= 32768 THEN
-                EM15017 = 65535
+            EM20016 = EM20008
+            EM20017 = 0
+            IF EM20008 >= 32768 THEN
+                EM20017 = 65535
             END IF
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM15016.L
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM20016.L
 
-        ELSE IF EM15006 = 15 THEN
+        ELSE IF EM20006 = 15 THEN
             ' OP_LOADI32 (BSS): R[a] = (b<<16)+c
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15008 = Z3 * 256 + Z4
+            EM20000 = EM20000 + 1
+            EM20008 = Z3 * 256 + Z4
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15009 = Z3 * 256 + Z4
+            EM20000 = EM20000 + 1
+            EM20009 = Z3 * 256 + Z4
             ' 上位 * 65536 は16ビット演算になり桁上がりが落ちるため、
             ' 下位/上位ワードを並べて32ビットとして読む
-            EM15016 = EM15009
-            EM15017 = EM15008
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM15016.L
+            EM20016 = EM20009
+            EM20017 = EM20008
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM20016.L
 
-        ELSE IF EM15006 = 17 THEN
+        ELSE IF EM20006 = 17 THEN
             ' OP_LOADNIL (B): R[a] = nil (=0)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 0
 
-        ELSE IF EM15006 = 18 THEN
+        ELSE IF EM20006 = 18 THEN
             ' OP_LOADSELF (B): R[a] = self (=0)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 0
 
-        ELSE IF EM15006 = 19 THEN
+        ELSE IF EM20006 = 19 THEN
             ' OP_LOADTRUE (B): R[a] = 1
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 1
 
-        ELSE IF EM15006 = 20 THEN
+        ELSE IF EM20006 = 20 THEN
             ' OP_LOADFALSE (B): R[a] = 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
             EM0.L:Z1 = 0
 
-        ELSE IF EM15006 = 21 THEN
+        ELSE IF EM20006 = 21 THEN
             ' OP_GETGV (BB): R[a] = global[symbols[b]]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' デバイスマッピングテーブル参照 (4ワード/エントリ)
-            Z3 = EM15008 * 4 + 19152
+            Z3 = EM20008 * 4 + 24152
             Z4 = Z3 + 1
             Z5 = EM0:Z3
             Z6 = EM0:Z4
             Z7 = Z3 + 2
             Z8 = EM0:Z7
             ' レジスタアドレス
-            Z2 = EM15007 * 4 + 15033
+            Z2 = EM20007 * 4 + 20033
             ' デバイスタイプ別読み取り
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
             '   2=.L(32bit符号付き)
@@ -352,28 +352,28 @@ IF EM15001 = 1 THEN
                     EM0.L:Z2 = 0
                 END IF
             ELSE
-                EM15001 = 3
-                EM15002 = 21
+                EM20001 = 3
+                EM20002 = 21
                 BREAK
             END IF
 
-        ELSE IF EM15006 = 22 THEN
+        ELSE IF EM20006 = 22 THEN
             ' OP_SETGV (BB): global[symbols[b]] = R[a]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' デバイスマッピングテーブル参照 (4ワード/エントリ)
-            Z3 = EM15008 * 4 + 19152
+            Z3 = EM20008 * 4 + 24152
             Z4 = Z3 + 1
             Z5 = EM0:Z3
             Z6 = EM0:Z4
             Z7 = Z3 + 2
             Z8 = EM0:Z7
             ' レジスタアドレス
-            Z2 = EM15007 * 4 + 15033
+            Z2 = EM20007 * 4 + 20033
             ' デバイスタイプ別書き込み
             ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
             '   2=.L(32bit符号付き)
@@ -448,242 +448,242 @@ IF EM15001 = 1 THEN
                     RES(C0:Z6)
                 END IF
             ELSE
-                EM15001 = 3
-                EM15002 = 22
+                EM20001 = 3
+                EM20002 = 22
                 BREAK
             END IF
 
-        ELSE IF EM15006 = 37 THEN
+        ELSE IF EM20006 = 37 THEN
             ' OP_JMP (S): PC += signed16(a)
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15007 = Z3 * 256 + Z4
-            IF EM15007 >= 32768 THEN
-                EM15007 = EM15007 - 65536
+            EM20000 = EM20000 + 1
+            EM20007 = Z3 * 256 + Z4
+            IF EM20007 >= 32768 THEN
+                EM20007 = EM20007 - 65536
             END IF
-            EM15000 = EM15000 + EM15007
+            EM20000 = EM20000 + EM20007
 
-        ELSE IF EM15006 = 38 THEN
+        ELSE IF EM20006 = 38 THEN
             ' OP_JMPIF (BS): if R[a] <> 0 then PC += signed16(b)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15008 = Z3 * 256 + Z4
-            IF EM15008 >= 32768 THEN
-                EM15008 = EM15008 - 65536
+            EM20000 = EM20000 + 1
+            EM20008 = Z3 * 256 + Z4
+            IF EM20008 >= 32768 THEN
+                EM20008 = EM20008 - 65536
             END IF
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20007 * 4 + 20033
             IF EM0.L:Z1 <> 0 THEN
-                EM15000 = EM15000 + EM15008
+                EM20000 = EM20000 + EM20008
             END IF
 
-        ELSE IF EM15006 = 39 THEN
+        ELSE IF EM20006 = 39 THEN
             ' OP_JMPNOT (BS): if R[a] = 0 then PC += signed16(b)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15008 = Z3 * 256 + Z4
-            IF EM15008 >= 32768 THEN
-                EM15008 = EM15008 - 65536
+            EM20000 = EM20000 + 1
+            EM20008 = Z3 * 256 + Z4
+            IF EM20008 >= 32768 THEN
+                EM20008 = EM20008 - 65536
             END IF
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20007 * 4 + 20033
             IF EM0.L:Z1 = 0 THEN
-                EM15000 = EM15000 + EM15008
+                EM20000 = EM20000 + EM20008
             END IF
 
-        ELSE IF EM15006 = 40 THEN
+        ELSE IF EM20006 = 40 THEN
             ' OP_JMPNIL (BS): if R[a] = 0 (nil) then PC += signed16(b)
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
             ' 16bit big-endian: hi byte, lo byte
-            Z1 = EM15000 + 15352
+            Z1 = EM20000 + 20352
             Z3 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
             Z4 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15008 = Z3 * 256 + Z4
-            IF EM15008 >= 32768 THEN
-                EM15008 = EM15008 - 65536
+            EM20000 = EM20000 + 1
+            EM20008 = Z3 * 256 + Z4
+            IF EM20008 >= 32768 THEN
+                EM20008 = EM20008 - 65536
             END IF
-            Z1 = EM15007 * 4 + 15033
+            Z1 = EM20007 * 4 + 20033
             IF EM0.L:Z1 = 0 THEN
-                EM15000 = EM15000 + EM15008
+                EM20000 = EM20000 + EM20008
             END IF
 
-        ELSE IF EM15006 = 56 THEN
+        ELSE IF EM20006 = 56 THEN
             ' OP_RETURN (B): トップレベルでは VM 停止
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            EM15001 = 2
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            EM20001 = 2
             BREAK
 
-        ELSE IF EM15006 = 60 THEN
+        ELSE IF EM20006 = 60 THEN
             ' OP_ADD (B): R[a] = R[a] + R[a+1]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             EM0.L:Z1 = EM0.L:Z1 + EM0.L:Z2
 
-        ELSE IF EM15006 = 61 THEN
+        ELSE IF EM20006 = 61 THEN
             ' OP_ADDI (BB): R[a] = R[a] + b
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM0.L:Z1 + EM15008
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM0.L:Z1 + EM20008
 
-        ELSE IF EM15006 = 62 THEN
+        ELSE IF EM20006 = 62 THEN
             ' OP_SUB (B): R[a] = R[a] - R[a+1]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             EM0.L:Z1 = EM0.L:Z1 - EM0.L:Z2
 
-        ELSE IF EM15006 = 63 THEN
+        ELSE IF EM20006 = 63 THEN
             ' OP_SUBI (BB): R[a] = R[a] - b
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15000 + 15352
-            EM15008 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            EM0.L:Z1 = EM0.L:Z1 - EM15008
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20000 + 20352
+            EM20008 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            EM0.L:Z1 = EM0.L:Z1 - EM20008
 
-        ELSE IF EM15006 = 64 THEN
+        ELSE IF EM20006 = 64 THEN
             ' OP_MUL (B): R[a] = R[a] * R[a+1]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             EM0.L:Z1 = EM0.L:Z1 * EM0.L:Z2
 
-        ELSE IF EM15006 = 65 THEN
+        ELSE IF EM20006 = 65 THEN
             ' OP_DIV (B): R[a] = R[a] / R[a+1]
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z2 <> 0 THEN
                 EM0.L:Z1 = EM0.L:Z1 / EM0.L:Z2
             ELSE
-                EM15001 = 3
-                EM15002 = 1
+                EM20001 = 3
+                EM20002 = 1
                 BREAK
             END IF
 
-        ELSE IF EM15006 = 66 THEN
+        ELSE IF EM20006 = 66 THEN
             ' OP_EQ (B): R[a] = (R[a] = R[a+1]) ? 1 : 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z1 = EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
                 EM0.L:Z1 = 0
             END IF
 
-        ELSE IF EM15006 = 67 THEN
+        ELSE IF EM20006 = 67 THEN
             ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? 1 : 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z1 < EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
                 EM0.L:Z1 = 0
             END IF
 
-        ELSE IF EM15006 = 68 THEN
+        ELSE IF EM20006 = 68 THEN
             ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? 1 : 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z1 <= EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
                 EM0.L:Z1 = 0
             END IF
 
-        ELSE IF EM15006 = 69 THEN
+        ELSE IF EM20006 = 69 THEN
             ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? 1 : 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z1 > EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
                 EM0.L:Z1 = 0
             END IF
 
-        ELSE IF EM15006 = 70 THEN
+        ELSE IF EM20006 = 70 THEN
             ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? 1 : 0
-            Z1 = EM15000 + 15352
-            EM15007 = EM0:Z1
-            EM15000 = EM15000 + 1
-            Z1 = EM15007 * 4 + 15033
-            Z2 = (EM15007 + 1) * 4 + 15033
+            Z1 = EM20000 + 20352
+            EM20007 = EM0:Z1
+            EM20000 = EM20000 + 1
+            Z1 = EM20007 * 4 + 20033
+            Z2 = (EM20007 + 1) * 4 + 20033
             IF EM0.L:Z1 >= EM0.L:Z2 THEN
                 EM0.L:Z1 = 1
             ELSE
                 EM0.L:Z1 = 0
             END IF
 
-        ELSE IF EM15006 = 105 THEN
+        ELSE IF EM20006 = 105 THEN
             ' OP_STOP (Z): VM 停止
-            EM15001 = 2
+            EM20001 = 2
             BREAK
 
         ELSE
             ' 未知のオペコード: エラー
-            EM15001 = 3
-            EM15002 = EM15006
+            EM20001 = 3
+            EM20002 = EM20006
             BREAK
 
         END IF
 
         ' バイトコード範囲チェック
-        IF EM15000 >= EM15010 THEN
-            EM15001 = 2
+        IF EM20000 >= EM20010 THEN
+            EM20001 = 2
             BREAK
         END IF
 
