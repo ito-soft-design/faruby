@@ -1,4 +1,8 @@
 # faRuby - Configuration
+#
+# ここに書いた項目だけが faruby_default.yml の既定値を上書きします。
+# 書かなかった項目は既定値のまま残ります。
+
 plc:
   protocol: keyence_kv
   host: 192.168.0.10
@@ -9,3 +13,11 @@ mrbc:
 
 vm:
   steps_per_cycle: 50
+
+# faRuby が使用する PLC デバイスの領域。
+# ラダーが使用していない範囲を割り当ててください。
+# 変更したら `rake vm_core` で再生成し、KV Studio に取り込み直します。
+# 既定値と項目の説明は faruby_default.yml を参照してください。
+# memory:
+#   device: EM
+#   base: 20000
