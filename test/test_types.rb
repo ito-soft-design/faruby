@@ -155,7 +155,7 @@ class TestTypes < Minitest::Test
   # 生成コード側で補正している (実機で -7 / 2 = -3 になることを確認済み)。
   def test_integer_division_rounds_toward_negative_infinity
     # R[1] = -7, R[2] = 2, R[1] = R[1] / R[2]
-    run_bytecode([0x03, 0x01, 0xF9,  # OP_LOADI8 R[1], -7
+    run_bytecode([0x04, 0x01, 0x07,  # OP_LOADINEG R[1], 7 → -7
                   0x08, 0x02,        # OP_LOADI_2 R[2]
                   0x41, 0x01,        # OP_DIV R[1]
                   STOP])

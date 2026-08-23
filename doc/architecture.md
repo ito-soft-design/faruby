@@ -279,7 +279,7 @@ KV-5000 実機で動作を確認済みのサフィックスです。
 
 負値や 65535 を超える値を組み立てる場合は、下位ワードを EM16・上位ワードを EM17 に
 置いてから `EM16.L` として読み出します。これにより符号拡張と桁上がりを KV 側の
-32 ビット演算に任せられます。OP_LOADI8 / OP_LOADINEG / OP_LOADI16 / OP_LOADI32 が
+32 ビット演算に任せられます。OP_LOADINEG / OP_LOADI16 / OP_LOADI32 が
 この方式を使っています。
 
 なお OP_JMP 系の相対ジャンプは PC (EM0) も 16 ビット符号なしのため、
@@ -564,7 +564,7 @@ KV スクリプトでは Z1-Z12 を間接アドレッシングに使用します
 | OP_NOP | 0x00 | Z | 何もしない |
 | OP_MOVE | 0x01 | BB | R[a] = R[b] |
 | OP_LOADL | 0x02 | BB | R[a] = Pool[b] |
-| OP_LOADI8 | 0x03 | BB | R[a] = signed(b) |
+| OP_LOADI | 0x03 | BB | R[a] = b (**符号なし** 0-255) |
 | OP_LOADINEG | 0x04 | BB | R[a] = -b |
 | OP_LOADI__1 | 0x05 | B | R[a] = -1 |
 | OP_LOADI_0..7 | 0x06-0x0D | B | R[a] = 0..7 |
@@ -592,8 +592,8 @@ KV スクリプトでは Z1-Z12 を間接アドレッシングに使用します
 
 | Opcode | Code | Format | 動作 |
 |--------|------|--------|------|
-| OP_LOADTRUE | 0x13 | B | R[a] = 1 |
-| OP_LOADFALSE | 0x14 | B | R[a] = 0 |
+| OP_LOADT | 0x13 | B | R[a] = true |
+| OP_LOADF | 0x14 | B | R[a] = false |
 
 #### 比較演算
 

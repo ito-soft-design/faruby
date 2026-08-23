@@ -11,8 +11,8 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 | 0x00 | 0 | OP_NOP | Z | 何もしない |
 | 0x01 | 1 | OP_MOVE | BB | R[a] = R[b] |
 | 0x02 | 2 | OP_LOADL | BB | R[a] = Pool[b] |
-| 0x03 | 3 | OP_LOADI8 | BB | R[a] = signed_int8(b) |
-| 0x04 | 4 | OP_LOADINEG | BB | R[a] = -b |
+| 0x03 | 3 | OP_LOADI | BB | R[a] = b (**符号なし** 0-255) |
+| 0x04 | 4 | OP_LOADINEG | BB | R[a] = -b (b は符号なし) |
 | 0x05 | 5 | OP_LOADI__1 | B | R[a] = -1 |
 | 0x06 | 6 | OP_LOADI_0 | B | R[a] = 0 |
 | 0x07 | 7 | OP_LOADI_1 | B | R[a] = 1 |
@@ -24,10 +24,10 @@ mruby 3.x 可変長バイトコード形式に基づきます。
 | 0x0D | 13 | OP_LOADI_7 | B | R[a] = 7 |
 | 0x0E | 14 | OP_LOADI16 | BS | R[a] = signed_int16(b) |
 | 0x0F | 15 | OP_LOADI32 | BSS | R[a] = (b << 16) + c |
-| 0x11 | 17 | OP_LOADNIL | B | R[a] = nil (= 0) |
-| 0x12 | 18 | OP_LOADSELF | B | R[a] = self (トップレベルでは 0) |
-| 0x13 | 19 | OP_LOADTRUE | B | R[a] = true (= 1) |
-| 0x14 | 20 | OP_LOADFALSE | B | R[a] = false (= 0) |
+| 0x11 | 17 | OP_LOADNIL | B | R[a] = nil |
+| 0x12 | 18 | OP_LOADSELF | B | R[a] = self (トップレベルでは main) |
+| 0x13 | 19 | OP_LOADT | B | R[a] = true |
+| 0x14 | 20 | OP_LOADF | B | R[a] = false |
 
 ### 変数アクセス系
 

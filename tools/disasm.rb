@@ -102,9 +102,9 @@ module FaRuby
       when :OP_LOADL
         pool_val = @irep.pool[ops[1]]
         "R[#{ops[0]}] = Pool[#{ops[1]}](#{pool_val})"
-      when :OP_LOADI8
-        val = ops[1] >= 128 ? ops[1] - 256 : ops[1]
-        "R[#{ops[0]}] = #{val}"
+      when :OP_LOADI
+        # オペランドは符号なし (負値は OP_LOADINEG)
+        "R[#{ops[0]}] = #{ops[1]}"
       when :OP_LOADINEG
         "R[#{ops[0]}] = -#{ops[1]}"
       when :OP_LOADI__1
@@ -124,9 +124,9 @@ module FaRuby
         "R[#{ops[0]}] = self"
       when :OP_LOADNIL
         "R[#{ops[0]}] = nil"
-      when :OP_LOADTRUE
+      when :OP_LOADT
         "R[#{ops[0]}] = true"
-      when :OP_LOADFALSE
+      when :OP_LOADF
         "R[#{ops[0]}] = false"
       when :OP_ADD
         "R[#{ops[0]}] = R[#{ops[0]}] + R[#{ops[0] + 1}]"

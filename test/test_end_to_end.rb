@@ -62,6 +62,35 @@ end
     assert_equal 2000, result[:locals]["b"]
   end
 
+  # OP_LOADI のオペランドは符号なし (0-255)。負値は OP_LOADINEG が受け持つ。
+  # 符号付きとして扱っていたころは 128 以上が負になり、`while i < 200` が
+  # 一度も回らなかった。境界をまたぐ値を実際にコンパイルして確認する。
+  def test_literals_across_the_signed_byte_boundary
+    [127, 128, 200, 255, 256].each do |n|
+      result = compile_and_run("a = #{n}\n")
+      assert_equal n, result[:locals]["a"], "リテラル #{n}"
+    end
+  end
+
+  def test_negative_literals_across_the_byte_boundary
+    [-1, -127, -128, -200, -255, -256].each do |n|
+      result = compile_and_run("a = #{n}\n")
+      assert_equal n, result[:locals]["a"], "リテラル #{n}"
+    end
+  end
+
+  # ループの上限が 127 を超えても回ること
+  def test_loop_bound_above_the_signed_byte_boundary
+    source = <<~RUBY
+      i = 0
+      while i < 200
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 200, result[:locals]["i"]
+  end
+
   def test_if_true_branch
     source = <<~RUBY
       a = 5

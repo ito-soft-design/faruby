@@ -58,7 +58,7 @@ module FaRuby
       0x00 => [:OP_NOP,        :Z],
       0x01 => [:OP_MOVE,       :BB],
       0x02 => [:OP_LOADL,      :BB],
-      0x03 => [:OP_LOADI8,     :BB],
+      0x03 => [:OP_LOADI,      :BB],
       0x04 => [:OP_LOADINEG,   :BB],
       0x05 => [:OP_LOADI__1,   :B],
       0x06 => [:OP_LOADI_0,    :B],
@@ -74,8 +74,8 @@ module FaRuby
       0x10 => [:OP_LOADSYM,    :BB],
       0x11 => [:OP_LOADNIL,    :B],
       0x12 => [:OP_LOADSELF,   :B],
-      0x13 => [:OP_LOADTRUE,   :B],
-      0x14 => [:OP_LOADFALSE,  :B],
+      0x13 => [:OP_LOADT,      :B],
+      0x14 => [:OP_LOADF,      :B],
       0x15 => [:OP_GETGV,      :BB],
       0x16 => [:OP_SETGV,      :BB],
       0x17 => [:OP_GETSV,      :BB],
@@ -108,7 +108,7 @@ module FaRuby
       0x32 => [:OP_SUPER,      :BB],
       0x33 => [:OP_ARGARY,     :BS],
       0x34 => [:OP_ENTER,      :W],
-      0x35 => [:OP_KEY_P,      :BBB],
+      0x35 => [:OP_KEY_P,      :BB],
       0x36 => [:OP_KEYEND,     :Z],
       0x37 => [:OP_KARG,       :BB],
       0x38 => [:OP_RETURN,     :B],
@@ -152,7 +152,7 @@ module FaRuby
       0x5E => [:OP_EXEC,       :BB],
       0x5F => [:OP_DEF,        :BB],
       0x60 => [:OP_ALIAS,      :BB],
-      0x61 => [:OP_UNDEF,      :BB],
+      0x61 => [:OP_UNDEF,      :B],
       0x62 => [:OP_SCLASS,     :B],
       0x63 => [:OP_TCLASS,     :B],
       0x64 => [:OP_DEBUG,      :BBB],
@@ -227,8 +227,11 @@ module FaRuby
         vm.load_pool(:a, :b)
       end
 
-      defs << OpcodeDef.new(0x03, "R[a] = signed(b)") do |vm|
-        vm.set_reg_int(:a, vm.sign_extend(vm.operand(:b), 8))
+      # b は符号なし (0-255)。mruby の vm.c は SET_FIXNUM_VALUE(regs[a], b) で、
+      # 符号拡張しない。負値は OP_LOADINEG が受け持つ。
+      # 符号付きとして扱うと 128 以上が負になり、`while i < 200` が回らない。
+      defs << OpcodeDef.new(0x03, "R[a] = b (符号なし)") do |vm|
+        vm.set_reg_int(:a, vm.operand(:b))
       end
 
       defs << OpcodeDef.new(0x04, "R[a] = -b") do |vm|

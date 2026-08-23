@@ -93,21 +93,41 @@ end
     assert_equal(-1, @sim.reg(1))
   end
 
-  # === OP_LOADI8 ===
-  def test_loadi8_positive
-    # R[1] = 42; STOP
+  # === OP_LOADI ===
+  #
+  # オペランドは符号なし (0-255)。負値は OP_LOADINEG が受け持つ。
+  # 符号付きとして扱うと 128 以上が負になり、`while i < 200` が回らない。
+  def test_loadi_positive
     load_bytecode([
-      0x03, 0x01, 42,   # OP_LOADI8 R[1], 42
+      0x03, 0x01, 42,   # OP_LOADI R[1], 42
       0x69,             # OP_STOP
     ])
     @sim.run
     assert_equal 42, @sim.reg(1)
   end
 
-  def test_loadi8_negative
-    # R[1] = -10; STOP  (256 - 10 = 246)
+  def test_loadi_is_unsigned
     load_bytecode([
-      0x03, 0x01, 246,  # OP_LOADI8 R[1], -10 (signed byte)
+      0x03, 0x01, 200,  # OP_LOADI R[1], 200
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 200, @sim.reg(1), "符号拡張すると -56 になる"
+  end
+
+  def test_loadi_upper_bound
+    load_bytecode([
+      0x03, 0x01, 255,  # OP_LOADI R[1], 255
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 255, @sim.reg(1)
+  end
+
+  # === OP_LOADINEG ===
+  def test_loadineg
+    load_bytecode([
+      0x04, 0x01, 10,   # OP_LOADINEG R[1], 10 → -10
       0x69,             # OP_STOP
     ])
     @sim.run

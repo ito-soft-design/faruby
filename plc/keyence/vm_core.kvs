@@ -104,23 +104,15 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z1 = EM0:Z2
 
             ELSE IF EM6:Z9 = 3 THEN
-                ' OP_LOADI8 (BB): R[a] = signed(b)
+                ' OP_LOADI (BB): R[a] = b (符号なし)
                 Z1 = EM0:Z9 + 352 + Z9
                 EM7:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM0:Z9 + 352 + Z9
                 EM8:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                ' 8ビット値を符号拡張して32ビットスクラッチに置く
-                ' 16ビット符号なしのまま引き算すると桁が壊れるため
-                EM16:Z9 = EM8:Z9
-                EM17:Z9 = 0
-                IF EM8:Z9 >= 128 THEN
-                    EM16:Z9 = EM8:Z9 + 65280
-                    EM17:Z9 = 65535
-                END IF
                 Z1 = EM7:Z9 * 4 + 32 + Z9
-                EM1.L:Z1 = EM16.L:Z9
+                EM1.L:Z1 = EM8:Z9
                 EM0:Z1 = 4
 
             ELSE IF EM6:Z9 = 4 THEN
@@ -293,7 +285,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z1 = 10
 
             ELSE IF EM6:Z9 = 19 THEN
-                ' OP_LOADTRUE (B): R[a] = true
+                ' OP_LOADT (B): R[a] = true
                 Z1 = EM0:Z9 + 352 + Z9
                 EM7:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
@@ -302,7 +294,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z1 = 3
 
             ELSE IF EM6:Z9 = 20 THEN
-                ' OP_LOADFALSE (B): R[a] = false
+                ' OP_LOADF (B): R[a] = false
                 Z1 = EM0:Z9 + 352 + Z9
                 EM7:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
