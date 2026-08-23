@@ -756,16 +756,18 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         ELSE
                             ' 0 除算。KV の / は CR2012 を出すため実行せず、
                             ' IEEE754 の無限大 / 非数のビット列を直接置く
-                            EM1:Z1 = 0
+                            ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+                            ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+                            ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+                            EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
                             IF EM1.F:Z1 > 0 THEN
-                                EM2:Z1 = 32640   ' +Infinity
-                            ELSE
-                                IF EM1.F:Z1 < 0 THEN
-                                    EM2:Z1 = 65408   ' -Infinity
-                                ELSE
-                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
-                                END IF
+                                EM16:Z9 = 32640   ' +Infinity
                             END IF
+                            IF EM1.F:Z1 < 0 THEN
+                                EM16:Z9 = 65408   ' -Infinity
+                            END IF
+                            EM1:Z1 = 0
+                            EM2:Z1 = EM16:Z9
                         END IF
                         EM0:Z1 = 5
                     ELSE
@@ -774,16 +776,18 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         ELSE
                             ' 0 除算。KV の / は CR2012 を出すため実行せず、
                             ' IEEE754 の無限大 / 非数のビット列を直接置く
-                            EM1:Z1 = 0
+                            ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+                            ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+                            ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+                            EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
                             IF EM1.F:Z1 > 0 THEN
-                                EM2:Z1 = 32640   ' +Infinity
-                            ELSE
-                                IF EM1.F:Z1 < 0 THEN
-                                    EM2:Z1 = 65408   ' -Infinity
-                                ELSE
-                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
-                                END IF
+                                EM16:Z9 = 32640   ' +Infinity
                             END IF
+                            IF EM1.F:Z1 < 0 THEN
+                                EM16:Z9 = 65408   ' -Infinity
+                            END IF
+                            EM1:Z1 = 0
+                            EM2:Z1 = EM16:Z9
                         END IF
                         EM0:Z1 = 5
                     END IF
@@ -794,16 +798,18 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         ELSE
                             ' 0 除算。KV の / は CR2012 を出すため実行せず、
                             ' IEEE754 の無限大 / 非数のビット列を直接置く
-                            EM1:Z1 = 0
+                            ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+                            ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+                            ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+                            EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
                             IF EM1.L:Z1 > 0 THEN
-                                EM2:Z1 = 32640   ' +Infinity
-                            ELSE
-                                IF EM1.L:Z1 < 0 THEN
-                                    EM2:Z1 = 65408   ' -Infinity
-                                ELSE
-                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
-                                END IF
+                                EM16:Z9 = 32640   ' +Infinity
                             END IF
+                            IF EM1.L:Z1 < 0 THEN
+                                EM16:Z9 = 65408   ' -Infinity
+                            END IF
+                            EM1:Z1 = 0
+                            EM2:Z1 = EM16:Z9
                         END IF
                         EM0:Z1 = 5
                     ELSE

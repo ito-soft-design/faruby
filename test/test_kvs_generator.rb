@@ -213,6 +213,21 @@ class TestKvsGenerator < Minitest::Test
     assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{base}"
   end
 
+  # 実数の 0 除算では、代入先を書き換える前に符号を確定させる。
+  #
+  # 代入先は被除数と同じレジスタなので、低位ワードを消してから符号を見ると
+  # 整数の 1-65535 が 0 になり、+Infinity が NaN になる。実機で確認した不具合。
+  # シミュレータは Ruby の値で計算するため、この順序は生成コードでしか守れない。
+  def test_float_division_by_zero_decides_the_sign_before_writing
+    body = opcode_body(0x41)
+    hi = "#{layout.device_name}#{SLOT_VALUE_OFFSET + 1}:Z1"
+
+    assert_includes body, "#{hi} = #{emitter.scratch_lo}",
+                    "上位ワードはスクラッチ経由で書く"
+    refute_match(/#{Regexp.escape(hi)} = \d/, body,
+                 "符号ごとに上位ワードを直接書くと、被除数を壊してから符号を見ることになる")
+  end
+
   # === オペコードの網羅 ===
 
   def test_all_table_opcodes_are_emitted

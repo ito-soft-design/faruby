@@ -567,12 +567,14 @@ module FaRuby
       end
       note "0 除算。KV の / は CR2012 を出すため実行せず、"
       note "IEEE754 の無限大 / 非数のビット列を直接置く"
+      note "代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。"
+      note "被除数を書き換えてから符号を見ると、低位ワードを消した時点で"
+      note "整数の 1-65535 が 0 になり、+Infinity が NaN になる"
+      line "#{scratch_lo} = #{FLOAT_NAN_HI}   ' 既定は NaN (0.0 / 0.0)"
+      if_("#{lhs} > 0") { line "#{scratch_lo} = #{FLOAT_POS_INF_HI}   ' +Infinity" }
+      if_("#{lhs} < 0") { line "#{scratch_lo} = #{FLOAT_NEG_INF_HI}   ' -Infinity" }
       line "#{dest.word(0)} = 0"
-      if_else_block("#{lhs} > 0") { line "#{dest.word(1)} = #{FLOAT_POS_INF_HI}   ' +Infinity" }
-      if_else_block("#{lhs} < 0") { line "#{dest.word(1)} = #{FLOAT_NEG_INF_HI}   ' -Infinity" }
-      line "#{dest.word(1)} = #{FLOAT_NAN_HI}   ' 0.0 / 0.0 は NaN"
-      end_block
-      end_block
+      line "#{dest.word(1)} = #{scratch_lo}"
       end_block
       line "#{dest.tag} = #{TT_FLOAT}"
     end

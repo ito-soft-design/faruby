@@ -248,6 +248,17 @@ class TestTypes < Minitest::Test
     assert_predicate float_of(1), :nan?
   end
 
+  # 被除数が整数の場合 (整数 ÷ 実数の 0)
+  def test_integer_divided_by_float_zero_yields_infinity
+    run_bytecode([0x07, 0x01] + load_float(0, 0.0, reg: 2) + [0x41, 0x01, STOP])
+    assert_equal Float::INFINITY, float_of(1), "1 / 0.0"
+  end
+
+  def test_negative_integer_divided_by_float_zero
+    run_bytecode([0x05, 0x01] + load_float(0, 0.0, reg: 2) + [0x41, 0x01, STOP])
+    assert_equal(-Float::INFINITY, float_of(1), "-1 / 0.0")
+  end
+
   # 生成コードは 0 除算を実行せずビット列を直接書く (KV は CR2012 を出すため)
   def test_generated_float_division_avoids_dividing_by_zero
     source = FaRuby::KvsGenerator.new.source
