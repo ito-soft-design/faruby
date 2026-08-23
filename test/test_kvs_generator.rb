@@ -15,12 +15,13 @@ class TestKvsGenerator < Minitest::Test
   # 利用者の faruby.yml に影響されないようにするため。
   def layout = FaRuby::MemoryLayout.default
 
-  # 生成コードに現れるデバイス名は配置から決まるため、テストも配置から導く
+  # 生成コードに現れるデバイス名は配置から決まるため、テストも配置から導く。
+  # 生成コードはブロック相対 (EM7:Z9) なので、テストも emitter 経由で組み立てる。
   def emitter      = @emitter ||= FaRuby::KvsEmitter.new(layout: layout)
   def operand(name) = emitter.operand(name)
   def pc           = emitter.pc
   def indexed_base = emitter.indexed_base
-  def opcode_var   = layout.device(layout.current_opcode_addr)
+  def opcode_var   = emitter.opcode
 
   # PC を1つ進める行の出現回数を数える
   def count_pc_increments(body)
@@ -66,15 +67,62 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_init_clears_the_register_file_of_the_current_layout
-    from = layout.reg_file_base
-    to   = layout.reg_slot_addr(layout.max_regs) - 1
+    from = emitter.block_offset(layout.reg_file_base)
+    to   = emitter.block_offset(layout.reg_slot_addr(layout.max_regs) - 1)
     assert_includes init_source, "FOR Z#{FaRuby::KvsEmitter::Z_PRIMARY} = #{from} TO #{to}"
   end
 
   def test_init_resets_vm_state_of_the_current_layout
-    assert_includes init_source, "#{layout.device(layout.pc_addr)} = 0"
-    assert_includes init_source, "#{layout.device(layout.status_addr)} = #{VM_STOPPED}"
-    assert_includes init_source, "IF #{layout.device(layout.reset_req_addr)} = 1 THEN"
+    assert_includes init_source, "#{emitter.pc} = 0"
+    assert_includes init_source, "#{emitter.status} = #{VM_STOPPED}"
+    assert_includes init_source, "IF #{emitter.state(layout.reset_req_addr)} = 1 THEN"
+  end
+
+  # === インスタンスループ ===
+
+  # 本体は1つで、ブロック先頭を Z9 に載せ替えて全インスタンスを回す
+  def test_both_scripts_loop_over_instances
+    header = "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} " \
+             "TO #{layout.last_origin} STEP #{layout.instance_size}"
+    assert_includes @source, header
+    assert_includes init_source, header
+  end
+
+  # 命令本体は1回だけ生成される (インスタンス数だけ複製しない)
+  def test_opcode_bodies_are_not_duplicated_per_instance
+    layout3 = FaRuby::MemoryLayout.new(base: layout.base, instances: 3)
+    source3 = FaRuby::KvsGenerator.new(layout: layout3).source
+    emitter3 = FaRuby::KvsEmitter.new(layout: layout3)
+
+    assert_equal 1, source3.scan("IF #{emitter3.opcode} = 105 THEN").size
+    assert_includes source3, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout3.base} " \
+                             "TO #{layout3.last_origin} STEP #{layout3.instance_size}"
+  end
+
+  # ブロック内の位置は絶対アドレスではなくオフセット + Z9 で指す。
+  # 絶対アドレスが残っていると instances > 1 でインスタンス0しか動かない。
+  #
+  # 例外は Z の退避・復元だけ。これはインスタンスループの外で1回だけ動く。
+  def test_state_is_addressed_relative_to_the_block
+    allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) }
+    offenders = code_lines(@source).select do |l|
+      l.scan(/\b#{layout.device_name}(\d+)/).flatten.map(&:to_i)
+       .any? { |n| n >= layout.base && !allowed.include?(n) }
+    end
+    assert_empty offenders,
+                 "ブロック内を絶対アドレスで指している行があります " \
+                 "(instances > 1 でインスタンス0しか動きません): #{offenders.first(3).inspect}"
+  end
+
+  # 実行判定は各インスタンスの STATUS を見る
+  def test_each_instance_checks_its_own_status
+    assert_includes @source, "IF #{emitter.status} = #{VM_RUNNING} THEN"
+  end
+
+  # 命令ループの回数も各インスタンスの設定に従う
+  def test_step_loop_uses_the_instance_own_settings
+    assert_includes @source, "FOR #{emitter.state(layout.loop_counter_addr)} = 1 " \
+                             "TO #{emitter.state(layout.steps_per_cycle_addr)}"
   end
 
   # === Z レジスタの退避・復元 ===
@@ -97,8 +145,9 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # 宣言していない Z を使っていないこと (退避漏れになる)
+  # 判定はコード行のみ。コメントは使えない Z にも言及するため。
   def test_no_undeclared_z_registers_are_used
-    used = @source.scan(/\bZ(\d+)\b/).flatten.map(&:to_i).uniq.sort
+    used = code_lines(@source).join("\n").scan(/\bZ(\d+)\b/).flatten.map(&:to_i).uniq.sort
     unexpected = used - FaRuby::KvsEmitter::USED_Z
     assert_empty unexpected,
                  "USED_Z に無い Z レジスタを使っています (退避されません): " \
@@ -143,18 +192,18 @@ class TestKvsGenerator < Minitest::Test
 
   # レジスタは「スロット先頭 + 値オフセット」を直接指す
   def test_register_address_matches_slot_layout
-    expected = "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{layout.reg_file_base + SLOT_VALUE_OFFSET}"
-    assert_includes @source, expected
+    base = emitter.block_offset(layout.reg_file_base + SLOT_VALUE_OFFSET)
+    assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{base}"
   end
 
   def test_pool_address_matches_slot_layout
-    expected = "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{layout.pool_base + SLOT_VALUE_OFFSET}"
-    assert_includes @source, expected
+    base = emitter.block_offset(layout.pool_base + SLOT_VALUE_OFFSET)
+    assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{base}"
   end
 
   def test_device_table_stride
-    expected = "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{layout.device_table_base}"
-    assert_includes @source, expected
+    base = emitter.block_offset(layout.device_table_base)
+    assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{base}"
   end
 
   # === オペコードの網羅 ===
@@ -165,7 +214,7 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_unknown_opcode_falls_through_to_error
-    assert_includes @source, "#{layout.device(layout.error_addr)} = #{opcode_var}"
+    assert_includes @source, "#{emitter.error} = #{opcode_var}"
   end
 
   # === オペランドフェッチが命令形式から生成されている ===
@@ -266,20 +315,28 @@ class TestKvsGenerator < Minitest::Test
 
   # 指定オペコードの分岐本体を切り出す
   #
-  # オペコードの分岐はインデント 8 桁に並ぶ。デバイス分岐の中の
+  # オペコードの分岐はすべて同じ深さに並ぶ。デバイス分岐の中の
   # ネストした ELSE で切れないよう、インデント幅で判定する。
-  OPCODE_INDENT = " " * 8
+  # 幅は生成物から読む (入れ子が変わっても追従する)。
+  def opcode_indent
+    @opcode_indent ||= begin
+      head = @source.lines.find { |l| l =~ /\A\s*IF #{Regexp.escape(opcode_var)} = \d+ THEN\s*\z/ }
+      refute_nil head, "オペコードの分岐が1つも見つからない"
+      head[/\A */]
+    end
+  end
 
   def opcode_body(code)
+    indent = opcode_indent
     lines = @source.lines
-    start = lines.index { |l| l.rstrip == "#{OPCODE_INDENT}IF #{opcode_var} = #{code} THEN" ||
-                              l.rstrip == "#{OPCODE_INDENT}ELSE IF #{opcode_var} = #{code} THEN" }
+    start = lines.index { |l| l.rstrip == "#{indent}IF #{opcode_var} = #{code} THEN" ||
+                              l.rstrip == "#{indent}ELSE IF #{opcode_var} = #{code} THEN" }
     refute_nil start, "オペコード #{code} の分岐が見つからない"
 
     rest = lines[(start + 1)..]
     stop = rest.index do |l|
       s = l.rstrip
-      s == "#{OPCODE_INDENT}ELSE" || s =~ /\A#{OPCODE_INDENT}ELSE IF #{Regexp.escape(opcode_var)} = \d+ THEN\z/
+      s == "#{indent}ELSE" || s =~ /\A#{indent}ELSE IF #{Regexp.escape(opcode_var)} = \d+ THEN\z/
     end
     refute_nil stop, "オペコード #{code} の分岐の終端が見つからない"
     rest[0...stop].join
