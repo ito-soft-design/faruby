@@ -32,6 +32,13 @@ module FaRuby
     Z_PRIMARY = 1
     Z_SECONDARY = 2
 
+    # faRuby が書き換える Z レジスタ
+    #
+    # PLC の Z はラダーと共有する資源なので、ブロックの先頭で退避し
+    # 末尾で復元する。ここに挙げたものだけを使うことを
+    # test_kvs_generator.rb が検証する。
+    USED_Z = (1..8).to_a.freeze
+
     # ワードデバイス (アクセス幅の選択が必要)
     WORD_DEVICES = [[DEVICE_TYPE_EM, "EM"], [DEVICE_TYPE_DM, "DM"], [DEVICE_TYPE_ZF, "ZF"]].freeze
 
@@ -63,6 +70,20 @@ module FaRuby
     # PC を指す layout.pc_addr とは別物なので混同しないこと。
     # デバイス番号 0 からの相対を Z レジスタで指定する書き方に使う。
     def indexed_base = "#{layout.device_name}0"
+
+    # 使用する Z レジスタをメモリへ退避する
+    def save_z_registers
+      note "インデックスレジスタの退避"
+      note "Z はラダーと共有する資源のため、faRuby の実行前後で"
+      note "内容が変わらないようにする (1スキャンにつき1回)"
+      USED_Z.each { |z| line "#{layout.device(layout.z_save_addr(z))} = Z#{z}" }
+    end
+
+    # 退避した Z レジスタを復元する
+    def restore_z_registers
+      note "インデックスレジスタの復元"
+      USED_Z.each { |z| line "Z#{z} = #{layout.device(layout.z_save_addr(z))}" }
+    end
 
     # --- 行の組み立て ---
 
@@ -376,6 +397,7 @@ module FaRuby
     include VmConstants
 
     OUTPUT_NAME = "vm_core.kvs"
+    INIT_NAME   = "vm_init.kvs"
     OUTPUT_DIR  = File.expand_path("../plc/keyence", __dir__)
 
     attr_reader :layout
@@ -389,11 +411,15 @@ module FaRuby
     def opcode_var = layout.device(layout.current_opcode_addr)
 
     def generate
-      { OUTPUT_NAME => build_source }
+      { OUTPUT_NAME => build_source, INIT_NAME => build_init_source }
     end
 
     def source
       generate.fetch(OUTPUT_NAME)
+    end
+
+    def init_source
+      generate.fetch(INIT_NAME)
     end
 
     # 生成結果をファイルに書き出す。書き換わったファイル名を返す
@@ -409,6 +435,53 @@ module FaRuby
 
     private
 
+    # リセットハンドラ (毎スキャン実行、RESET_REQ = 1 のときだけ動く)
+    def build_init_source
+      e = KvsEmitter.new(layout: layout)
+      z = KvsEmitter::Z_PRIMARY
+
+      e.note "======================================="
+      e.note "faRuby VM - Reset Handler"
+      e.note "======================================="
+      e.note "【自動生成】このファイルを直接編集しないでください。"
+      e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
+      e.note ""
+      e.note "毎スキャン実行。#{layout.device(layout.reset_req_addr)} (RESET_REQ) = 1 のとき"
+      e.note "VM 状態とレジスタファイルを初期化します。"
+      e.blank
+
+      e.line "IF #{layout.device(layout.reset_req_addr)} = 1 THEN"
+      e.blank
+      e.indent
+      e.note "インデックスレジスタの退避 (ラダーの値を壊さないため)"
+      e.line "#{layout.device(layout.z_save_addr(z))} = Z#{z}"
+      e.blank
+      e.line "#{e.pc} = 0      ' PC = 0"
+      e.line "#{e.status} = #{VM_STOPPED}      ' STATUS = stopped"
+      e.line "#{layout.device(layout.error_addr)} = 0      ' ERROR = none"
+      e.line "#{layout.device_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
+      e.blank
+      e.note "レジスタファイルクリア " \
+             "(#{layout.device(layout.reg_file_base)}-" \
+             "#{layout.device(layout.reg_slot_addr(layout.max_regs) - 1)}: " \
+             "#{layout.max_regs}スロット × #{SLOT_WORDS}ワード)"
+      e.note "スロット先頭の型タグも 0 (TT_EMPTY) になる"
+      e.line "FOR Z#{z} = #{layout.reg_file_base} TO #{layout.reg_slot_addr(layout.max_regs) - 1}"
+      e.indent
+      e.line "#{e.indexed_base}:Z#{z} = 0"
+      e.dedent
+      e.line "NEXT"
+      e.blank
+      e.line "#{layout.device(layout.reset_req_addr)} = 0     ' リセット要求クリア"
+      e.blank
+      e.note "インデックスレジスタの復元"
+      e.line "Z#{z} = #{layout.device(layout.z_save_addr(z))}"
+      e.dedent
+      e.blank
+      e.line "END IF"
+      "#{e.lines.join("\n")}\n"
+    end
+
     def build_source
       e = KvsEmitter.new(layout: layout)
       emit_header(e)
@@ -416,6 +489,8 @@ module FaRuby
       e.line "IF #{e.status} = #{VM_RUNNING} THEN"
       e.blank
       e.indent
+      e.save_z_registers
+      e.blank
       e.line "FOR #{layout.device(layout.loop_counter_addr)} = 1 TO #{layout.device(layout.steps_per_cycle_addr)}"
       e.blank
       e.indent
@@ -424,6 +499,8 @@ module FaRuby
       emit_range_check(e)
       e.dedent
       e.line "NEXT"
+      e.blank
+      e.restore_z_registers
       e.blank
       e.dedent
       e.line "END IF"
@@ -457,8 +534,12 @@ module FaRuby
       e.note "#{layout.device(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
       e.note "#{layout.device(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
       e.note "#{layout.device(layout.device_table_base)}~ = デバイスマッピングテーブル (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      e.note "#{layout.device(layout.z_save_addr(KvsEmitter::USED_Z.first))}-" \
+             "#{layout.device(layout.z_save_addr(KvsEmitter::USED_Z.last))} = Z レジスタの退避先"
       e.note ""
-      e.note "Z1-Z8 を間接アドレッシングに使用"
+      e.note "Z#{KvsEmitter::USED_Z.first}-Z#{KvsEmitter::USED_Z.last} を間接アドレッシングに使用"
+      e.note "  Z はラダーと共有する資源のため、ブロックの先頭で退避し末尾で復元する。"
+      e.note "  faRuby の実行前後で Z の内容は変わらない。"
       e.note ""
       e.note "【重要】インデックス修飾と型サフィックスの順序"
       e.note "  正: EM0.L:Z1   デバイスに .L が付く → 32ビットアクセス"

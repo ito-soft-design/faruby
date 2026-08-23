@@ -56,6 +56,13 @@ module FaRuby
     # 負値や 65535 超の即値は一旦ここへ置いてから .L で読む
     OFFSET_TEMP32          = 16
     OFFSET_LOOP_COUNTER    = 20  # FOR ループのカウンタ
+    # インデックスレジスタ (Z) の退避先
+    #
+    # faRuby は Z を作業用に書き換えるため、そのままではラダーが使っている
+    # Z の値を壊す。ブロックの先頭で退避し末尾で復元することで、faRuby の
+    # 実行前後で Z の内容が変わらないようにする。
+    # 退避は1スキャンにつき1回だけで、命令ごとの負荷は増えない。
+    OFFSET_Z_SAVE          = 21
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -171,6 +178,9 @@ module FaRuby
     def num_symbols_addr     = vm_state_base + OFFSET_NUM_SYMBOLS
     def temp32_addr          = vm_state_base + OFFSET_TEMP32
     def loop_counter_addr    = vm_state_base + OFFSET_LOOP_COUNTER
+
+    # Z レジスタ n (1始まり) の退避先アドレス
+    def z_save_addr(index) = vm_state_base + OFFSET_Z_SAVE + (index - 1)
 
     # --- 値スロットのアドレス ---
 

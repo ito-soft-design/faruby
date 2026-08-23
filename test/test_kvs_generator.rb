@@ -28,10 +28,13 @@ class TestKvsGenerator < Minitest::Test
   end
 
   VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
+  VM_INIT_PATH = File.expand_path("../plc/keyence/vm_init.kvs", __dir__)
 
   def setup
     @source = FaRuby::KvsGenerator.new.source
   end
+
+  def init_source = @init_source ||= FaRuby::KvsGenerator.new.init_source
 
   # コード行 (コメント・空行を除く)
   def code_lines(text)
@@ -51,8 +54,74 @@ class TestKvsGenerator < Minitest::Test
 
   def test_generate_returns_named_files
     files = FaRuby::KvsGenerator.new.generate
-    assert_equal ["vm_core.kvs"], files.keys
-    refute_empty files["vm_core.kvs"]
+    assert_equal ["vm_core.kvs", "vm_init.kvs"], files.keys.sort
+    files.each_value { |content| refute_empty content }
+  end
+
+  # リセットハンドラも生成物。配置に追従しないまま取り残されると
+  # 無関係な領域をクリアしてしまう。
+  def test_committed_init_matches_generated_output
+    assert_equal init_source.b, File.binread(VM_INIT_PATH),
+                 "plc/keyence/vm_init.kvs が生成結果と一致しません。`rake vm_core` を実行してください。"
+  end
+
+  def test_init_clears_the_register_file_of_the_current_layout
+    from = layout.reg_file_base
+    to   = layout.reg_slot_addr(layout.max_regs) - 1
+    assert_includes init_source, "FOR Z#{FaRuby::KvsEmitter::Z_PRIMARY} = #{from} TO #{to}"
+  end
+
+  def test_init_resets_vm_state_of_the_current_layout
+    assert_includes init_source, "#{layout.device(layout.pc_addr)} = 0"
+    assert_includes init_source, "#{layout.device(layout.status_addr)} = #{VM_STOPPED}"
+    assert_includes init_source, "IF #{layout.device(layout.reset_req_addr)} = 1 THEN"
+  end
+
+  # === Z レジスタの退避・復元 ===
+
+  # Z はラダーと共有する資源なので、faRuby の実行前後で内容が変わってはいけない
+  def test_used_z_registers_are_saved_and_restored
+    FaRuby::KvsEmitter::USED_Z.each do |z|
+      save = layout.device(layout.z_save_addr(z))
+      assert_includes @source, "#{save} = Z#{z}", "Z#{z} が退避されていない"
+      assert_includes @source, "Z#{z} = #{save}", "Z#{z} が復元されていない"
+    end
+  end
+
+  # 退避は命令ごとではなく1スキャンにつき1回
+  def test_z_is_saved_once_per_scan
+    z = FaRuby::KvsEmitter::Z_PRIMARY
+    save = layout.device(layout.z_save_addr(z))
+    assert_equal 1, @source.scan("#{save} = Z#{z}").size
+    assert_equal 1, @source.scan("Z#{z} = #{save}").size
+  end
+
+  # 宣言していない Z を使っていないこと (退避漏れになる)
+  def test_no_undeclared_z_registers_are_used
+    used = @source.scan(/\bZ(\d+)\b/).flatten.map(&:to_i).uniq.sort
+    unexpected = used - FaRuby::KvsEmitter::USED_Z
+    assert_empty unexpected,
+                 "USED_Z に無い Z レジスタを使っています (退避されません): " \
+                 "#{unexpected.map { |z| "Z#{z}" }.join(', ')}"
+  end
+
+  # 退避先が VM 状態領域に収まっていること
+  def test_z_save_area_fits_in_the_vm_state_region
+    last = layout.z_save_addr(FaRuby::KvsEmitter::USED_Z.last)
+    assert_operator last, :<, layout.reg_file_base
+  end
+
+  # 退避先とレジスタファイル等が重ならないこと
+  def test_z_save_area_does_not_collide_with_other_state
+    others = [layout.pc_addr, layout.status_addr, layout.error_addr,
+              layout.step_count_addr, layout.step_count_addr + 1,
+              layout.steps_per_cycle_addr, layout.current_opcode_addr,
+              layout.operand_a_addr, layout.operand_b_addr, layout.operand_c_addr,
+              layout.bytecode_len_addr, layout.nregs_addr, layout.nlocals_addr,
+              layout.reset_req_addr, layout.num_symbols_addr,
+              layout.temp32_addr, layout.temp32_addr + 1, layout.loop_counter_addr]
+    saves = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) }
+    assert_empty(saves & others, "Z の退避先が他の VM 状態と重なっています")
   end
 
   # === 型サフィックスの位置 (過去に91箇所で誤っていた) ===
