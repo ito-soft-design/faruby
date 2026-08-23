@@ -15,18 +15,60 @@ module FaRuby
     class Commands
       include VmConstants
 
-      attr_reader :layout
+      # 操作対象のインスタンス番号
+      #
+      # インスタンスごとに別のプログラムが動くため、compile/load/run/status は
+      # すべてここで選んだインスタンスに対して行われます。
+      attr_reader :instance
 
       def initialize(config:, adapter:, transfer:)
         @config = config
         @adapter = adapter
         @transfer = transfer
-        @layout = config.layout
+        @instance = 0
         @last_irep = nil
         @last_source = nil
         @last_disasm = nil
         @last_symbols = nil
         @last_sim = nil
+      end
+
+      # 選択中インスタンスの配置
+      def layout = @config.layout.for_instance(@instance)
+
+      # 操作対象を切り替える
+      def instance=(index)
+        @instance = Integer(index)
+        @transfer.layout = layout
+      end
+
+      # instance [n]
+      def cmd_instance(args)
+        total = @config.layout.instances
+
+        if args.empty?
+          puts "=== インスタンス ==="
+          total.times do |i|
+            block = @config.layout.for_instance(i)
+            mark = i == @instance ? "*" : " "
+            puts format("%s %d  %s-%s", mark, i,
+                        block.device(block.origin), block.device(block.block_last_addr))
+          end
+          puts ""
+          puts "  * が操作対象。切り替えは `instance <番号>`。"
+          return
+        end
+
+        index = args[0].to_i
+        unless index.between?(0, total - 1)
+          puts "ERROR: インスタンス番号は 0-#{total - 1} です"
+          puts "  同時に動かす数は faruby.yml の memory.instances で決まります " \
+               "(現在 #{total})。"
+          return
+        end
+
+        self.instance = index
+        puts "OK: インスタンス #{index} を操作対象にしました (#{layout.device(layout.origin)}~)"
       end
 
       # compile <file.rb>
@@ -167,6 +209,19 @@ module FaRuby
         puts "  設定: #{@config.config_path || '(既定のみ)'}"
         puts "  全体: #{layout}"
         puts ""
+
+        if @config.layout.instances > 1
+          puts "  インスタンス:"
+          @config.layout.instances.times do |i|
+            block = @config.layout.for_instance(i)
+            mark = i == @instance ? "*" : " "
+            puts format("  %s %d  %s-%s", mark, i,
+                        block.device(block.origin), block.device(block.block_last_addr))
+          end
+          puts ""
+          puts "  以下はインスタンス #{@instance} の内訳:"
+        end
+
         puts format("  %-20s %-10s %-10s %s", "領域", "開始", "終了", "ワード数")
         puts "  #{'-' * 52}"
         layout.regions.each do |name, from, to, words|
@@ -293,6 +348,7 @@ module FaRuby
           compile <file.rb>  Ruby ソースをコンパイル
           load               コンパイル済みプログラムを PLC に書き込み
           run                VM を開始 (STATUS=1)
+          instance [n]       操作対象のインスタンスを表示 / 切り替え
           status             VM 状態を表示
           regs [count]       レジスタ値を表示
           vars               グローバル変数の値を表示

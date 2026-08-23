@@ -20,7 +20,8 @@ module FaRuby
         VM_ERROR => "エラー",
       }.freeze
 
-      attr_reader :layout
+      # 対象インスタンスの切り替えで差し替わる
+      attr_accessor :layout
 
       def initialize(adapter, layout: MemoryLayout.default)
         @adapter = adapter
