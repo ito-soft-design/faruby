@@ -77,13 +77,17 @@ end
     assert_equal 7, em.read_s32(layout.pool_addr(0))
   end
 
-  # 未対応の型 (float) はスロットを書かない
-  def test_pool_float_is_skipped
+  # 未対応の型 (float) はスロットを 0 (TT_EMPTY) で埋める
+  #
+  # OP_LOADL はタグごと複製するため、書かずに残すと不定のタグを拾う。
+  # TT_EMPTY なら少なくとも偽として扱われ、挙動が決まる。
+  def test_pool_float_is_zeroed
     irep = build_irep(pool: [[:float, 1.5]])
-    _em, image = load_image(irep)
+    em, image = load_image(irep)
 
-    refute image.key?(layout.pool_addr(0))
-    refute image.key?(layout.pool_type_addr(0))
+    assert image.key?(layout.pool_type_addr(0)), "タグを書かずに残さない"
+    assert_equal TT_EMPTY, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 0, em.read_s32(layout.pool_addr(0))
   end
 
   # プール領域がデバイスマッピングテーブル (EM5000) を侵さないこと

@@ -55,6 +55,8 @@ module FaRuby
     # KV スクリプトの EM はサフィックス無しだと16ビット符号なしのため、
     # 負値や 65535 超の即値は一旦ここへ置いてから .L で読む
     OFFSET_TEMP32          = 16
+    # 2つ目の32ビットスクラッチ。除算の切り下げ補正で余りを置く
+    OFFSET_TEMP32_B        = 18
     OFFSET_LOOP_COUNTER    = 20  # FOR ループのカウンタ
     # インデックスレジスタ (Z) の退避先
     #
@@ -184,6 +186,7 @@ module FaRuby
     def reset_req_addr       = vm_state_base + OFFSET_RESET_REQ
     def num_symbols_addr     = vm_state_base + OFFSET_NUM_SYMBOLS
     def temp32_addr          = vm_state_base + OFFSET_TEMP32
+    def temp32_b_addr        = vm_state_base + OFFSET_TEMP32_B
     def loop_counter_addr    = vm_state_base + OFFSET_LOOP_COUNTER
 
     # Z レジスタ n (1始まり) の退避先アドレス

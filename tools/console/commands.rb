@@ -380,7 +380,7 @@ module FaRuby
       # ワードデバイスは VM と同じアクセス幅で読む
       def read_device_value(dev_name, dev_addr, z_offset, dev_type, bit, access_type = ACCESS_S)
         if @last_sim
-          dev = @last_sim.send(:device_memory, dev_type)
+          dev = @last_sim.devices[dev_type]
           return nil unless dev
           return dev.read_u16(z_offset) if bit
 
@@ -401,7 +401,7 @@ module FaRuby
       # ワードデバイスは VM と同じアクセス幅で書く
       def write_device_value(dev_name, dev_addr, z_offset, dev_type, bit, value, access_type = ACCESS_S)
         if @last_sim
-          dev = @last_sim.send(:device_memory, dev_type)
+          dev = @last_sim.devices[dev_type]
           return unless dev
 
           if bit

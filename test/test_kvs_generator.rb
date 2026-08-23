@@ -184,21 +184,28 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_register_access_uses_device_side_suffix
-    assert_includes @source, "EM0.L:Z1"
-    assert_includes @source, "EM0.L:Z2"
+    assert_includes @source, "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z1"
+    assert_includes @source, "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z2"
   end
 
   # === 値スロットのアドレス計算 ===
 
-  # レジスタは「スロット先頭 + 値オフセット」を直接指す
-  def test_register_address_matches_slot_layout
-    base = emitter.block_offset(layout.reg_file_base + SLOT_VALUE_OFFSET)
+  # Z はスロット先頭を指し、タグと値の両方を1本で扱う
+  def test_register_address_points_at_the_slot_head
+    base = emitter.block_offset(layout.reg_file_base)
     assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{base}"
   end
 
-  def test_pool_address_matches_slot_layout
-    base = emitter.block_offset(layout.pool_base + SLOT_VALUE_OFFSET)
+  def test_pool_address_points_at_the_slot_head
+    base = emitter.block_offset(layout.pool_base)
     assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{base}"
+  end
+
+  # 1本の Z でタグ (先頭) と値 (先頭+1) を指す
+  def test_slot_reference_covers_tag_and_value
+    slot = emitter.reg_slot(:a)
+    assert_equal "#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z1", slot.tag
+    assert_equal "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z1", slot.value
   end
 
   def test_device_table_stride

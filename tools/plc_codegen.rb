@@ -79,14 +79,15 @@ module FaRuby
       end
 
       # 定数プール (値スロット: 型タグ + 32ビット値)
+      #
+      # 未対応の型はスロットを 0 (TT_EMPTY) で埋める。OP_LOADL はタグごと
+      # 複製するため、書かずに残すと不定のタグを拾ってしまう。
       @irep.pool.each_with_index do |entry, i|
         value = pool_slot_value(entry)
-        next unless value
-
-        image[layout.pool_type_addr(i)] = pool_type_tag(entry)
         addr = layout.pool_addr(i)
-        image[addr]     = value & 0xFFFF
-        image[addr + 1] = (value >> 16) & 0xFFFF
+        image[layout.pool_type_addr(i)] = value ? pool_type_tag(entry) : TT_EMPTY
+        image[addr]     = value ? value & 0xFFFF : 0
+        image[addr + 1] = value ? (value >> 16) & 0xFFFF : 0
       end
 
       # レジスタファイル初期化 (スロット全体を 0 = TT_EMPTY + 値 0)

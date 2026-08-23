@@ -56,6 +56,9 @@ module FaRuby
     def reg_next(name) = read_reg(operand(name) + 1)
     def pool(name)     = @em.read_s32(layout.pool_addr(operand(name)))
 
+    def reg_tag(name)      = read_reg_tag(operand(name))
+    def reg_next_tag(name) = read_reg_tag(operand(name) + 1)
+
     def binop(op, lhs, rhs) = ARITHMETIC.fetch(op).call(lhs, rhs)
     def cmp(op, lhs, rhs)   = COMPARISON.fetch(op).call(lhs, rhs)
 
@@ -73,18 +76,44 @@ module FaRuby
 
     # --- 動作 ---
 
-    def set_reg(name, value)
-      write_reg(operand(name), value)
+    def set_reg_int(name, value)
+      write_slot(operand(name), TT_INTEGER, value)
+    end
+
+    def set_reg_special(name, tag)
+      write_slot(operand(name), tag, TT_CANONICAL_VALUE.fetch(tag))
+    end
+
+    def move_reg(dest_name, src_name)
+      src = operand(src_name)
+      write_slot(operand(dest_name), read_reg_tag(src), read_reg(src))
+    end
+
+    def load_pool(dest_name, pool_name)
+      index = operand(pool_name)
+      write_slot(operand(dest_name),
+                 @em.read_u16(layout.pool_type_addr(index)),
+                 @em.read_s32(layout.pool_addr(index)))
     end
 
     def set_reg_bool(name, op, lhs, rhs)
-      write_reg(operand(name), cmp(op, lhs, rhs) ? 1 : 0)
+      write_bool(operand(name), cmp(op, lhs, rhs))
     end
 
+    # 型が同じで値も同じときだけ真 (nil == false は偽)
+    def set_reg_eq(name)
+      index = operand(name)
+      same = read_reg_tag(index) == read_reg_tag(index + 1) &&
+             read_reg(index) == read_reg(index + 1)
+      write_bool(index, same)
+    end
+
+    # Ruby の整数除算は切り下げ。Ruby の / がそのまま切り下げなので補正は要らない
+    # (KV スクリプトの / は 0 方向へ切り捨てるため、生成コード側で補正している)
     def set_reg_div(name, lhs, rhs, error_code)
       return vm_error(error_code) if rhs.zero?
 
-      write_reg(operand(name), binop(:div, lhs, rhs))
+      write_slot(operand(name), TT_INTEGER, binop(:div, lhs, rhs))
     end
 
     def load_global_into_reg(dest, sym_operand)
@@ -92,12 +121,11 @@ module FaRuby
       dev = device_memory(type)
       return vm_error(0x15) unless dev
 
-      value = if bit_device?(type)
-                dev.read_u16(addr) != 0 ? 1 : 0
-              else
-                read_word_device(dev, addr, access)
-              end
-      write_reg(operand(dest), value)
+      if bit_device?(type)
+        write_bool(operand(dest), dev.read_u16(addr) != 0)
+      else
+        write_slot(operand(dest), TT_INTEGER, read_word_device(dev, addr, access))
+      end
     end
 
     def store_reg_into_global(sym_operand, src)
@@ -137,6 +165,14 @@ module FaRuby
       yield if cond
     end
 
+    # --- 真偽判定 ---
+    #
+    # Ruby で偽なのは nil と false だけ。0 も真。
+
+    def if_truthy(name) = (yield if reg_tag(name) > TT_FALSY_MAX)
+    def if_falsy(name)  = (yield if reg_tag(name) <= TT_FALSY_MAX)
+    def if_nil(name)    = (yield if reg_tag(name) == TT_NIL)
+
     # 生成コード向けのコメント。実行時は何もしない
     def note(_text) = nil
 
@@ -144,8 +180,21 @@ module FaRuby
 
     def pc = @em.read_u16(layout.pc_addr)
 
-    def read_reg(index)  = @em.read_s32(layout.reg_addr(index))
+    def read_reg(index)     = @em.read_s32(layout.reg_addr(index))
+    def read_reg_tag(index) = @em.read_u16(layout.reg_type_addr(index))
+
     def write_reg(index, value) = @em.write_s32(layout.reg_addr(index), value)
+
+    # 値スロットに型タグと値をまとめて書く
+    def write_slot(index, tag, value)
+      @em.write_u16(layout.reg_type_addr(index), tag)
+      @em.write_s32(layout.reg_addr(index), value)
+    end
+
+    def write_bool(index, value)
+      tag = value ? TT_TRUE : TT_FALSE
+      write_slot(index, tag, TT_CANONICAL_VALUE.fetch(tag))
+    end
 
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte

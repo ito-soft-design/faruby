@@ -220,54 +220,56 @@ module FaRuby
       defs << OpcodeDef.new(0x00, "何もしない") { |_vm| }
 
       defs << OpcodeDef.new(0x01, "R[a] = R[b]") do |vm|
-        vm.set_reg(:a, vm.reg(:b))
+        vm.move_reg(:a, :b)
       end
 
       defs << OpcodeDef.new(0x02, "R[a] = Pool[b]") do |vm|
-        vm.set_reg(:a, vm.pool(:b))
+        vm.load_pool(:a, :b)
       end
 
       defs << OpcodeDef.new(0x03, "R[a] = signed(b)") do |vm|
-        vm.set_reg(:a, vm.sign_extend(vm.operand(:b), 8))
+        vm.set_reg_int(:a, vm.sign_extend(vm.operand(:b), 8))
       end
 
       defs << OpcodeDef.new(0x04, "R[a] = -b") do |vm|
-        vm.set_reg(:a, vm.negate(vm.operand(:b)))
+        vm.set_reg_int(:a, vm.negate(vm.operand(:b)))
       end
 
       defs << OpcodeDef.new(0x05, "R[a] = -1") do |vm|
-        vm.set_reg(:a, vm.const(-1))
+        vm.set_reg_int(:a, vm.const(-1))
       end
 
       # OP_LOADI_0 ~ OP_LOADI_7
       (0..7).each do |n|
         defs << OpcodeDef.new(0x06 + n, "R[a] = #{n}") do |vm|
-          vm.set_reg(:a, vm.const(n))
+          vm.set_reg_int(:a, vm.const(n))
         end
       end
 
       defs << OpcodeDef.new(0x0E, "R[a] = signed16(b)") do |vm|
-        vm.set_reg(:a, vm.sign_extend(vm.operand(:b), 16))
+        vm.set_reg_int(:a, vm.sign_extend(vm.operand(:b), 16))
       end
 
       defs << OpcodeDef.new(0x0F, "R[a] = (b<<16)+c") do |vm|
-        vm.set_reg(:a, vm.compose32(vm.operand(:b), vm.operand(:c)))
+        vm.set_reg_int(:a, vm.compose32(vm.operand(:b), vm.operand(:c)))
       end
 
-      defs << OpcodeDef.new(0x11, "R[a] = nil (=0)") do |vm|
-        vm.set_reg(:a, vm.const(0))
+      defs << OpcodeDef.new(0x11, "R[a] = nil") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_NIL)
       end
 
-      defs << OpcodeDef.new(0x12, "R[a] = self (=0)") do |vm|
-        vm.set_reg(:a, vm.const(0))
+      # トップレベルの self は main。オブジェクトは未実装だが、
+      # 真偽判定では真になる必要があるためタグだけ付けておく
+      defs << OpcodeDef.new(0x12, "R[a] = self (main)") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_OBJECT)
       end
 
-      defs << OpcodeDef.new(0x13, "R[a] = 1") do |vm|
-        vm.set_reg(:a, vm.const(1))
+      defs << OpcodeDef.new(0x13, "R[a] = true") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_TRUE)
       end
 
-      defs << OpcodeDef.new(0x14, "R[a] = 0") do |vm|
-        vm.set_reg(:a, vm.const(0))
+      defs << OpcodeDef.new(0x14, "R[a] = false") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_FALSE)
       end
 
       defs << OpcodeDef.new(0x15, "R[a] = global[symbols[b]]") do |vm|
@@ -283,19 +285,21 @@ module FaRuby
         vm.jump_relative(:a)
       end
 
-      defs << OpcodeDef.new(0x26, "if R[a] <> 0 then PC += signed16(b)") do |vm|
+      # 真偽判定は型タグで行う。Ruby で偽なのは nil と false だけで、
+      # 0 も真になる (値で判定していたころは 0 が偽になっていた)
+      defs << OpcodeDef.new(0x26, "if R[a] が真 then PC += signed16(b)") do |vm|
         vm.normalize_signed16(:b)
-        vm.if_(vm.cmp(:ne, vm.reg(:a), vm.const(0))) { vm.jump_relative(:b) }
+        vm.if_truthy(:a) { vm.jump_relative(:b) }
       end
 
-      defs << OpcodeDef.new(0x27, "if R[a] = 0 then PC += signed16(b)") do |vm|
+      defs << OpcodeDef.new(0x27, "if R[a] が偽 (nil/false) then PC += signed16(b)") do |vm|
         vm.normalize_signed16(:b)
-        vm.if_(vm.cmp(:eq, vm.reg(:a), vm.const(0))) { vm.jump_relative(:b) }
+        vm.if_falsy(:a) { vm.jump_relative(:b) }
       end
 
-      defs << OpcodeDef.new(0x28, "if R[a] = 0 (nil) then PC += signed16(b)") do |vm|
+      defs << OpcodeDef.new(0x28, "if R[a] が nil then PC += signed16(b)") do |vm|
         vm.normalize_signed16(:b)
-        vm.if_(vm.cmp(:eq, vm.reg(:a), vm.const(0))) { vm.jump_relative(:b) }
+        vm.if_nil(:a) { vm.jump_relative(:b) }
       end
 
       defs << OpcodeDef.new(0x38, "トップレベルでは VM 停止") do |vm|
@@ -303,26 +307,34 @@ module FaRuby
       end
 
       # 二項算術: R[a] = R[a] <op> R[a+1]
+      #
+      # 型は見ずに値だけを使う。整数以外を渡すと Ruby なら TypeError だが、
+      # faRuby は例外を持たないため値をそのまま計算する。
       { 0x3C => :add, 0x3E => :sub, 0x40 => :mul }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} R[a+1]") do |vm|
-          vm.set_reg(:a, vm.binop(op, vm.reg(:a), vm.reg_next(:a)))
+          vm.set_reg_int(:a, vm.binop(op, vm.reg(:a), vm.reg_next(:a)))
         end
       end
 
       # 即値算術: R[a] = R[a] <op> b
       { 0x3D => :add, 0x3F => :sub }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} b") do |vm|
-          vm.set_reg(:a, vm.binop(op, vm.reg(:a), vm.operand(:b)))
+          vm.set_reg_int(:a, vm.binop(op, vm.reg(:a), vm.operand(:b)))
         end
       end
 
-      defs << OpcodeDef.new(0x41, "R[a] = R[a] / R[a+1]") do |vm|
+      defs << OpcodeDef.new(0x41, "R[a] = R[a] / R[a+1] (切り下げ)") do |vm|
         vm.set_reg_div(:a, vm.reg(:a), vm.reg_next(:a), DIVIDE_BY_ZERO_ERROR)
       end
 
-      # 比較: R[a] = (R[a] <op> R[a+1]) ? 1 : 0
-      { 0x42 => :eq, 0x43 => :lt, 0x44 => :le, 0x45 => :gt, 0x46 => :ge }.each do |code, op|
-        defs << OpcodeDef.new(code, "R[a] = (R[a] #{OPERATOR_TEXT[op]} R[a+1]) ? 1 : 0") do |vm|
+      # 等値比較は型も見る (nil == false は偽)
+      defs << OpcodeDef.new(0x42, "R[a] = (R[a] == R[a+1]) ? true : false") do |vm|
+        vm.set_reg_eq(:a)
+      end
+
+      # 大小比較: 値だけを比べる
+      { 0x43 => :lt, 0x44 => :le, 0x45 => :gt, 0x46 => :ge }.each do |code, op|
+        defs << OpcodeDef.new(code, "R[a] = (R[a] #{OPERATOR_TEXT[op]} R[a+1]) ? true : false") do |vm|
           vm.set_reg_bool(:a, op, vm.reg(:a), vm.reg_next(:a))
         end
       end
