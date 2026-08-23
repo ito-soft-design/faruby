@@ -111,11 +111,12 @@ faRuby は PLC のデバイス領域を連続した 1 ブロックとして使�
 memory:
   device: EM      # デバイス種別
   base: 20000     # 領域の先頭アドレス
+  instances: 2    # 同時に実行するインスタンス数
   align: 1000     # ブロックサイズをこの倍数に切り上げる
 ```
 
-既定では EM20000-EM24999 (5000 ワード) を使用します。内訳は `rake console` の
-`memmap` コマンドで確認できます。
+既定では EM20000-EM29999 を 5000 ワードずつ 2 ブロックに分けて使用します。
+内訳は `rake console` の `memmap` コマンドで確認できます。
 
 配置を変えたら `rake vm_core` で KV スクリプトを再生成し、KV Studio に取り込んで
 PLC へ転送し直してください。アドレスは生成されたスクリプトに定数として
@@ -138,6 +139,7 @@ rake console
 | `compile <file.rb>` | Ruby ソースをコンパイル (.mrb 生成) |
 | `load` | バイトコードを PLC に転送 |
 | `run` | VM 実行開始 |
+| `instance [n]` | 操作対象のインスタンスを表示 / 切り替え |
 | `status` | VM 状態を表示 |
 | `regs [count]` | レジスタ値を表示 |
 | `vars` | グローバル変数の値を表示 |
@@ -162,6 +164,24 @@ faruby> run
 faruby> status
 faruby> regs
 ```
+
+### 複数プログラムの並行実行
+
+インスタンスごとに独立した VM が動き、それぞれ別の Ruby プログラムを実行します。
+
+```
+faruby[0]> compile a.rb
+faruby[0]> load
+faruby[0]> run
+faruby[0]> instance 1
+faruby[1]> compile b.rb
+faruby[1]> load
+faruby[1]> run
+```
+
+`compile` / `load` / `run` / `status` / `regs` はすべて選択中のインスタンスに
+対して働きます。数は `faruby.yml` の `memory.instances` で決まり、変更したら
+`rake vm_core` で再生成して取り込み直します。
 
 ### グローバル変数による PLC デバイスの読み書き
 

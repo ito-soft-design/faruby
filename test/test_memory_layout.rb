@@ -174,7 +174,7 @@ class TestMemoryLayout < Minitest::Test
     l = Layout.default
     assert_equal "EM", l.device_name
     assert_operator l.base, :>=, 0
-    assert_equal 1, l.instances
+    assert_equal 2, l.instances
     assert_equal 80, l.max_regs
   end
 
