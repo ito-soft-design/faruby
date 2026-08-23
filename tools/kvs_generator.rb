@@ -660,20 +660,29 @@ module FaRuby
       end
     end
 
-    # 書き込み用に、レジスタの値を整数と実数の両方の形で用意する
+    # 書き込み用に、レジスタの値を必要な形へ変換する
     #
     # 実数レジスタを .S へ書くときは数値変換 (0方向へ切り捨て) が要り、
     # 整数レジスタを .F へ書くときは逆の変換が要る。ここで1度だけ済ませて
     # おけば、アクセス幅ごとの分岐でレジスタの型を見なくてよくなる。
+    #
+    # 【重要】両方の形を先に作ってはいけない。Infinity や NaN を整数へ変換すると
+    # 浮動小数点フォーマット異常になるため、.F へ書くだけの場合に整数への変換を
+    # 実行すると `$DM100F = 1.0 / 0` が PLC のエラーになる。
     def prepare_write_scratches(slot)
-      note "レジスタの値を整数・実数の両方の形で用意する"
-      note "アクセス幅ごとの分岐で型を見なくて済むようにするため"
+      note "レジスタの値を書き込み先の幅に合わせて変換する"
+      note "使う側の形だけを作る。Infinity や NaN の整数変換は"
+      note "浮動小数点フォーマット異常になるため、.F 書き込みでは行わない"
+      if_else_block("Z8 = #{ACCESS_F}") do
+        if_else_block("#{slot.tag} = #{TT_FLOAT}") { line "#{scratch_float} = #{slot.float}" }
+        line "#{scratch_float} = #{slot.value}      ' 整数→実数"
+        end_block
+      end
       if_else_block("#{slot.tag} = #{TT_FLOAT}") do
         line "#{scratch32} = #{slot.float}      ' 実数→整数 (0方向へ切り捨て)"
-        line "#{scratch_float} = #{slot.float}"
       end
       line "#{scratch32} = #{slot.value}"
-      line "#{scratch_float} = #{slot.value}      ' 整数→実数"
+      end_block
       end_block
     end
 

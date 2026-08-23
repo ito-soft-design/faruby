@@ -451,14 +451,21 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 Z8 = EM0:Z7
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + 32 + Z9
-                ' レジスタの値を整数・実数の両方の形で用意する
-                ' アクセス幅ごとの分岐で型を見なくて済むようにするため
-                IF EM0:Z2 = 5 THEN
-                    EM16.L:Z9 = EM1.F:Z2      ' 実数→整数 (0方向へ切り捨て)
-                    EM18.F:Z9 = EM1.F:Z2
+                ' レジスタの値を書き込み先の幅に合わせて変換する
+                ' 使う側の形だけを作る。Infinity や NaN の整数変換は
+                ' 浮動小数点フォーマット異常になるため、.F 書き込みでは行わない
+                IF Z8 = 4 THEN
+                    IF EM0:Z2 = 5 THEN
+                        EM18.F:Z9 = EM1.F:Z2
+                    ELSE
+                        EM18.F:Z9 = EM1.L:Z2      ' 整数→実数
+                    END IF
                 ELSE
-                    EM16.L:Z9 = EM1.L:Z2
-                    EM18.F:Z9 = EM1.L:Z2      ' 整数→実数
+                    IF EM0:Z2 = 5 THEN
+                        EM16.L:Z9 = EM1.F:Z2      ' 実数→整数 (0方向へ切り捨て)
+                    ELSE
+                        EM16.L:Z9 = EM1.L:Z2
+                    END IF
                 END IF
                 ' デバイスタイプ別書き込み
                 ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ

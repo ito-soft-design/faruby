@@ -228,6 +228,21 @@ class TestKvsGenerator < Minitest::Test
                  "符号ごとに上位ワードを直接書くと、被除数を壊してから符号を見ることになる")
   end
 
+  # 実数デバイスへ書くときは整数への変換を行わない。
+  #
+  # Infinity や NaN を整数へ変換すると浮動小数点フォーマット異常になるため、
+  # 両方の形を先に作ると `$DM100F = 1.0 / 0` が PLC のエラーになる。
+  def test_device_write_converts_only_what_it_uses
+    body = opcode_body(0x16) # OP_SETGV
+    to_int = "#{emitter.scratch32} = #{layout.device_name}#{SLOT_VALUE_OFFSET}.F:Z2"
+
+    assert_includes body, to_int, "実数→整数の変換自体はある"
+    width_branch = body.index("IF Z8 = #{ACCESS_F} THEN")
+    refute_nil width_branch, "アクセス幅で先に分岐する"
+    assert_operator width_branch, :<, body.index(to_int),
+                    "整数への変換は .F 以外の枝の中だけで行う"
+  end
+
   # === オペコードの網羅 ===
 
   def test_all_table_opcodes_are_emitted
