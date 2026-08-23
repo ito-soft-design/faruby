@@ -5,7 +5,7 @@
 
 require_relative "plc_adapters/keyence_kv"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class PlcConnection
       ADAPTERS = {

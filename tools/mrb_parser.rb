@@ -4,7 +4,7 @@
 # mruby の mrbc が出力する RITE 形式のバイトコードを解析し、
 # IREP (命令列、定数プール、シンボル) を抽出します。
 
-module MrubycOnPlc
+module FaRuby
   # RITE バイナリヘッダー (20 bytes)
   class RiteHeader
     MAGIC = "RITE"
@@ -273,7 +273,7 @@ if __FILE__ == $0
   end
 
   data = File.binread(ARGV[0])
-  parser = MrubycOnPlc::MrbParser.new(data).parse
+  parser = FaRuby::MrbParser.new(data).parse
 
   puts "=== RITE Header ==="
   puts parser.header

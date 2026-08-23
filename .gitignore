@@ -24,8 +24,8 @@ Gemfile.lock
 *.bak
 *.old
 
-# User config (use mrubycOnPlc.yml.example as template)
-mrubycOnPlc.yml
+# User config (use faruby.yml.example as template)
+faruby.yml
 
 # OS
 .DS_Store

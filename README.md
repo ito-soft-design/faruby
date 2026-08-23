@@ -1,6 +1,14 @@
-# mruby/c on PLC
+# faRuby
 
-PLC 上で Ruby (mruby/c) を動作させる実験的プロジェクトです。
+PLC 上で Ruby を動作させる実験的プロジェクトです。
+
+名称は **FA (Factory Automation) + Ruby** に由来します。
+
+| 用途 | 表記 |
+|------|------|
+| 表示名 | `faRuby` |
+| Ruby モジュール | `FaRuby` |
+| リポジトリ・設定ファイル | `faruby` |
 
 ## 概要
 
@@ -35,12 +43,14 @@ EM レジスタ値リスト ──通信──>  EM メモリに格納
 ## ディレクトリ構成
 
 ```
-mrubycOnPlc/
-├── tools/          PC側ツール (Ruby)
-├── simulator/      PC側 VM シミュレータ
-├── plc/keyence/    KV スクリプト VM
-├── test/           テスト
-└── doc/            ドキュメント
+faruby/
+├── tools/               PC側ツール (Ruby)
+├── simulator/           PC側 VM シミュレータ
+├── plc/keyence/         KV スクリプト VM (生成物)
+├── test/                テスト
+├── doc/                 ドキュメント
+├── faruby_default.yml   既定設定 (リポジトリに含む)
+└── faruby.yml           環境ごとの設定 (git 管理外)
 ```
 
 ## セットアップ
@@ -69,10 +79,10 @@ bundle install
 
 ### 設定ファイル
 
-`mrubycOnPlc.yml.example` をコピーして、環境に合わせて編集してください。
+`faruby.yml.example` をコピーして、環境に合わせて編集してください。
 
 ```bash
-cp mrubycOnPlc.yml.example mrubycOnPlc.yml
+cp faruby.yml.example faruby.yml
 ```
 
 ```yaml
@@ -87,6 +97,29 @@ mrbc:
 vm:
   steps_per_cycle: 50     # 1スキャンあたりの実行命令数
 ```
+
+設定は 2 層になっています。`faruby.yml` に書いた項目だけが `faruby_default.yml`
+の既定値を上書きし、書かなかった項目は既定値のまま残ります。既定値の一覧と
+説明は [faruby_default.yml](faruby_default.yml) にあります。
+
+### メモリ配置
+
+faRuby は PLC のデバイス領域を連続した 1 ブロックとして使用します。ラダーが
+使用していない領域を割り当ててください。重なると双方が壊れます。
+
+```yaml
+memory:
+  device: EM      # デバイス種別
+  base: 20000     # 領域の先頭アドレス
+  align: 1000     # ブロックサイズをこの倍数に切り上げる
+```
+
+既定では EM20000-EM24999 (5000 ワード) を使用します。内訳は `rake console` の
+`memmap` コマンドで確認できます。
+
+配置を変えたら `rake vm_core` で KV スクリプトを再生成し、KV Studio に取り込んで
+PLC へ転送し直してください。アドレスは生成されたスクリプトに定数として
+焼き込まれるためです。
 
 ## 使い方
 
@@ -103,15 +136,18 @@ rake console
 | コマンド | 説明 |
 |---------|------|
 | `compile <file.rb>` | Ruby ソースをコンパイル (.mrb 生成) |
-| `load <file.mrb>` | バイトコードを PLC に転送 |
+| `load` | バイトコードを PLC に転送 |
 | `run` | VM 実行開始 |
 | `status` | VM 状態を表示 |
 | `regs [count]` | レジスタ値を表示 |
+| `vars` | グローバル変数の値を表示 |
+| `dev <device> [value]` | デバイスの読み書き (例: `dev DM100`, `dev DM100 42`) |
 | `stop` | VM 停止 |
 | `reset` | VM リセット要求を送信 |
 | `verify` | PLC メモリとバイナリを比較 |
-| `disasm <file.mrb>` | バイトコード逆アセンブル表示 |
-| `sim <file.mrb>` | PC 上のシミュレータで実行 |
+| `memmap` | メモリ配置を表示 |
+| `disasm` | バイトコード逆アセンブル表示 |
+| `sim` | PC 上のシミュレータで実行 |
 | `connect` | PLC 接続確認 |
 | `help` | コマンド一覧 |
 | `quit` | 終了 |
@@ -119,13 +155,47 @@ rake console
 ### 使用例
 
 ```
-mrubycOnPlc> compile test.rb
-mrubycOnPlc> load
-mrubycOnPlc> verify
-mrubycOnPlc> run
-mrubycOnPlc> status
-mrubycOnPlc> regs
+faruby> compile test.rb
+faruby> load
+faruby> verify
+faruby> run
+faruby> status
+faruby> regs
 ```
+
+### グローバル変数による PLC デバイスの読み書き
+
+`$` で始まる変数名がそのままデバイスを指します。
+
+```ruby
+$DM100 = 42          # DM100 に書き込み (16ビット符号付き)
+$MR10 = 1            # ビットデバイスを ON
+$total = $DM100 + 1  # デバイス名でない場合は汎用グローバル変数
+```
+
+ワードデバイスはアクセス幅を末尾で指定できます。既定は 16 ビット符号付きです。
+
+| 表記 | 意味 | 占有 |
+|------|------|------|
+| `$DM100` | 16ビット符号付き | 1 ワード |
+| `$DM100U` | 16ビット符号なし | 1 ワード |
+| `$DM100L` | 32ビット符号付き | 2 ワード |
+| `$DM100D` | 32ビット符号なし | 2 ワード |
+
+同じデバイスを異なる幅で参照すると領域が重なります。割り当ての管理は
+プログラム作成者が行ってください。
+
+### PLC 側 VM の生成と取り込み
+
+`plc/keyence/*.kvs` は [tools/opcode_table.rb](tools/opcode_table.rb) から生成されます。
+直接編集しないでください。
+
+```bash
+rake vm_core
+```
+
+生成された `vm_core.kvs` と `vm_init.kvs` を KV Studio に取り込み、PLC へ転送します。
+命令を追加・変更した場合や、メモリ配置を変えた場合はこの手順が必要です。
 
 ### テストの実行
 
@@ -133,12 +203,18 @@ mrubycOnPlc> regs
 rake test
 ```
 
-## 現在のマイルストーン
+PC 上で完結するテストです。16 ビット丸めやアクセス幅サフィックスの解釈は
+KV スクリプトでしか起きないため、[test/ruby_programs/](test/ruby_programs/) の
+プログラムを実機で実行して確認します。
 
-### マイルストーン 1: 整数四則演算
+## 現在の対応範囲
 
-- 整数のロード、加減乗除、変数代入が動作する最小 VM
-- 対象: `a = 1 + 2; b = a * 3` のような単純な計算
+- 整数の四則演算、比較、代入
+- `if` / `while` による分岐と繰り返し
+- グローバル変数と PLC デバイスの読み書き
+- 値は 32 ビット符号付き整数
+
+メソッド定義・呼び出し、配列、文字列、浮動小数点数は未対応です。
 
 詳細は [doc/architecture.md](doc/architecture.md) を参照してください。
 

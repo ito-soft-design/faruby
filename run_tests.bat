@@ -1,4 +1,6 @@
 @echo off
 chcp 65001 >nul
-cd /d "c:\Users\伊藤勝良\Documents\ITO SOFT DESIGN\RubyOnPlc"
-ruby test/test_vm_simulator.rb
+rem %~dp0 = このバッチファイルのあるディレクトリ
+rem 絶対パスを直書きするとプロジェクトを移動・改名した際に壊れるため
+cd /d "%~dp0"
+rake test

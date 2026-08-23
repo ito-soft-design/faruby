@@ -4,13 +4,14 @@
 # PlcCodegen#memory_image の Hash を PLC に効率的に書き込み、
 # PLC から VM 状態やレジスタを読み出します。
 
-require_relative "../memory_map"
+require_relative "../vm_constants"
+require_relative "../memory_layout"
 require_relative "plc_adapters/base"
 
-module MrubycOnPlc
+module FaRuby
   module Console
     class MemoryTransfer
-      include MemoryMap
+      include VmConstants
 
       STATUS_LABELS = {
         VM_STOPPED => "停止",
@@ -19,8 +20,11 @@ module MrubycOnPlc
         VM_ERROR => "エラー",
       }.freeze
 
-      def initialize(adapter)
+      attr_reader :layout
+
+      def initialize(adapter, layout: MemoryLayout.default)
         @adapter = adapter
+        @layout = layout
       end
 
       # memory_image Hash を PLC に書き込む
@@ -36,38 +40,44 @@ module MrubycOnPlc
       end
 
       # VM 状態を PLC から読み出す
+      #
+      # read_words は先頭からの相対配列を返すため、絶対アドレスではなく
+      # VM 状態領域の先頭からのオフセットで引く
       def read_vm_state
-        words = @adapter.read_words(VM_STATE_BASE, 14)
+        base = layout.vm_state_base
+        words = @adapter.read_words(base, MemoryLayout::VM_STATE_WORDS)
+        at = ->(addr) { words[addr - base] }
+        status = at.(layout.status_addr)
         {
-          pc:              words[PC_ADDR],
-          status:          words[STATUS_ADDR],
-          status_label:    STATUS_LABELS[words[STATUS_ADDR]] || "不明(#{words[STATUS_ADDR]})",
-          error:           words[ERROR_ADDR],
-          step_count:      words[STEP_COUNT_ADDR] | (words[STEP_COUNT_ADDR + 1] << 16),
-          steps_per_cycle: words[STEPS_PER_CYCLE],
-          current_opcode:  words[CURRENT_OPCODE],
-          operand_a:       words[OPERAND_A],
-          operand_b:       words[OPERAND_B],
-          operand_c:       words[OPERAND_C],
-          bytecode_len:    words[BYTECODE_LEN_ADDR],
-          nregs:           words[NREGS_ADDR],
-          nlocals:         words[NLOCALS_ADDR],
-          reset_req:       words[RESET_REQ_ADDR],
+          pc:              at.(layout.pc_addr),
+          status:          status,
+          status_label:    STATUS_LABELS[status] || "不明(#{status})",
+          error:           at.(layout.error_addr),
+          step_count:      at.(layout.step_count_addr) | (at.(layout.step_count_addr + 1) << 16),
+          steps_per_cycle: at.(layout.steps_per_cycle_addr),
+          current_opcode:  at.(layout.current_opcode_addr),
+          operand_a:       at.(layout.operand_a_addr),
+          operand_b:       at.(layout.operand_b_addr),
+          operand_c:       at.(layout.operand_c_addr),
+          bytecode_len:    at.(layout.bytecode_len_addr),
+          nregs:           at.(layout.nregs_addr),
+          nlocals:         at.(layout.nlocals_addr),
+          reset_req:       at.(layout.reset_req_addr),
         }
       end
 
       # レジスタファイルを PLC から読み出す
       def read_registers(nregs = nil, nlocals = nil)
         unless nregs
-          meta = @adapter.read_words(NREGS_ADDR, 2)
+          meta = @adapter.read_words(layout.nregs_addr, 2)
           nregs = meta[0]
           nlocals = meta[1]
         end
-        nregs = [nregs, MAX_REGS].min
+        nregs = [nregs, layout.max_regs].min
         nlocals ||= 0
 
         # 値スロット (SLOT_WORDS ワード/レジスタ) をまとめて読む
-        words = @adapter.read_words(REG_FILE_BASE, nregs * SLOT_WORDS)
+        words = @adapter.read_words(layout.reg_file_base, nregs * SLOT_WORDS)
         regs = []
         nregs.times do |i|
           slot = i * SLOT_WORDS
@@ -91,7 +101,7 @@ module MrubycOnPlc
 
       # VM STATUS を書き込む
       def write_status(value)
-        @adapter.write_word(STATUS_ADDR, value)
+        @adapter.write_word(layout.status_addr, value)
       end
 
       # メモリイメージと PLC 上のデータを比較する
@@ -118,7 +128,7 @@ module MrubycOnPlc
 
       # VM リセット要求 (PLC 側の vm_init で処理される)
       def request_reset
-        @adapter.write_word(RESET_REQ_ADDR, 1)
+        @adapter.write_word(layout.reset_req_addr, 1)
       end
 
       private
@@ -127,7 +137,7 @@ module MrubycOnPlc
       # load 時は STATUS=STOPPED にする (run で明示的に開始するため)
       def normalize_image(image)
         image = image.dup
-        image[STATUS_ADDR] = VM_STOPPED
+        image[layout.status_addr] = VM_STOPPED
         image
       end
 
