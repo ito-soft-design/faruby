@@ -214,7 +214,10 @@ module FaRuby
         @pos += 8
         PoolEntry.new(:int64, value)
       when 5  # IREP_TT_FLOAT
-        value = @data[@pos, 8].unpack1("G")  # big-endian double
+        # 実数だけはリトルエンディアン。整数や長さは RITE 形式に従って
+        # ビッグエンディアンだが、mruby の dump.c は double をネイティブの
+        # バイト順のまま書き出すため (x86 でビルドした mrbc の出力を前提)。
+        value = @data[@pos, 8].unpack1("E")
         @pos += 8
         PoolEntry.new(:float, value)
       when 7  # IREP_TT_BIGINT

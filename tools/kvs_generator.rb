@@ -56,7 +56,7 @@ module FaRuby
     ].freeze
 
     # アクセス幅の分岐順。最後 (.S) が ELSE になる
-    ACCESS_BRANCHES = [[ACCESS_L, "L"], [ACCESS_U, "U"], [ACCESS_D, "D"]].freeze
+    ACCESS_BRANCHES = [[ACCESS_L, "L"], [ACCESS_U, "U"], [ACCESS_D, "D"], [ACCESS_F, "F"]].freeze
     ACCESS_DEFAULT_SUFFIX = "S"
 
     # KV スクリプトの比較演算子
@@ -190,7 +190,19 @@ module FaRuby
     def const(n) = n.to_s
 
     # 値スロットへの参照。1本の Z でタグと値の両方を指す
-    Slot = Struct.new(:tag, :value)
+    #
+    # 値は 32ビット整数 (.L) としても単精度実数 (.F) としても読めます。
+    # どちらで読むかは実行時のタグで決まるため、生成コードは両方の書き方を
+    # 出しておいて IF で選びます。
+    Slot = Struct.new(:tag, :z, :device_name) do
+      def ref(suffix) = "#{device_name}#{SLOT_VALUE_OFFSET}.#{suffix}:Z#{z}"
+
+      def value = ref("L")   # 32ビット符号付き整数
+      def float = ref("F")   # 単精度実数
+
+      # 値ワードを16ビット単位で指す (IEEE754 のビット列を直接書くときに使う)
+      def word(offset) = "#{device_name}#{SLOT_VALUE_OFFSET + offset}:Z#{z}"
+    end
 
     def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", layout.reg_file_base)
     def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", layout.reg_file_base)
@@ -274,7 +286,73 @@ module FaRuby
       line "#{dest.tag} = #{src.tag}"
     end
 
-    # R[a] = (lhs <op> rhs) ? true : false
+    # --- 数値演算の型振り分け ---
+    #
+    # KV スクリプトは整数と実数の混在を自動で昇格します (実機で確認済み)。
+    # 2.5 + 3 は 5.5 になり、.F への代入は数値変換されます。したがって
+    # faRuby がすることは「タグを見て .F と .L のどちらの書き方を出すか」
+    # だけで、IEEE754 を手で組み立てる必要はありません。
+    #
+    # 整数どうしの経路を残すのは、32ビット整数が単精度の仮数 (24ビット) に
+    # 収まらないためです。すべて実数にすると大きな整数の精度が落ちます。
+
+    # 両オペランドの型で分岐し、実数が絡む場合と整数どうしで別の本体を出す
+    #
+    # rhs_tag が nil のオペランド (バイトコードの即値) は常に整数として扱う。
+    def numeric_dispatch(lhs, rhs, rhs_tag: nil, &body)
+      is_float = ->(tag) { "#{tag} = #{TT_FLOAT}" }
+
+      if rhs_tag.nil?
+        # 即値は整数固定。左辺の型だけで 2 分岐
+        if_else_block(is_float.(lhs.tag)) { body.call(:float, lhs.float, rhs) }
+        body.call(:integer, lhs.value, rhs)
+        end_block
+        return
+      end
+
+      if_else_block(is_float.(lhs.tag)) do
+        if_else_block(is_float.(rhs_tag)) { body.call(:float, lhs.float, rhs.float) }
+        body.call(:float, lhs.float, rhs.value)
+        end_block
+      end
+      if_else_block(is_float.(rhs_tag)) { body.call(:float, lhs.value, rhs.float) }
+      body.call(:integer, lhs.value, rhs.value)
+      end_block
+      end_block
+    end
+
+    # R[a] = R[a] <op> R[a+1] / R[a] <op> 即値
+    def set_reg_arith(name, op, immediate: nil)
+      dest = reg_slot(name)
+      rhs = immediate ? operand(immediate) : reg_next_slot(name)
+      rhs_tag = immediate ? nil : reg_next_tag(name)
+
+      numeric_dispatch(dest, rhs, rhs_tag: rhs_tag) do |kind, l, r|
+        if kind == :float
+          line "#{dest.float} = #{binop(op, l, r)}"
+          line "#{dest.tag} = #{TT_FLOAT}"
+        else
+          line "#{dest.value} = #{binop(op, l, r)}"
+          line "#{dest.tag} = #{TT_INTEGER}"
+        end
+      end
+    end
+
+    # R[a] = (R[a] <op> R[a+1]) ? true : false
+    #
+    # 数値は型が違っても値で比べる (Ruby では 1 < 1.5 も 1 == 1.0 も成り立つ)。
+    def set_reg_cmp(name, op)
+      dest = reg_slot(name)
+      rhs = reg_next_slot(name)
+
+      numeric_dispatch(dest, rhs, rhs_tag: reg_next_tag(name)) do |_kind, l, r|
+        if_else_block(cmp(op, l, r)) { assign_bool(dest, true) }
+        assign_bool(dest, false)
+        end_block
+      end
+    end
+
+    # R[a] = (lhs <op> rhs) ? true : false (型を見ない単純比較)
     def set_reg_bool(name, op, lhs, rhs)
       dest = reg_slot(name)
       if_else_block(cmp(op, lhs, rhs)) { assign_bool(dest, true) }
@@ -289,41 +367,41 @@ module FaRuby
     def set_reg_eq(name)
       lhs = reg_slot(name)
       rhs = reg_next_slot(name)
-      note "型が同じで値も同じときだけ真 (nil == false は偽)"
+
+      note "数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)"
+      note "数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)"
       note "結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する"
       line "#{scratch_lo} = 0"
+
+      if_else_block(numeric?(lhs.tag)) do
+        if_else_block(numeric?(rhs.tag)) do
+          numeric_dispatch(lhs, rhs, rhs_tag: rhs.tag) do |_kind, l, r|
+            if_(cmp(:eq, l, r)) { line "#{scratch_lo} = 1" }
+          end
+        end
+        note "数値と非数値は等しくない"
+        end_block
+      end
       if_(cmp(:eq, lhs.tag, rhs.tag)) do
         if_(cmp(:eq, lhs.value, rhs.value)) { line "#{scratch_lo} = 1" }
       end
+      end_block
+
       if_else_block("#{scratch_lo} = 1") { assign_bool(lhs, true) }
       assign_bool(lhs, false)
       end_block
     end
 
-    # R[a] = lhs / rhs (0除算はエラー停止)
+    # R[a] = R[a] / R[a+1]
     #
-    # Ruby の整数除算は切り下げ (-7 / 2 = -4) だが、KV スクリプトの / は
-    # 0 方向へ切り捨てる (-7 / 2 = -3)。符号が異なり余りが出る場合に 1 を引いて
-    # 合わせる。実機で -3 になることを確認済み。
-    def set_reg_div(name, lhs, rhs, error_code)
+    # 整数どうしは Ruby と同じ切り下げ。実数が絡めば実数除算。
+    def set_reg_div(name, error_code)
       dest = reg_slot(name)
-      if_else_block(cmp(:ne, rhs, const(0))) do
-        note "Ruby の整数除算は切り下げ。KV の / は0方向へ切り捨てるため補正する"
-        line "#{scratch32} = #{lhs}       ' 被除数を退避"
-        line "#{dest.value} = #{binop(:div, lhs, rhs)}"
-        line "#{scratch32_b} = #{scratch32} - #{dest.value} * #{rhs}   ' 余り"
-        if_("#{scratch32_b} <> 0") do
-          note "符号が異なるときだけ切り下げになる"
-          if_else_block("#{scratch32} < 0") do
-            if_("#{rhs} > 0") { line "#{dest.value} = #{dest.value} - 1" }
-          end
-          if_("#{rhs} < 0") { line "#{dest.value} = #{dest.value} - 1" }
-          end_block
-        end
-        line "#{dest.tag} = #{TT_INTEGER}"
+      rhs = reg_next_slot(name)
+
+      numeric_dispatch(dest, rhs, rhs_tag: reg_next_tag(name)) do |kind, l, r|
+        kind == :float ? float_div(dest, l, r) : integer_div(dest, l, r, error_code)
       end
-      vm_error(error_code)
-      end_block
     end
 
     def load_global_into_reg(dest, sym_operand)
@@ -335,7 +413,9 @@ module FaRuby
     def store_reg_into_global(sym_operand, src)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
-      device_dispatch(:write, slot: global_reg_slot(src), error_code: 0x16)
+      slot = global_reg_slot(src)
+      prepare_write_scratches(slot)
+      device_dispatch(:write, slot: slot, error_code: 0x16)
     end
 
     # --- 真偽判定 ---
@@ -381,6 +461,9 @@ module FaRuby
     def scratch_hi  = state(layout.temp32_addr + 1)
     def scratch32   = state_long(layout.temp32_addr)
     def scratch32_b = state_long(layout.temp32_b_addr)
+
+    # 2つ目のスクラッチを実数として見たもの (デバイス書き込みの型合わせ用)
+    def scratch_float = "#{layout.device_name}#{layout.offset_of(layout.temp32_b_addr)}.F:Z#{Z_INSTANCE}"
 
     # --- オペランドフェッチ (命令形式から生成) ---
 
@@ -445,6 +528,55 @@ module FaRuby
 
     private
 
+    # タグが数値 (整数か実数) かどうかの条件式
+    def numeric?(tag) = "#{tag} >= #{TT_INTEGER}"
+
+    # 整数どうしの除算 (Ruby と同じ切り下げ、0除算はエラー停止)
+    #
+    # KV スクリプトの / は 0 方向へ切り捨てる (-7 / 2 = -3、実機で確認済み)。
+    # Ruby は切り下げ (-4) なので、符号が異なり余りが出る場合に 1 を引く。
+    def integer_div(dest, lhs, rhs, error_code)
+      if_else_block(cmp(:ne, rhs, const(0))) do
+        note "Ruby の整数除算は切り下げ。KV の / は0方向へ切り捨てるため補正する"
+        line "#{scratch32} = #{lhs}       ' 被除数を退避"
+        line "#{dest.value} = #{binop(:div, lhs, rhs)}"
+        line "#{scratch32_b} = #{scratch32} - #{dest.value} * #{rhs}   ' 余り"
+        if_("#{scratch32_b} <> 0") do
+          note "符号が異なるときだけ切り下げになる"
+          if_else_block("#{scratch32} < 0") do
+            if_("#{rhs} > 0") { line "#{dest.value} = #{dest.value} - 1" }
+          end
+          if_("#{rhs} < 0") { line "#{dest.value} = #{dest.value} - 1" }
+          end_block
+        end
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+      vm_error(error_code)
+      end_block
+    end
+
+    # 実数が絡む除算
+    #
+    # Ruby の 1.0 / 0 は Infinity で例外にならない。一方 KV スクリプトで
+    # 0 除算を実行すると軽度エラー CR2012 が出て代入先も更新されない
+    # (実機で確認済み)。そこで除数が 0 のときは除算を実行せず、
+    # IEEE754 のビット列を直接書き込む。
+    def float_div(dest, lhs, rhs)
+      if_else_block(cmp(:ne, rhs, const(0))) do
+        line "#{dest.float} = #{binop(:div, lhs, rhs)}"
+      end
+      note "0 除算。KV の / は CR2012 を出すため実行せず、"
+      note "IEEE754 の無限大 / 非数のビット列を直接置く"
+      line "#{dest.word(0)} = 0"
+      if_else_block("#{lhs} > 0") { line "#{dest.word(1)} = #{FLOAT_POS_INF_HI}   ' +Infinity" }
+      if_else_block("#{lhs} < 0") { line "#{dest.word(1)} = #{FLOAT_NEG_INF_HI}   ' -Infinity" }
+      line "#{dest.word(1)} = #{FLOAT_NAN_HI}   ' 0.0 / 0.0 は NaN"
+      end_block
+      end_block
+      end_block
+      line "#{dest.tag} = #{TT_FLOAT}"
+    end
+
     # スロットに true / false を書く
     def assign_bool(slot, value)
       tag = value ? TT_TRUE : TT_FALSE
@@ -469,10 +601,8 @@ module FaRuby
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
       line "Z#{z} = #{index_expr} + #{block_offset(base)}"
-      @slot_cache[key] = Slot.new(
-        "#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}",
-        "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z#{z}"
-      )
+      @slot_cache[key] = Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}",
+                                  z, layout.device_name)
     end
 
     # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
@@ -502,20 +632,47 @@ module FaRuby
         chain_head(first, "Z8 = #{value}")
         first = false
         indent
-        line word_assignment(mode, name, suffix, slot)
+        word_access(mode, name, suffix, slot)
         dedent
       end
       line "ELSE"
       indent
-      line word_assignment(mode, name, ACCESS_DEFAULT_SUFFIX, slot)
+      word_access(mode, name, ACCESS_DEFAULT_SUFFIX, slot)
       dedent
       line "END IF"
-      line "#{slot.tag} = #{TT_INTEGER}" if mode == :read
     end
 
-    def word_assignment(mode, name, suffix, slot)
+    # 1つのアクセス幅に対する読み書き
+    #
+    # 読み取りは幅に応じた型タグも書く。書き込みはあらかじめ用意した
+    # 整数・実数のスクラッチを使うため、レジスタの型を再び見なくてよい。
+    def word_access(mode, name, suffix, slot)
       device = "#{name}0.#{suffix}:Z6"
-      mode == :read ? "#{slot.value} = #{device}" : "#{device} = #{slot.value}"
+      float = suffix == "F"
+
+      if mode == :read
+        line "#{float ? slot.float : slot.value} = #{device}"
+        line "#{slot.tag} = #{float ? TT_FLOAT : TT_INTEGER}"
+      else
+        line "#{device} = #{float ? scratch_float : scratch32}"
+      end
+    end
+
+    # 書き込み用に、レジスタの値を整数と実数の両方の形で用意する
+    #
+    # 実数レジスタを .S へ書くときは数値変換 (0方向へ切り捨て) が要り、
+    # 整数レジスタを .F へ書くときは逆の変換が要る。ここで1度だけ済ませて
+    # おけば、アクセス幅ごとの分岐でレジスタの型を見なくてよくなる。
+    def prepare_write_scratches(slot)
+      note "レジスタの値を整数・実数の両方の形で用意する"
+      note "アクセス幅ごとの分岐で型を見なくて済むようにするため"
+      if_else_block("#{slot.tag} = #{TT_FLOAT}") do
+        line "#{scratch32} = #{slot.float}      ' 実数→整数 (0方向へ切り捨て)"
+        line "#{scratch_float} = #{slot.float}"
+      end
+      line "#{scratch32} = #{slot.value}"
+      line "#{scratch_float} = #{slot.value}      ' 整数→実数"
+      end_block
     end
 
     def bit_device_body(mode, name, slot, set_res)
@@ -525,11 +682,11 @@ module FaRuby
         assign_bool(slot, false)
         end_block
       elsif set_res
-        if_else_block("#{slot.value} <> 0") { line "SET(#{bit})" }
+        if_else_block("#{scratch32} <> 0") { line "SET(#{bit})" }
         line "RES(#{bit})"
         end_block
       else
-        if_else_block("#{slot.value} <> 0") { line "#{bit} = 1" }
+        if_else_block("#{scratch32} <> 0") { line "#{bit} = 1" }
         line "#{bit} = 0"
         end_block
       end

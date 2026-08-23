@@ -332,6 +332,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 '   2=.L(32bit符号付き)
                 '   1=.U(16bit符号なし)
                 '   3=.D(32bit符号なし)
+                '   4=.F(実数)
                 '   それ以外=.S(16bit符号付き/既定)
                 ' ビットデバイス (R, MR, B, L, T, C): ON→true, OFF→false
                 '   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
@@ -339,36 +340,54 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 IF Z5 = 0 THEN
                     IF Z8 = 2 THEN
                         EM1.L:Z2 = EM0.L:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 1 THEN
                         EM1.L:Z2 = EM0.U:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 3 THEN
                         EM1.L:Z2 = EM0.D:Z6
+                        EM0:Z2 = 4
+                    ELSE IF Z8 = 4 THEN
+                        EM1.F:Z2 = EM0.F:Z6
+                        EM0:Z2 = 5
                     ELSE
                         EM1.L:Z2 = EM0.S:Z6
+                        EM0:Z2 = 4
                     END IF
-                    EM0:Z2 = 4
                 ELSE IF Z5 = 1 THEN
                     IF Z8 = 2 THEN
                         EM1.L:Z2 = DM0.L:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 1 THEN
                         EM1.L:Z2 = DM0.U:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 3 THEN
                         EM1.L:Z2 = DM0.D:Z6
+                        EM0:Z2 = 4
+                    ELSE IF Z8 = 4 THEN
+                        EM1.F:Z2 = DM0.F:Z6
+                        EM0:Z2 = 5
                     ELSE
                         EM1.L:Z2 = DM0.S:Z6
+                        EM0:Z2 = 4
                     END IF
-                    EM0:Z2 = 4
                 ELSE IF Z5 = 2 THEN
                     IF Z8 = 2 THEN
                         EM1.L:Z2 = ZF0.L:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 1 THEN
                         EM1.L:Z2 = ZF0.U:Z6
+                        EM0:Z2 = 4
                     ELSE IF Z8 = 3 THEN
                         EM1.L:Z2 = ZF0.D:Z6
+                        EM0:Z2 = 4
+                    ELSE IF Z8 = 4 THEN
+                        EM1.F:Z2 = ZF0.F:Z6
+                        EM0:Z2 = 5
                     ELSE
                         EM1.L:Z2 = ZF0.S:Z6
+                        EM0:Z2 = 4
                     END IF
-                    EM0:Z2 = 4
                 ELSE IF Z5 = 3 THEN
                     IF R0:Z6 THEN
                         EM1.L:Z2 = 1
@@ -440,76 +459,92 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 Z8 = EM0:Z7
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + 32 + Z9
+                ' レジスタの値を整数・実数の両方の形で用意する
+                ' アクセス幅ごとの分岐で型を見なくて済むようにするため
+                IF EM0:Z2 = 5 THEN
+                    EM16.L:Z9 = EM1.F:Z2      ' 実数→整数 (0方向へ切り捨て)
+                    EM18.F:Z9 = EM1.F:Z2
+                ELSE
+                    EM16.L:Z9 = EM1.L:Z2
+                    EM18.F:Z9 = EM1.L:Z2      ' 整数→実数
+                END IF
                 ' デバイスタイプ別書き込み
                 ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
                 '   2=.L(32bit符号付き)
                 '   1=.U(16bit符号なし)
                 '   3=.D(32bit符号なし)
+                '   4=.F(実数)
                 '   それ以外=.S(16bit符号付き/既定)
                 ' ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF
                 '   true=1 / false=nil=0 なので値だけで判定できる
                 IF Z5 = 0 THEN
                     IF Z8 = 2 THEN
-                        EM0.L:Z6 = EM1.L:Z2
+                        EM0.L:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 1 THEN
-                        EM0.U:Z6 = EM1.L:Z2
+                        EM0.U:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 3 THEN
-                        EM0.D:Z6 = EM1.L:Z2
+                        EM0.D:Z6 = EM16.L:Z9
+                    ELSE IF Z8 = 4 THEN
+                        EM0.F:Z6 = EM18.F:Z9
                     ELSE
-                        EM0.S:Z6 = EM1.L:Z2
+                        EM0.S:Z6 = EM16.L:Z9
                     END IF
                 ELSE IF Z5 = 1 THEN
                     IF Z8 = 2 THEN
-                        DM0.L:Z6 = EM1.L:Z2
+                        DM0.L:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 1 THEN
-                        DM0.U:Z6 = EM1.L:Z2
+                        DM0.U:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 3 THEN
-                        DM0.D:Z6 = EM1.L:Z2
+                        DM0.D:Z6 = EM16.L:Z9
+                    ELSE IF Z8 = 4 THEN
+                        DM0.F:Z6 = EM18.F:Z9
                     ELSE
-                        DM0.S:Z6 = EM1.L:Z2
+                        DM0.S:Z6 = EM16.L:Z9
                     END IF
                 ELSE IF Z5 = 2 THEN
                     IF Z8 = 2 THEN
-                        ZF0.L:Z6 = EM1.L:Z2
+                        ZF0.L:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 1 THEN
-                        ZF0.U:Z6 = EM1.L:Z2
+                        ZF0.U:Z6 = EM16.L:Z9
                     ELSE IF Z8 = 3 THEN
-                        ZF0.D:Z6 = EM1.L:Z2
+                        ZF0.D:Z6 = EM16.L:Z9
+                    ELSE IF Z8 = 4 THEN
+                        ZF0.F:Z6 = EM18.F:Z9
                     ELSE
-                        ZF0.S:Z6 = EM1.L:Z2
+                        ZF0.S:Z6 = EM16.L:Z9
                     END IF
                 ELSE IF Z5 = 3 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         R0:Z6 = 1
                     ELSE
                         R0:Z6 = 0
                     END IF
                 ELSE IF Z5 = 4 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         MR0:Z6 = 1
                     ELSE
                         MR0:Z6 = 0
                     END IF
                 ELSE IF Z5 = 5 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         B0:Z6 = 1
                     ELSE
                         B0:Z6 = 0
                     END IF
                 ELSE IF Z5 = 6 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         L0:Z6 = 1
                     ELSE
                         L0:Z6 = 0
                     END IF
                 ELSE IF Z5 = 8 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         SET(T0:Z6)
                     ELSE
                         RES(T0:Z6)
                     END IF
                 ELSE IF Z5 = 9 THEN
-                    IF EM1.L:Z2 <> 0 THEN
+                    IF EM16.L:Z9 <> 0 THEN
                         SET(C0:Z6)
                     ELSE
                         RES(C0:Z6)
@@ -613,8 +648,23 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                EM1.L:Z1 = EM1.L:Z1 + EM1.L:Z2
-                EM0:Z1 = 4
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.F:Z1 + EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.F:Z1 = EM1.F:Z1 + EM1.L:Z2
+                        EM0:Z1 = 5
+                    END IF
+                ELSE
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.L:Z1 + EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.L:Z1 = EM1.L:Z1 + EM1.L:Z2
+                        EM0:Z1 = 4
+                    END IF
+                END IF
 
             ELSE IF EM6:Z9 = 61 THEN
                 ' OP_ADDI (BB): R[a] = R[a] + b
@@ -625,8 +675,13 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM8:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
-                EM1.L:Z1 = EM1.L:Z1 + EM8:Z9
-                EM0:Z1 = 4
+                IF EM0:Z1 = 5 THEN
+                    EM1.F:Z1 = EM1.F:Z1 + EM8:Z9
+                    EM0:Z1 = 5
+                ELSE
+                    EM1.L:Z1 = EM1.L:Z1 + EM8:Z9
+                    EM0:Z1 = 4
+                END IF
 
             ELSE IF EM6:Z9 = 62 THEN
                 ' OP_SUB (B): R[a] = R[a] - R[a+1]
@@ -635,8 +690,23 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                EM1.L:Z1 = EM1.L:Z1 - EM1.L:Z2
-                EM0:Z1 = 4
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.F:Z1 - EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.F:Z1 = EM1.F:Z1 - EM1.L:Z2
+                        EM0:Z1 = 5
+                    END IF
+                ELSE
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.L:Z1 - EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.L:Z1 = EM1.L:Z1 - EM1.L:Z2
+                        EM0:Z1 = 4
+                    END IF
+                END IF
 
             ELSE IF EM6:Z9 = 63 THEN
                 ' OP_SUBI (BB): R[a] = R[a] - b
@@ -647,8 +717,13 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM8:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
-                EM1.L:Z1 = EM1.L:Z1 - EM8:Z9
-                EM0:Z1 = 4
+                IF EM0:Z1 = 5 THEN
+                    EM1.F:Z1 = EM1.F:Z1 - EM8:Z9
+                    EM0:Z1 = 5
+                ELSE
+                    EM1.L:Z1 = EM1.L:Z1 - EM8:Z9
+                    EM0:Z1 = 4
+                END IF
 
             ELSE IF EM6:Z9 = 64 THEN
                 ' OP_MUL (B): R[a] = R[a] * R[a+1]
@@ -657,38 +732,113 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                EM1.L:Z1 = EM1.L:Z1 * EM1.L:Z2
-                EM0:Z1 = 4
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.F:Z1 * EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.F:Z1 = EM1.F:Z1 * EM1.L:Z2
+                        EM0:Z1 = 5
+                    END IF
+                ELSE
+                    IF EM0:Z2 = 5 THEN
+                        EM1.F:Z1 = EM1.L:Z1 * EM1.F:Z2
+                        EM0:Z1 = 5
+                    ELSE
+                        EM1.L:Z1 = EM1.L:Z1 * EM1.L:Z2
+                        EM0:Z1 = 4
+                    END IF
+                END IF
 
             ELSE IF EM6:Z9 = 65 THEN
-                ' OP_DIV (B): R[a] = R[a] / R[a+1] (切り下げ)
+                ' OP_DIV (B): R[a] = R[a] / R[a+1]
                 Z1 = EM0:Z9 + 352 + Z9
                 EM7:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                IF EM1.L:Z2 <> 0 THEN
-                    ' Ruby の整数除算は切り下げ。KV の / は0方向へ切り捨てるため補正する
-                    EM16.L:Z9 = EM1.L:Z1       ' 被除数を退避
-                    EM1.L:Z1 = EM1.L:Z1 / EM1.L:Z2
-                    EM18.L:Z9 = EM16.L:Z9 - EM1.L:Z1 * EM1.L:Z2   ' 余り
-                    IF EM18.L:Z9 <> 0 THEN
-                        ' 符号が異なるときだけ切り下げになる
-                        IF EM16.L:Z9 < 0 THEN
-                            IF EM1.L:Z2 > 0 THEN
-                                EM1.L:Z1 = EM1.L:Z1 - 1
-                            END IF
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z2 <> 0 THEN
+                            EM1.F:Z1 = EM1.F:Z1 / EM1.F:Z2
                         ELSE
-                            IF EM1.L:Z2 < 0 THEN
-                                EM1.L:Z1 = EM1.L:Z1 - 1
+                            ' 0 除算。KV の / は CR2012 を出すため実行せず、
+                            ' IEEE754 の無限大 / 非数のビット列を直接置く
+                            EM1:Z1 = 0
+                            IF EM1.F:Z1 > 0 THEN
+                                EM2:Z1 = 32640   ' +Infinity
+                            ELSE
+                                IF EM1.F:Z1 < 0 THEN
+                                    EM2:Z1 = 65408   ' -Infinity
+                                ELSE
+                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
+                                END IF
                             END IF
                         END IF
+                        EM0:Z1 = 5
+                    ELSE
+                        IF EM1.L:Z2 <> 0 THEN
+                            EM1.F:Z1 = EM1.F:Z1 / EM1.L:Z2
+                        ELSE
+                            ' 0 除算。KV の / は CR2012 を出すため実行せず、
+                            ' IEEE754 の無限大 / 非数のビット列を直接置く
+                            EM1:Z1 = 0
+                            IF EM1.F:Z1 > 0 THEN
+                                EM2:Z1 = 32640   ' +Infinity
+                            ELSE
+                                IF EM1.F:Z1 < 0 THEN
+                                    EM2:Z1 = 65408   ' -Infinity
+                                ELSE
+                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
+                                END IF
+                            END IF
+                        END IF
+                        EM0:Z1 = 5
                     END IF
-                    EM0:Z1 = 4
                 ELSE
-                    EM1:Z9 = 3
-                    EM2:Z9 = 1
-                    BREAK
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z2 <> 0 THEN
+                            EM1.F:Z1 = EM1.L:Z1 / EM1.F:Z2
+                        ELSE
+                            ' 0 除算。KV の / は CR2012 を出すため実行せず、
+                            ' IEEE754 の無限大 / 非数のビット列を直接置く
+                            EM1:Z1 = 0
+                            IF EM1.L:Z1 > 0 THEN
+                                EM2:Z1 = 32640   ' +Infinity
+                            ELSE
+                                IF EM1.L:Z1 < 0 THEN
+                                    EM2:Z1 = 65408   ' -Infinity
+                                ELSE
+                                    EM2:Z1 = 32704   ' 0.0 / 0.0 は NaN
+                                END IF
+                            END IF
+                        END IF
+                        EM0:Z1 = 5
+                    ELSE
+                        IF EM1.L:Z2 <> 0 THEN
+                            ' Ruby の整数除算は切り下げ。KV の / は0方向へ切り捨てるため補正する
+                            EM16.L:Z9 = EM1.L:Z1       ' 被除数を退避
+                            EM1.L:Z1 = EM1.L:Z1 / EM1.L:Z2
+                            EM18.L:Z9 = EM16.L:Z9 - EM1.L:Z1 * EM1.L:Z2   ' 余り
+                            IF EM18.L:Z9 <> 0 THEN
+                                ' 符号が異なるときだけ切り下げになる
+                                IF EM16.L:Z9 < 0 THEN
+                                    IF EM1.L:Z2 > 0 THEN
+                                        EM1.L:Z1 = EM1.L:Z1 - 1
+                                    END IF
+                                ELSE
+                                    IF EM1.L:Z2 < 0 THEN
+                                        EM1.L:Z1 = EM1.L:Z1 - 1
+                                    END IF
+                                END IF
+                            END IF
+                            EM0:Z1 = 4
+                        ELSE
+                            EM1:Z9 = 3
+                            EM2:Z9 = 1
+                            BREAK
+                        END IF
+                    END IF
                 END IF
 
             ELSE IF EM6:Z9 = 66 THEN
@@ -698,12 +848,41 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                ' 型が同じで値も同じときだけ真 (nil == false は偽)
+                ' 数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)
+                ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
                 ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
                 EM16:Z9 = 0
-                IF EM0:Z1 = EM0:Z2 THEN
-                    IF EM1.L:Z1 = EM1.L:Z2 THEN
-                        EM16:Z9 = 1
+                IF EM0:Z1 >= 4 THEN
+                    IF EM0:Z2 >= 4 THEN
+                        IF EM0:Z1 = 5 THEN
+                            IF EM0:Z2 = 5 THEN
+                                IF EM1.F:Z1 = EM1.F:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            ELSE
+                                IF EM1.F:Z1 = EM1.L:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            END IF
+                        ELSE
+                            IF EM0:Z2 = 5 THEN
+                                IF EM1.L:Z1 = EM1.F:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            ELSE
+                                IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            END IF
+                        END IF
+                    ELSE
+                        ' 数値と非数値は等しくない
+                    END IF
+                ELSE
+                    IF EM0:Z1 = EM0:Z2 THEN
+                        IF EM1.L:Z1 = EM1.L:Z2 THEN
+                            EM16:Z9 = 1
+                        END IF
                     END IF
                 END IF
                 IF EM16:Z9 = 1 THEN
@@ -721,12 +900,42 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                IF EM1.L:Z1 < EM1.L:Z2 THEN
-                    EM1.L:Z1 = 1
-                    EM0:Z1 = 3
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z1 < EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.F:Z1 < EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 ELSE
-                    EM1.L:Z1 = 0
-                    EM0:Z1 = 2
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.L:Z1 < EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.L:Z1 < EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 END IF
 
             ELSE IF EM6:Z9 = 68 THEN
@@ -736,12 +945,42 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                IF EM1.L:Z1 <= EM1.L:Z2 THEN
-                    EM1.L:Z1 = 1
-                    EM0:Z1 = 3
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z1 <= EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.F:Z1 <= EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 ELSE
-                    EM1.L:Z1 = 0
-                    EM0:Z1 = 2
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.L:Z1 <= EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.L:Z1 <= EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 END IF
 
             ELSE IF EM6:Z9 = 69 THEN
@@ -751,12 +990,42 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                IF EM1.L:Z1 > EM1.L:Z2 THEN
-                    EM1.L:Z1 = 1
-                    EM0:Z1 = 3
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z1 > EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.F:Z1 > EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 ELSE
-                    EM1.L:Z1 = 0
-                    EM0:Z1 = 2
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.L:Z1 > EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.L:Z1 > EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 END IF
 
             ELSE IF EM6:Z9 = 70 THEN
@@ -766,12 +1035,42 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
-                IF EM1.L:Z1 >= EM1.L:Z2 THEN
-                    EM1.L:Z1 = 1
-                    EM0:Z1 = 3
+                IF EM0:Z1 = 5 THEN
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.F:Z1 >= EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.F:Z1 >= EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 ELSE
-                    EM1.L:Z1 = 0
-                    EM0:Z1 = 2
+                    IF EM0:Z2 = 5 THEN
+                        IF EM1.L:Z1 >= EM1.F:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    ELSE
+                        IF EM1.L:Z1 >= EM1.L:Z2 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
+                    END IF
                 END IF
 
             ELSE IF EM6:Z9 = 105 THEN

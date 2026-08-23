@@ -308,34 +308,34 @@ module FaRuby
 
       # 二項算術: R[a] = R[a] <op> R[a+1]
       #
-      # 型は見ずに値だけを使う。整数以外を渡すと Ruby なら TypeError だが、
-      # faRuby は例外を持たないため値をそのまま計算する。
+      # 両オペランドの型で振り分ける。実数が絡めば実数演算になり、
+      # 整数どうしなら整数演算のまま (32ビット整数は単精度に収まらないため)。
       { 0x3C => :add, 0x3E => :sub, 0x40 => :mul }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} R[a+1]") do |vm|
-          vm.set_reg_int(:a, vm.binop(op, vm.reg(:a), vm.reg_next(:a)))
+          vm.set_reg_arith(:a, op)
         end
       end
 
-      # 即値算術: R[a] = R[a] <op> b
+      # 即値算術: R[a] = R[a] <op> b (b は常に整数)
       { 0x3D => :add, 0x3F => :sub }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} b") do |vm|
-          vm.set_reg_int(:a, vm.binop(op, vm.reg(:a), vm.operand(:b)))
+          vm.set_reg_arith(:a, op, immediate: :b)
         end
       end
 
-      defs << OpcodeDef.new(0x41, "R[a] = R[a] / R[a+1] (切り下げ)") do |vm|
-        vm.set_reg_div(:a, vm.reg(:a), vm.reg_next(:a), DIVIDE_BY_ZERO_ERROR)
+      defs << OpcodeDef.new(0x41, "R[a] = R[a] / R[a+1]") do |vm|
+        vm.set_reg_div(:a, DIVIDE_BY_ZERO_ERROR)
       end
 
-      # 等値比較は型も見る (nil == false は偽)
+      # 等値比較は型も見る (nil == false は偽、1 == 1.0 は真)
       defs << OpcodeDef.new(0x42, "R[a] = (R[a] == R[a+1]) ? true : false") do |vm|
         vm.set_reg_eq(:a)
       end
 
-      # 大小比較: 値だけを比べる
+      # 大小比較: 数値は型が違っても値で比べる
       { 0x43 => :lt, 0x44 => :le, 0x45 => :gt, 0x46 => :ge }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = (R[a] #{OPERATOR_TEXT[op]} R[a+1]) ? true : false") do |vm|
-          vm.set_reg_bool(:a, op, vm.reg(:a), vm.reg_next(:a))
+          vm.set_reg_cmp(:a, op)
         end
       end
 

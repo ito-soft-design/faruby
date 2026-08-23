@@ -293,21 +293,25 @@ end
     assert_equal(-31072, sim.global_value("$lo"))  # 0x86A0 (34464) を符号付き16ビットで読んだ値
   end
 
-  # F サフィックスは未実装なのでコンパイル時にエラーになる
-  def test_device_suffix_float_is_rejected
+  # F サフィックスは実数として扱われる。整数を代入すると実数に変換される
+  def test_device_suffix_float_is_mapped
     rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
-    rb_file.write("$DM460F = 1\n")
+    rb_file.write("$DM460F = 1.5\n")
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
 
     begin
       assert system(@mrbc, "-o", mrb_path, rb_file.path)
       irep = FaRuby::MrbParser.new(File.binread(mrb_path)).parse.irep
-      err = assert_raises(FaRuby::CodegenError) do
-        FaRuby::PlcCodegen.new(irep).memory_image
-      end
-      assert_match(/実数/, err.message)
-      assert_match(/\$DM460F/, err.message)
+      codegen = FaRuby::PlcCodegen.new(irep)
+
+      assert_equal FaRuby::VmConstants::ACCESS_F, codegen.device_mappings[0][:access_type]
+      # 実数リテラルは IEEE754 単精度でプールに載る
+      image = codegen.memory_image
+      layout = codegen.layout
+      bits = image[layout.pool_addr(0)] | (image[layout.pool_addr(0) + 1] << 16)
+      assert_equal FaRuby::VmConstants::TT_FLOAT, image[layout.pool_type_addr(0)]
+      assert_in_delta 1.5, [bits].pack("V").unpack1("e"), 1e-6
     ensure
       rb_file.unlink
       File.delete(mrb_path) if File.exist?(mrb_path)

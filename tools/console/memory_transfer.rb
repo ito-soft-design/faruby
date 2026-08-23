@@ -86,7 +86,12 @@ module FaRuby
           lo = words[slot + SLOT_VALUE_OFFSET] & 0xFFFF
           hi = words[slot + SLOT_VALUE_OFFSET + 1] & 0xFFFF
           val = (hi << 16) | lo
-          val -= 0x1_0000_0000 if val >= 0x8000_0000
+          # 実数は同じ2ワードが IEEE754 単精度のビット列
+          if type == TT_FLOAT
+            val = [val].pack("V").unpack1("e")
+          else
+            val -= 0x1_0000_0000 if val >= 0x8000_0000
+          end
 
           label = if i == 0
                     "self"
@@ -95,9 +100,24 @@ module FaRuby
                   else
                     "temp"
                   end
-          regs << { index: i, value: val, label: label, type: type }
+          regs << { index: i, value: val, label: label, type: type,
+                    display: display_value(type, val) }
         end
         regs
+      end
+
+      # 型タグに応じた表示
+      #
+      # 値だけを出すと nil も false も 0 も同じに見えてしまう
+      def display_value(type, value)
+        case type
+        when TT_NIL    then "nil"
+        when TT_TRUE   then "true"
+        when TT_FALSE  then "false"
+        when TT_OBJECT then "self"
+        when TT_EMPTY  then "-"
+        else                value.to_s
+        end
       end
 
       # VM STATUS を書き込む

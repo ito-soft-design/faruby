@@ -47,6 +47,15 @@ module FaRuby
     # これ以下のタグが偽。Ruby で偽なのは nil と false だけ (0 も真)。
     TT_FALSY_MAX = TT_FALSE
 
+    # --- 単精度実数 (IEEE754) の特殊値 ---
+    #
+    # Ruby の 1.0 / 0 は Infinity で例外にならないが、KV スクリプトで
+    # 0 除算を実行すると軽度エラー CR2012 が出る。そのため除数が 0 のときは
+    # 除算を実行せず、ビット列を直接書き込む。下位ワードはいずれも 0。
+    FLOAT_POS_INF_HI = 0x7F80   # +Infinity (0x7F800000)
+    FLOAT_NEG_INF_HI = 0xFF80   # -Infinity (0xFF800000)
+    FLOAT_NAN_HI     = 0x7FC0   # NaN       (0x7FC00000)
+
     # 値を持たない型の値ワード
     #
     # true を 1、false と nil を 0 にしてあるのは、ビットデバイスへの書き込みを

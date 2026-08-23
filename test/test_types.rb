@@ -170,4 +170,113 @@ class TestTypes < Minitest::Test
     assert_includes source, "#{emitter.scratch32_b} = "
     assert_match(/余り/, source)
   end
+
+  # === 実数 ===
+
+  # 値ワードには IEEE754 単精度のビット列が入る
+  def float_of(index) = [@sim.em.read_u32(layout.reg_addr(index))].pack("V").unpack1("e")
+
+  # プールに実数を置いて OP_LOADL で読む
+  def load_float(index, value, reg: 1)
+    @sim.em.write_u16(layout.pool_type_addr(index), TT_FLOAT)
+    @sim.em.write_u32(layout.pool_addr(index), [value].pack("e").unpack1("V"))
+    [0x02, reg, index] # OP_LOADL R[reg], Pool[index]
+  end
+
+  def test_pool_float_loads_with_its_tag
+    run_bytecode(load_float(0, 1.5) + [STOP])
+    assert_equal TT_FLOAT, tag_of(1)
+    assert_in_delta 1.5, float_of(1), 1e-6
+  end
+
+  def test_float_arithmetic
+    # R[1] = 2.5, R[2] = 0.5, R[1] = R[1] + R[2]
+    run_bytecode(load_float(0, 2.5, reg: 1) + load_float(1, 0.5, reg: 2) +
+                 [0x3C, 0x01, STOP])
+    assert_equal TT_FLOAT, tag_of(1)
+    assert_in_delta 3.0, float_of(1), 1e-6
+  end
+
+  # 整数と実数が混ざれば実数になる (Ruby と同じ)
+  def test_mixed_arithmetic_promotes_to_float
+    run_bytecode(load_float(0, 2.5, reg: 1) + [0x09, 0x02] + [0x3C, 0x01, STOP])
+    assert_equal TT_FLOAT, tag_of(1)
+    assert_in_delta 5.5, float_of(1), 1e-6
+  end
+
+  # 整数どうしは整数のまま。すべて実数にすると大きな整数の精度が落ちる
+  def test_integer_arithmetic_stays_integer
+    run_bytecode([0x09, 0x01, 0x0A, 0x02, 0x3C, 0x01, STOP])
+    assert_equal TT_INTEGER, tag_of(1)
+    assert_equal 7, value_of(1)
+  end
+
+  # 1 == 1.0 は真 (数値は型が違っても値で比べる)
+  def test_integer_equals_float_of_the_same_value
+    run_bytecode([0x07, 0x01] + load_float(0, 1.0, reg: 2) + [0x42, 0x01, STOP])
+    assert_equal TT_TRUE, tag_of(1)
+  end
+
+  def test_numeric_comparison_across_types
+    run_bytecode([0x07, 0x01] + load_float(0, 1.5, reg: 2) + [0x43, 0x01, STOP])
+    assert_equal TT_TRUE, tag_of(1), "1 < 1.5"
+  end
+
+  # 実数どうしの除算は切り下げない
+  def test_float_division_does_not_floor
+    run_bytecode(load_float(0, 7.0, reg: 1) + load_float(1, 2.0, reg: 2) +
+                 [0x41, 0x01, STOP])
+    assert_equal TT_FLOAT, tag_of(1)
+    assert_in_delta 3.5, float_of(1), 1e-6
+  end
+
+  # Ruby の 1.0 / 0 は Infinity で例外にならない
+  def test_float_division_by_zero_yields_infinity
+    run_bytecode(load_float(0, 1.0, reg: 1) + [0x06, 0x02] + [0x41, 0x01, STOP])
+    assert_equal TT_FLOAT, tag_of(1)
+    assert_equal Float::INFINITY, float_of(1)
+    assert_equal VM_FINISHED, @sim.status, "エラー停止しない"
+  end
+
+  def test_negative_float_division_by_zero_yields_negative_infinity
+    run_bytecode(load_float(0, -1.0, reg: 1) + [0x06, 0x02] + [0x41, 0x01, STOP])
+    assert_equal(-Float::INFINITY, float_of(1))
+  end
+
+  def test_zero_divided_by_zero_yields_nan
+    run_bytecode(load_float(0, 0.0, reg: 1) + [0x06, 0x02] + [0x41, 0x01, STOP])
+    assert_predicate float_of(1), :nan?
+  end
+
+  # 生成コードは 0 除算を実行せずビット列を直接書く (KV は CR2012 を出すため)
+  def test_generated_float_division_avoids_dividing_by_zero
+    source = FaRuby::KvsGenerator.new.source
+    assert_includes source, FaRuby::VmConstants::FLOAT_POS_INF_HI.to_s
+    assert_includes source, FaRuby::VmConstants::FLOAT_NEG_INF_HI.to_s
+    assert_includes source, FaRuby::VmConstants::FLOAT_NAN_HI.to_s
+    assert_match(/CR2012/, source)
+  end
+
+  # 実数は単精度。倍精度のまま計算すると実機とずれる
+  def test_floats_are_rounded_to_single_precision
+    run_bytecode(load_float(0, 0.1, reg: 1) + [STOP])
+    assert_equal [0.1].pack("e").unpack1("e"), float_of(1)
+    refute_equal 0.1, float_of(1), "倍精度の 0.1 とは一致しない"
+  end
+
+  # === .mrb の実数リテラル ===
+
+  # 実数だけはリトルエンディアンで書かれている。
+  # RITE 形式の他の値と同じくビッグエンディアンで読むと値が化ける
+  # (2.5 が 5.375e-321 になっていた)。
+  def test_float_pool_entry_is_little_endian
+    parser = FaRuby::MrbParser.new([0x05].pack("C") + [2.5].pack("E"))
+    assert_equal 2.5, parser.send(:parse_pool_entry).value
+  end
+
+  # 整数プールは RITE 形式どおりビッグエンディアン
+  def test_integer_pool_entry_is_big_endian
+    parser = FaRuby::MrbParser.new([0x01].pack("C") + [1234].pack("N"))
+    assert_equal 1234, parser.send(:parse_pool_entry).value
+  end
 end

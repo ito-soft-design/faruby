@@ -162,7 +162,7 @@ module FaRuby
 
         puts "=== Registers ==="
         regs.each do |r|
-          puts "  R[#{r[:index]}] = #{r[:value]}\t(#{r[:label]})"
+          puts "  R[#{r[:index]}] = #{r[:display] || r[:value]}\t(#{r[:label]})"
         end
       end
 
@@ -388,6 +388,7 @@ module FaRuby
           when ACCESS_U then dev.read_u16(z_offset)
           when ACCESS_L then dev.read_s32(z_offset)
           when ACCESS_D then dev.read_u32(z_offset)
+          when ACCESS_F then [dev.read_u32(z_offset)].pack("V").unpack1("e")
           else               dev.read_s16(z_offset)
           end
         elsif @adapter.connected?
@@ -411,6 +412,7 @@ module FaRuby
             when ACCESS_U then dev.write_u16(z_offset, value)
             when ACCESS_L then dev.write_s32(z_offset, value)
             when ACCESS_D then dev.write_u32(z_offset, value)
+            when ACCESS_F then dev.write_u32(z_offset, [value.to_f].pack("e").unpack1("V"))
             else               dev.write_s16(z_offset, value)
             end
           end
