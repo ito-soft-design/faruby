@@ -18,6 +18,7 @@ module FaRuby
         "compile" => :cmd_compile,
         "load"    => :cmd_load,
         "run"     => :cmd_run,
+        "instance" => :cmd_instance,
         "status"  => :cmd_status,
         "regs"    => :cmd_regs,
         "vars"    => :cmd_vars,
@@ -35,7 +36,7 @@ module FaRuby
       def initialize(config_path: nil)
         @config = Config.new(config_path)
         @adapter = PlcConnection.create(@config)
-        @transfer = MemoryTransfer.new(@adapter)
+        @transfer = MemoryTransfer.new(@adapter, layout: @config.layout)
         @commands = Commands.new(config: @config, adapter: @adapter, transfer: @transfer)
       end
 
@@ -81,11 +82,19 @@ module FaRuby
         end
       end
 
+      # 複数インスタンスのときは操作対象を常に見せる。
+      # どのインスタンスに load したか分からなくなるのを防ぐため。
+      def prompt
+        return PROMPT if @config.layout.instances == 1
+
+        "faruby[#{@commands.instance}]> "
+      end
+
       def read_line
         if @use_readline
-          Readline.readline(PROMPT, true)
+          Readline.readline(prompt, true)
         else
-          print PROMPT
+          print prompt
           $stdout.flush
           $stdin.gets&.chomp
         end

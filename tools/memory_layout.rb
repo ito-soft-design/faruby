@@ -59,9 +59,13 @@ module FaRuby
     # インデックスレジスタ (Z) の退避先
     #
     # faRuby は Z を作業用に書き換えるため、そのままではラダーが使っている
-    # Z の値を壊す。ブロックの先頭で退避し末尾で復元することで、faRuby の
-    # 実行前後で Z の内容が変わらないようにする。
-    # 退避は1スキャンにつき1回だけで、命令ごとの負荷は増えない。
+    # Z の値を壊す。退避し復元することで、faRuby の実行前後で Z の内容が
+    # 変わらないようにする。退避は1スキャンにつき1回だけで、命令ごとの
+    # 負荷は増えない。
+    #
+    # 全インスタンスで共有する。退避・復元はインスタンスループの外側で
+    # 1回だけ行うため、置き場所はインスタンス0のブロック内で足りる。
+    # 他のインスタンスの同じ位置は未使用のまま残る (8ワード)。
     OFFSET_Z_SAVE          = 21
 
     DEFAULTS = {
@@ -157,8 +161,11 @@ module FaRuby
     # 全インスタンスが占有するワード数
     def total_words = instance_size * instances
 
-    # faRuby が使用する最後のアドレス
+    # faRuby が使用する最後のアドレス (全インスタンス)
     def last_addr = base + total_words - 1
+
+    # このインスタンスのブロックの最後のアドレス
+    def block_last_addr = origin + instance_size - 1
 
     # --- VM 状態のアドレス ---
 
@@ -180,7 +187,21 @@ module FaRuby
     def loop_counter_addr    = vm_state_base + OFFSET_LOOP_COUNTER
 
     # Z レジスタ n (1始まり) の退避先アドレス
-    def z_save_addr(index) = vm_state_base + OFFSET_Z_SAVE + (index - 1)
+    #
+    # 全インスタンスで共有するため、インスタンス番号によらず同じ場所を返す。
+    def z_save_addr(index) = base + OFFSET_Z_SAVE + (index - 1)
+
+    # --- ブロック内オフセット ---
+
+    # 絶対アドレスをブロック先頭からのオフセットに変換する
+    #
+    # 生成される KV スクリプトはブロック先頭を Z レジスタに載せ、
+    # ここで得たオフセットをインデックス修飾で足します (EM7:Z9)。
+    # インスタンスによらず同じコードが使えるのはこのためです。
+    def offset_of(addr) = addr - origin
+
+    # 最後のインスタンスのブロック先頭
+    def last_origin = base + (instances - 1) * instance_size
 
     # --- 値スロットのアドレス ---
 

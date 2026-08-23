@@ -174,7 +174,7 @@ class TestMemoryLayout < Minitest::Test
     l = Layout.default
     assert_equal "EM", l.device_name
     assert_operator l.base, :>=, 0
-    assert_equal 1, l.instances
+    assert_equal 2, l.instances
     assert_equal 80, l.max_regs
   end
 
@@ -258,14 +258,18 @@ class TestMemoryLayout < Minitest::Test
   end
 
   # 生成される KV スクリプトが配置に追従すること
+  #
+  # 生成コードはブロック相対なので、base はインスタンスループの開始値と
+  # Z の退避先に現れる。ブロック内のオフセットは base によらず同じ。
   def test_generated_script_follows_the_layout
     # 既定と必ず異なる base を使う (既定値を変えてもテストが壊れないように)
     layout = build(base: Layout.default.base + 12_345)
     source = FaRuby::KvsGenerator.new(layout: layout).source
 
-    # レジスタアドレスの計算が新しい配置になっている
-    assert_includes source, "+ #{layout.reg_file_base + SLOT_VALUE_OFFSET}"
+    assert_includes source, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} "
+    assert_includes source, "#{layout.device(layout.z_save_addr(1))} = Z1"
     # 既定配置のアドレスは現れない
-    refute_includes source, "+ #{Layout.default.reg_file_base + SLOT_VALUE_OFFSET}\n"
+    refute_includes source, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{Layout.default.base} "
+    refute_includes source, "#{Layout.default.device(Layout.default.z_save_addr(1))} = Z1"
   end
 end
