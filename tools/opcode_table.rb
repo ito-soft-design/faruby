@@ -283,6 +283,16 @@ module FaRuby
         vm.store_reg_into_global(:b, :a)
       end
 
+      # 添字によるデバイスアクセス。$DM[100 + i] で実行時にアドレスを決める。
+      # OP_GETIDX / OP_SETIDX は専用命令なのでメソッド呼び出しは要らない。
+      defs << OpcodeDef.new(0x23, "R[a] = R[a][R[a+1]] (デバイス)") do |vm|
+        vm.load_device_index(:a, DEVICE_INDEX_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x24, "R[a][R[a+1]] = R[a+2] (デバイス)") do |vm|
+        vm.store_device_index(:a, DEVICE_INDEX_ERROR)
+      end
+
       defs << OpcodeDef.new(0x25, "PC += signed16(a)") do |vm|
         vm.normalize_signed16(:a)
         vm.jump_relative(:a)
@@ -351,6 +361,10 @@ module FaRuby
 
     # 0 除算のエラーコード
     DIVIDE_BY_ZERO_ERROR = 1
+
+    # 添字アクセスのエラーコード
+    # デバイス参照以外への添字、または範囲外のアドレス
+    DEVICE_INDEX_ERROR = 2
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {

@@ -43,6 +43,20 @@ module FaRuby
     TT_ARRAY   = 8
     TT_HASH    = 9
     TT_OBJECT  = 10
+    TT_DEVICE  = 11    # デバイス族への参照 ($DM など)
+
+    # --- デバイス参照 (TT_DEVICE) の表現 ---
+    #
+    # `$DM[100 + i]` のように実行時に決まるアドレスへアクセスするための値です。
+    # `$DM` を読むとこの型の値になり、添字を付けると実際の読み書きになります。
+    #
+    #   値 下位ワード : ベースアドレス (裸の $DM なら 0)
+    #   値 上位ワード : デバイス種別 + アクセス幅 * DEVICE_REF_ACCESS_SCALE
+    #
+    # 種別と幅を1ワードに詰めるのは、スロットの予備ワードを使うと OP_MOVE が
+    # 4 ワード目まで複製する必要が出て、複製のたびに費用がかかるためです。
+    # 種別は 0-9、幅は 0-4 なので 16 倍で分離できます。
+    DEVICE_REF_ACCESS_SCALE = 16
 
     # これ以下のタグが偽。Ruby で偽なのは nil と false だけ (0 も真)。
     TT_FALSY_MAX = TT_FALSE
@@ -122,7 +136,11 @@ module FaRuby
     VM_ERROR    = 3
 
     # デバイスマッピングテーブル 1 エントリのワード数
-    #   +0 device_type / +1 device_address / +2 access_type / +3 予備
+    #   +0 device_type / +1 device_address / +2 access_type / +3 デバイス族フラグ
     DEVICE_TABLE_STRIDE = 4
+
+    # +3 が 1 なら「デバイス族」($DM など、アドレスを持たない)。
+    # GETGV はデバイスを読まず、TT_DEVICE の参照値をレジスタに置く。
+    DEVICE_TABLE_FAMILY_OFFSET = 3
   end
 end

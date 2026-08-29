@@ -55,7 +55,7 @@ module FaRuby
       idx = @irep.symbols.index(sym_name)
       return nil unless idx
 
-      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type]
+      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type, *]
       dev = @vm.send(:device_memory, device_type)
       return nil unless dev
 

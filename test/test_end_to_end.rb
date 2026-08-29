@@ -388,7 +388,80 @@ end
     assert_equal 99, sim.em.read_s32(layout.general_global_addr(0))
   end
 
+  # === 添字によるデバイスアクセス ===
+  #
+  # $DM100 はコンパイル時にアドレスが確定するため、実行時に計算した
+  # アドレスを読み書きできない。裸の $DM に添字を付けて解決する。
+
+  def test_device_index_write_and_read_in_a_loop
+    source = <<~RUBY
+      i = 0
+      while i < 5
+        $DM[600 + i] = i * 10
+        i = i + 1
+      end
+      sum = 0
+      i = 0
+      while i < 5
+        sum = sum + $DM[600 + i]
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [0, 10, 20, 30, 40], (0..4).map { |i| dm.read_s16(600 + i) }
+    assert_equal 100, result[:locals]["sum"]
+  end
+
+  def test_device_index_honours_the_width_suffix
+    result = compile_and_run("$DML[612] = 70000\n")
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 70_000, dm.read_s32(612)
+  end
+
+  # 範囲外は黙って別の場所を読み書きしてしまうため、VM を止める
+  def test_device_index_out_of_range_stops_the_vm
+    [-1, 70_000].each do |index|
+      sim = run_expecting_error("$DM[#{index}] = 1\n")
+      assert_equal FaRuby::VmConstants::VM_ERROR, sim.status, "添字 #{index}"
+    end
+  end
+
+  # ビットデバイスも同じ経路。添字はデバイス番号 (MR400 は 64)
+  def test_device_index_works_for_bit_devices
+    source = <<~RUBY
+      $MR[64] = true
+      $MR[65] = false
+      $MR[66] = true
+    RUBY
+    result = compile_and_run(source)
+    mr = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_MR]
+
+    assert_equal [1, 0, 1], [64, 65, 66].map { |n| mr.read_u16(n) }
+  end
+
   private
+
+  # エラー停止することを期待して実行する (compile_and_run は完了を要求する)
+  def run_expecting_error(source)
+    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file.write(source)
+    rb_file.close
+    mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
+
+    begin
+      assert system(@mrbc, "-o", mrb_path, rb_file.path)
+      irep = FaRuby::MrbParser.new(File.binread(mrb_path)).parse.irep
+      sim = FaRuby::KvVmSimulator.new
+      sim.load_irep_and_run(irep)
+      sim
+    ensure
+      rb_file.unlink
+      File.delete(mrb_path) if File.exist?(mrb_path)
+    end
+  end
 
   def find_mrbc
     MRBC_PATHS.each do |path|

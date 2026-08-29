@@ -33,6 +33,8 @@ module FaRuby
     Z_PRIMARY = 1
     Z_SECONDARY = 2
     Z_INSTANCE = 9
+    # OP_SETIDX の代入元。Z1 は参照、Z2 は添字が使うので3本目を割り当てる
+    Z_VALUE = 3
 
     # faRuby が書き換える Z レジスタ
     #
@@ -407,15 +409,59 @@ module FaRuby
     def load_global_into_reg(dest, sym_operand)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
-      device_dispatch(:read, slot: global_reg_slot(dest), error_code: 0x15)
+      slot = global_reg_slot(dest)
+      if_else_block("Z1 = 1") { assign_device_ref(slot) }
+      device_dispatch(:read, slot: slot, error_code: 0x15)
+      end_block
     end
 
     def store_reg_into_global(sym_operand, src)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(src)
+      if_else_block("Z1 = 1") do
+        note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
+        vm_error(0x16)
+      end
       prepare_write_scratches(slot)
       device_dispatch(:write, slot: slot, error_code: 0x16)
+      end_block
+    end
+
+    # --- 添字によるデバイスアクセス ---
+    #
+    # $DM[100 + i] のように実行時にアドレスを決める経路です。
+    # OP_GETIDX / OP_SETIDX は専用命令なので、メソッド呼び出しは要りません。
+
+    # R[a] = R[a][R[a+1]]
+    def load_device_index(name, error_code)
+      ref = reg_slot(name)          # デバイス参照 (結果の格納先でもある)
+      index = reg_next_slot(name)   # 添字
+
+      if_else_block("#{ref.tag} = #{TT_DEVICE}") do
+        device_ref_lookup(ref, index.value, error_code)
+        device_dispatch(:read, slot: ref, error_code: error_code)
+      end
+      note "デバイス参照以外への添字アクセスは未対応"
+      vm_error(error_code)
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2]
+    def store_device_index(name, error_code)
+      ref = reg_slot(name)
+      index = reg_next_slot(name)
+      value = slot_ref([:reg_value, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}",
+                       layout.reg_file_base, z: Z_VALUE)
+
+      if_else_block("#{ref.tag} = #{TT_DEVICE}") do
+        device_ref_lookup(ref, index.value, error_code)
+        prepare_write_scratches(value)
+        device_dispatch(:write, slot: value, error_code: error_code)
+      end
+      note "デバイス参照以外への添字代入は未対応"
+      vm_error(error_code)
+      end_block
     end
 
     # --- 真偽判定 ---
@@ -476,7 +522,9 @@ module FaRuby
 
     # --- デバイスアクセス ---
 
-    # デバイスマッピングテーブルから type / address / access_type を読む
+    # デバイスマッピングテーブルから type / address / access_type / 族フラグを読む
+    #
+    # Z5 = 種別, Z6 = アドレス, Z8 = アクセス幅, Z1 = デバイス族フラグ
     def device_table_lookup(name)
       note "デバイスマッピングテーブル参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
       line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{block_offset(layout.device_table_base)}"
@@ -485,6 +533,38 @@ module FaRuby
       line "Z6 = #{indexed_base}:Z4"
       line "Z7 = Z3 + 2"
       line "Z8 = #{indexed_base}:Z7"
+      line "Z7 = Z3 + #{DEVICE_TABLE_FAMILY_OFFSET}"
+      line "Z1 = #{indexed_base}:Z7   ' デバイス族フラグ"
+    end
+
+    # デバイス族の参照値をスロットに置く ($DM を読んだとき)
+    #
+    # 種別と幅を1ワードに詰める。予備ワードを使うと OP_MOVE が
+    # 4ワード目まで複製する必要が出るため。
+    def assign_device_ref(slot)
+      note "デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分)"
+      line "#{slot.word(0)} = Z6   ' ベースアドレス"
+      line "#{slot.word(1)} = Z5 + Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' 種別 + 幅"
+      line "#{slot.tag} = #{TT_DEVICE}"
+    end
+
+    # デバイス参照 + 添字から Z5 / Z6 / Z8 を組み立てる
+    #
+    # device_table_lookup と同じ役割を、テーブルではなくレジスタの値から行う。
+    # これで device_dispatch をそのまま使い回せる。
+    def device_ref_lookup(ref, index_value, error_code)
+      note "デバイス参照から種別・幅・アドレスを取り出す"
+      line "Z8 = #{ref.word(1)} / #{DEVICE_REF_ACCESS_SCALE}   ' アクセス幅"
+      line "Z5 = #{ref.word(1)} - Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' デバイス種別"
+      note "アドレス = ベース + 添字。範囲外は黙って別の場所を読み書きしてしまうため弾く"
+      line "#{scratch32} = #{ref.word(0)} + #{index_value}"
+      if_else_block("#{scratch32} >= 0") do
+        if_else_block("#{scratch32} <= 65535") { line "Z6 = #{scratch32}" }
+        vm_error(error_code)
+        end_block
+      end
+      vm_error(error_code)
+      end_block
     end
 
     # デバイス種別 × アクセス幅の分岐を生成する

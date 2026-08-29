@@ -165,9 +165,10 @@ module FaRuby
     end
 
     def load_global_into_reg(dest, sym_operand)
-      type, addr, access = device_entry(operand(sym_operand))
+      type, addr, access, family = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x15) unless dev
+      return write_device_ref(operand(dest), type, addr, access) if family == 1
 
       if bit_device?(type)
         write_bool(operand(dest), dev.read_u16(addr) != 0)
@@ -179,21 +180,52 @@ module FaRuby
     end
 
     def store_reg_into_global(sym_operand, src)
-      type, addr, access = device_entry(operand(sym_operand))
+      type, addr, access, family = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x16) unless dev
+      return vm_error(0x16) if family == 1 # $DM = 1 は意味を持たない
 
-      # 実数レジスタを .S 等へ書くときは 0 方向へ切り捨て、
-      # 整数レジスタを .F へ書くときは実数へ変換する (生成コードと同じ規則)
-      index = operand(src)
-      if bit_device?(type)
-        dev.write_u16(addr, numeric_value(index) != 0 ? 1 : 0)
-      elsif access == ACCESS_F
-        dev.write_u32(addr, SimVm.float_bits(numeric_value(index)))
+      write_device_value(dev, type, addr, access, operand(src))
+    end
+
+    # --- 添字によるデバイスアクセス ---
+    #
+    # $DM[100 + i] のように実行時にアドレスを決める。
+
+    # R[a] = R[a][R[a+1]]
+    def load_device_index(name, error_code)
+      index = operand(name)
+      ref = device_ref(index)
+      return vm_error(error_code) unless ref
+
+      addr = device_index_address(ref, read_reg(index + 1))
+      return vm_error(error_code) unless addr
+
+      dev = device_memory(ref[:type])
+      return vm_error(error_code) unless dev
+
+      if bit_device?(ref[:type])
+        write_bool(index, dev.read_u16(addr) != 0)
+      elsif ref[:access] == ACCESS_F
+        write_float(index, SimVm.bits_to_float(dev.read_u32(addr)))
       else
-        value = float_operand?(index) ? read_float(index).truncate : read_reg(index)
-        write_word_device(dev, addr, access, value)
+        write_slot(index, TT_INTEGER, read_word_device(dev, addr, ref[:access]))
       end
+    end
+
+    # R[a][R[a+1]] = R[a+2]
+    def store_device_index(name, error_code)
+      index = operand(name)
+      ref = device_ref(index)
+      return vm_error(error_code) unless ref
+
+      addr = device_index_address(ref, read_reg(index + 1))
+      return vm_error(error_code) unless addr
+
+      dev = device_memory(ref[:type])
+      return vm_error(error_code) unless dev
+
+      write_device_value(dev, ref[:type], addr, ref[:access], index + 2)
     end
 
     # 16ビットオペランドを符号付きとして解釈する
@@ -306,7 +338,49 @@ module FaRuby
 
     def device_entry(idx)
       table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
-      [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2)]
+      [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2),
+       @em.read_u16(table_addr + DEVICE_TABLE_FAMILY_OFFSET)]
+    end
+
+    # --- デバイス参照 (TT_DEVICE) ---
+    #
+    # 値ワードに「ベースアドレス」と「種別 + 幅 * 16」を詰める。
+    # 予備ワードを使うと OP_MOVE が4ワード目まで複製する必要が出るため。
+
+    def write_device_ref(index, type, base, access)
+      @em.write_u16(layout.reg_type_addr(index), TT_DEVICE)
+      @em.write_u16(layout.reg_addr(index), base)
+      @em.write_u16(layout.reg_addr(index) + 1, type + access.to_i * DEVICE_REF_ACCESS_SCALE)
+    end
+
+    # レジスタがデバイス参照ならその内容、違えば nil
+    def device_ref(index)
+      return nil unless read_reg_tag(index) == TT_DEVICE
+
+      packed = @em.read_u16(layout.reg_addr(index) + 1)
+      { base: @em.read_u16(layout.reg_addr(index)),
+        type: packed % DEVICE_REF_ACCESS_SCALE,
+        access: packed / DEVICE_REF_ACCESS_SCALE }
+    end
+
+    # ベース + 添字。範囲外なら nil
+    #
+    # 範囲外を許すと、EM では 512 ワード周期で別の場所を読み書きしてしまう。
+    def device_index_address(ref, offset)
+      addr = ref[:base] + offset
+      addr.between?(0, 65_535) ? addr : nil
+    end
+
+    # レジスタの値をデバイスへ書く (生成コードと同じ変換規則)
+    def write_device_value(dev, type, addr, access, index)
+      if bit_device?(type)
+        dev.write_u16(addr, numeric_value(index) != 0 ? 1 : 0)
+      elsif access == ACCESS_F
+        dev.write_u32(addr, SimVm.float_bits(numeric_value(index)))
+      else
+        value = float_operand?(index) ? read_float(index).truncate : read_reg(index)
+        write_word_device(dev, addr, access, value)
+      end
     end
 
     def device_memory(type)

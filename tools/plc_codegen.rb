@@ -101,7 +101,7 @@ module FaRuby
         image[m[:table_addr]]     = m[:device_type]
         image[m[:table_addr] + 1] = m[:z_offset]
         image[m[:table_addr] + 2] = m[:access_type] || 0
-        image[m[:table_addr] + 3] = 0
+        image[m[:table_addr] + DEVICE_TABLE_FAMILY_OFFSET] = m[:family] ? 1 : 0
         # 汎用グローバルはスロット全体を 0 初期化
         next unless m[:general]
 
@@ -120,12 +120,13 @@ module FaRuby
       slot_index = 0
       @irep.symbols.each_with_index.map do |sym, idx|
         table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
-        parsed = parse_device_symbol(sym)
+        parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
         if parsed
           { symbol: sym, index: idx, table_addr: table_addr, general: false,
             device_type: parsed[:device_type], device_name: parsed[:device_name],
             address: parsed[:address], z_offset: parsed[:z_offset],
-            access_type: parsed[:access_type], bit: parsed[:bit] }
+            access_type: parsed[:access_type], bit: parsed[:bit],
+            family: parsed[:family] || false }
         else
           # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
           value_addr = layout.general_global_addr(slot_index)
@@ -245,7 +246,9 @@ module FaRuby
           lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
         lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || 0}    ' #{m[:symbol]} access=#{kind}"
-        lines << "#{layout.device(table_addr + 3)} = 0    ' #{m[:symbol]} 予備"
+        family_note = m[:family] ? "デバイス族 (添字でアドレスを決める)" : "-"
+        lines << "#{layout.device(table_addr + DEVICE_TABLE_FAMILY_OFFSET)} = #{m[:family] ? 1 : 0}    " \
+                 "' #{m[:symbol]} #{family_note}"
       end
 
       lines.concat(generate_general_global_clear(mappings))
@@ -279,6 +282,20 @@ module FaRuby
     # CR はインデックス扱い不可のため非対応
     BIT_DEVICE_PATTERN      = /^\$(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
     BIT_DEVICE_PATTERN_BARE = /^(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+
+    # デバイス族: アドレスを持たない形。添字を付けて実行時にアドレスを決める
+    #   $DM[100 + i]    16ビット符号付き (既定)
+    #   $DML[100 + i]   32ビット符号付き
+    #   $MR[64 + i]     ビットデバイス
+    #
+    # 単独の D デバイスが無いため $DML は DM + L と一意に解析でき、
+    # $L (ラッチリレー) とも衝突しません。
+    #
+    # 添字は「デバイス番号」です。ワードデバイスは表示上のアドレスと一致
+    # しますが、MR / R / B は一致しません (MR400 は番号 64、B10 は 16)。
+    # 番号空間では線形で、MR415 の次は MR500 になります。
+    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)([SULDF]?)$/i
+    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|L|T|C)$/i
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
@@ -309,6 +326,27 @@ module FaRuby
     # デバイス名 (DM100, DM100L, $ なし) からデバイス情報をパース
     def self.parse_device_name(name)
       parse_device(name, WORD_DEVICE_PATTERN_BARE, BIT_DEVICE_PATTERN_BARE)
+    end
+
+    # デバイス族 ($DM, $DML, $MR 等) をパースする。該当しなければ nil
+    #
+    # アドレスを持たないため z_offset は 0 で、添字を足して実行時に決めます。
+    def self.parse_device_family(sym)
+      return nil unless sym
+
+      if (m = sym.match(WORD_FAMILY_PATTERN))
+        device_name = m[1].upcase
+        return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
+                 z_offset: 0, device_name: device_name, family: true,
+                 access_type: VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase), bit: false }
+      end
+
+      return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
+
+      device_name = m[1].upcase
+      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
+        z_offset: 0, device_name: device_name, family: true,
+        access_type: nil, bit: true }
     end
 
     # ワードデバイス → ビットデバイスの順にマッチを試みる
