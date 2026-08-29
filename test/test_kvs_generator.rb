@@ -298,11 +298,10 @@ class TestKvsGenerator < Minitest::Test
     assert_includes body, "RES(C0:Z6)"
   end
 
-  # ビットデバイスに幅サフィックスを付けてはいけない (16飛びになる)
   # ビットデバイスは幅の有無で経路が分かれる。
   # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T / C は現在値)。
   def test_bit_devices_have_both_paths
-    %w[MR R B L T C].each do |dev|
+    %w[MR R B LR T C].each do |dev|
       assert_includes @source, "#{dev}0:Z6", "#{dev} の個別ビットアクセス"
       assert_includes @source, "#{dev}0.L:Z6", "#{dev} の幅付きアクセス"
     end

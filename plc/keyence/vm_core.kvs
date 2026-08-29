@@ -334,7 +334,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     '   3=.D(32bit符号なし)
                     '   4=.F(実数)
                     '   それ以外=.S(16bit符号付き/既定)
-                    ' ビットデバイス (R, MR, B, L, T, C): ON→true, OFF→false
+                    ' ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
                     '   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
                     '   整数にすると if $MR10 が常に成立してしまう
                     IF Z5 = 0 THEN
@@ -471,7 +471,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         END IF
                     ELSE IF Z5 = 6 THEN
                         IF Z8 = 5 THEN
-                            IF L0:Z6 THEN
+                            IF LR0:Z6 THEN
                                 EM1.L:Z2 = 1
                                 EM0:Z2 = 3
                             ELSE
@@ -480,19 +480,19 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             END IF
                         ELSE
                             IF Z8 = 2 THEN
-                                EM1.L:Z2 = L0.L:Z6
+                                EM1.L:Z2 = LR0.L:Z6
                                 EM0:Z2 = 4
                             ELSE IF Z8 = 1 THEN
-                                EM1.L:Z2 = L0.U:Z6
+                                EM1.L:Z2 = LR0.U:Z6
                                 EM0:Z2 = 4
                             ELSE IF Z8 = 3 THEN
-                                EM1.L:Z2 = L0.D:Z6
+                                EM1.L:Z2 = LR0.D:Z6
                                 EM0:Z2 = 4
                             ELSE IF Z8 = 4 THEN
-                                EM1.F:Z2 = L0.F:Z6
+                                EM1.F:Z2 = LR0.F:Z6
                                 EM0:Z2 = 5
                             ELSE
-                                EM1.L:Z2 = L0.S:Z6
+                                EM1.L:Z2 = LR0.S:Z6
                                 EM0:Z2 = 4
                             END IF
                         END IF
@@ -599,7 +599,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     '   3=.D(32bit符号なし)
                     '   4=.F(実数)
                     '   それ以外=.S(16bit符号付き/既定)
-                    ' ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF
+                    ' ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF
                     '   true=1 / false=nil=0 なので値だけで判定できる
                     IF Z5 = 0 THEN
                         IF Z8 = 2 THEN
@@ -700,21 +700,21 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     ELSE IF Z5 = 6 THEN
                         IF Z8 = 5 THEN
                             IF EM16.L:Z9 <> 0 THEN
-                                L0:Z6 = 1
+                                LR0:Z6 = 1
                             ELSE
-                                L0:Z6 = 0
+                                LR0:Z6 = 0
                             END IF
                         ELSE
                             IF Z8 = 2 THEN
-                                L0.L:Z6 = EM16.L:Z9
+                                LR0.L:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 1 THEN
-                                L0.U:Z6 = EM16.L:Z9
+                                LR0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
-                                L0.D:Z6 = EM16.L:Z9
+                                LR0.D:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 4 THEN
-                                L0.F:Z6 = EM18.F:Z9
+                                LR0.F:Z6 = EM18.F:Z9
                             ELSE
-                                L0.S:Z6 = EM16.L:Z9
+                                LR0.S:Z6 = EM16.L:Z9
                             END IF
                         END IF
                     ELSE IF Z5 = 8 THEN
@@ -793,7 +793,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     '   3=.D(32bit符号なし)
                     '   4=.F(実数)
                     '   それ以外=.S(16bit符号付き/既定)
-                    ' ビットデバイス (R, MR, B, L, T, C): ON→true, OFF→false
+                    ' ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
                     '   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
                     '   整数にすると if $MR10 が常に成立してしまう
                     IF Z5 = 0 THEN
@@ -930,7 +930,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         END IF
                     ELSE IF Z5 = 6 THEN
                         IF Z8 = 5 THEN
-                            IF L0:Z6 THEN
+                            IF LR0:Z6 THEN
                                 EM1.L:Z1 = 1
                                 EM0:Z1 = 3
                             ELSE
@@ -939,19 +939,19 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             END IF
                         ELSE
                             IF Z8 = 2 THEN
-                                EM1.L:Z1 = L0.L:Z6
+                                EM1.L:Z1 = LR0.L:Z6
                                 EM0:Z1 = 4
                             ELSE IF Z8 = 1 THEN
-                                EM1.L:Z1 = L0.U:Z6
+                                EM1.L:Z1 = LR0.U:Z6
                                 EM0:Z1 = 4
                             ELSE IF Z8 = 3 THEN
-                                EM1.L:Z1 = L0.D:Z6
+                                EM1.L:Z1 = LR0.D:Z6
                                 EM0:Z1 = 4
                             ELSE IF Z8 = 4 THEN
-                                EM1.F:Z1 = L0.F:Z6
+                                EM1.F:Z1 = LR0.F:Z6
                                 EM0:Z1 = 5
                             ELSE
-                                EM1.L:Z1 = L0.S:Z6
+                                EM1.L:Z1 = LR0.S:Z6
                                 EM0:Z1 = 4
                             END IF
                         END IF
@@ -1065,7 +1065,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     '   3=.D(32bit符号なし)
                     '   4=.F(実数)
                     '   それ以外=.S(16bit符号付き/既定)
-                    ' ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF
+                    ' ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF
                     '   true=1 / false=nil=0 なので値だけで判定できる
                     IF Z5 = 0 THEN
                         IF Z8 = 2 THEN
@@ -1166,21 +1166,21 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     ELSE IF Z5 = 6 THEN
                         IF Z8 = 5 THEN
                             IF EM16.L:Z9 <> 0 THEN
-                                L0:Z6 = 1
+                                LR0:Z6 = 1
                             ELSE
-                                L0:Z6 = 0
+                                LR0:Z6 = 0
                             END IF
                         ELSE
                             IF Z8 = 2 THEN
-                                L0.L:Z6 = EM16.L:Z9
+                                LR0.L:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 1 THEN
-                                L0.U:Z6 = EM16.L:Z9
+                                LR0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
-                                L0.D:Z6 = EM16.L:Z9
+                                LR0.D:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 4 THEN
-                                L0.F:Z6 = EM18.F:Z9
+                                LR0.F:Z6 = EM18.F:Z9
                             ELSE
-                                L0.S:Z6 = EM16.L:Z9
+                                LR0.S:Z6 = EM16.L:Z9
                             END IF
                         END IF
                     ELSE IF Z5 = 8 THEN

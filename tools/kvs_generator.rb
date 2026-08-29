@@ -53,7 +53,7 @@ module FaRuby
     # ビットデバイス。set_res が true のものは代入ではなく SET/RES を使う
     BIT_DEVICES = [
       [DEVICE_TYPE_R,  "R",  false], [DEVICE_TYPE_MR, "MR", false],
-      [DEVICE_TYPE_B,  "B",  false], [DEVICE_TYPE_L,  "L",  false],
+      [DEVICE_TYPE_B,  "B",  false], [DEVICE_TYPE_L,  "LR", false],
       [DEVICE_TYPE_T,  "T",  true],  [DEVICE_TYPE_C,  "C",  true],
     ].freeze
 
@@ -578,11 +578,11 @@ module FaRuby
       ACCESS_BRANCHES.each { |value, sfx| note "  #{value}=.#{sfx}(#{ACCESS_NAMES.fetch(value)})" }
       note "  それ以外=.#{ACCESS_DEFAULT_SUFFIX}(#{ACCESS_NAMES.fetch(ACCESS_S)}/既定)"
       if mode == :read
-        note "ビットデバイス (R, MR, B, L, T, C): ON→true, OFF→false"
+        note "ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false"
         note "  整数の 1/0 ではなく真偽値。0 は Ruby では真なので、"
         note "  整数にすると if $MR10 が常に成立してしまう"
       else
-        note "ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF"
+        note "ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF"
         note "  true=1 / false=nil=0 なので値だけで判定できる"
       end
 
