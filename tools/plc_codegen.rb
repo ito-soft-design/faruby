@@ -293,10 +293,11 @@ module FaRuby
     #   その他 10進。D や F はアドレスに現れないので曖昧さなし ($T0D は T0 + D)
     #
     # MR を R より先にマッチさせる。CR はインデックス扱い不可のため非対応
+    # MR を R より、LR を L より先にマッチさせる
     HEX_BIT_DEVICE_PATTERN       = /^\$(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
     HEX_BIT_DEVICE_PATTERN_BARE  = /^(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN           = /^\$(MR|R|L|T|C)(\d+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|L|T|C)(\d+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN           = /^\$(MR|R|LR|L|T|C)(\d+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|LR|L|T|C)(\d+)#{SUFFIX}$/i
 
     # デバイス族: アドレスを持たない形。添字を付けて実行時にアドレスを決める
     #   $DM[100 + i]    16ビット符号付き (既定)
@@ -310,23 +311,44 @@ module FaRuby
     # しますが、MR / R / B は一致しません (MR400 は番号 64、B10 は 16)。
     # 番号空間では線形で、MR415 の次は MR500 になります。
     WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)#{SUFFIX}$/i
-    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|L|T|C)#{SUFFIX}$/i
+    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|LR|L|T|C)#{SUFFIX}$/i
 
     # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
     NO_FLOAT_DEVICE_TYPES = [DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
+    # KV スクリプトとホスト通信でデバイス名が違うもの
+    #
+    # ラッチリレーは KV スクリプトでは L、KV のマニュアルと plc_access では LR です。
+    # ラダーで L と入力すると LR に変換されます。
+    #
+    # **番号の付け方も違います。** LR100 は番号 16 (MR や R と同じチャンネル・ビット
+    # 形式) ですが、plc_access は "L100" も受け付けてしまい番号 100 を返します。
+    # ホストと通信する名前は LR に正規化しないと、別のビットを読み書きします。
+    #
+    # 生成する KV スクリプトはエミッタ側の名前表を使うため L のままです。
+    PROTOCOL_DEVICE_NAME = { "L" => "LR" }.freeze
+
+    def self.protocol_name(device_name)
+      PROTOCOL_DEVICE_NAME.fetch(device_name, device_name)
+    end
+
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
-      "L" => DEVICE_TYPE_L, "T" => DEVICE_TYPE_T, "C" => DEVICE_TYPE_C,
+      "L" => DEVICE_TYPE_L, "LR" => DEVICE_TYPE_L,
+      "T" => DEVICE_TYPE_T, "C" => DEVICE_TYPE_C,
     }.freeze
-    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.invert.freeze
+    # 表示用。L と LR は同じ種別なので LR を代表にする
+    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.except("L").invert.freeze
 
     # KvDevice を使ってデバイスアドレスの Z レジスタ用オフセットを取得
-    # HEXDEC (R, MR 等): MR200 → 32, R100 → 16
+    # HEXDEC (R, MR, LR 等): MR200 → 32, R100 → 16, LR100 → 16
     # HEX (B): B10 → 16
     # DEC (EM, DM 等): そのまま
+    #
+    # 名前は必ず protocol_name を通したものを渡すこと。plc_access は "L100" も
+    # 受け付けるが番号 100 を返し、LR100 (番号 16) とは別のビットになる。
     def self.device_z_offset(device_name, addr_str)
-      PlcAccess::Protocol::Keyence::KvDevice.new("#{device_name}#{addr_str}").number
+      PlcAccess::Protocol::Keyence::KvDevice.new("#{protocol_name(device_name)}#{addr_str}").number
     end
 
     def parse_device_symbol(sym)
@@ -362,7 +384,7 @@ module FaRuby
 
       return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
 
-      device_name = m[1].upcase
+      device_name = protocol_name(m[1].upcase)
       device_type = DEVICE_NAME_TO_TYPE[device_name]
       bit = m[2].to_s.empty?
       access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase)
@@ -393,7 +415,8 @@ module FaRuby
     end
 
     def self.build_device(match, bit:)
-      device_name = match[1].upcase
+      # ホストと通信する名前へ正規化する ($L100 も $LR100 も LR100)
+      device_name = protocol_name(match[1].upcase)
       addr_str = match[2]
       device_type = DEVICE_NAME_TO_TYPE[device_name]
       access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(match[3].to_s.upcase)

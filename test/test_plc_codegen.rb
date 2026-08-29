@@ -235,6 +235,29 @@ end
     assert_equal ACCESS_F, separated[:access_type]
   end
 
+  # ラッチリレーは KV スクリプトでは L、マニュアルと plc_access では LR。
+  # 番号の付け方も違い、L100 は 100、LR100 は 16 になる。
+  # ホストと通信する名前は LR に正規化しないと別のビットを読み書きする。
+  def test_latch_relay_normalises_to_the_protocol_name
+    %w[$L100 $LR100].each do |sym|
+      parsed = FaRuby::PlcCodegen.parse_device_symbol(sym)
+      assert_equal "LR", parsed[:device_name], sym
+      assert_equal DEVICE_TYPE_L, parsed[:device_type], sym
+      assert_equal 16, parsed[:z_offset], "#{sym} は LR100 = 番号 16"
+    end
+  end
+
+  def test_latch_relay_family_normalises_too
+    parsed = FaRuby::PlcCodegen.parse_device_family("$L")
+    assert_equal "LR", parsed[:device_name]
+    assert_equal DEVICE_TYPE_L, parsed[:device_type]
+  end
+
+  # LR を L より先にマッチさせないと、LR100 が L + "R100" になる
+  def test_lr_matches_before_l
+    assert_equal 160, FaRuby::PlcCodegen.parse_device_symbol("$LR1000")[:z_offset]
+  end
+
   # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
   def test_timer_and_counter_reject_float
     %w[$T0F $C0F $T0_F $T $C].each do |sym|
