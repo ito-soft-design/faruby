@@ -634,10 +634,14 @@ end
   # === OP_GETGV / OP_SETGV ===
 
   # デバイスマッピングテーブルにエントリを設定するヘルパー
-  def setup_device_mapping(sym_index, device_type, device_addr)
+  #
+  # access は既定でワードの16ビット符号付き。ビットデバイスを個別ビットとして
+  # 扱いたい場合は ACCESS_BIT を渡す (幅を付けると整数として扱われるため)。
+  def setup_device_mapping(sym_index, device_type, device_addr, access = ACCESS_S)
     table_addr = layout.device_table_base + sym_index * DEVICE_TABLE_STRIDE
     @sim.em.write_u16(table_addr, device_type)
     @sim.em.write_u16(table_addr + 1, device_addr)
+    @sim.em.write_u16(table_addr + 2, access)
   end
 
   def test_setgv_em
@@ -729,7 +733,7 @@ end
       0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_MR, 10)
+    setup_device_mapping(0, DEVICE_TYPE_MR, 10, ACCESS_BIT)
     @sim.run
     assert_equal VM_FINISHED, @sim.status
     assert_equal 1, @sim.devices[DEVICE_TYPE_MR].read_u16(10)
@@ -742,7 +746,7 @@ end
       0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_R, 200)
+    setup_device_mapping(0, DEVICE_TYPE_R, 200, ACCESS_BIT)
     @sim.run
     assert_equal VM_FINISHED, @sim.status
     assert_equal 0, @sim.devices[DEVICE_TYPE_R].read_u16(200)
@@ -754,7 +758,7 @@ end
       0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_MR, 5)
+    setup_device_mapping(0, DEVICE_TYPE_MR, 5, ACCESS_BIT)
     @sim.devices[DEVICE_TYPE_MR].write_u16(5, 1)
     @sim.run
     assert_equal VM_FINISHED, @sim.status

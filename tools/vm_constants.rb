@@ -107,6 +107,12 @@ module FaRuby
     ACCESS_D = 3
     ACCESS_F = 4
 
+    # 個別ビット。ビットデバイスをサフィックス無しで書いたとき
+    #
+    # 0 (ACCESS_S) と区別する必要があります。ビットデバイスに幅を付けると
+    # 整数として扱われるため、「幅の指定が無い」ことを表す値が要ります。
+    ACCESS_BIT = 5
+
     # Ruby シンボルのサフィックス文字 → ACCESS_*
     ACCESS_SUFFIXES = {
       ""  => ACCESS_S,   # 既定は16ビット符号付き
@@ -126,7 +132,7 @@ module FaRuby
     ACCESS_NAMES = {
       ACCESS_S => "16bit符号付き", ACCESS_U => "16bit符号なし",
       ACCESS_L => "32bit符号付き", ACCESS_D => "32bit符号なし",
-      ACCESS_F => "実数",
+      ACCESS_F => "実数", ACCESS_BIT => "ビット",
     }.freeze
 
     # --- VM 状態 ---

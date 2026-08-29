@@ -170,13 +170,45 @@ module FaRuby
       return vm_error(0x15) unless dev
       return write_device_ref(operand(dest), type, addr, access) if family == 1
 
-      if bit_device?(type)
-        write_bool(operand(dest), dev.read_u16(addr) != 0)
+      read_device_into(dev, addr, access, operand(dest), bit_device: bit_device?(type))
+    end
+
+    # デバイスの値をレジスタへ読む (生成コードと同じ規則)
+    #
+    # 幅サフィックスの有無で意味が変わる。無しなら個別ビット、
+    # 有りなら整数 (MR 等はビット列、T/C は現在値)。
+    def read_device_into(dev, addr, access, index, bit_device: false)
+      if access == ACCESS_BIT
+        write_bool(index, dev.read_u16(addr) != 0)
+      elsif bit_device
+        write_slot(index, TT_INTEGER, read_bit_field(dev, addr, access))
       elsif access == ACCESS_F
-        write_float(operand(dest), SimVm.bits_to_float(dev.read_u32(addr)))
+        write_float(index, SimVm.bits_to_float(dev.read_u32(addr)))
       else
-        write_slot(operand(dest), TT_INTEGER, read_word_device(dev, addr, access))
+        write_slot(index, TT_INTEGER, read_word_device(dev, addr, access))
       end
+    end
+
+    # --- ビットデバイスの幅アクセス ---
+    #
+    # 実機はそのビットから連続したビット列を整数として扱います (1ビット刻み、
+    # チャンネル境界に揃っていなくてよい)。シミュレータはビットを 1 ワードに
+    # 1 個ずつ持っているため、読み書きのたびに組み立て直します。
+    #
+    # T / C は実機では現在値を返しますが、シミュレータにタイマは無いため
+    # 再現できません。ここではビット列として扱います。
+
+    def access_bits(access) = ACCESS_WORDS.fetch(access, 1) * 16
+
+    def read_bit_field(dev, addr, access)
+      bits = access_bits(access)
+      value = (0...bits).sum { |i| dev.read_u16(addr + i).zero? ? 0 : (1 << i) }
+      signed = [ACCESS_S, ACCESS_L].include?(access)
+      signed && value >= (1 << (bits - 1)) ? value - (1 << bits) : value
+    end
+
+    def write_bit_field(dev, addr, access, value)
+      access_bits(access).times { |i| dev.write_u16(addr + i, (value >> i) & 1) }
     end
 
     def store_reg_into_global(sym_operand, src)
@@ -204,13 +236,7 @@ module FaRuby
       dev = device_memory(ref[:type])
       return vm_error(error_code) unless dev
 
-      if bit_device?(ref[:type])
-        write_bool(index, dev.read_u16(addr) != 0)
-      elsif ref[:access] == ACCESS_F
-        write_float(index, SimVm.bits_to_float(dev.read_u32(addr)))
-      else
-        write_slot(index, TT_INTEGER, read_word_device(dev, addr, ref[:access]))
-      end
+      read_device_into(dev, addr, ref[:access], index, bit_device: bit_device?(ref[:type]))
     end
 
     # R[a][R[a+1]] = R[a+2]
@@ -350,7 +376,7 @@ module FaRuby
     def write_device_ref(index, type, base, access)
       @em.write_u16(layout.reg_type_addr(index), TT_DEVICE)
       @em.write_u16(layout.reg_addr(index), base)
-      @em.write_u16(layout.reg_addr(index) + 1, type + access.to_i * DEVICE_REF_ACCESS_SCALE)
+      @em.write_u16(layout.reg_addr(index) + 1, type + access * DEVICE_REF_ACCESS_SCALE)
     end
 
     # レジスタがデバイス参照ならその内容、違えば nil
@@ -373,14 +399,20 @@ module FaRuby
 
     # レジスタの値をデバイスへ書く (生成コードと同じ変換規則)
     def write_device_value(dev, type, addr, access, index)
-      if bit_device?(type)
+      if access == ACCESS_BIT
         dev.write_u16(addr, numeric_value(index) != 0 ? 1 : 0)
+      elsif bit_device?(type)
+        write_bit_field(dev, addr, access, integer_form(index))
       elsif access == ACCESS_F
         dev.write_u32(addr, SimVm.float_bits(numeric_value(index)))
       else
-        value = float_operand?(index) ? read_float(index).truncate : read_reg(index)
-        write_word_device(dev, addr, access, value)
+        write_word_device(dev, addr, access, integer_form(index))
       end
+    end
+
+    # 実数レジスタは 0 方向へ切り捨てて整数にする (生成コードと同じ規則)
+    def integer_form(index)
+      float_operand?(index) ? read_float(index).truncate : read_reg(index)
     end
 
     def device_memory(type)

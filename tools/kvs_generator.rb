@@ -591,11 +591,15 @@ module FaRuby
         dedent
       end
 
+      # ビットデバイスは幅サフィックスの有無で意味が変わる。
+      # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T/C は現在値)。
       BIT_DEVICES.each do |type, name, set_res|
         chain_head(first, "Z5 = #{type}")
         first = false
         indent
-        bit_device_body(mode, name, slot, set_res)
+        if_else_block("Z8 = #{ACCESS_BIT}") { bit_device_body(mode, name, slot, set_res) }
+        word_device_body(mode, name, slot)
+        end_block
         dedent
       end
 

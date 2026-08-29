@@ -100,7 +100,7 @@ module FaRuby
       device_mappings.each do |m|
         image[m[:table_addr]]     = m[:device_type]
         image[m[:table_addr] + 1] = m[:z_offset]
-        image[m[:table_addr] + 2] = m[:access_type] || 0
+        image[m[:table_addr] + 2] = m[:access_type] || ACCESS_BIT
         image[m[:table_addr] + DEVICE_TABLE_FAMILY_OFFSET] = m[:family] ? 1 : 0
         # 汎用グローバルはスロット全体を 0 初期化
         next unless m[:general]
@@ -237,7 +237,7 @@ module FaRuby
       mappings = device_mappings
       mappings.each do |m|
         table_addr = m[:table_addr]
-        kind = m[:bit] ? "ビット" : ACCESS_NAMES[m[:access_type]]
+        kind = ACCESS_NAMES[m[:access_type] || ACCESS_BIT]
         if m[:general]
           lines << "#{layout.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
           lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> #{layout.device(m[:z_offset])}"
@@ -245,7 +245,7 @@ module FaRuby
           lines << "#{layout.device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
           lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
-        lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || 0}    ' #{m[:symbol]} access=#{kind}"
+        lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || ACCESS_BIT}    ' #{m[:symbol]} access=#{kind}"
         family_note = m[:family] ? "デバイス族 (添字でアドレスを決める)" : "-"
         lines << "#{layout.device(table_addr + DEVICE_TABLE_FAMILY_OFFSET)} = #{m[:family] ? 1 : 0}    " \
                  "' #{m[:symbol]} #{family_note}"
@@ -272,16 +272,31 @@ module FaRuby
        "NEXT"]
     end
 
-    # ワードデバイス: 10進アドレス + アクセス幅サフィックス (省略時は16ビット符号付き)
-    #   $DM100 / $DM100S / $DM100U / $DM100L / $DM100D / $DM100F
-    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF)(\d+)([SULDF]?)$/i
-    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF)(\d+)([SULDF]?)$/i
+    # アクセス幅サフィックス。アンダースコアで区切ってもよい
+    #
+    # 16進アドレスを持つ B では `$B1F` が「0x1F」なのか「0x1 を実数で」なのか
+    # 区別できないため、区切りたいときに `$B1_F` と書けるようにしています。
+    # 10進アドレスのデバイスでは元々曖昧さがなく、読みやすさのためだけです。
+    SUFFIX = "_?([SULDF]?)"
 
-    # ビットデバイス: 幅の概念が無いためサフィックス無し
-    # MR を R より先にマッチさせる。B は16進アドレス (例: $B1F)、他は10進
-    # CR はインデックス扱い不可のため非対応
-    BIT_DEVICE_PATTERN      = /^\$(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
-    BIT_DEVICE_PATTERN_BARE = /^(MR|R|B|L|T|C)([0-9A-Fa-f]+)$/i
+    # ワードデバイス: 10進アドレス + アクセス幅 (省略時は16ビット符号付き)
+    #   $DM100 / $DM100L / $DM100_L
+    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF)(\d+)#{SUFFIX}$/i
+    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF)(\d+)#{SUFFIX}$/i
+
+    # ビットデバイス: サフィックス無しなら個別ビット、付ければ整数
+    #   $MR100 は接点、$MR100L はそこから32ビット、$T0D はタイマ現在値
+    #
+    # アドレスの基数がデバイスで違うためパターンを分けます。
+    #   B      16進。D と F は数字でもありサフィックスでもあるため、
+    #          アドレスを貪欲に取る ($B1F は 0x1F)。区切るなら $B1_F
+    #   その他 10進。D や F はアドレスに現れないので曖昧さなし ($T0D は T0 + D)
+    #
+    # MR を R より先にマッチさせる。CR はインデックス扱い不可のため非対応
+    HEX_BIT_DEVICE_PATTERN       = /^\$(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
+    HEX_BIT_DEVICE_PATTERN_BARE  = /^(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN           = /^\$(MR|R|L|T|C)(\d+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|L|T|C)(\d+)#{SUFFIX}$/i
 
     # デバイス族: アドレスを持たない形。添字を付けて実行時にアドレスを決める
     #   $DM[100 + i]    16ビット符号付き (既定)
@@ -294,8 +309,8 @@ module FaRuby
     # 添字は「デバイス番号」です。ワードデバイスは表示上のアドレスと一致
     # しますが、MR / R / B は一致しません (MR400 は番号 64、B10 は 16)。
     # 番号空間では線形で、MR415 の次は MR500 になります。
-    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)([SULDF]?)$/i
-    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|L|T|C)$/i
+    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)#{SUFFIX}$/i
+    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|L|T|C)#{SUFFIX}$/i
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
@@ -320,12 +335,13 @@ module FaRuby
     # z_offset:    Z レジスタ用オフセット (マッピングテーブル・シミュレータ用)
     # access_type: ACCESS_* (ビットデバイスは nil)
     def self.parse_device_symbol(sym)
-      parse_device(sym, WORD_DEVICE_PATTERN, BIT_DEVICE_PATTERN)
+      parse_device(sym, WORD_DEVICE_PATTERN, HEX_BIT_DEVICE_PATTERN, BIT_DEVICE_PATTERN)
     end
 
     # デバイス名 (DM100, DM100L, $ なし) からデバイス情報をパース
     def self.parse_device_name(name)
-      parse_device(name, WORD_DEVICE_PATTERN_BARE, BIT_DEVICE_PATTERN_BARE)
+      parse_device(name, WORD_DEVICE_PATTERN_BARE,
+                   HEX_BIT_DEVICE_PATTERN_BARE, BIT_DEVICE_PATTERN_BARE)
     end
 
     # デバイス族 ($DM, $DML, $MR 等) をパースする。該当しなければ nil
@@ -344,31 +360,39 @@ module FaRuby
       return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
 
       device_name = m[1].upcase
+      bit = m[2].to_s.empty?
       { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
-        z_offset: 0, device_name: device_name, family: true,
-        access_type: nil, bit: true }
+        z_offset: 0, device_name: device_name, family: true, bit: bit,
+        access_type: bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase) }
     end
 
-    # ワードデバイス → ビットデバイスの順にマッチを試みる
-    def self.parse_device(str, word_pattern, bit_pattern)
+    # ワードデバイス → ビットデバイス (16進 → 10進) の順にマッチを試みる
+    #
+    # ビットデバイスは幅サフィックスの有無で意味が変わります。
+    #   無し  個別ビット (true / false)
+    #   有り  そのビットから連続したビット列を整数として (MR, R, B, L)
+    #         タイマ・カウンタの現在値 (T, C)
+    def self.parse_device(str, word_pattern, hex_bit_pattern, bit_pattern)
       return nil unless str
 
       if (m = str.match(word_pattern))
-        device_name = m[1].upcase
-        addr_str = m[2]
-        access_type = VmConstants::ACCESS_SUFFIXES.fetch(m[3].to_s.upcase)
-        return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
-                 z_offset: device_z_offset(device_name, addr_str),
-                 device_name: device_name, access_type: access_type, bit: false }
+        return build_device(m, bit: false)
       end
 
-      return nil unless (m = str.match(bit_pattern))
+      m = str.match(hex_bit_pattern) || str.match(bit_pattern)
+      return nil unless m
 
-      device_name = m[1].upcase
-      addr_str = m[2]
+      # サフィックスが付いていればワードとして扱う
+      build_device(m, bit: m[3].to_s.empty?)
+    end
+
+    def self.build_device(match, bit:)
+      device_name = match[1].upcase
+      addr_str = match[2]
       { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
         z_offset: device_z_offset(device_name, addr_str),
-        device_name: device_name, access_type: nil, bit: true }
+        device_name: device_name, bit: bit,
+        access_type: bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(match[3].to_s.upcase) }
     end
   end
 end

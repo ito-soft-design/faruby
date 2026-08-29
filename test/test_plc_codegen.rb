@@ -209,8 +209,38 @@ end
       addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
       assert_equal expected, image[addr + 2], "シンボル #{idx} の access_type"
     end
-    # ビットデバイスは 0 (未使用)
-    assert_equal 0, image[layout.device_table_base + 2 * DEVICE_TABLE_STRIDE + 2]
+    # サフィックス無しのビットデバイスは ACCESS_BIT。
+    # 0 (ACCESS_S) と区別が要る。幅を付けると整数として扱われるため。
+    assert_equal ACCESS_BIT, image[layout.device_table_base + 2 * DEVICE_TABLE_STRIDE + 2]
+  end
+
+  # ビットデバイスに幅を付けると整数として扱う
+  # (MR 等はそのビットから連続したビット列、T / C は現在値)
+  def test_bit_device_with_a_width_suffix_is_a_word_access
+    irep = build_irep(symbols: ["$MR100", "$MR100L", "$MR100_L", "$T0D"])
+    _em, image = load_image(irep)
+
+    widths = (0..3).map { |i| image[layout.device_table_base + i * DEVICE_TABLE_STRIDE + 2] }
+    assert_equal [ACCESS_BIT, ACCESS_L, ACCESS_L, ACCESS_D], widths
+  end
+
+  # B は16進アドレスなので D と F が数字と重なる。
+  # アンダースコアで区切れば幅として読める。
+  def test_hex_address_keeps_its_digits_unless_separated
+    assert_equal 0x1F, FaRuby::PlcCodegen.parse_device_symbol("$B1F")[:z_offset]
+    assert_nil FaRuby::PlcCodegen.parse_device_symbol("$B1F")[:access_type]
+
+    separated = FaRuby::PlcCodegen.parse_device_symbol("$B1_F")
+    assert_equal 0x1, separated[:z_offset]
+    assert_equal ACCESS_F, separated[:access_type]
+  end
+
+  # 10進アドレスのデバイスでは区切りが無くても曖昧にならない
+  def test_decimal_address_needs_no_separator
+    { "$T0D" => ACCESS_D, "$T0_D" => ACCESS_D, "$MR100L" => ACCESS_L,
+      "$DM100_L" => ACCESS_L }.each do |sym, access|
+      assert_equal access, FaRuby::PlcCodegen.parse_device_symbol(sym)[:access_type], sym
+    end
   end
 
   # 汎用グローバルは Ruby の値を持つので常に32ビット

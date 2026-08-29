@@ -429,6 +429,39 @@ end
     end
   end
 
+  # 幅サフィックスを付けると、そのビットから連続したビット列を整数として扱う
+  # (実機で確認済み。1ビット刻みでチャンネル境界に揃っていなくてよい)
+  def test_bit_device_with_a_width_reads_a_bit_field
+    source = <<~RUBY
+      $MR[64] = true
+      $MR[65] = true
+      $MR[66] = true
+      a = $MRL[64]
+    RUBY
+    result = compile_and_run(source)
+
+    assert_equal 7, result[:locals]["a"], "下位3ビットが立つ"
+  end
+
+  def test_bit_device_with_a_width_writes_a_bit_field
+    result = compile_and_run("$MRU[80] = 6\n")
+    mr = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_MR]
+
+    assert_equal [0, 1, 1, 0], (80..83).map { |n| mr.read_u16(n) }, "6 = 0b110"
+  end
+
+  # チャンネル境界に揃っていない位置から読める
+  def test_bit_field_can_start_anywhere
+    source = <<~RUBY
+      $MR[17] = true
+      $MR[20] = true
+      a = $MRU[17]
+    RUBY
+    result = compile_and_run(source)
+
+    assert_equal 9, result[:locals]["a"], "bit0 と bit3"
+  end
+
   # ビットデバイスも同じ経路。添字はデバイス番号 (MR400 は 64)
   def test_device_index_works_for_bit_devices
     source = <<~RUBY

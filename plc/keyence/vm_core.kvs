@@ -389,52 +389,166 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             EM0:Z2 = 4
                         END IF
                     ELSE IF Z5 = 3 THEN
-                        IF R0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF R0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = R0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = R0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = R0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = R0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = R0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 4 THEN
-                        IF MR0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF MR0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = MR0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = MR0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = MR0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = MR0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = MR0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 5 THEN
-                        IF B0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF B0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = B0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = B0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = B0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = B0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = B0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 6 THEN
-                        IF L0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF L0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = L0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = L0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = L0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = L0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = L0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 8 THEN
-                        IF T0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF T0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = T0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = T0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = T0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = T0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = T0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 9 THEN
-                        IF C0:Z6 THEN
-                            EM1.L:Z2 = 1
-                            EM0:Z2 = 3
+                        IF Z8 = 5 THEN
+                            IF C0:Z6 THEN
+                                EM1.L:Z2 = 1
+                                EM0:Z2 = 3
+                            ELSE
+                                EM1.L:Z2 = 0
+                                EM0:Z2 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z2 = 0
-                            EM0:Z2 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z2 = C0.L:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z2 = C0.U:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z2 = C0.D:Z6
+                                EM0:Z2 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z2 = C0.F:Z6
+                                EM0:Z2 = 5
+                            ELSE
+                                EM1.L:Z2 = C0.S:Z6
+                                EM0:Z2 = 4
+                            END IF
                         END IF
                     ELSE
                         EM1:Z9 = 3
@@ -530,40 +644,124 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ZF0.S:Z6 = EM16.L:Z9
                         END IF
                     ELSE IF Z5 = 3 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            R0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                R0:Z6 = 1
+                            ELSE
+                                R0:Z6 = 0
+                            END IF
                         ELSE
-                            R0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                R0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                R0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                R0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                R0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                R0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 4 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            MR0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                MR0:Z6 = 1
+                            ELSE
+                                MR0:Z6 = 0
+                            END IF
                         ELSE
-                            MR0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                MR0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                MR0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                MR0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                MR0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                MR0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 5 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            B0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                B0:Z6 = 1
+                            ELSE
+                                B0:Z6 = 0
+                            END IF
                         ELSE
-                            B0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                B0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                B0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                B0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                B0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                B0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 6 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            L0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                L0:Z6 = 1
+                            ELSE
+                                L0:Z6 = 0
+                            END IF
                         ELSE
-                            L0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                L0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                L0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                L0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                L0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                L0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 8 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            SET(T0:Z6)
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                SET(T0:Z6)
+                            ELSE
+                                RES(T0:Z6)
+                            END IF
                         ELSE
-                            RES(T0:Z6)
+                            IF Z8 = 2 THEN
+                                T0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                T0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                T0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                T0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                T0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 9 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            SET(C0:Z6)
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                SET(C0:Z6)
+                            ELSE
+                                RES(C0:Z6)
+                            END IF
                         ELSE
-                            RES(C0:Z6)
+                            IF Z8 = 2 THEN
+                                C0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                C0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                C0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                C0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                C0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE
                         EM1:Z9 = 3
@@ -660,52 +858,166 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             EM0:Z1 = 4
                         END IF
                     ELSE IF Z5 = 3 THEN
-                        IF R0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF R0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = R0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = R0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = R0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = R0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = R0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 4 THEN
-                        IF MR0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF MR0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = MR0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = MR0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = MR0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = MR0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = MR0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 5 THEN
-                        IF B0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF B0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = B0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = B0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = B0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = B0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = B0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 6 THEN
-                        IF L0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF L0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = L0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = L0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = L0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = L0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = L0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 8 THEN
-                        IF T0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF T0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = T0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = T0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = T0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = T0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = T0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE IF Z5 = 9 THEN
-                        IF C0:Z6 THEN
-                            EM1.L:Z1 = 1
-                            EM0:Z1 = 3
+                        IF Z8 = 5 THEN
+                            IF C0:Z6 THEN
+                                EM1.L:Z1 = 1
+                                EM0:Z1 = 3
+                            ELSE
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 2
+                            END IF
                         ELSE
-                            EM1.L:Z1 = 0
-                            EM0:Z1 = 2
+                            IF Z8 = 2 THEN
+                                EM1.L:Z1 = C0.L:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 1 THEN
+                                EM1.L:Z1 = C0.U:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 3 THEN
+                                EM1.L:Z1 = C0.D:Z6
+                                EM0:Z1 = 4
+                            ELSE IF Z8 = 4 THEN
+                                EM1.F:Z1 = C0.F:Z6
+                                EM0:Z1 = 5
+                            ELSE
+                                EM1.L:Z1 = C0.S:Z6
+                                EM0:Z1 = 4
+                            END IF
                         END IF
                     ELSE
                         EM1:Z9 = 3
@@ -808,40 +1120,124 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ZF0.S:Z6 = EM16.L:Z9
                         END IF
                     ELSE IF Z5 = 3 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            R0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                R0:Z6 = 1
+                            ELSE
+                                R0:Z6 = 0
+                            END IF
                         ELSE
-                            R0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                R0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                R0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                R0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                R0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                R0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 4 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            MR0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                MR0:Z6 = 1
+                            ELSE
+                                MR0:Z6 = 0
+                            END IF
                         ELSE
-                            MR0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                MR0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                MR0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                MR0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                MR0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                MR0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 5 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            B0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                B0:Z6 = 1
+                            ELSE
+                                B0:Z6 = 0
+                            END IF
                         ELSE
-                            B0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                B0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                B0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                B0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                B0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                B0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 6 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            L0:Z6 = 1
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                L0:Z6 = 1
+                            ELSE
+                                L0:Z6 = 0
+                            END IF
                         ELSE
-                            L0:Z6 = 0
+                            IF Z8 = 2 THEN
+                                L0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                L0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                L0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                L0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                L0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 8 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            SET(T0:Z6)
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                SET(T0:Z6)
+                            ELSE
+                                RES(T0:Z6)
+                            END IF
                         ELSE
-                            RES(T0:Z6)
+                            IF Z8 = 2 THEN
+                                T0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                T0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                T0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                T0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                T0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE IF Z5 = 9 THEN
-                        IF EM16.L:Z9 <> 0 THEN
-                            SET(C0:Z6)
+                        IF Z8 = 5 THEN
+                            IF EM16.L:Z9 <> 0 THEN
+                                SET(C0:Z6)
+                            ELSE
+                                RES(C0:Z6)
+                            END IF
                         ELSE
-                            RES(C0:Z6)
+                            IF Z8 = 2 THEN
+                                C0.L:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 1 THEN
+                                C0.U:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 3 THEN
+                                C0.D:Z6 = EM16.L:Z9
+                            ELSE IF Z8 = 4 THEN
+                                C0.F:Z6 = EM18.F:Z9
+                            ELSE
+                                C0.S:Z6 = EM16.L:Z9
+                            END IF
                         END IF
                     ELSE
                         EM1:Z9 = 3

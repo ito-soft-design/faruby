@@ -299,9 +299,17 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # ビットデバイスに幅サフィックスを付けてはいけない (16飛びになる)
-  def test_bit_devices_have_no_width_suffix
-    bad = code_lines(@source).grep(/\b(R|MR|B|L|T|C)0\.[SULDF]:Z/)
-    assert_empty bad, "ビットデバイスに幅サフィックスが付いています: #{bad.first(3).inspect}"
+  # ビットデバイスは幅の有無で経路が分かれる。
+  # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T / C は現在値)。
+  def test_bit_devices_have_both_paths
+    %w[MR R B L T C].each do |dev|
+      assert_includes @source, "#{dev}0:Z6", "#{dev} の個別ビットアクセス"
+      assert_includes @source, "#{dev}0.L:Z6", "#{dev} の幅付きアクセス"
+    end
+  end
+
+  def test_bit_access_is_selected_by_the_width
+    assert_includes @source, "IF Z8 = #{ACCESS_BIT} THEN"
   end
 
   # === 定義表とエミッタの境界 ===
