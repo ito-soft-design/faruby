@@ -281,8 +281,11 @@ module FaRuby
 
     # ワードデバイス: 10進アドレス + アクセス幅 (省略時は16ビット符号付き)
     #   $DM100 / $DM100L / $DM100_L
-    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF)(\d+)#{SUFFIX}$/i
-    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF)(\d+)#{SUFFIX}$/i
+    #
+    # 略記 (E, D, M) は正式名より後ろに置く。正規表現の選択肢は左から順に
+    # 試されるため、$EM100 が E + "M100" と読まれないようにするため
+    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF|E|D)(\d+)#{SUFFIX}$/i
+    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF|E|D)(\d+)#{SUFFIX}$/i
 
     # ビットデバイス: サフィックス無しなら個別ビット、付ければ整数
     #   $MR100 は接点、$MR100L はそこから32ビット、$T0D はタイマ現在値
@@ -292,61 +295,59 @@ module FaRuby
     #          アドレスを貪欲に取る ($B1F は 0x1F)。区切るなら $B1_F
     #   その他 10進。D や F はアドレスに現れないので曖昧さなし ($T0D は T0 + D)
     #
-    # MR を R より先にマッチさせる。CR はインデックス扱い不可のため非対応
-    # MR を R より、LR を L より先にマッチさせる
+    # CR はインデックス扱い不可のため非対応
+    # MR を R と M より、LR を L より先にマッチさせる
     HEX_BIT_DEVICE_PATTERN       = /^\$(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
     HEX_BIT_DEVICE_PATTERN_BARE  = /^(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN           = /^\$(MR|R|LR|L|T|C)(\d+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|LR|L|T|C)(\d+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN           = /^\$(MR|R|LR|L|M|T|C)(\d+)#{SUFFIX}$/i
+    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|LR|L|M|T|C)(\d+)#{SUFFIX}$/i
 
     # デバイス族: アドレスを持たない形。添字を付けて実行時にアドレスを決める
     #   $DM[100 + i]    16ビット符号付き (既定)
     #   $DML[100 + i]   32ビット符号付き
     #   $MR[64 + i]     ビットデバイス
     #
-    # 単独の D デバイスが無いため $DML は DM + L と一意に解析でき、
-    # $L (ラッチリレー) とも衝突しません。
+    # 略記の D / E / M があるため、正式名を先に試して一意に解析します。
+    # $DML は DM + L、$DL は D (= DM) + L です。
     #
     # 添字は「デバイス番号」です。ワードデバイスは表示上のアドレスと一致
     # しますが、MR / R / B は一致しません (MR400 は番号 64、B10 は 16)。
     # 番号空間では線形で、MR415 の次は MR500 になります。
-    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)#{SUFFIX}$/i
-    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|LR|L|T|C)#{SUFFIX}$/i
+    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF|E|D)#{SUFFIX}$/i
+    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|LR|L|M|T|C)#{SUFFIX}$/i
 
     # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
     NO_FLOAT_DEVICE_TYPES = [DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
-    # KV スクリプトとホスト通信でデバイス名が違うもの
+    # KV が受け付ける略記。正式名に正規化してから先へ渡します。
     #
-    # ラッチリレーは KV スクリプトでは L、KV のマニュアルと plc_access では LR です。
-    # ラダーで L と入力すると LR に変換されます。
-    #
-    # **番号の付け方も違います。** LR100 は番号 16 (MR や R と同じチャンネル・ビット
-    # 形式) ですが、plc_access は "L100" も受け付けてしまい番号 100 を返します。
-    # ホストと通信する名前は LR に正規化しないと、別のビットを読み書きします。
-    #
-    # 生成する KV スクリプトはエミッタ側の名前表を使うため L のままです。
-    PROTOCOL_DEVICE_NAME = { "L" => "LR" }.freeze
+    # ラダーでは略記で入力すると正式名に変換されます。plc_access は略記を
+    # 知らないため、正規化しないと **別のデバイスになります**。
+    # たとえば LR100 は番号 16 (MR や R と同じチャンネル・ビット形式) ですが、
+    # plc_access は "L100" も受け付けてしまい番号 100 を返します。
+    PROTOCOL_DEVICE_NAME = {
+      "L" => "LR", "M" => "MR", "D" => "DM", "E" => "EM",
+    }.freeze
 
     def self.protocol_name(device_name)
       PROTOCOL_DEVICE_NAME.fetch(device_name, device_name)
     end
 
+    # 正式名のみ。略記は protocol_name を通してから引くこと
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
-      "L" => DEVICE_TYPE_L, "LR" => DEVICE_TYPE_L,
+      "LR" => DEVICE_TYPE_L,
       "T" => DEVICE_TYPE_T, "C" => DEVICE_TYPE_C,
     }.freeze
-    # 表示用。L と LR は同じ種別なので LR を代表にする
-    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.except("L").invert.freeze
+    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.invert.freeze
 
     # KvDevice を使ってデバイスアドレスの Z レジスタ用オフセットを取得
     # HEXDEC (R, MR, LR 等): MR200 → 32, R100 → 16, LR100 → 16
     # HEX (B): B10 → 16
     # DEC (EM, DM 等): そのまま
     #
-    # 名前は必ず protocol_name を通したものを渡すこと。plc_access は "L100" も
-    # 受け付けるが番号 100 を返し、LR100 (番号 16) とは別のビットになる。
+    # 名前は必ず protocol_name を通したものを渡すこと。plc_access は略記を
+    # 知らず、"L100" を受け付けても番号 100 を返して LR100 (番号 16) と食い違う。
     def self.device_z_offset(device_name, addr_str)
       PlcAccess::Protocol::Keyence::KvDevice.new("#{protocol_name(device_name)}#{addr_str}").number
     end
@@ -376,7 +377,7 @@ module FaRuby
       return nil unless sym
 
       if (m = sym.match(WORD_FAMILY_PATTERN))
-        device_name = m[1].upcase
+        device_name = protocol_name(m[1].upcase)
         return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
                  z_offset: 0, device_name: device_name, family: true,
                  access_type: VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase), bit: false }

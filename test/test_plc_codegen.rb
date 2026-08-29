@@ -235,27 +235,54 @@ end
     assert_equal ACCESS_F, separated[:access_type]
   end
 
-  # ラッチリレーは KV スクリプトでは L、マニュアルと plc_access では LR。
-  # 番号の付け方も違い、L100 は 100、LR100 は 16 になる。
-  # ホストと通信する名前は LR に正規化しないと別のビットを読み書きする。
-  def test_latch_relay_normalises_to_the_protocol_name
-    %w[$L100 $LR100].each do |sym|
+  # KV が受け付ける略記 (E, D, M, L) は正式名に正規化する。
+  # plc_access は略記を知らず、"L100" を受け付けても番号 100 を返して
+  # LR100 (番号 16) と食い違うため、正規化しないと別のビットを読み書きする。
+  ALIAS_PAIRS = {
+    "$E100" => ["EM", DEVICE_TYPE_EM, 100],
+    "$D100" => ["DM", DEVICE_TYPE_DM, 100],
+    "$M100" => ["MR", DEVICE_TYPE_MR, 16],
+    "$L100" => ["LR", DEVICE_TYPE_L,  16],
+  }.freeze
+
+  def test_shorthand_device_names_normalise_to_the_protocol_name
+    ALIAS_PAIRS.each do |sym, (name, type, z_offset)|
       parsed = FaRuby::PlcCodegen.parse_device_symbol(sym)
-      assert_equal "LR", parsed[:device_name], sym
-      assert_equal DEVICE_TYPE_L, parsed[:device_type], sym
-      assert_equal 16, parsed[:z_offset], "#{sym} は LR100 = 番号 16"
+      assert_equal name, parsed[:device_name], sym
+      assert_equal type, parsed[:device_type], sym
+      assert_equal z_offset, parsed[:z_offset], "#{sym} は #{name}100 と同じ番号"
     end
   end
 
-  def test_latch_relay_family_normalises_too
-    parsed = FaRuby::PlcCodegen.parse_device_family("$L")
-    assert_equal "LR", parsed[:device_name]
-    assert_equal DEVICE_TYPE_L, parsed[:device_type]
+  # 略記と正式名は同じものを指す
+  def test_shorthand_matches_the_full_name
+    { "$E100" => "$EM100", "$D100L" => "$DM100L",
+      "$M100U" => "$MR100U", "$L100" => "$LR100" }.each do |short, full|
+      assert_equal FaRuby::PlcCodegen.parse_device_symbol(full),
+                   FaRuby::PlcCodegen.parse_device_symbol(short),
+                   "#{short} と #{full}"
+    end
   end
 
-  # LR を L より先にマッチさせないと、LR100 が L + "R100" になる
-  def test_lr_matches_before_l
+  def test_shorthand_device_families_normalise_too
+    { "$L" => "LR", "$M" => "MR", "$D" => "DM", "$E" => "EM" }.each do |sym, name|
+      assert_equal name, FaRuby::PlcCodegen.parse_device_family(sym)[:device_name], sym
+    end
+  end
+
+  # 正式名を略記より先にマッチさせないと、LR100 が L + "R100"、
+  # EM100 が E + "M100" になる
+  def test_full_names_match_before_shorthands
     assert_equal 160, FaRuby::PlcCodegen.parse_device_symbol("$LR1000")[:z_offset]
+    assert_equal DEVICE_TYPE_MR, FaRuby::PlcCodegen.parse_device_symbol("$MR100")[:device_type]
+    assert_equal DEVICE_TYPE_EM, FaRuby::PlcCodegen.parse_device_symbol("$EM100")[:device_type]
+    assert_equal DEVICE_TYPE_DM, FaRuby::PlcCodegen.parse_device_symbol("$DM100")[:device_type]
+  end
+
+  # $DML は DM + L。略記の D を先に取ると "ML" が幅として解釈できず壊れる
+  def test_family_suffix_is_read_after_the_full_name
+    assert_equal FaRuby::PlcCodegen.parse_device_family("$DL"),
+                 FaRuby::PlcCodegen.parse_device_family("$DML")
   end
 
   # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
