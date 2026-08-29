@@ -167,9 +167,25 @@ end
     regs = @transfer.read_registers
 
     assert_equal 3, regs.size
-    assert_equal({ index: 0, value: 0, label: "self", type: TT_EMPTY }, regs[0])
-    assert_equal({ index: 1, value: 42, label: "local", type: TT_EMPTY }, regs[1])
-    assert_equal({ index: 2, value: 100, label: "temp", type: TT_EMPTY }, regs[2])
+    assert_equal [0, 42, 100], regs.map { |r| r[:value] }
+    assert_equal %w[self local temp], regs.map { |r| r[:label] }
+    assert_equal [TT_EMPTY] * 3, regs.map { |r| r[:type] }
+  end
+
+  # 表示は型タグに従う。値だけでは nil も false も 0 も見分けがつかない
+  def test_registers_are_displayed_by_type
+    @adapter.memory[layout.nregs_addr] = 5
+    @adapter.memory[layout.nlocals_addr] = 5
+
+    { 0 => [TT_NIL, 0], 1 => [TT_TRUE, 1], 2 => [TT_FALSE, 0],
+      3 => [TT_INTEGER, 42], 4 => [TT_FLOAT, 0x3FC00000] }.each do |i, (tag, value)|
+      @adapter.memory[layout.reg_type_addr(i)] = tag
+      @adapter.memory[layout.reg_addr(i)]      = value & 0xFFFF
+      @adapter.memory[layout.reg_addr(i) + 1]  = (value >> 16) & 0xFFFF
+    end
+
+    displays = @transfer.read_registers.map { |r| r[:display] }
+    assert_equal ["nil", "true", "false", "42", "1.5"], displays
   end
 
   # スロット先頭の型タグが値と独立に読み出せること

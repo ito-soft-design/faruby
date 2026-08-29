@@ -27,6 +27,15 @@ module FaRuby
       div: ->(a, b) { a / b },
     }.freeze
 
+    # 実数は単精度 (IEEE754 32ビット)
+    #
+    # Ruby の Float は倍精度なので、そのままでは実機と結果がずれます。
+    # 演算のたびに単精度へ丸めて PLC に合わせます。
+    def self.to_single(value) = [value.to_f].pack("e").unpack1("e")
+
+    def self.float_bits(value) = [value.to_f].pack("e").unpack1("V")
+    def self.bits_to_float(bits) = [bits & 0xFFFF_FFFF].pack("V").unpack1("e")
+
     COMPARISON = {
       eq: ->(a, b) { a == b },  ne: ->(a, b) { a != b },
       lt: ->(a, b) { a < b },   le: ->(a, b) { a <= b },
@@ -56,6 +65,9 @@ module FaRuby
     def reg_next(name) = read_reg(operand(name) + 1)
     def pool(name)     = @em.read_s32(layout.pool_addr(operand(name)))
 
+    def reg_tag(name)      = read_reg_tag(operand(name))
+    def reg_next_tag(name) = read_reg_tag(operand(name) + 1)
+
     def binop(op, lhs, rhs) = ARITHMETIC.fetch(op).call(lhs, rhs)
     def cmp(op, lhs, rhs)   = COMPARISON.fetch(op).call(lhs, rhs)
 
@@ -73,18 +85,83 @@ module FaRuby
 
     # --- 動作 ---
 
-    def set_reg(name, value)
-      write_reg(operand(name), value)
+    def set_reg_int(name, value)
+      write_slot(operand(name), TT_INTEGER, value)
+    end
+
+    # --- 数値演算 (整数・実数の振り分け) ---
+    #
+    # 生成コード側はタグを見て .F と .L のどちらの書き方を出すかを選ぶ。
+    # ここでは Ruby の値として素直に計算し、実数なら単精度へ丸める。
+
+    def set_reg_arith(name, op, immediate: nil)
+      index = operand(name)
+      lhs = numeric_value(index)
+      rhs = immediate ? operand(immediate) : numeric_value(index + 1)
+
+      if float_operand?(index) || (immediate.nil? && float_operand?(index + 1))
+        write_float(index, binop(op, lhs.to_f, rhs.to_f))
+      else
+        write_slot(index, TT_INTEGER, binop(op, lhs, rhs))
+      end
+    end
+
+    def set_reg_cmp(name, op)
+      index = operand(name)
+      write_bool(index, cmp(op, numeric_value(index), numeric_value(index + 1)))
+    end
+
+    def set_reg_special(name, tag)
+      write_slot(operand(name), tag, TT_CANONICAL_VALUE.fetch(tag))
+    end
+
+    def move_reg(dest_name, src_name)
+      src = operand(src_name)
+      write_slot(operand(dest_name), read_reg_tag(src), read_reg(src))
+    end
+
+    def load_pool(dest_name, pool_name)
+      index = operand(pool_name)
+      write_slot(operand(dest_name),
+                 @em.read_u16(layout.pool_type_addr(index)),
+                 @em.read_s32(layout.pool_addr(index)))
     end
 
     def set_reg_bool(name, op, lhs, rhs)
-      write_reg(operand(name), cmp(op, lhs, rhs) ? 1 : 0)
+      write_bool(operand(name), cmp(op, lhs, rhs))
     end
 
-    def set_reg_div(name, lhs, rhs, error_code)
+    # 数値は型が違っても値で比べ (1 == 1.0 は真)、
+    # 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
+    def set_reg_eq(name)
+      index = operand(name)
+      same =
+        if numeric_tag?(read_reg_tag(index)) && numeric_tag?(read_reg_tag(index + 1))
+          numeric_value(index) == numeric_value(index + 1)
+        else
+          read_reg_tag(index) == read_reg_tag(index + 1) &&
+            read_reg(index) == read_reg(index + 1)
+        end
+      write_bool(index, same)
+    end
+
+    # R[a] = R[a] / R[a+1]
+    #
+    # 整数どうしは Ruby の / がそのまま切り下げなので補正は要らない
+    # (KV スクリプトの / は 0 方向へ切り捨てるため生成コード側で補正している)。
+    # 実数が絡む 0 除算は Ruby と同じく Infinity / NaN になる。
+    def set_reg_div(name, error_code)
+      index = operand(name)
+      lhs = numeric_value(index)
+      rhs = numeric_value(index + 1)
+
+      if float_operand?(index) || float_operand?(index + 1)
+        return write_float(index, float_div_result(lhs.to_f, rhs.to_f))
+      end
+
       return vm_error(error_code) if rhs.zero?
 
-      write_reg(operand(name), binop(:div, lhs, rhs))
+      write_slot(index, TT_INTEGER, binop(:div, lhs, rhs))
     end
 
     def load_global_into_reg(dest, sym_operand)
@@ -92,12 +169,13 @@ module FaRuby
       dev = device_memory(type)
       return vm_error(0x15) unless dev
 
-      value = if bit_device?(type)
-                dev.read_u16(addr) != 0 ? 1 : 0
-              else
-                read_word_device(dev, addr, access)
-              end
-      write_reg(operand(dest), value)
+      if bit_device?(type)
+        write_bool(operand(dest), dev.read_u16(addr) != 0)
+      elsif access == ACCESS_F
+        write_float(operand(dest), SimVm.bits_to_float(dev.read_u32(addr)))
+      else
+        write_slot(operand(dest), TT_INTEGER, read_word_device(dev, addr, access))
+      end
     end
 
     def store_reg_into_global(sym_operand, src)
@@ -105,10 +183,15 @@ module FaRuby
       dev = device_memory(type)
       return vm_error(0x16) unless dev
 
-      value = read_reg(operand(src))
+      # 実数レジスタを .S 等へ書くときは 0 方向へ切り捨て、
+      # 整数レジスタを .F へ書くときは実数へ変換する (生成コードと同じ規則)
+      index = operand(src)
       if bit_device?(type)
-        dev.write_u16(addr, value != 0 ? 1 : 0)
+        dev.write_u16(addr, numeric_value(index) != 0 ? 1 : 0)
+      elsif access == ACCESS_F
+        dev.write_u32(addr, SimVm.float_bits(numeric_value(index)))
       else
+        value = float_operand?(index) ? read_float(index).truncate : read_reg(index)
         write_word_device(dev, addr, access, value)
       end
     end
@@ -137,6 +220,14 @@ module FaRuby
       yield if cond
     end
 
+    # --- 真偽判定 ---
+    #
+    # Ruby で偽なのは nil と false だけ。0 も真。
+
+    def if_truthy(name) = (yield if reg_tag(name) > TT_FALSY_MAX)
+    def if_falsy(name)  = (yield if reg_tag(name) <= TT_FALSY_MAX)
+    def if_nil(name)    = (yield if reg_tag(name) == TT_NIL)
+
     # 生成コード向けのコメント。実行時は何もしない
     def note(_text) = nil
 
@@ -144,8 +235,51 @@ module FaRuby
 
     def pc = @em.read_u16(layout.pc_addr)
 
-    def read_reg(index)  = @em.read_s32(layout.reg_addr(index))
+    def read_reg(index)     = @em.read_s32(layout.reg_addr(index))
+    def read_reg_tag(index) = @em.read_u16(layout.reg_type_addr(index))
+
     def write_reg(index, value) = @em.write_s32(layout.reg_addr(index), value)
+
+    # 値スロットに型タグと値をまとめて書く
+    def write_slot(index, tag, value)
+      @em.write_u16(layout.reg_type_addr(index), tag)
+      @em.write_s32(layout.reg_addr(index), value)
+    end
+
+    def write_bool(index, value)
+      tag = value ? TT_TRUE : TT_FALSE
+      write_slot(index, tag, TT_CANONICAL_VALUE.fetch(tag))
+    end
+
+    # --- 実数 ---
+    #
+    # 値ワードには IEEE754 単精度のビット列を置く (PLC 側と同じ表現)。
+
+    def numeric_tag?(tag) = tag >= TT_INTEGER
+    def float_operand?(index) = read_reg_tag(index) == TT_FLOAT
+
+    def read_float(index) = SimVm.bits_to_float(@em.read_u32(layout.reg_addr(index)))
+
+    def write_float(index, value)
+      @em.write_u16(layout.reg_type_addr(index), TT_FLOAT)
+      @em.write_u32(layout.reg_addr(index), SimVm.float_bits(value))
+    end
+
+    # レジスタを数値として読む (タグに応じて整数か実数)
+    def numeric_value(index)
+      float_operand?(index) ? read_float(index) : read_reg(index)
+    end
+
+    # Ruby と同じく 0 除算は Infinity / NaN になる
+    #
+    # 生成コード側は KV の / が軽度エラー CR2012 を出すため、
+    # 除数が 0 のときは IEEE754 のビット列を直接書いている。
+    def float_div_result(lhs, rhs)
+      return lhs / rhs unless rhs.zero?
+      return Float::NAN if lhs.zero?
+
+      lhs.positive? ? Float::INFINITY : -Float::INFINITY
+    end
 
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte

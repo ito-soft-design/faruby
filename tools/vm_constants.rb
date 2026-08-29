@@ -17,9 +17,8 @@ module FaRuby
     #   +2 : 値 上位ワード          ┘
     #   +3 : 予備 (将来の拡張用)
     #
-    # 現時点で VM は整数のみを扱うため型タグは書き込まず TT_EMPTY (0) のまま
-    # ですが、Float・String・Array 等を導入する際にレジスタ幅を変更せずに
-    # 済むよう領域を予約しています。
+    # 生成コードはスロット先頭を Z に載せ、タグを EM0:Z、値を EM1.L:Z で
+    # 指します。1 本の Z で両方を扱えるようにするためです。
     SLOT_WORDS        = 4
     SLOT_TYPE_OFFSET  = 0
     SLOT_VALUE_OFFSET = 1
@@ -29,7 +28,11 @@ module FaRuby
     # .mrb バイナリには実行時の型情報が含まれないため、本プロジェクトで
     # 定義した番号です (mruby/c の mrbc_vtype に倣った命名)。
     # TT_EMPTY = 0 はレジスタクリア直後の状態と一致します。
-    TT_EMPTY   = 0     # 未初期化
+    #
+    # 【重要】この並び順には意味があります。Ruby で偽になるのは nil と false
+    # だけなので、偽の 2 つを真より小さい番号に置いてあります。真偽判定が
+    # 「タグ >= TT_TRUE」の1比較で済みます。並べ替えないでください。
+    TT_EMPTY   = 0     # 未初期化 (nil と同じく偽として扱う)
     TT_NIL     = 1
     TT_FALSE   = 2
     TT_TRUE    = 3
@@ -40,6 +43,30 @@ module FaRuby
     TT_ARRAY   = 8
     TT_HASH    = 9
     TT_OBJECT  = 10
+
+    # これ以下のタグが偽。Ruby で偽なのは nil と false だけ (0 も真)。
+    TT_FALSY_MAX = TT_FALSE
+
+    # --- 単精度実数 (IEEE754) の特殊値 ---
+    #
+    # Ruby の 1.0 / 0 は Infinity で例外にならないが、KV スクリプトで
+    # 0 除算を実行すると軽度エラー CR2012 が出る。そのため除数が 0 のときは
+    # 除算を実行せず、ビット列を直接書き込む。下位ワードはいずれも 0。
+    FLOAT_POS_INF_HI = 0x7F80   # +Infinity (0x7F800000)
+    FLOAT_NEG_INF_HI = 0xFF80   # -Infinity (0xFF800000)
+    FLOAT_NAN_HI     = 0x7FC0   # NaN       (0x7FC00000)
+
+    # 値を持たない型の値ワード
+    #
+    # true を 1、false と nil を 0 にしてあるのは、ビットデバイスへの書き込みを
+    # 値だけで判定できるようにするためです ($MR10 = true も $MR10 = 1 も ON)。
+    TT_CANONICAL_VALUE = {
+      TT_EMPTY  => 0,
+      TT_NIL    => 0,
+      TT_FALSE  => 0,
+      TT_TRUE   => 1,
+      TT_OBJECT => 0,   # トップレベルの self (main)
+    }.freeze
 
     # --- デバイスタイプ ---
     DEVICE_TYPE_EM = 0

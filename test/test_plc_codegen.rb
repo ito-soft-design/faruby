@@ -77,13 +77,27 @@ end
     assert_equal 7, em.read_s32(layout.pool_addr(0))
   end
 
-  # 未対応の型 (float) はスロットを書かない
-  def test_pool_float_is_skipped
+  # 実数は IEEE754 単精度のビット列として格納する
+  # (PLC 側は値ワードを .F で読む)
+  def test_pool_float_is_stored_as_ieee754
     irep = build_irep(pool: [[:float, 1.5]])
-    _em, image = load_image(irep)
+    em, = load_image(irep)
 
-    refute image.key?(layout.pool_addr(0))
-    refute image.key?(layout.pool_type_addr(0))
+    assert_equal TT_FLOAT, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 0x3FC00000, em.read_u32(layout.pool_addr(0))
+  end
+
+  # 対応していない型はスロットを 0 (TT_EMPTY) で埋める
+  #
+  # OP_LOADL はタグごと複製するため、書かずに残すと不定のタグを拾う。
+  # TT_EMPTY なら少なくとも偽として扱われ、挙動が決まる。
+  def test_unsupported_pool_entry_is_zeroed
+    irep = build_irep(pool: [[:string, "hi"]])
+    em, image = load_image(irep)
+
+    assert image.key?(layout.pool_type_addr(0)), "タグを書かずに残さない"
+    assert_equal TT_EMPTY, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 0, em.read_s32(layout.pool_addr(0))
   end
 
   # プール領域がデバイスマッピングテーブル (EM5000) を侵さないこと
@@ -206,12 +220,14 @@ end
     assert_equal ACCESS_L, mappings[0][:access_type]
   end
 
-  # 実数はコンパイル時に弾く
-  def test_float_access_is_rejected
+  # 実数デバイスはアクセス幅 F としてテーブルに載る
+  def test_float_access_is_mapped
     irep = build_irep(symbols: ["$DM100F"])
-    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
-    assert_match(/実数/, err.message)
-    assert_match(/\$DM100F/, err.message)
+    mappings = FaRuby::PlcCodegen.new(irep).device_mappings
+
+    assert_equal ACCESS_F, mappings[0][:access_type]
+    assert_equal DEVICE_TYPE_DM, mappings[0][:device_type]
+    assert_equal "100", mappings[0][:address]
   end
 
   # デバイステーブルが汎用グローバル領域を侵さないこと

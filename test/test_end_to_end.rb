@@ -62,6 +62,35 @@ end
     assert_equal 2000, result[:locals]["b"]
   end
 
+  # OP_LOADI のオペランドは符号なし (0-255)。負値は OP_LOADINEG が受け持つ。
+  # 符号付きとして扱っていたころは 128 以上が負になり、`while i < 200` が
+  # 一度も回らなかった。境界をまたぐ値を実際にコンパイルして確認する。
+  def test_literals_across_the_signed_byte_boundary
+    [127, 128, 200, 255, 256].each do |n|
+      result = compile_and_run("a = #{n}\n")
+      assert_equal n, result[:locals]["a"], "リテラル #{n}"
+    end
+  end
+
+  def test_negative_literals_across_the_byte_boundary
+    [-1, -127, -128, -200, -255, -256].each do |n|
+      result = compile_and_run("a = #{n}\n")
+      assert_equal n, result[:locals]["a"], "リテラル #{n}"
+    end
+  end
+
+  # ループの上限が 127 を超えても回ること
+  def test_loop_bound_above_the_signed_byte_boundary
+    source = <<~RUBY
+      i = 0
+      while i < 200
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    assert_equal 200, result[:locals]["i"]
+  end
+
   def test_if_true_branch
     source = <<~RUBY
       a = 5
@@ -293,21 +322,25 @@ end
     assert_equal(-31072, sim.global_value("$lo"))  # 0x86A0 (34464) を符号付き16ビットで読んだ値
   end
 
-  # F サフィックスは未実装なのでコンパイル時にエラーになる
-  def test_device_suffix_float_is_rejected
+  # F サフィックスは実数として扱われる。整数を代入すると実数に変換される
+  def test_device_suffix_float_is_mapped
     rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
-    rb_file.write("$DM460F = 1\n")
+    rb_file.write("$DM460F = 1.5\n")
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
 
     begin
       assert system(@mrbc, "-o", mrb_path, rb_file.path)
       irep = FaRuby::MrbParser.new(File.binread(mrb_path)).parse.irep
-      err = assert_raises(FaRuby::CodegenError) do
-        FaRuby::PlcCodegen.new(irep).memory_image
-      end
-      assert_match(/実数/, err.message)
-      assert_match(/\$DM460F/, err.message)
+      codegen = FaRuby::PlcCodegen.new(irep)
+
+      assert_equal FaRuby::VmConstants::ACCESS_F, codegen.device_mappings[0][:access_type]
+      # 実数リテラルは IEEE754 単精度でプールに載る
+      image = codegen.memory_image
+      layout = codegen.layout
+      bits = image[layout.pool_addr(0)] | (image[layout.pool_addr(0) + 1] << 16)
+      assert_equal FaRuby::VmConstants::TT_FLOAT, image[layout.pool_type_addr(0)]
+      assert_in_delta 1.5, [bits].pack("V").unpack1("e"), 1e-6
     ensure
       rb_file.unlink
       File.delete(mrb_path) if File.exist?(mrb_path)

@@ -31,7 +31,6 @@ module FaRuby
       check_limit("バイトコード長", @irep.ilen, layout.max_bytecode)
       check_limit("定数プールのエントリ数", @irep.pool.size, layout.max_pool)
       check_limit("シンボル数", @irep.symbols.size, layout.max_symbols)
-      check_unsupported_access
       self
     end
 
@@ -79,14 +78,15 @@ module FaRuby
       end
 
       # 定数プール (値スロット: 型タグ + 32ビット値)
+      #
+      # 未対応の型はスロットを 0 (TT_EMPTY) で埋める。OP_LOADL はタグごと
+      # 複製するため、書かずに残すと不定のタグを拾ってしまう。
       @irep.pool.each_with_index do |entry, i|
         value = pool_slot_value(entry)
-        next unless value
-
-        image[layout.pool_type_addr(i)] = pool_type_tag(entry)
         addr = layout.pool_addr(i)
-        image[addr]     = value & 0xFFFF
-        image[addr + 1] = (value >> 16) & 0xFFFF
+        image[layout.pool_type_addr(i)] = value ? pool_type_tag(entry) : TT_EMPTY
+        image[addr]     = value ? value & 0xFFFF : 0
+        image[addr + 1] = value ? (value >> 16) & 0xFFFF : 0
       end
 
       # レジスタファイル初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
@@ -146,17 +146,6 @@ module FaRuby
       raise CodegenError, "#{label}が上限を超えています (#{actual} > #{limit})"
     end
 
-    # 実数 (F サフィックス) は VM が型タグを扱えるようになるまで未対応
-    def check_unsupported_access
-      floats = device_mappings.select { |m| m[:access_type] == ACCESS_F }
-      return if floats.empty?
-
-      names = floats.map { |m| m[:symbol] }.join(", ")
-      raise CodegenError,
-            "実数デバイス (F サフィックス) は未実装です: #{names} " \
-            "(VM の型タグ実装が必要。整数は S/U/L/D が使えます)"
-    end
-
     # プールエントリの型タグを返す
     def pool_type_tag(entry)
       case entry.type
@@ -167,12 +156,19 @@ module FaRuby
     end
 
     # プールエントリの 32ビット値を返す (未対応の型は nil)
+    #
+    # 実数は IEEE754 単精度のビット列として格納します。PLC 側は値ワードを
+    # .F で読むため、ビット列がそのまま実数として解釈されます。
     def pool_slot_value(entry)
       case entry.type
       when :int32 then entry.value
       when :int64 then entry.value & 0xFFFFFFFF  # 下位32ビットのみ使用
+      when :float then float_bits(entry.value)
       end
     end
+
+    # 倍精度の Ruby Float を単精度のビット列にする
+    def float_bits(value) = [value].pack("e").unpack1("V")
 
     def generate_vm_state
       lines = []
@@ -217,7 +213,11 @@ module FaRuby
           lines << "#{layout.device(layout.pool_type_addr(i))} = #{TT_INTEGER}    ' Pool[#{i}] type=integer"
           lines << "#{layout.device_long(layout.pool_addr(i))} = #{entry.value}    ' Pool[#{i}]"
         when :float
-          lines << "' Pool[#{i}] = #{entry.value} (float - not supported in milestone 1)"
+          lines << "#{layout.device(layout.pool_type_addr(i))} = #{TT_FLOAT}    ' Pool[#{i}] type=float"
+          lines << "#{layout.device(layout.pool_addr(i))} = #{float_bits(entry.value) & 0xFFFF}    " \
+                   "' Pool[#{i}] = #{entry.value} (IEEE754 下位)"
+          lines << "#{layout.device(layout.pool_addr(i) + 1)} = #{(float_bits(entry.value) >> 16) & 0xFFFF}    " \
+                   "' Pool[#{i}] = #{entry.value} (IEEE754 上位)"
         else
           lines << "' Pool[#{i}] = #{entry} (type #{entry.type} - not supported)"
         end

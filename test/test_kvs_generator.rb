@@ -184,26 +184,63 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_register_access_uses_device_side_suffix
-    assert_includes @source, "EM0.L:Z1"
-    assert_includes @source, "EM0.L:Z2"
+    assert_includes @source, "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z1"
+    assert_includes @source, "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z2"
   end
 
   # === 値スロットのアドレス計算 ===
 
-  # レジスタは「スロット先頭 + 値オフセット」を直接指す
-  def test_register_address_matches_slot_layout
-    base = emitter.block_offset(layout.reg_file_base + SLOT_VALUE_OFFSET)
+  # Z はスロット先頭を指し、タグと値の両方を1本で扱う
+  def test_register_address_points_at_the_slot_head
+    base = emitter.block_offset(layout.reg_file_base)
     assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{base}"
   end
 
-  def test_pool_address_matches_slot_layout
-    base = emitter.block_offset(layout.pool_base + SLOT_VALUE_OFFSET)
+  def test_pool_address_points_at_the_slot_head
+    base = emitter.block_offset(layout.pool_base)
     assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{base}"
+  end
+
+  # 1本の Z でタグ (先頭) と値 (先頭+1) を指す
+  def test_slot_reference_covers_tag_and_value
+    slot = emitter.reg_slot(:a)
+    assert_equal "#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z1", slot.tag
+    assert_equal "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z1", slot.value
   end
 
   def test_device_table_stride
     base = emitter.block_offset(layout.device_table_base)
     assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{base}"
+  end
+
+  # 実数の 0 除算では、代入先を書き換える前に符号を確定させる。
+  #
+  # 代入先は被除数と同じレジスタなので、低位ワードを消してから符号を見ると
+  # 整数の 1-65535 が 0 になり、+Infinity が NaN になる。実機で確認した不具合。
+  # シミュレータは Ruby の値で計算するため、この順序は生成コードでしか守れない。
+  def test_float_division_by_zero_decides_the_sign_before_writing
+    body = opcode_body(0x41)
+    hi = "#{layout.device_name}#{SLOT_VALUE_OFFSET + 1}:Z1"
+
+    assert_includes body, "#{hi} = #{emitter.scratch_lo}",
+                    "上位ワードはスクラッチ経由で書く"
+    refute_match(/#{Regexp.escape(hi)} = \d/, body,
+                 "符号ごとに上位ワードを直接書くと、被除数を壊してから符号を見ることになる")
+  end
+
+  # 実数デバイスへ書くときは整数への変換を行わない。
+  #
+  # Infinity や NaN を整数へ変換すると浮動小数点フォーマット異常になるため、
+  # 両方の形を先に作ると `$DM100F = 1.0 / 0` が PLC のエラーになる。
+  def test_device_write_converts_only_what_it_uses
+    body = opcode_body(0x16) # OP_SETGV
+    to_int = "#{emitter.scratch32} = #{layout.device_name}#{SLOT_VALUE_OFFSET}.F:Z2"
+
+    assert_includes body, to_int, "実数→整数の変換自体はある"
+    width_branch = body.index("IF Z8 = #{ACCESS_F} THEN")
+    refute_nil width_branch, "アクセス幅で先に分岐する"
+    assert_operator width_branch, :<, body.index(to_int),
+                    "整数への変換は .F 以外の枝の中だけで行う"
   end
 
   # === オペコードの網羅 ===

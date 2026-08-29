@@ -77,6 +77,9 @@ module FaRuby
             read_device_long(device_prefix, addr)
           when VmConstants::ACCESS_D
             read_device_long(device_prefix, addr) & 0xFFFF_FFFF
+          when VmConstants::ACCESS_F
+            # 同じ2ワードを IEEE754 単精度として読む
+            [read_device_long(device_prefix, addr) & 0xFFFF_FFFF].pack("V").unpack1("e")
           else # ACCESS_S
             v = read_device(device_prefix, addr)
             v >= 0x8000 ? v - 0x1_0000 : v
@@ -88,6 +91,9 @@ module FaRuby
           case access_type
           when VmConstants::ACCESS_L, VmConstants::ACCESS_D
             write_device_long(device_prefix, addr, value)
+          when VmConstants::ACCESS_F
+            bits = [value.to_f].pack("e").unpack1("V")
+            write_device_long(device_prefix, addr, bits - (bits >= 0x8000_0000 ? 0x1_0000_0000 : 0))
           else # ACCESS_S / ACCESS_U
             write_device(device_prefix, addr, value.to_i & 0xFFFF)
           end

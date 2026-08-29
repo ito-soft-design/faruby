@@ -93,21 +93,41 @@ end
     assert_equal(-1, @sim.reg(1))
   end
 
-  # === OP_LOADI8 ===
-  def test_loadi8_positive
-    # R[1] = 42; STOP
+  # === OP_LOADI ===
+  #
+  # オペランドは符号なし (0-255)。負値は OP_LOADINEG が受け持つ。
+  # 符号付きとして扱うと 128 以上が負になり、`while i < 200` が回らない。
+  def test_loadi_positive
     load_bytecode([
-      0x03, 0x01, 42,   # OP_LOADI8 R[1], 42
+      0x03, 0x01, 42,   # OP_LOADI R[1], 42
       0x69,             # OP_STOP
     ])
     @sim.run
     assert_equal 42, @sim.reg(1)
   end
 
-  def test_loadi8_negative
-    # R[1] = -10; STOP  (256 - 10 = 246)
+  def test_loadi_is_unsigned
     load_bytecode([
-      0x03, 0x01, 246,  # OP_LOADI8 R[1], -10 (signed byte)
+      0x03, 0x01, 200,  # OP_LOADI R[1], 200
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 200, @sim.reg(1), "符号拡張すると -56 になる"
+  end
+
+  def test_loadi_upper_bound
+    load_bytecode([
+      0x03, 0x01, 255,  # OP_LOADI R[1], 255
+      0x69,             # OP_STOP
+    ])
+    @sim.run
+    assert_equal 255, @sim.reg(1)
+  end
+
+  # === OP_LOADINEG ===
+  def test_loadineg
+    load_bytecode([
+      0x04, 0x01, 10,   # OP_LOADINEG R[1], 10 → -10
       0x69,             # OP_STOP
     ])
     @sim.run
@@ -180,9 +200,9 @@ end
     assert_equal 100000, @sim.em.read_s32(layout.reg_addr(1))
     # 隣接スロットが侵食されない
     assert_equal 1, @sim.reg(2)
-    # 型タグ領域は未使用 (TT_EMPTY)
-    assert_equal TT_EMPTY, @sim.em.read_u16(layout.reg_type_addr(1))
-    assert_equal TT_EMPTY, @sim.em.read_u16(layout.reg_type_addr(2))
+    # スロット先頭に型タグが入る
+    assert_equal TT_INTEGER, @sim.em.read_u16(layout.reg_type_addr(1))
+    assert_equal TT_INTEGER, @sim.em.read_u16(layout.reg_type_addr(2))
     # スロット間隔が SLOT_WORDS であること
     assert_equal SLOT_WORDS,
                  layout.reg_slot_addr(2) - layout.reg_slot_addr(1)
@@ -507,18 +527,43 @@ end
   end
 
   # === OP_JMPNOT ===
+  #
+  # 真偽判定は型タグで行う。Ruby で偽なのは nil と false だけ。
   def test_jmpnot_taken
-    # R[1]=0 (false), JMPNOT should jump
+    # R[1]=false, JMPNOT should jump
     # JMPNOT at offset 2: after reading BS operands → PC=6
     # offset=2 → target=6+2=8 (OP_STOP)
     load_bytecode([
-      0x06, 0x01,             # 0,1: OP_LOADI_0 R[1] (false)
+      0x14, 0x01,             # 0,1: OP_LOADFALSE R[1]
       0x27, 0x01, 0x00, 0x02, # 2,3,4,5: OP_JMPNOT R[1], offset=2 → PC=6+2=8
       0x0B, 0x02,             # 6,7: OP_LOADI_5 R[2] (skipped)
       0x69,                   # 8: OP_STOP
     ], nregs: 4)
     @sim.run
     assert_equal 0, @sim.reg(2), "LOADI_5 should be skipped"
+  end
+
+  def test_jmpnot_taken_for_nil
+    load_bytecode([
+      0x11, 0x01,             # OP_LOADNIL R[1]
+      0x27, 0x01, 0x00, 0x02, # OP_JMPNOT R[1] → 飛ぶ
+      0x0B, 0x02,             # OP_LOADI_5 R[2] (skipped)
+      0x69,                   # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 0, @sim.reg(2), "nil は偽なので飛ぶ"
+  end
+
+  # Ruby では 0 も真。値ではなく型タグで判定していることの確認
+  def test_integer_zero_is_truthy
+    load_bytecode([
+      0x06, 0x01,             # OP_LOADI_0 R[1] (整数の 0)
+      0x27, 0x01, 0x00, 0x02, # OP_JMPNOT R[1] → 飛ばない
+      0x0B, 0x02,             # OP_LOADI_5 R[2] (executed)
+      0x69,                   # OP_STOP
+    ], nregs: 4)
+    @sim.run
+    assert_equal 5, @sim.reg(2), "整数の 0 は Ruby では真"
   end
 
   def test_jmpnot_not_taken
