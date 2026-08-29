@@ -235,6 +235,26 @@ end
     assert_equal ACCESS_F, separated[:access_type]
   end
 
+  # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
+  def test_timer_and_counter_reject_float
+    %w[$T0F $C0F $T0_F $T $C].each do |sym|
+      next if %w[$T $C].include?(sym) # 幅無しは個別ビットなので対象外
+
+      err = assert_raises(FaRuby::CodegenError, sym) { FaRuby::PlcCodegen.parse_device_symbol(sym) }
+      assert_match(/実数/, err.message)
+    end
+
+    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_family("$TF") }
+    assert_match(/実数/, err.message)
+  end
+
+  # 生成コードにも T / C の実数分岐を出さない
+  def test_generated_code_has_no_float_branch_for_timers
+    source = FaRuby::KvsGenerator.new.source
+    refute_match(/\b[TC]0\.F:Z/, source)
+    assert_match(/\bMR0\.F:Z/, source, "他のビットデバイスには残る")
+  end
+
   # 10進アドレスのデバイスでは区切りが無くても曖昧にならない
   def test_decimal_address_needs_no_separator
     { "$T0D" => ACCESS_D, "$T0_D" => ACCESS_D, "$MR100L" => ACCESS_L,

@@ -61,6 +61,10 @@ module FaRuby
     ACCESS_BRANCHES = [[ACCESS_L, "L"], [ACCESS_U, "U"], [ACCESS_D, "D"], [ACCESS_F, "F"]].freeze
     ACCESS_DEFAULT_SUFFIX = "S"
 
+    # タイマ・カウンタは .F を受け付けない (KV Studio の変換が通らない)。
+    # 幅を付けると現在値を返すデバイスなので、実数の出番が無い。
+    NO_FLOAT_DEVICES = [DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
+
     # KV スクリプトの比較演算子
     COMPARISON = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }.freeze
     ARITHMETIC = { add: "+", sub: "-", mul: "*", div: "/" }.freeze
@@ -587,7 +591,7 @@ module FaRuby
         chain_head(first, "Z5 = #{type}")
         first = false
         indent
-        word_device_body(mode, name, slot)
+        word_device_body(mode, name, slot, type)
         dedent
       end
 
@@ -598,7 +602,7 @@ module FaRuby
         first = false
         indent
         if_else_block("Z8 = #{ACCESS_BIT}") { bit_device_body(mode, name, slot, set_res) }
-        word_device_body(mode, name, slot)
+        word_device_body(mode, name, slot, type)
         end_block
         dedent
       end
@@ -712,9 +716,12 @@ module FaRuby
       line(first ? "IF #{cond} THEN" : "ELSE IF #{cond} THEN")
     end
 
-    def word_device_body(mode, name, slot)
+    def word_device_body(mode, name, slot, type)
+      branches = ACCESS_BRANCHES
+      branches = branches.reject { |value, _| value == ACCESS_F } if NO_FLOAT_DEVICES.include?(type)
+
       first = true
-      ACCESS_BRANCHES.each do |value, suffix|
+      branches.each do |value, suffix|
         chain_head(first, "Z8 = #{value}")
         first = false
         indent

@@ -311,6 +311,9 @@ module FaRuby
     # 番号空間では線形で、MR415 の次は MR500 になります。
     WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF)#{SUFFIX}$/i
     BIT_FAMILY_PATTERN  = /^\$(MR|R|B|L|T|C)#{SUFFIX}$/i
+
+    # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
+    NO_FLOAT_DEVICE_TYPES = [DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
     DEVICE_NAME_TO_TYPE = {
       "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
       "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
@@ -360,10 +363,13 @@ module FaRuby
       return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
 
       device_name = m[1].upcase
+      device_type = DEVICE_NAME_TO_TYPE[device_name]
       bit = m[2].to_s.empty?
-      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
-        z_offset: 0, device_name: device_name, family: true, bit: bit,
-        access_type: bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase) }
+      access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase)
+      check_float_support(device_name, device_type, access_type)
+
+      { device_type: device_type, address: "0", z_offset: 0,
+        device_name: device_name, family: true, bit: bit, access_type: access_type }
     end
 
     # ワードデバイス → ビットデバイス (16進 → 10進) の順にマッチを試みる
@@ -389,10 +395,24 @@ module FaRuby
     def self.build_device(match, bit:)
       device_name = match[1].upcase
       addr_str = match[2]
-      { device_type: DEVICE_NAME_TO_TYPE[device_name], address: addr_str,
+      device_type = DEVICE_NAME_TO_TYPE[device_name]
+      access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(match[3].to_s.upcase)
+      check_float_support(device_name, device_type, access_type)
+
+      { device_type: device_type, address: addr_str,
         z_offset: device_z_offset(device_name, addr_str),
-        device_name: device_name, bit: bit,
-        access_type: bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(match[3].to_s.upcase) }
+        device_name: device_name, bit: bit, access_type: access_type }
+    end
+
+    # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)。
+    # 幅を付けると現在値を返すデバイスなので、実数の出番が無い。
+    def self.check_float_support(device_name, device_type, access_type)
+      return unless access_type == VmConstants::ACCESS_F
+      return unless NO_FLOAT_DEVICE_TYPES.include?(device_type)
+
+      raise CodegenError,
+            "#{device_name} は実数 (F サフィックス) を扱えません。" \
+            "幅を付けると現在値を返すため、整数の幅を指定してください (#{device_name}0D 等)"
     end
   end
 end

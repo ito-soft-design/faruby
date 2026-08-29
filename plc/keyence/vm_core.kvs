@@ -515,9 +515,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ELSE IF Z8 = 3 THEN
                                 EM1.L:Z2 = T0.D:Z6
                                 EM0:Z2 = 4
-                            ELSE IF Z8 = 4 THEN
-                                EM1.F:Z2 = T0.F:Z6
-                                EM0:Z2 = 5
                             ELSE
                                 EM1.L:Z2 = T0.S:Z6
                                 EM0:Z2 = 4
@@ -542,9 +539,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ELSE IF Z8 = 3 THEN
                                 EM1.L:Z2 = C0.D:Z6
                                 EM0:Z2 = 4
-                            ELSE IF Z8 = 4 THEN
-                                EM1.F:Z2 = C0.F:Z6
-                                EM0:Z2 = 5
                             ELSE
                                 EM1.L:Z2 = C0.S:Z6
                                 EM0:Z2 = 4
@@ -737,8 +731,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                                 T0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
                                 T0.D:Z6 = EM16.L:Z9
-                            ELSE IF Z8 = 4 THEN
-                                T0.F:Z6 = EM18.F:Z9
                             ELSE
                                 T0.S:Z6 = EM16.L:Z9
                             END IF
@@ -757,8 +749,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                                 C0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
                                 C0.D:Z6 = EM16.L:Z9
-                            ELSE IF Z8 = 4 THEN
-                                C0.F:Z6 = EM18.F:Z9
                             ELSE
                                 C0.S:Z6 = EM16.L:Z9
                             END IF
@@ -984,9 +974,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ELSE IF Z8 = 3 THEN
                                 EM1.L:Z1 = T0.D:Z6
                                 EM0:Z1 = 4
-                            ELSE IF Z8 = 4 THEN
-                                EM1.F:Z1 = T0.F:Z6
-                                EM0:Z1 = 5
                             ELSE
                                 EM1.L:Z1 = T0.S:Z6
                                 EM0:Z1 = 4
@@ -1011,9 +998,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                             ELSE IF Z8 = 3 THEN
                                 EM1.L:Z1 = C0.D:Z6
                                 EM0:Z1 = 4
-                            ELSE IF Z8 = 4 THEN
-                                EM1.F:Z1 = C0.F:Z6
-                                EM0:Z1 = 5
                             ELSE
                                 EM1.L:Z1 = C0.S:Z6
                                 EM0:Z1 = 4
@@ -1213,8 +1197,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                                 T0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
                                 T0.D:Z6 = EM16.L:Z9
-                            ELSE IF Z8 = 4 THEN
-                                T0.F:Z6 = EM18.F:Z9
                             ELSE
                                 T0.S:Z6 = EM16.L:Z9
                             END IF
@@ -1233,8 +1215,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                                 C0.U:Z6 = EM16.L:Z9
                             ELSE IF Z8 = 3 THEN
                                 C0.D:Z6 = EM16.L:Z9
-                            ELSE IF Z8 = 4 THEN
-                                C0.F:Z6 = EM18.F:Z9
                             ELSE
                                 C0.S:Z6 = EM16.L:Z9
                             END IF
