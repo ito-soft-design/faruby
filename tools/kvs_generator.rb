@@ -371,9 +371,10 @@ module FaRuby
     # 型が違えば等しくない (Ruby では nil == false も 1 == true も偽)。
     # 値だけを比べると nil と false と 0 が同一になってしまう。
     def set_reg_eq(name)
-      lhs = reg_slot(name)
-      rhs = reg_next_slot(name)
+      eq_into(reg_slot(name), reg_next_slot(name))
+    end
 
+    def eq_into(lhs, rhs, negate: false)
       note "数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)"
       note "数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)"
       note "結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する"
@@ -393,8 +394,8 @@ module FaRuby
       end
       end_block
 
-      if_else_block("#{scratch_lo} = 1") { assign_bool(lhs, true) }
-      assign_bool(lhs, false)
+      if_else_block("#{scratch_lo} = 1") { assign_bool(lhs, !negate) }
+      assign_bool(lhs, negate)
       end_block
     end
 
@@ -414,7 +415,7 @@ module FaRuby
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(dest)
-      if_else_block("Z1 = 1") { assign_device_ref(slot) }
+      if_else_block("Z1 = #{SYMBOL_KIND_FAMILY}") { assign_device_ref(slot) }
       device_dispatch(:read, slot: slot, error_code: 0x15)
       end_block
     end
@@ -423,7 +424,7 @@ module FaRuby
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(src)
-      if_else_block("Z1 = 1") do
+      if_else_block("Z1 = #{SYMBOL_KIND_FAMILY}") do
         note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
         vm_error(0x16)
       end
@@ -466,6 +467,51 @@ module FaRuby
       note "デバイス参照以外への添字代入は未対応"
       vm_error(error_code)
       end_block
+    end
+
+    # --- 組み込みメソッド ---
+    #
+    # 呼び出しフレームは作りません。引数は R[a+1] から連続して並び、結果は
+    # R[a] に返るため、その場で計算して置き換えるだけで済みます。
+    #
+    # メソッド名はホスト側で番号に解決してシンボル表に載せてあります。
+    # VM は文字列を持たず、整数の分岐だけで振り分けます。
+
+    # R[a] = R[a].メソッド(R[a+1])
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
+        note "メソッド名でないシンボルへの呼び出し"
+        vm_error(unknown_code)
+      end
+      if_("#{operand(argc_name)} <> Z8") do
+        note "引数の数が定義と違う"
+        vm_error(unknown_code)
+      end
+
+      dest = reg_slot(name)
+      rhs = reg_next_slot(name)
+
+      if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
+        note "#{METHOD_NUMERIC_MIN} 以上のメソッドはレシーバが数値であること"
+        if_("#{dest.tag} < #{TT_INTEGER}") { vm_error(type_code) }
+      end
+
+      first = true
+      METHOD_NAMES.each_key do |code|
+        chain_head(first, "Z5 = #{code}")
+        first = false
+        indent
+        note METHOD_NAMES.fetch(code)
+        method_body(code, dest, rhs, type_code, zero_code)
+        dedent
+      end
+      line "ELSE"
+      indent
+      note "未対応のメソッド"
+      vm_error(unknown_code)
+      dedent
+      line "END IF"
     end
 
     # --- 真偽判定 ---
@@ -537,8 +583,8 @@ module FaRuby
       line "Z6 = #{indexed_base}:Z4"
       line "Z7 = Z3 + 2"
       line "Z8 = #{indexed_base}:Z7"
-      line "Z7 = Z3 + #{DEVICE_TABLE_FAMILY_OFFSET}"
-      line "Z1 = #{indexed_base}:Z7   ' デバイス族フラグ"
+      line "Z7 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z1 = #{indexed_base}:Z7   ' シンボル種別"
     end
 
     # デバイス族の参照値をスロットに置く ($DM を読んだとき)
@@ -665,6 +711,137 @@ module FaRuby
       line "#{dest.word(1)} = #{scratch_lo}"
       end_block
       line "#{dest.tag} = #{TT_FLOAT}"
+    end
+
+    # --- 組み込みメソッドの本体 ---
+
+    # シンボル表からメソッド番号・引数の数・種別を読む
+    #
+    # Z5 = メソッド番号, Z8 = 引数の数, Z4 = 種別
+    # Z1 / Z2 は使わない。この後レジスタスロットの参照に使うため。
+    def method_table_lookup(name)
+      note "シンボル表参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{block_offset(layout.device_table_base)}"
+      line "Z5 = #{indexed_base}:Z3   ' メソッド番号"
+      line "Z7 = Z3 + 2"
+      line "Z8 = #{indexed_base}:Z7   ' 引数の数"
+      line "Z7 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z4 = #{indexed_base}:Z7   ' シンボル種別"
+    end
+
+    def method_body(code, dest, rhs, type_code, zero_code)
+      case code
+      when METHOD_NE    then eq_into(dest, rhs, negate: true)
+      when METHOD_NOT   then not_into(dest)
+      when METHOD_MOD   then mod_into(dest, rhs, type_code, zero_code)
+      when METHOD_ABS   then abs_into(dest)
+      when METHOD_TO_I  then to_i_into(dest)
+      when METHOD_TO_F  then to_f_into(dest)
+      when METHOD_FLOOR then floor_into(dest)
+      when METHOD_ROUND then round_into(dest)
+      else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
+      end
+    end
+
+    # !R[a]。偽なら true、それ以外は false
+    def not_into(dest)
+      if_else_block("#{dest.tag} > #{TT_FALSY_MAX}") { assign_bool(dest, false) }
+      assign_bool(dest, true)
+      end_block
+    end
+
+    # R[a] % R[a+1]。整数どうしのみ
+    #
+    # Ruby の % は商を切り下げた余りで、符号は除数に合います (-7 % 3 = 2)。
+    # KV の / は 0 方向へ切り捨てるため、符号が違うときに除数を足して補正します。
+    def mod_into(dest, rhs, type_code, zero_code)
+      note "整数どうしのみ。実数の % は未対応"
+      if_else_block("#{rhs.tag} = #{TT_INTEGER}") do
+        if_else_block("#{dest.tag} = #{TT_INTEGER}") do
+          integer_mod(dest, rhs, zero_code)
+        end
+        vm_error(type_code)
+        end_block
+      end
+      vm_error(type_code)
+      end_block
+    end
+
+    def integer_mod(dest, rhs, zero_code)
+      if_else_block(cmp(:ne, rhs.value, const(0))) do
+        line "#{scratch32} = #{dest.value}       ' 被除数を退避"
+        line "#{dest.value} = #{binop(:div, dest.value, rhs.value)}   ' 0方向へ切り捨てた商"
+        line "#{scratch32_b} = #{scratch32} - #{dest.value} * #{rhs.value}   ' 余り"
+        if_("#{scratch32_b} <> 0") do
+          note "符号が違うときだけ除数を足して符号を合わせる"
+          if_else_block("#{scratch32} < 0") do
+            if_("#{rhs.value} > 0") { line "#{scratch32_b} = #{scratch32_b} + #{rhs.value}" }
+          end
+          if_("#{rhs.value} < 0") { line "#{scratch32_b} = #{scratch32_b} + #{rhs.value}" }
+          end_block
+        end
+        line "#{dest.value} = #{scratch32_b}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+      vm_error(zero_code)
+      end_block
+    end
+
+    # 絶対値。型は変わらない
+    def abs_into(dest)
+      if_else_block("#{dest.tag} = #{TT_FLOAT}") do
+        if_("#{dest.float} < 0") { line "#{dest.float} = 0 - #{dest.float}" }
+      end
+      if_("#{dest.value} < 0") { line "#{dest.value} = 0 - #{dest.value}" }
+      end_block
+    end
+
+    # 実数→整数。整数はそのまま
+    #
+    # 同じスロットを .F で読んで .L で書くため、一度スクラッチに移します。
+    def to_i_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "0 方向へ切り捨て (Ruby の Float#to_i と同じ)"
+        line "#{scratch32} = #{dest.float}"
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+    end
+
+    # 整数→実数。実数はそのまま
+    def to_f_into(dest)
+      if_("#{dest.tag} = #{TT_INTEGER}") do
+        note "整数→実数。同じスロットを .L で読んで .F で書くためスクラッチを挟む"
+        line "#{scratch_float} = #{dest.value}"
+        line "#{dest.float} = #{scratch_float}"
+        line "#{dest.tag} = #{TT_FLOAT}"
+      end
+    end
+
+    # 切り下げ。整数はそのまま
+    def floor_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く"
+        line "#{scratch32} = #{dest.float}"
+        if_("#{dest.float} < 0") do
+          if_("#{scratch32} <> #{dest.float}") { line "#{scratch32} = #{scratch32} - 1" }
+        end
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+    end
+
+    # 四捨五入。整数はそのまま
+    def round_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "Ruby の round は 0 から遠い方へ丸める (2.5→3, -2.5→-3)"
+        if_else_block("#{dest.float} >= 0") { line "#{scratch_float} = #{dest.float} + 0.5" }
+        line "#{scratch_float} = #{dest.float} - 0.5"
+        end_block
+        line "#{scratch32} = #{scratch_float}"
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
     end
 
     # スロットに true / false を書く

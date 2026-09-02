@@ -318,7 +318,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 Z7 = Z3 + 2
                 Z8 = EM0:Z7
                 Z7 = Z3 + 3
-                Z1 = EM0:Z7   ' デバイス族フラグ
+                Z1 = EM0:Z7   ' シンボル種別
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + 32 + Z9
                 IF Z1 = 1 THEN
@@ -567,7 +567,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 Z7 = Z3 + 2
                 Z8 = EM0:Z7
                 Z7 = Z3 + 3
-                Z1 = EM0:Z7   ' デバイス族フラグ
+                Z1 = EM0:Z7   ' シンボル種別
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + 32 + Z9
                 IF Z1 = 1 THEN
@@ -1307,6 +1307,199 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 Z1 = EM7:Z9 * 4 + 32 + Z9
                 IF EM0:Z1 = 1 THEN
                     EM0:Z9 = EM0:Z9 + EM8:Z9
+                END IF
+
+            ELSE IF EM6:Z9 = 47 THEN
+                ' OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)
+                Z1 = EM0:Z9 + 352 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + 352 + Z9
+                EM8:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + 352 + Z9
+                EM9:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' シンボル表参照 (4ワード/エントリ)
+                Z3 = EM8:Z9 * 4 + 4152 + Z9
+                Z5 = EM0:Z3   ' メソッド番号
+                Z7 = Z3 + 2
+                Z8 = EM0:Z7   ' 引数の数
+                Z7 = Z3 + 3
+                Z4 = EM0:Z7   ' シンボル種別
+                IF Z4 <> 2 THEN
+                    ' メソッド名でないシンボルへの呼び出し
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                IF EM9:Z9 <> Z8 THEN
+                    ' 引数の数が定義と違う
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                Z1 = EM7:Z9 * 4 + 32 + Z9
+                Z2 = (EM7:Z9 + 1) * 4 + 32 + Z9
+                IF Z5 >= 3 THEN
+                    ' 3 以上のメソッドはレシーバが数値であること
+                    IF EM0:Z1 < 4 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 4
+                        BREAK
+                    END IF
+                END IF
+                IF Z5 = 1 THEN
+                    ' !=
+                    ' 数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)
+                    ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
+                    ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
+                    EM16:Z9 = 0
+                    IF EM0:Z1 >= 4 THEN
+                        IF EM0:Z2 >= 4 THEN
+                            IF EM0:Z1 = 5 THEN
+                                IF EM0:Z2 = 5 THEN
+                                    IF EM1.F:Z1 = EM1.F:Z2 THEN
+                                        EM16:Z9 = 1
+                                    END IF
+                                ELSE
+                                    IF EM1.F:Z1 = EM1.L:Z2 THEN
+                                        EM16:Z9 = 1
+                                    END IF
+                                END IF
+                            ELSE
+                                IF EM0:Z2 = 5 THEN
+                                    IF EM1.L:Z1 = EM1.F:Z2 THEN
+                                        EM16:Z9 = 1
+                                    END IF
+                                ELSE
+                                    IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                        EM16:Z9 = 1
+                                    END IF
+                                END IF
+                            END IF
+                        ELSE
+                            ' 数値と非数値は等しくない
+                        END IF
+                    ELSE
+                        IF EM0:Z1 = EM0:Z2 THEN
+                            IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                EM16:Z9 = 1
+                            END IF
+                        END IF
+                    END IF
+                    IF EM16:Z9 = 1 THEN
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 2
+                    ELSE
+                        EM1.L:Z1 = 1
+                        EM0:Z1 = 3
+                    END IF
+                ELSE IF Z5 = 2 THEN
+                    ' !
+                    IF EM0:Z1 > 2 THEN
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 2
+                    ELSE
+                        EM1.L:Z1 = 1
+                        EM0:Z1 = 3
+                    END IF
+                ELSE IF Z5 = 3 THEN
+                    ' %
+                    ' 整数どうしのみ。実数の % は未対応
+                    IF EM0:Z2 = 4 THEN
+                        IF EM0:Z1 = 4 THEN
+                            IF EM1.L:Z2 <> 0 THEN
+                                EM16.L:Z9 = EM1.L:Z1       ' 被除数を退避
+                                EM1.L:Z1 = EM1.L:Z1 / EM1.L:Z2   ' 0方向へ切り捨てた商
+                                EM18.L:Z9 = EM16.L:Z9 - EM1.L:Z1 * EM1.L:Z2   ' 余り
+                                IF EM18.L:Z9 <> 0 THEN
+                                    ' 符号が違うときだけ除数を足して符号を合わせる
+                                    IF EM16.L:Z9 < 0 THEN
+                                        IF EM1.L:Z2 > 0 THEN
+                                            EM18.L:Z9 = EM18.L:Z9 + EM1.L:Z2
+                                        END IF
+                                    ELSE
+                                        IF EM1.L:Z2 < 0 THEN
+                                            EM18.L:Z9 = EM18.L:Z9 + EM1.L:Z2
+                                        END IF
+                                    END IF
+                                END IF
+                                EM1.L:Z1 = EM18.L:Z9
+                                EM0:Z1 = 4
+                            ELSE
+                                EM1:Z9 = 3
+                                EM2:Z9 = 1
+                                BREAK
+                            END IF
+                        ELSE
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE
+                        EM1:Z9 = 3
+                        EM2:Z9 = 4
+                        BREAK
+                    END IF
+                ELSE IF Z5 = 4 THEN
+                    ' abs
+                    IF EM0:Z1 = 5 THEN
+                        IF EM1.F:Z1 < 0 THEN
+                            EM1.F:Z1 = 0 - EM1.F:Z1
+                        END IF
+                    ELSE
+                        IF EM1.L:Z1 < 0 THEN
+                            EM1.L:Z1 = 0 - EM1.L:Z1
+                        END IF
+                    END IF
+                ELSE IF Z5 = 5 THEN
+                    ' to_i
+                    IF EM0:Z1 = 5 THEN
+                        ' 0 方向へ切り捨て (Ruby の Float#to_i と同じ)
+                        EM16.L:Z9 = EM1.F:Z1
+                        EM1.L:Z1 = EM16.L:Z9
+                        EM0:Z1 = 4
+                    END IF
+                ELSE IF Z5 = 6 THEN
+                    ' to_f
+                    IF EM0:Z1 = 4 THEN
+                        ' 整数→実数。同じスロットを .L で読んで .F で書くためスクラッチを挟む
+                        EM18.F:Z9 = EM1.L:Z1
+                        EM1.F:Z1 = EM18.F:Z9
+                        EM0:Z1 = 5
+                    END IF
+                ELSE IF Z5 = 7 THEN
+                    ' floor
+                    IF EM0:Z1 = 5 THEN
+                        ' KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く
+                        EM16.L:Z9 = EM1.F:Z1
+                        IF EM1.F:Z1 < 0 THEN
+                            IF EM16.L:Z9 <> EM1.F:Z1 THEN
+                                EM16.L:Z9 = EM16.L:Z9 - 1
+                            END IF
+                        END IF
+                        EM1.L:Z1 = EM16.L:Z9
+                        EM0:Z1 = 4
+                    END IF
+                ELSE IF Z5 = 8 THEN
+                    ' round
+                    IF EM0:Z1 = 5 THEN
+                        ' Ruby の round は 0 から遠い方へ丸める (2.5→3, -2.5→-3)
+                        IF EM1.F:Z1 >= 0 THEN
+                            EM18.F:Z9 = EM1.F:Z1 + 0.5
+                        ELSE
+                            EM18.F:Z9 = EM1.F:Z1 - 0.5
+                        END IF
+                        EM16.L:Z9 = EM18.F:Z9
+                        EM1.L:Z1 = EM16.L:Z9
+                        EM0:Z1 = 4
+                    END IF
+                ELSE
+                    ' 未対応のメソッド
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
                 END IF
 
             ELSE IF EM6:Z9 = 56 THEN

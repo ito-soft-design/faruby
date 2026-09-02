@@ -98,10 +98,17 @@ module FaRuby
       # デバイスマッピングテーブル
       image[layout.num_symbols_addr] = @irep.symbols.size
       device_mappings.each do |m|
+        image[m[:table_addr] + DEVICE_TABLE_KIND_OFFSET] = m[:kind]
+        if m[:kind] == SYMBOL_KIND_METHOD
+          image[m[:table_addr]]     = m[:method_code]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = m[:argc]
+          next
+        end
+
         image[m[:table_addr]]     = m[:device_type]
         image[m[:table_addr] + 1] = m[:z_offset]
         image[m[:table_addr] + 2] = m[:access_type] || ACCESS_BIT
-        image[m[:table_addr] + DEVICE_TABLE_FAMILY_OFFSET] = m[:family] ? 1 : 0
         # 汎用グローバルはスロット全体を 0 初期化
         next unless m[:general]
 
@@ -112,9 +119,13 @@ module FaRuby
       image
     end
 
-    # シンボルごとのデバイス割り当てを解決する
-    # デバイス名にマッチするシンボル ($DM100 等) は該当デバイスへ、
-    # マッチしないシンボル ($foo 等) は汎用グローバル領域へ出現順に割り当てる。
+    # シンボルごとの割り当てを解決する
+    #
+    # シンボル表にはグローバル変数名とメソッド名が混在します。`$` で始まる
+    # ものがグローバル変数で、デバイス名にマッチすれば該当デバイスへ、
+    # しなければ ($foo 等) 汎用グローバル領域へ出現順に割り当てます。
+    # それ以外はメソッド名として番号に解決します。
+    #
     # z_offset は「値ワード」のアドレス (デバイスマッピングテーブルに格納する値)。
     def device_mappings
       slot_index = 0
@@ -123,18 +134,24 @@ module FaRuby
         parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
         if parsed
           { symbol: sym, index: idx, table_addr: table_addr, general: false,
+            kind: parsed[:family] ? SYMBOL_KIND_FAMILY : SYMBOL_KIND_VALUE,
             device_type: parsed[:device_type], device_name: parsed[:device_name],
             address: parsed[:address], z_offset: parsed[:z_offset],
             access_type: parsed[:access_type], bit: parsed[:bit],
             family: parsed[:family] || false }
-        else
+        elsif sym.start_with?("$")
           # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
           value_addr = layout.general_global_addr(slot_index)
           slot_index += 1
           { symbol: sym, index: idx, table_addr: table_addr, general: true,
+            kind: SYMBOL_KIND_VALUE,
             device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
             address: value_addr.to_s, z_offset: value_addr,
             access_type: ACCESS_L, bit: false }
+        else
+          code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
+          { symbol: sym, index: idx, table_addr: table_addr, general: false,
+            kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc }
         end
       end
     end
@@ -237,6 +254,11 @@ module FaRuby
       mappings = device_mappings
       mappings.each do |m|
         table_addr = m[:table_addr]
+        if m[:kind] == SYMBOL_KIND_METHOD
+          lines.concat(method_table_lines(m))
+          next
+        end
+
         kind = ACCESS_NAMES[m[:access_type] || ACCESS_BIT]
         if m[:general]
           lines << "#{layout.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
@@ -247,12 +269,24 @@ module FaRuby
         end
         lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || ACCESS_BIT}    ' #{m[:symbol]} access=#{kind}"
         family_note = m[:family] ? "デバイス族 (添字でアドレスを決める)" : "-"
-        lines << "#{layout.device(table_addr + DEVICE_TABLE_FAMILY_OFFSET)} = #{m[:family] ? 1 : 0}    " \
+        lines << "#{layout.device(table_addr + DEVICE_TABLE_KIND_OFFSET)} = #{m[:kind]}    " \
                  "' #{m[:symbol]} #{family_note}"
       end
 
       lines.concat(generate_general_global_clear(mappings))
       lines
+    end
+
+    # メソッド名のエントリ。VM は名前ではなく番号で振り分ける
+    def method_table_lines(mapping)
+      addr = mapping[:table_addr]
+      note = mapping[:method_code] == METHOD_NONE ? "未対応 (呼ぶと実行時エラー)" : "組み込みメソッド"
+      [
+        "#{layout.device(addr)} = #{mapping[:method_code]}    ' #{mapping[:symbol]} #{note}",
+        "#{layout.device(addr + 1)} = 0    ' #{mapping[:symbol]} 未使用",
+        "#{layout.device(addr + 2)} = #{mapping[:argc]}    ' #{mapping[:symbol]} 引数の数",
+        "#{layout.device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_METHOD}    ' #{mapping[:symbol]} メソッド名",
+      ]
     end
 
     # 汎用グローバル変数のスロットを 0 初期化する

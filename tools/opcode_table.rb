@@ -315,6 +315,13 @@ module FaRuby
         vm.if_nil(:a) { vm.jump_relative(:b) }
       end
 
+      # 組み込みメソッドの呼び出し。呼び出しフレームは作らない。
+      # 引数は R[a+1] から連続して並び、結果は R[a] に返る。
+      # メソッド名はホスト側で番号に解決してシンボル表に載せてある。
+      defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)") do |vm|
+        vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR, DIVIDE_BY_ZERO_ERROR)
+      end
+
       defs << OpcodeDef.new(0x38, "トップレベルでは VM 停止") do |vm|
         vm.vm_finish
       end
@@ -365,6 +372,12 @@ module FaRuby
     # 添字アクセスのエラーコード
     # デバイス参照以外への添字、または範囲外のアドレス
     DEVICE_INDEX_ERROR = 2
+
+    # 未対応のメソッド呼び出し。引数の数が合わない場合も含む
+    UNKNOWN_METHOD_ERROR = 3
+
+    # メソッドのレシーバまたは引数の型が扱えない
+    METHOD_TYPE_ERROR = 4
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {

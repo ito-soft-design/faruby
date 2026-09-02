@@ -99,7 +99,7 @@ class TestDeviceIndex < Minitest::Test
 
   def test_family_flag_reaches_the_memory_image
     image = Codegen.new(irep_with(["$DM"])).memory_image
-    flag_addr = layout.device_table_base + DEVICE_TABLE_FAMILY_OFFSET
+    flag_addr = layout.device_table_base + DEVICE_TABLE_KIND_OFFSET
 
     assert_equal 1, image[flag_addr]
   end
@@ -108,7 +108,7 @@ class TestDeviceIndex < Minitest::Test
 
   def test_generated_code_branches_on_the_family_flag
     source = FaRuby::KvsGenerator.new.source
-    assert_includes source, "デバイス族フラグ"
+    assert_includes source, "IF Z1 = #{SYMBOL_KIND_FAMILY} THEN"
     assert_includes source, "#{FaRuby::KvsEmitter.new(layout: layout).reg_slot(:a).tag} = #{TT_DEVICE}"
   end
 

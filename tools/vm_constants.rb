@@ -142,11 +142,56 @@ module FaRuby
     VM_ERROR    = 3
 
     # デバイスマッピングテーブル 1 エントリのワード数
-    #   +0 device_type / +1 device_address / +2 access_type / +3 デバイス族フラグ
+    #
+    # シンボル 1 つにつき 1 エントリで、+3 の種別によって意味が変わります。
+    #
+    #   種別 0 (値)         +0 device_type / +1 device_address / +2 access_type
+    #   種別 1 (デバイス族) 同上。アドレスを持たず、添字で決める
+    #   種別 2 (メソッド)   +0 METHOD_* / +1 未使用 / +2 引数の数
     DEVICE_TABLE_STRIDE = 4
+    DEVICE_TABLE_KIND_OFFSET = 3
 
-    # +3 が 1 なら「デバイス族」($DM など、アドレスを持たない)。
-    # GETGV はデバイスを読まず、TT_DEVICE の参照値をレジスタに置く。
-    DEVICE_TABLE_FAMILY_OFFSET = 3
+    # シンボルの種別
+    #
+    # `$` で始まるシンボルはグローバル変数 (デバイスか汎用グローバル)、
+    # それ以外はメソッド名です。同じシンボル表を OP_GETGV / OP_SETGV と
+    # OP_SEND が共有するため、種別で振り分けます。
+    SYMBOL_KIND_VALUE  = 0
+    SYMBOL_KIND_FAMILY = 1
+    SYMBOL_KIND_METHOD = 2
+
+    # --- 組み込みメソッド ---
+    #
+    # メソッド名はホスト側で番号に解決してテーブルに載せます。VM は文字列を
+    # 持たず、整数の分岐だけで振り分けます。
+    #
+    # 【重要】並び順に意味があります。METHOD_NUMERIC_MIN 以上はレシーバが
+    # 数値でなければならず、判定を 1 比較で済ませています。並べ替えないでください。
+    METHOD_NONE  = 0   # 未対応 (実行時エラー)
+    METHOD_NE    = 1   # !=
+    METHOD_NOT   = 2   # !
+    METHOD_MOD   = 3   # %
+    METHOD_ABS   = 4
+    METHOD_TO_I  = 5
+    METHOD_TO_F  = 6
+    METHOD_FLOOR = 7
+    METHOD_ROUND = 8
+
+    # これ以上のメソッドはレシーバが数値であること
+    METHOD_NUMERIC_MIN = METHOD_MOD
+
+    # メソッド名 => [番号, 引数の数]
+    BUILTIN_METHODS = {
+      "!="    => [METHOD_NE,    1],
+      "!"     => [METHOD_NOT,   0],
+      "%"     => [METHOD_MOD,   1],
+      "abs"   => [METHOD_ABS,   0],
+      "to_i"  => [METHOD_TO_I,  0],
+      "to_f"  => [METHOD_TO_F,  0],
+      "floor" => [METHOD_FLOOR, 0],
+      "round" => [METHOD_ROUND, 0],
+    }.freeze
+
+    METHOD_NAMES = BUILTIN_METHODS.to_h { |name, (code, _argc)| [code, name] }.freeze
   end
 end

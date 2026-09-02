@@ -165,12 +165,28 @@ module FaRuby
     end
 
     def load_global_into_reg(dest, sym_operand)
-      type, addr, access, family = device_entry(operand(sym_operand))
+      type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x15) unless dev
-      return write_device_ref(operand(dest), type, addr, access) if family == 1
+      return write_device_ref(operand(dest), type, addr, access) if kind == SYMBOL_KIND_FAMILY
 
       read_device_into(dev, addr, access, operand(dest), bit_device: bit_device?(type))
+    end
+
+    # --- 組み込みメソッド ---
+    #
+    # 呼び出しフレームは作らない。引数は R[a+1] から連続して並び、
+    # 結果は R[a] に返る。生成コードと同じ規則で計算する。
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code)
+      code, _unused, argc, kind = device_entry(operand(sym_name))
+      return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
+      return vm_error(unknown_code) unless operand(argc_name) == argc
+
+      index = operand(name)
+      return vm_error(type_code) if code >= METHOD_NUMERIC_MIN && !numeric_tag?(read_reg_tag(index))
+      return vm_error(unknown_code) unless METHOD_NAMES.key?(code)
+
+      apply_method(code, index, type_code, zero_code)
     end
 
     # デバイスの値をレジスタへ読む (生成コードと同じ規則)
@@ -212,10 +228,10 @@ module FaRuby
     end
 
     def store_reg_into_global(sym_operand, src)
-      type, addr, access, family = device_entry(operand(sym_operand))
+      type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x16) unless dev
-      return vm_error(0x16) if family == 1 # $DM = 1 は意味を持たない
+      return vm_error(0x16) if kind == SYMBOL_KIND_FAMILY # $DM = 1 は意味を持たない
 
       write_device_value(dev, type, addr, access, operand(src))
     end
@@ -339,6 +355,60 @@ module FaRuby
       lhs.positive? ? Float::INFINITY : -Float::INFINITY
     end
 
+    # 組み込みメソッドの本体
+    #
+    # 生成コードは実数を単精度で扱うため、実数の結果は write_float で丸める。
+    def apply_method(code, index, type_code, zero_code)
+      case code
+      when METHOD_NE    then send_ne(index)
+      when METHOD_NOT   then write_bool(index, read_reg_tag(index) <= TT_FALSY_MAX)
+      when METHOD_MOD   then send_mod(index, type_code, zero_code)
+      when METHOD_ABS   then send_numeric(index) { |v| v.abs }
+      when METHOD_TO_I  then write_slot(index, TT_INTEGER, numeric_value(index).to_i)
+      when METHOD_TO_F  then write_float(index, numeric_value(index).to_f)
+      when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)
+      when METHOD_ROUND then write_slot(index, TT_INTEGER, round_away_from_zero(numeric_value(index)))
+      else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
+      end
+    end
+
+    # 型が違えば等しくない (set_reg_eq の否定)
+    def send_ne(index)
+      same =
+        if numeric_tag?(read_reg_tag(index)) && numeric_tag?(read_reg_tag(index + 1))
+          numeric_value(index) == numeric_value(index + 1)
+        else
+          read_reg_tag(index) == read_reg_tag(index + 1) &&
+            read_reg(index) == read_reg(index + 1)
+        end
+      write_bool(index, !same)
+    end
+
+    # 整数どうしのみ。Ruby の % は商を切り下げた余りで、符号は除数に合う
+    def send_mod(index, type_code, zero_code)
+      return vm_error(type_code) unless read_reg_tag(index) == TT_INTEGER
+      return vm_error(type_code) unless read_reg_tag(index + 1) == TT_INTEGER
+
+      rhs = read_reg(index + 1)
+      return vm_error(zero_code) if rhs.zero?
+
+      write_slot(index, TT_INTEGER, read_reg(index) % rhs)
+    end
+
+    # 型を保ったまま値だけ変える (abs)
+    def send_numeric(index)
+      value = yield(numeric_value(index))
+      float_operand?(index) ? write_float(index, value) : write_slot(index, TT_INTEGER, value)
+    end
+
+    # Ruby の Float#round は 0 から遠い方へ丸める (2.5→3, -2.5→-3)
+    # Ruby の Integer#round はそのまま
+    def round_away_from_zero(value)
+      return value if value.is_a?(Integer)
+
+      value.negative? ? (value - 0.5).to_i : (value + 0.5).to_i
+    end
+
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte
       current = pc
@@ -365,7 +435,7 @@ module FaRuby
     def device_entry(idx)
       table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
       [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2),
-       @em.read_u16(table_addr + DEVICE_TABLE_FAMILY_OFFSET)]
+       @em.read_u16(table_addr + DEVICE_TABLE_KIND_OFFSET)]
     end
 
     # --- デバイス参照 (TT_DEVICE) ---
