@@ -318,6 +318,11 @@ module FaRuby
       # 組み込みメソッドの呼び出し。呼び出しフレームは作らない。
       # 引数は R[a+1] から連続して並び、結果は R[a] に返る。
       # メソッド名はホスト側で番号に解決してシンボル表に載せてある。
+      #
+      # オペランド c は引数の数そのものではない。下位4ビットが位置引数、
+      # 上位4ビットがキーワード引数の数で、15 は配列やハッシュにまとめて
+      # 渡す印 (mruby の CALL_MAXARGS)。普通の呼び出しでは引数の数と一致
+      # するためそのまま比べており、スプラットやキーワード付きは弾かれる。
       defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)") do |vm|
         vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR, DIVIDE_BY_ZERO_ERROR)
       end

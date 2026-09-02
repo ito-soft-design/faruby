@@ -486,6 +486,8 @@ module FaRuby
       end
       if_("#{operand(argc_name)} <> Z8") do
         note "引数の数が定義と違う"
+        note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
+        note "普通の呼び出しでは引数の数と一致し、スプラットやキーワード付きは弾かれる"
         vm_error(unknown_code)
       end
 
