@@ -326,6 +326,7 @@ PLC が軽度エラーを出します**。0 除算が起こりうる箇所では
 |------|------|
 | [doc/architecture.md](doc/architecture.md) | VM の仕組み、メモリ配置、コード生成 |
 | [doc/roadmap.md](doc/roadmap.md) | 何を作るかと、なぜその順序なのか |
+| [doc/method_calls.md](doc/method_calls.md) | メソッド定義・呼び出しの設計メモ (未実装) |
 | [doc/ruby_and_plc.md](doc/ruby_and_plc.md) | Ruby と PLC で意味が違う箇所とその埋め方。新しい機種に対応する際の確認項目 |
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
