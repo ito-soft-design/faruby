@@ -92,12 +92,65 @@ class TestInstances < Minitest::Test
   # ここが分かれていないと2つ目のプログラムが1つ目を上書きする。
   def test_programs_are_written_to_separate_blocks
     @commands.instance = 0
-    @transfer.write_image(block(0).bytecode_base => 0xAA)
+    @transfer.write_image(block(0).general_global_base => 0xAA)
     @commands.instance = 1
-    @transfer.write_image(block(1).bytecode_base => 0xBB)
+    @transfer.write_image(block(1).general_global_base => 0xBB)
 
-    assert_equal 0xAA, @adapter.read_word(block(0).bytecode_base)
-    assert_equal 0xBB, @adapter.read_word(block(1).bytecode_base)
+    assert_equal 0xAA, @adapter.read_word(block(0).general_global_base)
+    assert_equal 0xBB, @adapter.read_word(block(1).general_global_base)
+  end
+
+  # 固定領域 (FM) もインスタンスごとに分かれる
+  #
+  # ホストにはバンクを選ぶ手段が無いため ZF の絶対アドレスで書く。
+  # 生成コードは FM のアドレスを VM 状態から引くので、両者がずれると
+  # 別のインスタンスのバイトコードを実行してしまう。
+  def test_fixed_areas_are_written_to_separate_blocks
+    @commands.instance = 0
+    @transfer.write_fixed_image(block(0).bytecode_base => 0xAA)
+    @commands.instance = 1
+    @transfer.write_fixed_image(block(1).bytecode_base => 0xBB)
+
+    zf = @adapter.fixed
+    assert_equal 0xAA, zf[block(0).fixed_host_addr(block(0).bytecode_base)]
+    assert_equal 0xBB, zf[block(1).fixed_host_addr(block(1).bytecode_base)]
+  end
+
+  # 実行中の irep の位置は VM 状態にあり、インスタンスごとに違う。
+  # 命令本体は 1 つしか無いため、ここがずれると全インスタンスが
+  # インスタンス 0 のバイトコードを読む。
+  def test_each_instance_points_at_its_own_fixed_area
+    irep = FaRuby::Irep.new
+    irep.nregs = 4
+    irep.nlocals = 1
+    irep.instructions = "\x69"
+    irep.ilen = 1
+
+    INSTANCES.times do |i|
+      l = block(i)
+      image = FaRuby::PlcCodegen.new(irep, layout: l).memory_image
+
+      assert_equal l.irep_table_base, image[l.irep_table_addr_addr], "インスタンス #{i}"
+      assert_equal l.bytecode_base, image[l.cur_bytecode_addr], "インスタンス #{i}"
+      assert_equal l.device_table_base, image[l.cur_symbols_addr], "インスタンス #{i}"
+    end
+  end
+
+  # 固定領域も重ならないこと
+  def test_fixed_blocks_do_not_overlap
+    ranges = INSTANCES.times.map do |i|
+      l = block(i)
+      (l.fixed_origin..(l.fixed_origin + l.fixed_instance_size - 1))
+    end
+    ranges.each_cons(2) do |a, b|
+      assert_operator a.last, :<, b.first, "固定ブロックが重なっている"
+    end
+  end
+
+  # 全インスタンス分がバンク 1 つ (32768 ワード) に収まること
+  def test_fixed_areas_fit_in_one_bank
+    assert_operator block(INSTANCES - 1).fixed_last_addr, :<,
+                    FaRuby::MemoryLayout::FIXED_BANK_SIZE
   end
 
   # === 状態の読み取り ===
