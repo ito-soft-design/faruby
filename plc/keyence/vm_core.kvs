@@ -2315,7 +2315,6 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     EM2:Z9 = 3
                     BREAK
                 END IF
-                Z6 = EM0:Z3   ' 組み込みメソッド番号
                 Z3 = Z3 + 1
                 Z5 = EM0:Z3   ' ユーザー定義メソッドID
                 IF Z5 = 0 THEN

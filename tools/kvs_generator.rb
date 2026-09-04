@@ -541,7 +541,6 @@ module FaRuby
     def define_method(name, sym_name, error_code)
       method_table_lookup(sym_name)
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(error_code) }
-      line "Z6 = #{indexed_base}:Z3   ' 組み込みメソッド番号"
       line "Z3 = Z3 + 1"
       line "Z5 = #{indexed_base}:Z3   ' ユーザー定義メソッドID"
       if_("Z5 = #{METHOD_ID_NONE}") do
