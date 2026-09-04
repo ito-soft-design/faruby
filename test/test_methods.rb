@@ -29,10 +29,11 @@ class TestMethods < Minitest::Test
   # シンボル表に 1 件だけメソッドを置く
   def put_method(name, index: 0)
     code, argc = BUILTIN_METHODS.fetch(name, [METHOD_NONE, 0])
+    # シンボル表は固定領域 (FM) にある
     addr = layout.device_table_base + index * DEVICE_TABLE_STRIDE
-    @sim.em.write_u16(addr, code)
-    @sim.em.write_u16(addr + 2, argc)
-    @sim.em.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_METHOD)
+    @sim.fixed.write_u16(addr, code)
+    @sim.fixed.write_u16(addr + 2, argc)
+    @sim.fixed.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_METHOD)
     argc
   end
 
@@ -59,7 +60,8 @@ class TestMethods < Minitest::Test
     em.write_u16(layout.status_addr, VM_RUNNING)
     em.write_u16(layout.bytecode_len_addr, bytes.size)
     em.write_u16(layout.nregs_addr, nregs)
-    bytes.each_with_index { |b, i| em.write_u16(layout.bytecode_addr(i), b) }
+    # バイトコードは固定領域 (FM) にある
+    bytes.each_with_index { |b, i| @sim.fixed.write_u16(layout.bytecode_addr(i), b) }
     @sim.run
   end
 
@@ -205,7 +207,7 @@ class TestMethods < Minitest::Test
   def test_calling_a_variable_symbol_stops_the_vm
     set_reg(0, TT_INTEGER, 3)
     addr = layout.device_table_base
-    @sim.em.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_VALUE)
+    @sim.fixed.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_VALUE)
     run_bytecode([SEND, 0x00, 0x00, 0x00, STOP])
     assert_equal VM_ERROR, status
     assert_equal UNKNOWN_METHOD_ERROR, error

@@ -6,26 +6,40 @@
 # 計算します。ラダーが使用していない領域へ丸ごと移動できるよう、すべての
 # アドレスは base からの相対で決まります。
 #
-# 1インスタンス分のブロックを instances 個並べた配置になります。
+# 領域は **実行中に変わるもの (EM)** と **変わらないもの (FM)** に分かれます。
+# どちらもインスタンスごとにブロックを並べます。
 #
-#   base + 0 * instance_size   インスタンス0
-#   base + 1 * instance_size   インスタンス1
+#   可変 (EM)  base + n * instance_size
+#   固定 (FM)  fixed_base + n * fixed_instance_size
 #
-# ブロック内の配置 (サイズ設定から詰めて計算):
+# 可変ブロックの配置:
 #
 #   +0                    VM状態 (VM_STATE_WORDS)
 #                         レジスタスタック      max_regs    × 4
 #                         呼び出しスタック      max_frames  × 4
-#                         IREPテーブル          max_ireps   × 8
+#                         メソッド表            max_methods × 1
+#                         汎用グローバル変数    max_globals × 4
+#
+# 固定ブロックの配置:
+#
+#   +0                    IREPテーブル          max_ireps   × 8
 #                         バイトコード          max_bytecode
 #                         定数プール            max_pool    × 4
 #                         シンボル表            max_symbols × 4
-#                         メソッド表            max_methods × 1
-#                         汎用グローバル変数    max_globals × 4
 #
 # バイトコード・定数プール・シンボル表は **全 irep 分をまとめた領域**です。
 # irep ごとの位置は IREP テーブルに入れ、実行時にそこから引きます。
 # 子 irep (メソッドの本体) を扱うために、アドレスを定数で焼き込めなくなりました。
+#
+# ## FM と ZF
+#
+# FM は ZF をバンクに分けたもので、`FRSET(n)` で切り替えます。faRuby はバンク 3 を
+# 使い、スクリプトの先頭で `FRSET(3)`、末尾で `FRSET(0)` に戻します (現在のバンクを
+# 読む命令が無いため、Z のような退避ができません)。
+#
+# **スクリプトからは FM、ホストからは ZF 絶対アドレスで触ります。** バンク 3 の
+# FM0 は ZF#{FIXED_BANK_SIZE * 3} に当たります。FM のアドレスは 0-32767 なので
+# 16 ビットに収まり、インデックスレジスタ Z に載せられます。
 #
 # アドレスは生成される vm_core.kvs に定数として焼き込まれます。設定を変えたら
 # `rake vm_core` で再生成し、KV Studio に取り込み直す必要があります。
@@ -43,11 +57,24 @@ module FaRuby
     # VM 状態領域のワード数 (将来の追加に備えて余裕を持たせている)
     VM_STATE_WORDS = 48
 
+    # --- 固定領域 (FM) ---
+    #
+    # FM は ZF をバンクに分けたもの。1 バンク 32768 ワードで、n = 0-3。
+    # faRuby はバンク 3 を使い、スクリプトの出入りで FRSET を切り替える。
+    FIXED_BANK_SIZE = 32_768
+    FIXED_BANK      = 3
+
+    # スクリプトから見たデバイス名 (バンク切り替え後)
+    FIXED_DEVICE_NAME = "FM"
+
+    # ホストから見たデバイス名。バンクを跨いだ絶対アドレスで触る
+    FIXED_HOST_DEVICE = "ZF"
+
     # IREP テーブル 1 エントリのワード数
     #   +0 バイトコード先頭 / +1 バイトコード長 / +2 定数プール先頭
     #   +3 シンボル表先頭   / +4 nregs          / +5-7 予備
     #
-    # 位置はいずれもブロック先頭からのオフセット。生成コードは Z9 を足して指す。
+    # 位置はいずれも FM の絶対アドレス。FM は 0-32767 なので Z に載せられる。
     IREP_TABLE_STRIDE  = 8
     IREP_BYTECODE      = 0
     IREP_BYTECODE_LEN  = 1
@@ -106,6 +133,8 @@ module FaRuby
     # irep が複数になったため、命令フェッチ・定数プール・シンボル表の位置は
     # 定数ではなく「実行中の irep のもの」になります。命令ごとに IREP テーブルを
     # 引くとスキャンタイムが延びるため、切り替え時にここへ写して使います。
+    # 固定領域の位置 (CUR_*) は FM の絶対アドレス。可変領域の位置 (REG_BASE) は
+    # ブロック先頭からのオフセットで、生成コードが Z9 を足す。
     OFFSET_CUR_IREP        = 30
     OFFSET_FRAME_SP        = 31  # 呼び出しフレームの段数 (0 = トップレベル)
     OFFSET_REG_BASE        = 32  # レジスタ窓の先頭 (ブロック内オフセット)
@@ -115,15 +144,22 @@ module FaRuby
     OFFSET_NUM_IREPS       = 36
     # 呼び出し中の実引数の数。OP_SSEND が置き、OP_ENTER が定義と突き合わせる
     OFFSET_CALL_ARGC       = 37
+    # このインスタンスの IREP テーブル先頭 (FM の絶対アドレス)
+    #
+    # 固定領域はインスタンスごとに位置が違い、Z9 (可変ブロックの先頭) からは
+    # 割り算なしに求められないため、読み込み時にここへ書いておく。
+    OFFSET_IREP_TABLE      = 38
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
+      "fixed_base" => 0, "fixed_align" => 1000,
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 32,
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
+                :fixed_base, :fixed_align,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
                 :max_ireps, :max_frames, :max_methods
 
@@ -146,19 +182,23 @@ module FaRuby
         align: c["align"], max_regs: c["max_regs"], max_bytecode: c["max_bytecode"],
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
         max_globals: c["max_globals"], max_ireps: c["max_ireps"],
-        max_frames: c["max_frames"], max_methods: c["max_methods"]
+        max_frames: c["max_frames"], max_methods: c["max_methods"],
+        fixed_base: c["fixed_base"], fixed_align: c["fixed_align"]
       )
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
                    align: 1000, max_regs: 80, max_bytecode: 3000,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
-                   max_ireps: 16, max_frames: 16, max_methods: 32)
+                   max_ireps: 16, max_frames: 16, max_methods: 32,
+                   fixed_base: 0, fixed_align: 1000)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
       @instance_index = Integer(instance_index)
       @align          = Integer(align)
+      @fixed_base     = Integer(fixed_base)
+      @fixed_align    = Integer(fixed_align)
       @max_regs       = Integer(max_regs)
       @max_bytecode   = Integer(max_bytecode)
       @max_pool       = Integer(max_pool)
@@ -178,51 +218,71 @@ module FaRuby
         device_name: device_name, base: base, instances: instances, instance_index: index,
         align: align, max_regs: max_regs, max_bytecode: max_bytecode,
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
-        max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods
+        max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
+        fixed_base: fixed_base, fixed_align: fixed_align
       )
     end
 
     # --- 領域の先頭アドレス ---
+    #
+    # 可変領域 (EM) はブロック先頭 origin から、固定領域 (FM) は fixed_origin から。
 
-    # このインスタンスのブロック先頭
+    # このインスタンスの可変ブロック先頭
     def origin = base + instance_index * instance_size
 
     def vm_state_base       = origin
     def reg_file_base       = vm_state_base + VM_STATE_WORDS
     def frame_stack_base    = reg_file_base + max_regs * SLOT_WORDS
-    def irep_table_base     = frame_stack_base + max_frames * FRAME_WORDS
-    def bytecode_base       = irep_table_base + max_ireps * IREP_TABLE_STRIDE
-    def pool_base           = bytecode_base + max_bytecode
-    def device_table_base   = pool_base + max_pool * SLOT_WORDS
-    def method_table_base   = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
+    def method_table_base   = frame_stack_base + max_frames * FRAME_WORDS
     def general_global_base = method_table_base + max_methods
 
-    # 各領域の合計 (パディングを含まない)
+    # このインスタンスの固定ブロック先頭 (FM の絶対アドレス)
+    def fixed_origin = fixed_base + instance_index * fixed_instance_size
+
+    def irep_table_base   = fixed_origin
+    def bytecode_base     = irep_table_base + max_ireps * IREP_TABLE_STRIDE
+    def pool_base         = bytecode_base + max_bytecode
+    def device_table_base = pool_base + max_pool * SLOT_WORDS
+
+    # --- ホストから見た固定領域 ---
+    #
+    # スクリプトは FRSET(#{FIXED_BANK}) でバンクを選んでから FM で触りますが、
+    # ホストにはバンクを選ぶ手段が無いため ZF の絶対アドレスで触ります。
+    def fixed_host_base = FIXED_BANK * FIXED_BANK_SIZE
+    def fixed_host_addr(fm_addr) = fixed_host_base + fm_addr
+    def fixed_host_device = FIXED_HOST_DEVICE
+    def fixed_device_name = FIXED_DEVICE_NAME
+
+    # 可変領域の合計 (パディングを含まない)
     def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
-        max_ireps * IREP_TABLE_STRIDE + max_bytecode +
-        max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE +
         max_methods + max_globals * SLOT_WORDS
+    end
+
+    # 固定領域の合計 (パディングを含まない)
+    def fixed_content_size
+      max_ireps * IREP_TABLE_STRIDE + max_bytecode +
+        max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE
     end
 
     # 1インスタンスが占有するワード数
     #
     # align の倍数に切り上げる。開始・終了アドレスが区切りの良い値になり、
     # 複数インスタンスの場合も各ブロックが丸い境界に載る。
-    def instance_size
-      return content_size if align <= 1
-
-      ((content_size + align - 1) / align) * align
-    end
+    def instance_size       = round_up(content_size, align)
+    def fixed_instance_size = round_up(fixed_content_size, fixed_align)
 
     # 切り上げによって生じた未使用ワード数
-    def padding = instance_size - content_size
+    def padding       = instance_size - content_size
+    def fixed_padding = fixed_instance_size - fixed_content_size
 
     # 全インスタンスが占有するワード数
-    def total_words = instance_size * instances
+    def total_words       = instance_size * instances
+    def fixed_total_words = fixed_instance_size * instances
 
     # faRuby が使用する最後のアドレス (全インスタンス)
-    def last_addr = base + total_words - 1
+    def last_addr       = base + total_words - 1
+    def fixed_last_addr = fixed_base + fixed_total_words - 1
 
     # このインスタンスのブロックの最後のアドレス
     def block_last_addr = origin + instance_size - 1
@@ -254,6 +314,7 @@ module FaRuby
     def cur_symbols_addr     = vm_state_base + OFFSET_CUR_SYMBOLS
     def num_ireps_addr       = vm_state_base + OFFSET_NUM_IREPS
     def call_argc_addr       = vm_state_base + OFFSET_CALL_ARGC
+    def irep_table_addr_addr = vm_state_base + OFFSET_IREP_TABLE
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
@@ -302,18 +363,18 @@ module FaRuby
     def device(addr)      = "#{device_name}#{addr}"
     def device_long(addr) = "#{device_name}#{addr}.L"
 
+    # 固定領域はスクリプトからは FM で触る (FRSET でバンクを選んだ後)
+    def fixed_device(addr)      = "#{FIXED_DEVICE_NAME}#{addr}"
+    def fixed_device_long(addr) = "#{FIXED_DEVICE_NAME}#{addr}.L"
+
     # --- 表示用 ---
 
-    # 領域の一覧を [名前, 開始, 終了, ワード数] の配列で返す
+    # 可変領域 (EM) の一覧を [名前, 開始, 終了, ワード数] の配列で返す
     def regions
       list = [
         ["VM状態",            vm_state_base,       reg_file_base - 1],
         ["レジスタスタック",  reg_file_base,       frame_stack_base - 1],
-        ["呼び出しスタック",  frame_stack_base,    irep_table_base - 1],
-        ["IREPテーブル",      irep_table_base,     bytecode_base - 1],
-        ["バイトコード",      bytecode_base,       pool_base - 1],
-        ["定数プール",        pool_base,           device_table_base - 1],
-        ["シンボル表",        device_table_base,   method_table_base - 1],
+        ["呼び出しスタック",  frame_stack_base,    method_table_base - 1],
         ["メソッド表",        method_table_base,   general_global_base - 1],
         ["汎用グローバル変数", general_global_base, general_global_base + max_globals * SLOT_WORDS - 1],
       ]
@@ -321,15 +382,38 @@ module FaRuby
       list.map { |name, from, to| [name, from, to, to - from + 1] }
     end
 
+    # 固定領域 (FM) の一覧。アドレスは FM のもの
+    def fixed_regions
+      list = [
+        ["IREPテーブル", irep_table_base,   bytecode_base - 1],
+        ["バイトコード", bytecode_base,     pool_base - 1],
+        ["定数プール",   pool_base,         device_table_base - 1],
+        ["シンボル表",   device_table_base, device_table_base + max_symbols * DEVICE_TABLE_STRIDE - 1],
+      ]
+      if fixed_padding.positive?
+        list << ["予備 (端数調整)", fixed_origin + fixed_content_size,
+                 fixed_origin + fixed_instance_size - 1]
+      end
+      list.map { |name, from, to| [name, from, to, to - from + 1] }
+    end
+
     def to_s
-      "#{device_name}#{base}-#{device_name}#{last_addr} " \
-        "(#{instances}インスタンス × #{instance_size}ワード)"
+      "#{device_name}#{base}-#{device_name}#{last_addr} / " \
+        "#{FIXED_DEVICE_NAME}#{fixed_base}-#{FIXED_DEVICE_NAME}#{fixed_last_addr} " \
+        "(#{instances}インスタンス × #{instance_size}+#{fixed_instance_size}ワード)"
     end
 
     private
 
+    def round_up(size, unit)
+      return size if unit <= 1
+
+      ((size + unit - 1) / unit) * unit
+    end
+
     def validate!
       raise LayoutError, "base は 0 以上にしてください (#{@base})" if @base.negative?
+      raise LayoutError, "fixed_base は 0 以上にしてください (#{@fixed_base})" if @fixed_base.negative?
       raise LayoutError, "instances は 1 以上にしてください (#{@instances})" if @instances < 1
 
       { "max_regs" => @max_regs, "max_bytecode" => @max_bytecode, "max_pool" => @max_pool,
@@ -338,6 +422,11 @@ module FaRuby
         "max_methods" => @max_methods }.each do |name, value|
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end
+
+      return if fixed_last_addr < FIXED_BANK_SIZE
+
+      raise LayoutError, "固定領域がバンクに収まりません " \
+                         "(#{FIXED_DEVICE_NAME}#{fixed_last_addr} > #{FIXED_BANK_SIZE - 1})"
     end
   end
 end

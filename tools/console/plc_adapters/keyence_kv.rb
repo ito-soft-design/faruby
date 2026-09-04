@@ -42,13 +42,21 @@ module FaRuby
         end
 
         def read_words(addr, count)
-          ensure_connected
-          @plc["#{DEVICE_PREFIX}#{addr}", count]
+          read_device_words(DEVICE_PREFIX, addr, count)
         end
 
         def write_words(addr, values)
+          write_device_words(DEVICE_PREFIX, addr, values)
+        end
+
+        def read_device_words(device_prefix, addr, count)
           ensure_connected
-          @plc["#{DEVICE_PREFIX}#{addr}", values.size] = values
+          @plc["#{device_prefix}#{addr}", count]
+        end
+
+        def write_device_words(device_prefix, addr, values)
+          ensure_connected
+          @plc["#{device_prefix}#{addr}", values.size] = values
         end
 
         def device_name

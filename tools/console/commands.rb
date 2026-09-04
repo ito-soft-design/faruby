@@ -121,12 +121,16 @@ module FaRuby
         end
 
         codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
-        image = codegen.memory_image
-        count = @transfer.write_image(image)
-        puts "OK: #{count} ワードを PLC に書き込みました"
-        puts "  バイトコード: #{@last_irep.ilen} バイト"
-        puts "  定数プール: #{@last_irep.pool.size} エントリ"
-        puts "  レジスタ: #{@last_irep.nregs} 個"
+        mutable = @transfer.write_image(codegen.memory_image)
+        fixed = @transfer.write_fixed_image(codegen.fixed_image)
+        ireps = codegen.irep_entries
+        puts "OK: #{mutable + fixed} ワードを PLC に書き込みました"
+        puts "  可変 (#{layout.device_name}): #{mutable} ワード"
+        puts "  固定 (#{layout.fixed_host_device}): #{fixed} ワード"
+        puts "  irep: #{ireps.size} 個"
+        puts "  バイトコード: #{ireps.sum { |e| e[:irep].ilen }} バイト"
+        puts "  定数プール: #{ireps.sum { |e| e[:irep].pool.size }} エントリ"
+        puts "  レジスタ: #{ireps.map { |e| e[:irep].nregs }.max} 個"
       end
 
       # run
@@ -186,19 +190,20 @@ module FaRuby
         end
 
         codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
-        image = codegen.memory_image
+        results = [@transfer.verify_image(codegen.memory_image),
+                   @transfer.verify_fixed_image(codegen.fixed_image)]
+        total = results.sum { |r| r[:total] }
+        mismatches = results.flat_map { |r| r[:mismatches] }
 
-        result = @transfer.verify_image(image)
-
-        if result[:match]
-          puts "OK: PLC メモリと一致 (#{result[:total]} ワード)"
+        if mismatches.empty?
+          puts "OK: PLC メモリと一致 (#{total} ワード)"
         else
-          puts "NG: #{result[:mismatches].size} / #{result[:total]} ワード不一致"
+          puts "NG: #{mismatches.size} / #{total} ワード不一致"
           puts ""
-          puts "  %-8s  %-10s  %-10s  %-10s" % ["ADDR", "DEVICE", "EXPECTED", "ACTUAL"]
-          puts "  #{'-' * 42}"
-          result[:mismatches].each do |m|
-            puts "  %-8d  %-10s  %-10d  %-10d" % [m[:addr], layout.device(m[:addr]), m[:expected], m[:actual]]
+          puts "  %-10s  %-10s  %-10s" % %w[DEVICE EXPECTED ACTUAL]
+          puts "  #{'-' * 36}"
+          mismatches.each do |m|
+            puts "  %-10s  %-10d  %-10d" % ["#{m[:device]}#{m[:addr]}", m[:expected], m[:actual]]
           end
         end
       end
@@ -215,22 +220,35 @@ module FaRuby
           @config.layout.instances.times do |i|
             block = @config.layout.for_instance(i)
             mark = i == @instance ? "*" : " "
-            puts format("  %s %d  %s-%s", mark, i,
-                        block.device(block.origin), block.device(block.block_last_addr))
+            puts format("  %s %d  %s-%s / %s-%s", mark, i,
+                        block.device(block.origin), block.device(block.block_last_addr),
+                        block.fixed_device(block.fixed_origin),
+                        block.fixed_device(block.fixed_origin + block.fixed_instance_size - 1))
           end
           puts ""
           puts "  以下はインスタンス #{@instance} の内訳:"
         end
 
-        puts format("  %-20s %-10s %-10s %s", "領域", "開始", "終了", "ワード数")
-        puts "  #{'-' * 52}"
-        layout.regions.each do |name, from, to, words|
-          puts format("  %-20s %-10s %-10s %d", name, layout.device(from), layout.device(to), words)
+        puts "  実行中に変わる領域 (#{layout.device_name})"
+        print_regions(layout.regions) { |addr| layout.device(addr) }
+        puts ""
+        puts "  実行中に変わらない領域 (#{layout.fixed_device_name} = " \
+             "#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの)"
+        print_regions(layout.fixed_regions) do |addr|
+          "#{layout.fixed_device(addr)} (#{layout.fixed_host_device}#{layout.fixed_host_addr(addr)})"
         end
         puts ""
         puts "  ラダーがこの範囲を使用していないことを確認してください。"
         puts "  範囲を変えるには faruby.yml の memory 節を編集し、"
         puts "  `rake vm_core` で再生成して KV Studio に取り込み直します。"
+      end
+
+      def print_regions(regions)
+        puts format("  %-20s %-22s %-22s %s", "領域", "開始", "終了", "ワード数")
+        puts "  #{'-' * 72}"
+        regions.each do |name, from, to, words|
+          puts format("  %-20s %-22s %-22s %d", name, yield(from), yield(to), words)
+        end
       end
 
       # disasm

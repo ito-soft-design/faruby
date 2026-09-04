@@ -8,9 +8,9 @@
 '
 ' EM デバイスを使用。
 '
-' インスタンスごとに 5000 ワードのブロックを使います。
-'   インスタンス0  EM20000-EM24999
-'   インスタンス1  EM25000-EM29999
+' インスタンスごとに 1000 ワードのブロックを使います。
+'   インスタンス0  EM20000-EM20999
+'   インスタンス1  EM21000-EM21999
 '
 ' 実行中のブロック先頭は Z9 に載っています。
 ' ブロック内の位置はオフセットをインデックス修飾で足して指します。
@@ -36,10 +36,10 @@
 '   EM35:Z9 = 実行中の irep のシンボル表先頭
 '   +48~ = レジスタスタック (値スロット 4ワード/レジスタ)
 '   +368~ = 呼び出しスタック (4ワード/段)
-'   +432~ = IREPテーブル (8ワード/irep)
-'   +560~ = バイトコード (1バイト/1ワード)
-'   +3560~ = 定数プール (値スロット 4ワード/エントリ)
-'   +4160~ = シンボル表 (4ワード/エントリ)
+'   +-20000~ = IREPテーブル (8ワード/irep)
+'   +-19872~ = バイトコード (1バイト/1ワード)
+'   +-16872~ = 定数プール (値スロット 4ワード/エントリ)
+'   +-16272~ = シンボル表 (4ワード/エントリ)
 '
 ' バイトコード・定数プール・シンボル表は全 irep で 1 つの領域を分け合う。
 ' irep ごとの位置は IREP テーブルにあり、切り替え時に VM 状態へ写す。
@@ -68,18 +68,21 @@ EM20026 = Z6
 EM20027 = Z7
 EM20028 = Z8
 EM20029 = Z9
+' 固定領域 (FM) のバンクを選ぶ
+' 現在のバンクを読む命令が無いため、抜けるときは 0 に戻す
+FRSET(3)
 
 ' インスタンスごとの実行 (ブロック先頭を Z9 に載せる)
 ' instances = 2
-FOR Z9 = 20000 TO 25000 STEP 5000
+FOR Z9 = 20000 TO 21000 STEP 1000
 
     IF EM1:Z9 = 1 THEN
 
         FOR EM20:Z9 = 1 TO EM5:Z9
 
             ' === FETCH OPCODE ===
-            Z1 = EM0:Z9 + EM33:Z9 + Z9
-            EM6:Z9 = EM0:Z1
+            Z1 = EM0:Z9 + EM33:Z9
+            EM6:Z9 = FM0:Z1
             EM0:Z9 = EM0:Z9 + 1
 
             ' === DECODE & EXECUTE ===
@@ -89,11 +92,11 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 1 THEN
                 ' OP_MOVE (BB): R[a] = R[b]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = EM8:Z9 * 4 + EM32:Z9 + Z9
@@ -102,24 +105,24 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 2 THEN
                 ' OP_LOADL (BB): R[a] = Pool[b]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                Z2 = EM8:Z9 * 4 + EM34:Z9 + Z9
-                EM1.L:Z1 = EM1.L:Z2
-                EM0:Z1 = EM0:Z2
+                Z2 = EM8:Z9 * 4 + EM34:Z9
+                EM1.L:Z1 = FM1.L:Z2
+                EM0:Z1 = FM0:Z2
 
             ELSE IF EM6:Z9 = 3 THEN
                 ' OP_LOADI (BB): R[a] = b (符号なし)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = EM8:Z9
@@ -127,11 +130,11 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 4 THEN
                 ' OP_LOADINEG (BB): R[a] = -b
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 2の補数を32ビットで組み立てる
                 EM16:Z9 = 0 - EM8:Z9
@@ -145,8 +148,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 5 THEN
                 ' OP_LOADI__1 (B): R[a] = -1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = -1
@@ -154,8 +157,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 6 THEN
                 ' OP_LOADI_0 (B): R[a] = 0
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 0
@@ -163,8 +166,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 7 THEN
                 ' OP_LOADI_1 (B): R[a] = 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 1
@@ -172,8 +175,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 8 THEN
                 ' OP_LOADI_2 (B): R[a] = 2
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 2
@@ -181,8 +184,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 9 THEN
                 ' OP_LOADI_3 (B): R[a] = 3
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 3
@@ -190,8 +193,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 10 THEN
                 ' OP_LOADI_4 (B): R[a] = 4
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 4
@@ -199,8 +202,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 11 THEN
                 ' OP_LOADI_5 (B): R[a] = 5
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 5
@@ -208,8 +211,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 12 THEN
                 ' OP_LOADI_6 (B): R[a] = 6
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 6
@@ -217,8 +220,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 13 THEN
                 ' OP_LOADI_7 (B): R[a] = 7
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 7
@@ -226,15 +229,15 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 14 THEN
                 ' OP_LOADI16 (BS): R[a] = signed16(b)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4
                 ' 16ビット値を符号拡張して32ビットスクラッチに置く
@@ -249,23 +252,23 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 15 THEN
                 ' OP_LOADI32 (BSS): R[a] = (b<<16)+c
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM9:Z9 = Z3 * 256 + Z4
                 ' 上位 * 65536 は16ビット演算になり桁上がりが落ちるため、
@@ -278,8 +281,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 17 THEN
                 ' OP_LOADNIL (B): R[a] = nil
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 0
@@ -287,8 +290,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 18 THEN
                 ' OP_LOADSELF (B): R[a] = self (main)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 0
@@ -296,8 +299,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 19 THEN
                 ' OP_LOADT (B): R[a] = true
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 1
@@ -305,8 +308,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 20 THEN
                 ' OP_LOADF (B): R[a] = false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 0
@@ -314,21 +317,21 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 21 THEN
                 ' OP_GETGV (BB): R[a] = global[symbols[b]]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' シンボル表参照 (4ワード/エントリ)
-                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
+                Z3 = EM8:Z9 * 4 + EM35:Z9
                 Z4 = Z3 + 1
-                Z5 = EM0:Z3
-                Z6 = EM0:Z4
+                Z5 = FM0:Z3
+                Z6 = FM0:Z4
                 Z7 = Z3 + 2
-                Z8 = EM0:Z7
+                Z8 = FM0:Z7
                 Z7 = Z3 + 3
-                Z1 = EM0:Z7   ' シンボル種別
+                Z1 = FM0:Z7   ' シンボル種別
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 IF Z1 = 1 THEN
@@ -563,21 +566,21 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 22 THEN
                 ' OP_SETGV (BB): global[symbols[b]] = R[a]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' シンボル表参照 (4ワード/エントリ)
-                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
+                Z3 = EM8:Z9 * 4 + EM35:Z9
                 Z4 = Z3 + 1
-                Z5 = EM0:Z3
-                Z6 = EM0:Z4
+                Z5 = FM0:Z3
+                Z6 = FM0:Z4
                 Z7 = Z3 + 2
-                Z8 = EM0:Z7
+                Z8 = FM0:Z7
                 Z7 = Z3 + 3
-                Z1 = EM0:Z7   ' シンボル種別
+                Z1 = FM0:Z7   ' シンボル種別
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 IF Z1 = 1 THEN
@@ -772,8 +775,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 35 THEN
                 ' OP_GETIDX (B): R[a] = R[a][R[a+1]] (デバイス)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -1027,8 +1030,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 36 THEN
                 ' OP_SETIDX (B): R[a][R[a+1]] = R[a+2] (デバイス)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -1244,11 +1247,11 @@ FOR Z9 = 20000 TO 25000 STEP 5000
             ELSE IF EM6:Z9 = 37 THEN
                 ' OP_JMP (S): PC += signed16(a)
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM7:Z9 = Z3 * 256 + Z4
                 IF EM7:Z9 >= 32768 THEN
@@ -1258,15 +1261,15 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 38 THEN
                 ' OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4
                 IF EM8:Z9 >= 32768 THEN
@@ -1279,15 +1282,15 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 39 THEN
                 ' OP_JMPNOT (BS): if R[a] が偽 (nil/false) then PC += signed16(b)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4
                 IF EM8:Z9 >= 32768 THEN
@@ -1300,15 +1303,15 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 40 THEN
                 ' OP_JMPNIL (BS): if R[a] が nil then PC += signed16(b)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 16bit big-endian: hi byte, lo byte
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4
                 IF EM8:Z9 >= 32768 THEN
@@ -1321,14 +1324,14 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 45 THEN
                 ' OP_SSEND (BBB): R[a] = self.symbols[b](R[a+1]..)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM9:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM9:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' self をレシーバ位置に置く (mruby の regs[a] = regs[0])
                 Z3 = 0 + EM32:Z9 + Z9
@@ -1336,19 +1339,19 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                 EM1.L:Z1 = EM1.L:Z3
                 EM0:Z1 = EM0:Z3
                 ' シンボル表参照 (4ワード/エントリ)
-                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
-                Z5 = EM0:Z3   ' メソッド番号
+                Z3 = EM8:Z9 * 4 + EM35:Z9
+                Z5 = FM0:Z3   ' メソッド番号
                 Z7 = Z3 + 2
-                Z8 = EM0:Z7   ' 引数の数
+                Z8 = FM0:Z7   ' 引数の数
                 Z7 = Z3 + 3
-                Z4 = EM0:Z7   ' シンボル種別
+                Z4 = FM0:Z7   ' シンボル種別
                 IF Z4 <> 2 THEN
                     EM1:Z9 = 3
                     EM2:Z9 = 3
                     BREAK
                 END IF
                 Z3 = Z3 + 1
-                Z6 = EM0:Z3   ' ユーザー定義メソッドID
+                Z6 = FM0:Z3   ' ユーザー定義メソッドID
                 IF Z5 <> 0 THEN
                     ' 組み込みメソッド。フレームを積まずその場で計算する
                     IF EM9:Z9 <> Z8 THEN
@@ -1527,7 +1530,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         EM2:Z9 = 3
                         BREAK
                     END IF
-                    Z3 = Z6 + 4560 + Z9
+                    Z3 = Z6 + 432 + Z9
                     Z5 = EM0:Z3   ' 本体の irep 番号
                     IF Z5 = 0 THEN
                         ' まだ def が実行されていない
@@ -1552,12 +1555,12 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     EM37:Z9 = EM9:Z9
                     EM30:Z9 = Z5
                     ' IREP テーブルから実行中の irep の情報を写す
-                    Z1 = Z5 * 8 + 432 + Z9
-                    EM33:Z9 = EM0:Z1
-                    EM10:Z9 = EM1:Z1
-                    EM34:Z9 = EM2:Z1
-                    EM35:Z9 = EM3:Z1
-                    EM11:Z9 = EM4:Z1
+                    Z1 = Z5 * 8 + EM38:Z9
+                    EM33:Z9 = FM0:Z1
+                    EM10:Z9 = FM1:Z1
+                    EM34:Z9 = FM2:Z1
+                    EM35:Z9 = FM3:Z1
+                    EM11:Z9 = FM4:Z1
                     ' レジスタ窓が領域からはみ出さないこと
                     EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
                     IF EM16:Z9 > 368 THEN
@@ -1570,22 +1573,22 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 47 THEN
                 ' OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM9:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM9:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' シンボル表参照 (4ワード/エントリ)
-                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
-                Z5 = EM0:Z3   ' メソッド番号
+                Z3 = EM8:Z9 * 4 + EM35:Z9
+                Z5 = FM0:Z3   ' メソッド番号
                 Z7 = Z3 + 2
-                Z8 = EM0:Z7   ' 引数の数
+                Z8 = FM0:Z7   ' 引数の数
                 Z7 = Z3 + 3
-                Z4 = EM0:Z7   ' シンボル種別
+                Z4 = FM0:Z7   ' シンボル種別
                 IF Z4 <> 2 THEN
                     ' メソッド名でないシンボルへの呼び出し
                     EM1:Z9 = 3
@@ -1766,14 +1769,14 @@ FOR Z9 = 20000 TO 25000 STEP 5000
             ELSE IF EM6:Z9 = 52 THEN
                 ' OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
                 ' 24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z3 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z3 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                Z4 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                Z4 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 EM8:Z9 = Z3 * 256 + Z4   ' aspec の下位2バイト
                 ' 必須引数の数 = aspec >> 18。上位バイトを 4 で割った値と同じ
@@ -1806,8 +1809,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 56 THEN
                 ' OP_RETURN (B): R[b] を返して呼び出し元へ (トップレベルでは VM 停止)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 IF EM31:Z9 = 0 THEN
                     ' トップレベルの return は VM 停止
@@ -1827,18 +1830,18 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     EM32:Z9 = EM2:Z3
                     EM30:Z9 = Z5
                     ' IREP テーブルから実行中の irep の情報を写す
-                    Z1 = Z5 * 8 + 432 + Z9
-                    EM33:Z9 = EM0:Z1
-                    EM10:Z9 = EM1:Z1
-                    EM34:Z9 = EM2:Z1
-                    EM35:Z9 = EM3:Z1
-                    EM11:Z9 = EM4:Z1
+                    Z1 = Z5 * 8 + EM38:Z9
+                    EM33:Z9 = FM0:Z1
+                    EM10:Z9 = FM1:Z1
+                    EM34:Z9 = FM2:Z1
+                    EM35:Z9 = FM3:Z1
+                    EM11:Z9 = FM4:Z1
                 END IF
 
             ELSE IF EM6:Z9 = 60 THEN
                 ' OP_ADD (B): R[a] = R[a] + R[a+1]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -1862,11 +1865,11 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 61 THEN
                 ' OP_ADDI (BB): R[a] = R[a] + b
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 IF EM0:Z1 = 5 THEN
@@ -1879,8 +1882,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 62 THEN
                 ' OP_SUB (B): R[a] = R[a] - R[a+1]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -1904,11 +1907,11 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 63 THEN
                 ' OP_SUBI (BB): R[a] = R[a] - b
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 IF EM0:Z1 = 5 THEN
@@ -1921,8 +1924,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 64 THEN
                 ' OP_MUL (B): R[a] = R[a] * R[a+1]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -1946,8 +1949,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 65 THEN
                 ' OP_DIV (B): R[a] = R[a] / R[a+1]
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2043,8 +2046,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 66 THEN
                 ' OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2095,8 +2098,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 67 THEN
                 ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2140,8 +2143,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 68 THEN
                 ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2185,8 +2188,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 69 THEN
                 ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2230,8 +2233,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 70 THEN
                 ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2275,16 +2278,16 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 88 THEN
                 ' OP_METHOD (BB): R[a] = 子 irep b への参照
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
-                Z3 = EM30:Z9 * 8 + 432 + Z9
+                Z3 = EM30:Z9 * 8 + EM38:Z9
                 Z4 = Z3 + 5
-                EM16:Z9 = EM0:Z4 + EM8:Z9
+                EM16:Z9 = FM0:Z4 + EM8:Z9
                 IF EM16:Z9 >= EM36:Z9 THEN
                     ' 指す先の irep が無い
                     EM1:Z9 = 3
@@ -2297,26 +2300,26 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 95 THEN
                 ' OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM8:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 ' シンボル表参照 (4ワード/エントリ)
-                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
-                Z5 = EM0:Z3   ' メソッド番号
+                Z3 = EM8:Z9 * 4 + EM35:Z9
+                Z5 = FM0:Z3   ' メソッド番号
                 Z7 = Z3 + 2
-                Z8 = EM0:Z7   ' 引数の数
+                Z8 = FM0:Z7   ' 引数の数
                 Z7 = Z3 + 3
-                Z4 = EM0:Z7   ' シンボル種別
+                Z4 = FM0:Z7   ' シンボル種別
                 IF Z4 <> 2 THEN
                     EM1:Z9 = 3
                     EM2:Z9 = 3
                     BREAK
                 END IF
                 Z3 = Z3 + 1
-                Z5 = EM0:Z3   ' ユーザー定義メソッドID
+                Z5 = FM0:Z3   ' ユーザー定義メソッドID
                 IF Z5 = 0 THEN
                     ' 組み込みと同じ名前は再定義できない
                     EM1:Z9 = 3
@@ -2330,7 +2333,7 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     BREAK
                 END IF
                 ' メソッド表 (ID => 本体の irep 番号)
-                Z3 = Z5 + 4560 + Z9
+                Z3 = Z5 + 432 + Z9
                 EM0:Z3 = EM1.L:Z2
                 ' OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
@@ -2339,8 +2342,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
             ELSE IF EM6:Z9 = 99 THEN
                 ' OP_TCLASS (B): R[a] = 定義先クラス (トップレベルは main)
-                Z1 = EM0:Z9 + EM33:Z9 + Z9
-                EM7:Z9 = EM0:Z1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 EM1.L:Z1 = 0
@@ -2371,6 +2374,8 @@ FOR Z9 = 20000 TO 25000 STEP 5000
 
 NEXT
 
+' ファイルレジスタのバンクを 0 に戻す
+FRSET(0)
 ' インデックスレジスタの復元
 Z1 = EM20021
 Z2 = EM20022

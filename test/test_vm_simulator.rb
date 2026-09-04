@@ -33,9 +33,9 @@ end
     em.write_u16(layout.nregs_addr, nregs)
     em.write_u16(layout.nlocals_addr, nlocals)
 
-    # バイトコード
+    # バイトコードは固定領域 (FM) にある
     bytecode.each_with_index do |b, i|
-      em.write_u16(layout.bytecode_base + i, b)
+      @sim.fixed.write_u16(layout.bytecode_base + i, b)
     end
 
     # レジスタクリア
@@ -162,8 +162,8 @@ end
       0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(0), 123456)
+    @sim.fixed.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(0), 123456)
     @sim.run
     assert_equal 123456, @sim.reg(1)
   end
@@ -175,15 +175,15 @@ end
       0x02, 0x02, 0x01, # OP_LOADL R[2], Pool[1]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(0), -1)
-    @sim.em.write_u16(layout.pool_type_addr(1), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(1), 222)
+    @sim.fixed.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(0), -1)
+    @sim.fixed.write_u16(layout.pool_type_addr(1), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(1), 222)
     @sim.run
     assert_equal(-1, @sim.reg(1))
     assert_equal 222, @sim.reg(2)
     # 型タグが -1 の上位ワードで潰されていないこと
-    assert_equal TT_INTEGER, @sim.em.read_u16(layout.pool_type_addr(1))
+    assert_equal TT_INTEGER, @sim.fixed.read_u16(layout.pool_type_addr(1))
   end
 
   # === 値スロットのレイアウト (ストライド 4) ===
@@ -638,10 +638,11 @@ end
   # access は既定でワードの16ビット符号付き。ビットデバイスを個別ビットとして
   # 扱いたい場合は ACCESS_BIT を渡す (幅を付けると整数として扱われるため)。
   def setup_device_mapping(sym_index, device_type, device_addr, access = ACCESS_S)
+    # シンボル表は固定領域 (FM) にある
     table_addr = layout.device_table_base + sym_index * DEVICE_TABLE_STRIDE
-    @sim.em.write_u16(table_addr, device_type)
-    @sim.em.write_u16(table_addr + 1, device_addr)
-    @sim.em.write_u16(table_addr + 2, access)
+    @sim.fixed.write_u16(table_addr, device_type)
+    @sim.fixed.write_u16(table_addr + 1, device_addr)
+    @sim.fixed.write_u16(table_addr + 2, access)
   end
 
   def test_setgv_em

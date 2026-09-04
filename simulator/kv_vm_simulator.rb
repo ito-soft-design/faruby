@@ -29,12 +29,17 @@ module FaRuby
     def initialize(layout: MemoryLayout.default)
       @layout = layout
       @em = EmMemory.new
+      # 固定領域 (実機では FM = バンク 3 の ZF)。
+      # 利用者が $ZF500 を使う場合とアドレスが重ならないよう別のメモリにする
+      @fixed = EmMemory.new
       @devices = Array.new(10) { EmMemory.new }
       @devices[0] = @em  # EM はメインメモリを共用
-      @vm = SimVm.new(@em, @devices, layout: layout)
+      @vm = SimVm.new(@em, @devices, layout: layout, fixed: @fixed)
       @irep = nil
       point_at_top_irep
     end
+
+    attr_reader :fixed
 
     # 実行中の irep とレジスタ窓を既定の位置に向ける
     #
@@ -42,19 +47,23 @@ module FaRuby
     # 位置は VM 状態から引くようになりました。メモリイメージを読まずにバイト
     # コードを直接置いて動かす場合 (テスト) もここで既定値が入ります。
     def point_at_top_irep
-      { layout.reg_base_addr     => layout.reg_file_base,
-        layout.cur_bytecode_addr => layout.bytecode_base,
+      # レジスタ窓は可変領域なのでブロック先頭からのオフセット。
+      # 残りは固定領域 (FM) の絶対アドレス
+      @em.write_u16(layout.reg_base_addr, layout.offset_of(layout.reg_file_base))
+      { layout.cur_bytecode_addr => layout.bytecode_base,
         layout.cur_pool_addr     => layout.pool_base,
-        layout.cur_symbols_addr  => layout.device_table_base }.each do |addr, target|
-        @em.write_u16(addr, layout.offset_of(target))
+        layout.cur_symbols_addr  => layout.device_table_base,
+        layout.irep_table_addr_addr => layout.irep_table_base }.each do |addr, target|
+        @em.write_u16(addr, target)
       end
       @em.write_u16(layout.cur_irep_addr, 0)
       @em.write_u16(layout.frame_sp_addr, 0)
     end
 
     # メモリイメージをロードして実行
-    def load_and_run(image, max_steps: 10000)
+    def load_and_run(image, fixed_image = nil, max_steps: 10000)
       @em.load_image(image)
+      @fixed.load_image(fixed_image) if fixed_image
       run(max_steps: max_steps)
     end
 
@@ -62,7 +71,7 @@ module FaRuby
     def load_irep_and_run(irep, max_steps: 10000)
       @irep = irep
       codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout)
-      load_and_run(codegen.memory_image, max_steps: max_steps)
+      load_and_run(codegen.memory_image, codegen.fixed_image, max_steps: max_steps)
     end
 
     # グローバル変数の値をシンボル名で取得 (テスト用)

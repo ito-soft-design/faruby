@@ -74,7 +74,7 @@ module FaRuby
       lines.join("\n")
     end
 
-    # メモリイメージを Hash として返す (シミュレータ用)
+    # 可変領域 (EM) のイメージを Hash で返す
     # { address => value, ... }
     def memory_image
       validate!
@@ -93,12 +93,37 @@ module FaRuby
       image[layout.frame_sp_addr] = 0
       image[layout.call_argc_addr] = 0
       image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
+      image[layout.irep_table_addr_addr] = layout.irep_table_base
+      image[layout.num_symbols_addr] = irep_entries.sum { |e| e[:irep].symbols.size }
 
       # メソッド表 (ユーザー定義メソッド ID => 本体の irep 番号)
       # 登録は OP_DEF が実行時に行うため、ここでは未定義で埋める
       layout.max_methods.times { |id| image[layout.method_table_addr(id)] = METHOD_UNDEFINED }
       # 実行はトップレベルの irep から始まる
       current_irep_state(top).each { |addr, value| image[addr] = value }
+
+      # レジスタスタック初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
+      layout.max_regs.times do |i|
+        slot = layout.reg_slot_addr(i)
+        SLOT_WORDS.times { |w| image[slot + w] = 0 }
+      end
+
+      # 汎用グローバル変数のスロットを 0 初期化する
+      device_mappings.select { |m| m[:general] }.each do |m|
+        slot = m[:z_offset] - SLOT_VALUE_OFFSET
+        SLOT_WORDS.times { |w| image[slot + w] = 0 }
+      end
+
+      image
+    end
+
+    # 固定領域 (FM) のイメージを Hash で返す
+    #
+    # アドレスは FM のもの。ホストから書き込むときは ZF の絶対アドレスに
+    # 直す必要があります (layout.fixed_host_addr)。
+    def fixed_image
+      validate!
+      image = {}
 
       irep_entries.each do |entry|
         irep_table_words(entry).each { |addr, value| image[addr] = value }
@@ -121,14 +146,7 @@ module FaRuby
         end
       end
 
-      # レジスタスタック初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
-      layout.max_regs.times do |i|
-        slot = layout.reg_slot_addr(i)
-        SLOT_WORDS.times { |w| image[slot + w] = 0 }
-      end
-
       # シンボル表
-      image[layout.num_symbols_addr] = irep_entries.sum { |e| e[:irep].symbols.size }
       device_mappings.each do |m|
         image[m[:table_addr] + DEVICE_TABLE_KIND_OFFSET] = m[:kind]
         if m[:kind] == SYMBOL_KIND_METHOD
@@ -141,11 +159,6 @@ module FaRuby
         image[m[:table_addr]]     = m[:device_type]
         image[m[:table_addr] + 1] = m[:z_offset]
         image[m[:table_addr] + 2] = m[:access_type] || ACCESS_BIT
-        # 汎用グローバルはスロット全体を 0 初期化
-        next unless m[:general]
-
-        slot = m[:z_offset] - SLOT_VALUE_OFFSET
-        SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
       image
@@ -153,14 +166,14 @@ module FaRuby
 
     # IREP テーブル 1 エントリ分の { アドレス => 値 }
     #
-    # 位置はブロック先頭からのオフセットで入れる。生成コードは Z9 を足して指す。
+    # 位置は FM の絶対アドレス。FM は 0-32767 なので Z にそのまま載る。
     def irep_table_words(entry)
       addr = layout.irep_table_addr(entry[:index])
       {
-        addr + MemoryLayout::IREP_BYTECODE     => layout.offset_of(entry[:bytecode_base]),
+        addr + MemoryLayout::IREP_BYTECODE     => entry[:bytecode_base],
         addr + MemoryLayout::IREP_BYTECODE_LEN => entry[:irep].ilen,
-        addr + MemoryLayout::IREP_POOL         => layout.offset_of(entry[:pool_base]),
-        addr + MemoryLayout::IREP_SYMBOLS      => layout.offset_of(entry[:symbol_base]),
+        addr + MemoryLayout::IREP_POOL         => entry[:pool_base],
+        addr + MemoryLayout::IREP_SYMBOLS      => entry[:symbol_base],
         addr + MemoryLayout::IREP_NREGS        => entry[:irep].nregs,
         addr + MemoryLayout::IREP_FIRST_CHILD  => entry[:first_child],
       }
@@ -169,14 +182,14 @@ module FaRuby
     # 実行中の irep を表す VM 状態の { アドレス => 値 }
     #
     # 命令ごとに IREP テーブルを引くとスキャンタイムが延びるため、
-    # 切り替え時にここへ写して使う。
+    # 切り替え時にここへ写して使う。位置は FM の絶対アドレス。
     def current_irep_state(entry)
       {
         layout.cur_irep_addr     => entry[:index],
-        layout.cur_bytecode_addr => layout.offset_of(entry[:bytecode_base]),
+        layout.cur_bytecode_addr => entry[:bytecode_base],
         layout.bytecode_len_addr => entry[:irep].ilen,
-        layout.cur_pool_addr     => layout.offset_of(entry[:pool_base]),
-        layout.cur_symbols_addr  => layout.offset_of(entry[:symbol_base]),
+        layout.cur_pool_addr     => entry[:pool_base],
+        layout.cur_symbols_addr  => entry[:symbol_base],
         layout.nregs_addr        => entry[:irep].nregs,
       }
     end
@@ -333,7 +346,7 @@ module FaRuby
         lines << "' irep #{entry[:index]}: ilen=#{entry[:irep].ilen} " \
                  "pool=#{entry[:irep].pool.size} syms=#{entry[:irep].symbols.size} " \
                  "nregs=#{entry[:irep].nregs} children=#{entry[:irep].children.size}"
-        lines.concat(irep_table_words(entry).map { |addr, value| "#{layout.device(addr)} = #{value}" })
+        lines.concat(irep_table_words(entry).map { |addr, value| "#{layout.fixed_device(addr)} = #{value}" })
       end
       lines
     end
@@ -343,7 +356,7 @@ module FaRuby
       irep_entries.each do |entry|
         lines << "' --- Bytecode: irep #{entry[:index]} (#{entry[:irep].ilen} bytes) ---"
         entry[:irep].instructions.each_byte.each_with_index do |b, i|
-          lines << "#{layout.device(entry[:bytecode_base] + i)} = #{b}"
+          lines << "#{layout.fixed_device(entry[:bytecode_base] + i)} = #{b}"
         end
       end
       lines
@@ -364,19 +377,19 @@ module FaRuby
 
     def pool_entry_lines(entry, pool_entry, index)
       slot = entry[:pool_base] + index * SLOT_WORDS
-      type_addr  = layout.device(slot + SLOT_TYPE_OFFSET)
+      type_addr  = layout.fixed_device(slot + SLOT_TYPE_OFFSET)
       value_addr = slot + SLOT_VALUE_OFFSET
       label = "Pool[#{index}]"
 
       case pool_entry.type
       when :int32, :int64
         ["#{type_addr} = #{TT_INTEGER}    ' #{label} type=integer",
-         "#{layout.device_long(value_addr)} = #{pool_entry.value}    ' #{label}"]
+         "#{layout.fixed_device_long(value_addr)} = #{pool_entry.value}    ' #{label}"]
       when :float
         bits = float_bits(pool_entry.value)
         ["#{type_addr} = #{TT_FLOAT}    ' #{label} type=float",
-         "#{layout.device(value_addr)} = #{bits & 0xFFFF}    ' #{label} = #{pool_entry.value} (IEEE754 下位)",
-         "#{layout.device(value_addr + 1)} = #{(bits >> 16) & 0xFFFF}    " \
+         "#{layout.fixed_device(value_addr)} = #{bits & 0xFFFF}    ' #{label} = #{pool_entry.value} (IEEE754 下位)",
+         "#{layout.fixed_device(value_addr + 1)} = #{(bits >> 16) & 0xFFFF}    " \
          "' #{label} = #{pool_entry.value} (IEEE754 上位)"]
       else
         ["' #{label} = #{pool_entry} (type #{pool_entry.type} - not supported)"]
@@ -401,15 +414,15 @@ module FaRuby
 
         kind = ACCESS_NAMES[m[:access_type] || ACCESS_BIT]
         if m[:general]
-          lines << "#{layout.device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
-          lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> #{layout.device(m[:z_offset])}"
+          lines << "#{layout.fixed_device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
+          lines << "#{layout.fixed_device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> #{layout.device(m[:z_offset])}"
         else
-          lines << "#{layout.device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
-          lines << "#{layout.device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
+          lines << "#{layout.fixed_device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
+          lines << "#{layout.fixed_device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
-        lines << "#{layout.device(table_addr + 2)} = #{m[:access_type] || ACCESS_BIT}    ' #{m[:symbol]} access=#{kind}"
+        lines << "#{layout.fixed_device(table_addr + 2)} = #{m[:access_type] || ACCESS_BIT}    ' #{m[:symbol]} access=#{kind}"
         family_note = m[:family] ? "デバイス族 (添字でアドレスを決める)" : "-"
-        lines << "#{layout.device(table_addr + DEVICE_TABLE_KIND_OFFSET)} = #{m[:kind]}    " \
+        lines << "#{layout.fixed_device(table_addr + DEVICE_TABLE_KIND_OFFSET)} = #{m[:kind]}    " \
                  "' #{m[:symbol]} #{family_note}"
       end
 
@@ -422,10 +435,10 @@ module FaRuby
       addr = mapping[:table_addr]
       note = mapping[:method_code] == METHOD_NONE ? "ユーザー定義" : "組み込みメソッド"
       [
-        "#{layout.device(addr)} = #{mapping[:method_code]}    ' #{mapping[:symbol]} #{note}",
-        "#{layout.device(addr + 1)} = #{mapping[:method_id]}    ' #{mapping[:symbol]} ユーザー定義ID",
-        "#{layout.device(addr + 2)} = #{mapping[:argc]}    ' #{mapping[:symbol]} 引数の数",
-        "#{layout.device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_METHOD}    ' #{mapping[:symbol]} メソッド名",
+        "#{layout.fixed_device(addr)} = #{mapping[:method_code]}    ' #{mapping[:symbol]} #{note}",
+        "#{layout.fixed_device(addr + 1)} = #{mapping[:method_id]}    ' #{mapping[:symbol]} ユーザー定義ID",
+        "#{layout.fixed_device(addr + 2)} = #{mapping[:argc]}    ' #{mapping[:symbol]} 引数の数",
+        "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_METHOD}    ' #{mapping[:symbol]} メソッド名",
       ]
     end
 

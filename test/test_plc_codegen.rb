@@ -31,13 +31,18 @@ end
     irep
   end
 
-  # memory_image を EmMemory にロードして返す
+  # 固定領域 (FM) のイメージを EmMemory にロードして返す
+  #
+  # 定数プールとシンボル表は固定領域にあるため fixed_image を見る
   def load_image(irep)
-    image = FaRuby::PlcCodegen.new(irep).memory_image
+    image = FaRuby::PlcCodegen.new(irep).fixed_image
     em = FaRuby::EmMemory.new
     em.load_image(image)
     [em, image]
   end
+
+  # 可変領域 (EM) のイメージ。レジスタや汎用グローバルの初期化を見る
+  def mutable_image(irep) = FaRuby::PlcCodegen.new(irep).memory_image
 
   # === 定数プール ===
 
@@ -110,7 +115,7 @@ end
 
   def test_validate_rejects_pool_overflow
     irep = build_irep(pool: Array.new(layout.max_pool + 1) { [:int32, 1] })
-    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
+    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).fixed_image }
     assert_match(/定数プール/, err.message)
   end
 
@@ -121,7 +126,7 @@ end
 
   def test_validate_rejects_symbol_overflow
     irep = build_irep(symbols: Array.new(layout.max_symbols + 1) { |i| "$v#{i}" })
-    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
+    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).fixed_image }
   end
 
   def test_validate_accepts_limits
@@ -133,7 +138,7 @@ end
 
   def test_register_file_cleared_by_slot
     irep = build_irep(nregs: 3)
-    _em, image = load_image(irep)
+    image = mutable_image(irep)
 
     3.times do |i|
       slot = layout.reg_slot_addr(i)
@@ -144,10 +149,10 @@ end
     end
   end
 
-  # レジスタ領域がバイトコード領域を侵さないこと
-  def test_register_region_fits_before_bytecode
+  # レジスタ領域が呼び出しスタックを侵さないこと
+  def test_register_region_fits_before_the_call_stack
     last = layout.reg_slot_addr(layout.max_regs - 1) + SLOT_WORDS - 1
-    assert_operator last, :<, layout.bytecode_base
+    assert_operator last, :<, layout.frame_stack_base
   end
 
   # === シンボル解析 (アクセス幅サフィックス) ===
@@ -364,7 +369,7 @@ end
   # 汎用グローバルのスロットは 0 初期化される
   def test_general_global_slots_cleared
     irep = build_irep(symbols: ["$foo"])
-    _em, image = load_image(irep)
+    image = mutable_image(irep)
 
     slot = layout.general_global_slot_addr(0)
     SLOT_WORDS.times do |w|
@@ -389,9 +394,9 @@ end
     irep = build_irep(nregs: 2, pool: [[:int32, 99]])
     script = FaRuby::PlcCodegen.new(irep).generate
 
-    # プールの型タグと値がそれぞれのアドレスに出力される
-    assert_includes script, "EM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
-    assert_includes script, "EM#{layout.pool_addr(0)}.L = 99"
+    # プールは固定領域 (FM) に出力される
+    assert_includes script, "FM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
+    assert_includes script, "FM#{layout.pool_addr(0)}.L = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
     # 窓が呼び出しごとにずれるため、irep の nregs ではなく領域全体を回る
     assert_includes script,

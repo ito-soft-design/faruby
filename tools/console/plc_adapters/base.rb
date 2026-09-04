@@ -57,6 +57,17 @@ module FaRuby
           raise NotImplementedError
         end
 
+        # 任意デバイスの連続ワード読み書き
+        #
+        # 固定領域は ZF に置くため、既定デバイス (EM) 以外への一括転送が要ります。
+        def read_device_words(device_prefix, addr, count)
+          raise NotImplementedError
+        end
+
+        def write_device_words(device_prefix, addr, values)
+          raise NotImplementedError
+        end
+
         # ワードデバイスを32ビット符号付きで読む (連続2ワード、下位が先)
         def read_device_long(device_prefix, addr)
           raise NotImplementedError

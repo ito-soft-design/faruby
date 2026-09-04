@@ -336,7 +336,7 @@ end
 
       assert_equal FaRuby::VmConstants::ACCESS_F, codegen.device_mappings[0][:access_type]
       # 実数リテラルは IEEE754 単精度でプールに載る
-      image = codegen.memory_image
+      image = codegen.fixed_image
       layout = codegen.layout
       bits = image[layout.pool_addr(0)] | (image[layout.pool_addr(0) + 1] << 16)
       assert_equal FaRuby::VmConstants::TT_FLOAT, image[layout.pool_type_addr(0)]

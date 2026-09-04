@@ -44,8 +44,11 @@ module FaRuby
 
     attr_reader :layout
 
-    def initialize(em, devices, layout: MemoryLayout.default)
+    # fixed は固定領域 (実機では FM = バンク 3 の ZF) のメモリ。
+    # 省略すると em と同じものを使う (領域を分ける前の書き方との互換)。
+    def initialize(em, devices, layout: MemoryLayout.default, fixed: nil)
       @em = em
+      @fixed = fixed || em
       @devices = devices
       @layout = layout
       @operands = {}
@@ -63,7 +66,7 @@ module FaRuby
 
     def reg(name)      = read_reg(operand(name))
     def reg_next(name) = read_reg(operand(name) + 1)
-    def pool(name)     = @em.read_s32(pool_value_addr(operand(name)))
+    def pool(name)     = @fixed.read_s32(pool_value_addr(operand(name)))
 
     def reg_tag(name)      = read_reg_tag(operand(name))
     def reg_next_tag(name) = read_reg_tag(operand(name) + 1)
@@ -123,8 +126,8 @@ module FaRuby
     def load_pool(dest_name, pool_name)
       index = operand(pool_name)
       write_slot(operand(dest_name),
-                 @em.read_u16(pool_type_addr(index)),
-                 @em.read_s32(pool_value_addr(index)))
+                 @fixed.read_u16(pool_type_addr(index)),
+                 @fixed.read_s32(pool_value_addr(index)))
     end
 
     def set_reg_bool(name, op, lhs, rhs)
@@ -408,15 +411,20 @@ module FaRuby
     # irep が複数になり、呼び出しごとにレジスタ窓もずれるため、これらの位置は
     # 固定ではありません。生成コードと同じく VM 状態から引きます。値は
     # ブロック先頭からのオフセットなので、絶対アドレスにするため origin を足します。
+    # レジスタ窓 (可変領域) はブロック先頭からのオフセット。バイトコード・
+    # 定数プール・シンボル表は固定領域 (FM) にあり、絶対アドレスがそのまま入る
     def reg_base      = layout.origin + @em.read_u16(layout.reg_base_addr)
-    def bytecode_base = layout.origin + @em.read_u16(layout.cur_bytecode_addr)
-    def pool_base     = layout.origin + @em.read_u16(layout.cur_pool_addr)
-    def symbol_base   = layout.origin + @em.read_u16(layout.cur_symbols_addr)
+    def bytecode_base = @em.read_u16(layout.cur_bytecode_addr)
+    def pool_base     = @em.read_u16(layout.cur_pool_addr)
+    def symbol_base   = @em.read_u16(layout.cur_symbols_addr)
+
+    # 固定領域のメモリ。実機では FM (バンク 3 の ZF)
+    def fixed = @fixed
 
     def cur_irep = @em.read_u16(layout.cur_irep_addr)
     def frame_sp = @em.read_u16(layout.frame_sp_addr)
 
-    def irep_word(index, field) = @em.read_u16(layout.irep_table_addr(index) + field)
+    def irep_word(index, field) = @fixed.read_u16(layout.irep_table_addr(index) + field)
 
     # 戻り先 (PC・irep・レジスタ窓) を積む
     def push_frame
@@ -553,7 +561,7 @@ module FaRuby
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte
       current = pc
-      value = @em.read_u16(bytecode_base + current)
+      value = @fixed.read_u16(bytecode_base + current)
       @em.write_u16(layout.pc_addr, current + 1)
       value & 0xFF
     end
@@ -575,8 +583,9 @@ module FaRuby
 
     def device_entry(idx)
       table_addr = symbol_base + idx * DEVICE_TABLE_STRIDE
-      [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2),
-       @em.read_u16(table_addr + DEVICE_TABLE_KIND_OFFSET)]
+      [@fixed.read_u16(table_addr), @fixed.read_u16(table_addr + 1),
+       @fixed.read_u16(table_addr + 2),
+       @fixed.read_u16(table_addr + DEVICE_TABLE_KIND_OFFSET)]
     end
 
     # --- デバイス参照 (TT_DEVICE) ---

@@ -98,7 +98,7 @@ class TestDeviceIndex < Minitest::Test
   end
 
   def test_family_flag_reaches_the_memory_image
-    image = Codegen.new(irep_with(["$DM"])).memory_image
+    image = Codegen.new(irep_with(["$DM"])).fixed_image
     flag_addr = layout.device_table_base + DEVICE_TABLE_KIND_OFFSET
 
     assert_equal 1, image[flag_addr]

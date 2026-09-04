@@ -260,8 +260,10 @@ class TestKvsGenerator < Minitest::Test
   def test_bb_format_fetches_two_bytes
     body = opcode_body(0x01)
     assert_equal 2, count_pc_increments(body)
-    assert_includes body, "#{operand(:a)} = #{indexed_base}:Z1"
-    assert_includes body, "#{operand(:b)} = #{indexed_base}:Z1"
+    # バイトコードは固定領域 (FM) から読む
+    fixed = emitter.fixed_indexed_base
+    assert_includes body, "#{operand(:a)} = #{fixed}:Z1"
+    assert_includes body, "#{operand(:b)} = #{fixed}:Z1"
   end
 
   # OP_LOADI32 (BSS) は 1 バイト + 16ビット × 2 を読む

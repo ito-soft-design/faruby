@@ -21,6 +21,8 @@ end
   class MockAdapter < FaRuby::Console::PlcAdapters::Base
     attr_reader :memory, :write_log
 
+    def fixed = (@fixed ||= Hash.new(0))
+
     def initialize
       @memory = Hash.new(0)
       @write_log = []  # [addr, values] の履歴
@@ -39,14 +41,27 @@ end
     end
 
     def read_words(addr, count)
-      count.times.map { |i| @memory[addr + i] }
+      read_device_words(device_name, addr, count)
     end
 
     def write_words(addr, values)
-      @write_log << [addr, values.dup]
-      values.each_with_index do |v, i|
-        @memory[addr + i] = v
-      end
+      write_device_words(device_name, addr, values)
+    end
+
+    # 固定領域は ZF に置くため、デバイスごとにメモリを分ける
+    def read_device_words(device_prefix, addr, count)
+      mem = memory_for(device_prefix)
+      count.times.map { |i| mem[addr + i] }
+    end
+
+    def write_device_words(device_prefix, addr, values)
+      @write_log << [addr, values.dup] if device_prefix == device_name
+      mem = memory_for(device_prefix)
+      values.each_with_index { |v, i| mem[addr + i] = v }
+    end
+
+    def memory_for(device_prefix)
+      device_prefix == device_name ? @memory : (@fixed ||= Hash.new(0))
     end
 
     def device_name
@@ -65,7 +80,7 @@ end
   # アドレスは配置から導く (base が 0 とは限らないため)
   def test_write_image_groups_consecutive_addresses
     pc = layout.pc_addr           # VM 状態の先頭。次が STATUS
-    far = layout.bytecode_base    # 離れた位置
+    far = layout.general_global_base   # 離れた位置 (同じ可変領域の中)
 
     image = {
       pc => 10, pc + 1 => 20, pc + 2 => 30,   # 連続

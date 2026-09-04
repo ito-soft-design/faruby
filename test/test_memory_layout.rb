@@ -29,12 +29,14 @@ class TestMemoryLayout < Minitest::Test
     assert_equal 0, l.vm_state_base
     assert_equal Layout::VM_STATE_WORDS, l.reg_file_base
     assert_equal l.reg_file_base + 10 * SLOT_WORDS, l.frame_stack_base
-    assert_equal l.frame_stack_base + l.max_frames * Layout::FRAME_WORDS, l.irep_table_base
+    assert_equal l.frame_stack_base + l.max_frames * Layout::FRAME_WORDS, l.method_table_base
+    assert_equal l.method_table_base + l.max_methods, l.general_global_base
+
+    # 固定領域 (FM) は別のブロック
+    assert_equal l.fixed_origin, l.irep_table_base
     assert_equal l.irep_table_base + l.max_ireps * Layout::IREP_TABLE_STRIDE, l.bytecode_base
     assert_equal l.bytecode_base + 100, l.pool_base
     assert_equal l.pool_base + 5 * SLOT_WORDS, l.device_table_base
-    assert_equal l.device_table_base + 4 * DEVICE_TABLE_STRIDE, l.method_table_base
-    assert_equal l.method_table_base + l.max_methods, l.general_global_base
   end
 
   # 領域が重ならず、隙間なく並ぶ
@@ -64,13 +66,15 @@ class TestMemoryLayout < Minitest::Test
   def test_aligned_layout_has_round_boundaries
     l = build(base: 15_000, align: 1000)
     assert_equal 15_000, l.base
-    assert_equal 19_999, l.last_addr
+    assert_equal 15_000 + l.instance_size - 1, l.last_addr
   end
 
   # 複数インスタンスでも各ブロックが丸い境界に載る
   def test_aligned_instances_start_on_round_boundaries
     l = build(base: 15_000, align: 1000, instances: 3)
-    assert_equal [15_000, 20_000, 25_000], (0..2).map { |i| l.for_instance(i).origin }
+    expected = (0..2).map { |i| 15_000 + i * l.instance_size }
+    assert_equal expected, (0..2).map { |i| l.for_instance(i).origin }
+    assert(expected.all? { |a| (a % 1000).zero? }, "丸い境界に載っていない")
   end
 
   # align: 1 なら切り上げない
@@ -101,9 +105,10 @@ class TestMemoryLayout < Minitest::Test
 
     assert_equal a.pc_addr + 10_000,          b.pc_addr
     assert_equal a.reg_file_base + 10_000,    b.reg_file_base
-    assert_equal a.bytecode_base + 10_000,    b.bytecode_base
-    assert_equal a.pool_base + 10_000,        b.pool_base
-    assert_equal a.device_table_base + 10_000, b.device_table_base
+    # 固定領域 (FM) は base の影響を受けない。別のデバイスに置くため
+    assert_equal a.bytecode_base,             b.bytecode_base
+    assert_equal a.pool_base,                 b.pool_base
+    assert_equal a.device_table_base,         b.device_table_base
     assert_equal a.reg_addr(5) + 10_000,      b.reg_addr(5)
     assert_equal a.instance_size,             b.instance_size
   end
@@ -250,7 +255,8 @@ class TestMemoryLayout < Minitest::Test
       em.write_u16(layout.status_addr, VM_RUNNING)
       em.write_u16(layout.bytecode_len_addr, bytecode.size)
       em.write_u16(layout.nregs_addr, 4)
-      bytecode.each_with_index { |b, i| em.write_u16(layout.bytecode_addr(i), b) }
+      # バイトコードは固定領域 (FM) にある
+      bytecode.each_with_index { |b, i| sim.fixed.write_u16(layout.bytecode_addr(i), b) }
       4.times { |i| em.write_s32(layout.reg_addr(i), 0) }
       sim.run
       [sim.status, sim.reg(1)]

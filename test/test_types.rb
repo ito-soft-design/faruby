@@ -27,7 +27,8 @@ class TestTypes < Minitest::Test
     em.write_u16(layout.status_addr, VM_RUNNING)
     em.write_u16(layout.bytecode_len_addr, bytes.size)
     em.write_u16(layout.nregs_addr, nregs)
-    bytes.each_with_index { |b, i| em.write_u16(layout.bytecode_addr(i), b) }
+    # バイトコードは固定領域 (FM) にある
+    bytes.each_with_index { |b, i| @sim.fixed.write_u16(layout.bytecode_addr(i), b) }
     @sim.run
   end
 
@@ -178,8 +179,9 @@ class TestTypes < Minitest::Test
 
   # プールに実数を置いて OP_LOADL で読む
   def load_float(index, value, reg: 1)
-    @sim.em.write_u16(layout.pool_type_addr(index), TT_FLOAT)
-    @sim.em.write_u32(layout.pool_addr(index), [value].pack("e").unpack1("V"))
+    # 定数プールは固定領域 (FM) にある
+    @sim.fixed.write_u16(layout.pool_type_addr(index), TT_FLOAT)
+    @sim.fixed.write_u32(layout.pool_addr(index), [value].pack("e").unpack1("V"))
     [0x02, reg, index] # OP_LOADL R[reg], Pool[index]
   end
 

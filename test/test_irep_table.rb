@@ -71,15 +71,15 @@ class TestIrepTable < Minitest::Test
   def test_the_table_records_where_each_irep_lives
     child = irep(bytes: [7, 7], nregs: 6)
     root = irep(bytes: [1, 2, 3], nregs: 4, children: [child])
-    image = codegen(root).memory_image
+    image = codegen(root).fixed_image
 
-    assert_equal layout.offset_of(layout.bytecode_base),
+    assert_equal layout.bytecode_base,
                  entry_word(image, 0, Layout::IREP_BYTECODE)
     assert_equal 3, entry_word(image, 0, Layout::IREP_BYTECODE_LEN)
     assert_equal 4, entry_word(image, 0, Layout::IREP_NREGS)
     assert_equal 1, entry_word(image, 0, Layout::IREP_FIRST_CHILD)
 
-    assert_equal layout.offset_of(layout.bytecode_base + 3),
+    assert_equal layout.bytecode_base + 3,
                  entry_word(image, 1, Layout::IREP_BYTECODE)
     assert_equal 2, entry_word(image, 1, Layout::IREP_BYTECODE_LEN)
     assert_equal 6, entry_word(image, 1, Layout::IREP_NREGS)
@@ -88,7 +88,7 @@ class TestIrepTable < Minitest::Test
   # 子 irep のバイトコードも転送される (以前はトップレベルだけだった)
   def test_child_bytecode_reaches_the_image
     root = irep(bytes: [1, 2, 3], children: [irep(bytes: [7, 8])])
-    image = codegen(root).memory_image
+    image = codegen(root).fixed_image
 
     assert_equal [1, 2, 3], (0..2).map { |i| image[layout.bytecode_base + i] }
     assert_equal [7, 8], (3..4).map { |i| image[layout.bytecode_base + i] }
@@ -98,9 +98,12 @@ class TestIrepTable < Minitest::Test
   def test_the_vm_starts_on_the_top_level_irep
     root = irep(bytes: [1, 2, 3], nregs: 4, children: [irep(bytes: [7, 8], nregs: 9)])
     image = codegen(root).memory_image
+    fixed = codegen(root).fixed_image
 
     assert_equal 0, image[layout.cur_irep_addr]
-    assert_equal layout.offset_of(layout.bytecode_base), image[layout.cur_bytecode_addr]
+    assert_equal layout.bytecode_base, image[layout.cur_bytecode_addr]
+    assert_equal layout.irep_table_base, image[layout.irep_table_addr_addr]
+    refute_empty fixed, "固定領域のイメージが空"
     assert_equal 3, image[layout.bytecode_len_addr]
     assert_equal 4, image[layout.nregs_addr]
     assert_equal layout.offset_of(layout.reg_file_base), image[layout.reg_base_addr]
