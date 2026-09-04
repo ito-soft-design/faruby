@@ -23,14 +23,29 @@ module FaRuby
       @layout = layout
     end
 
+    # irep を並べ、それぞれの領域内の位置を決めたもの
+    #
+    # メソッドを定義すると本体が子 irep になります。バイトコード・定数プール・
+    # シンボル表は全 irep で 1 つの領域を分け合い、各 irep の位置を IREP
+    # テーブルに入れて実行時に引きます。
+    #
+    # 並びは **幅優先**です。こうすると同じ親の子が連続するため、親の
+    # 「最初の子の番号」に `OP_METHOD` のオペランド (親から見た子の番号) を
+    # 足すだけで通し番号になります。深さ優先では子が離れて足し算できません。
+    def irep_entries
+      @irep_entries ||= build_irep_entries
+    end
+
     # 各領域が上限を超えていないか検証する
-    # 超えたまま生成すると隣接領域 (定数プール → デバイステーブル等) を
+    # 超えたまま生成すると隣接領域 (定数プール → シンボル表等) を
     # 破壊するため、生成前に必ず呼ぶ。
     def validate!
-      check_limit("レジスタ数", @irep.nregs, layout.max_regs)
-      check_limit("バイトコード長", @irep.ilen, layout.max_bytecode)
-      check_limit("定数プールのエントリ数", @irep.pool.size, layout.max_pool)
-      check_limit("シンボル数", @irep.symbols.size, layout.max_symbols)
+      list = irep_entries.map { |e| e[:irep] }
+      check_limit("irep の数", list.size, layout.max_ireps)
+      check_limit("レジスタ数", list.map(&:nregs).max, layout.max_regs)
+      check_limit("バイトコード長", list.sum(&:ilen), layout.max_bytecode)
+      check_limit("定数プールのエントリ数", list.sum { |i| i.pool.size }, layout.max_pool)
+      check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
       self
     end
 
@@ -46,6 +61,8 @@ module FaRuby
 
       lines.concat(generate_vm_state)
       lines << ""
+      lines.concat(generate_irep_table)
+      lines << ""
       lines.concat(generate_bytecode)
       lines << ""
       lines.concat(generate_pool)
@@ -60,6 +77,7 @@ module FaRuby
     def memory_image
       validate!
       image = {}
+      top = irep_entries.first
 
       # VM 状態
       image[layout.pc_addr] = 0
@@ -68,35 +86,42 @@ module FaRuby
       image[layout.step_count_addr] = 0
       image[layout.step_count_addr + 1] = 0
       image[layout.steps_per_cycle_addr] = @steps_per_cycle
-      image[layout.bytecode_len_addr] = @irep.ilen
-      image[layout.nregs_addr] = @irep.nregs
       image[layout.nlocals_addr] = @irep.nlocals
+      image[layout.num_ireps_addr] = irep_entries.size
+      image[layout.frame_sp_addr] = 0
+      image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
+      # 実行はトップレベルの irep から始まる
+      current_irep_state(top).each { |addr, value| image[addr] = value }
 
-      # バイトコード
-      @irep.instructions.each_byte.each_with_index do |b, i|
-        image[layout.bytecode_base + i] = b
+      irep_entries.each do |entry|
+        irep_table_words(entry).each { |addr, value| image[addr] = value }
+
+        entry[:irep].instructions.each_byte.each_with_index do |b, i|
+          image[entry[:bytecode_base] + i] = b
+        end
+
+        # 定数プール (値スロット: 型タグ + 32ビット値)
+        #
+        # 未対応の型はスロットを 0 (TT_EMPTY) で埋める。OP_LOADL はタグごと
+        # 複製するため、書かずに残すと不定のタグを拾ってしまう。
+        entry[:irep].pool.each_with_index do |pool_entry, i|
+          value = pool_slot_value(pool_entry)
+          addr = entry[:pool_base] + i * SLOT_WORDS + SLOT_VALUE_OFFSET
+          image[entry[:pool_base] + i * SLOT_WORDS + SLOT_TYPE_OFFSET] =
+            value ? pool_type_tag(pool_entry) : TT_EMPTY
+          image[addr]     = value ? value & 0xFFFF : 0
+          image[addr + 1] = value ? (value >> 16) & 0xFFFF : 0
+        end
       end
 
-      # 定数プール (値スロット: 型タグ + 32ビット値)
-      #
-      # 未対応の型はスロットを 0 (TT_EMPTY) で埋める。OP_LOADL はタグごと
-      # 複製するため、書かずに残すと不定のタグを拾ってしまう。
-      @irep.pool.each_with_index do |entry, i|
-        value = pool_slot_value(entry)
-        addr = layout.pool_addr(i)
-        image[layout.pool_type_addr(i)] = value ? pool_type_tag(entry) : TT_EMPTY
-        image[addr]     = value ? value & 0xFFFF : 0
-        image[addr + 1] = value ? (value >> 16) & 0xFFFF : 0
-      end
-
-      # レジスタファイル初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
-      @irep.nregs.times do |i|
+      # レジスタスタック初期化 (スロット全体を 0 = TT_EMPTY + 値 0)
+      layout.max_regs.times do |i|
         slot = layout.reg_slot_addr(i)
         SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
-      # デバイスマッピングテーブル
-      image[layout.num_symbols_addr] = @irep.symbols.size
+      # シンボル表
+      image[layout.num_symbols_addr] = irep_entries.sum { |e| e[:irep].symbols.size }
       device_mappings.each do |m|
         image[m[:table_addr] + DEVICE_TABLE_KIND_OFFSET] = m[:kind]
         if m[:kind] == SYMBOL_KIND_METHOD
@@ -119,40 +144,81 @@ module FaRuby
       image
     end
 
+    # IREP テーブル 1 エントリ分の { アドレス => 値 }
+    #
+    # 位置はブロック先頭からのオフセットで入れる。生成コードは Z9 を足して指す。
+    def irep_table_words(entry)
+      addr = layout.irep_table_addr(entry[:index])
+      {
+        addr + MemoryLayout::IREP_BYTECODE     => layout.offset_of(entry[:bytecode_base]),
+        addr + MemoryLayout::IREP_BYTECODE_LEN => entry[:irep].ilen,
+        addr + MemoryLayout::IREP_POOL         => layout.offset_of(entry[:pool_base]),
+        addr + MemoryLayout::IREP_SYMBOLS      => layout.offset_of(entry[:symbol_base]),
+        addr + MemoryLayout::IREP_NREGS        => entry[:irep].nregs,
+        addr + MemoryLayout::IREP_FIRST_CHILD  => entry[:first_child],
+      }
+    end
+
+    # 実行中の irep を表す VM 状態の { アドレス => 値 }
+    #
+    # 命令ごとに IREP テーブルを引くとスキャンタイムが延びるため、
+    # 切り替え時にここへ写して使う。
+    def current_irep_state(entry)
+      {
+        layout.cur_irep_addr     => entry[:index],
+        layout.cur_bytecode_addr => layout.offset_of(entry[:bytecode_base]),
+        layout.bytecode_len_addr => entry[:irep].ilen,
+        layout.cur_pool_addr     => layout.offset_of(entry[:pool_base]),
+        layout.cur_symbols_addr  => layout.offset_of(entry[:symbol_base]),
+        layout.nregs_addr        => entry[:irep].nregs,
+      }
+    end
+
     # シンボルごとの割り当てを解決する
+    #
+    # シンボル表は irep ごとに別で、番号も irep ごとに振り直されます。全 irep 分を
+    # 1 つの領域に詰め、各 irep の先頭を IREP テーブルに入れます。同じ名前が
+    # 複数の irep に現れると別のエントリになりますが、解決結果は同じです。
     #
     # シンボル表にはグローバル変数名とメソッド名が混在します。`$` で始まる
     # ものがグローバル変数で、デバイス名にマッチすれば該当デバイスへ、
     # しなければ ($foo 等) 汎用グローバル領域へ出現順に割り当てます。
+    # **同じ名前は irep をまたいでも同じスロットを指します** (Ruby の
+    # グローバル変数はどこから見ても同じ変数のため)。
     # それ以外はメソッド名として番号に解決します。
     #
-    # z_offset は「値ワード」のアドレス (デバイスマッピングテーブルに格納する値)。
+    # z_offset は「値ワード」のアドレス (シンボル表に格納する値)。
     def device_mappings
-      slot_index = 0
-      @irep.symbols.each_with_index.map do |sym, idx|
-        table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
-        parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
-        if parsed
-          { symbol: sym, index: idx, table_addr: table_addr, general: false,
-            kind: parsed[:family] ? SYMBOL_KIND_FAMILY : SYMBOL_KIND_VALUE,
-            device_type: parsed[:device_type], device_name: parsed[:device_name],
-            address: parsed[:address], z_offset: parsed[:z_offset],
-            access_type: parsed[:access_type], bit: parsed[:bit],
-            family: parsed[:family] || false }
-        elsif sym.start_with?("$")
-          # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
-          value_addr = layout.general_global_addr(slot_index)
-          slot_index += 1
-          { symbol: sym, index: idx, table_addr: table_addr, general: true,
-            kind: SYMBOL_KIND_VALUE,
-            device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
-            address: value_addr.to_s, z_offset: value_addr,
-            access_type: ACCESS_L, bit: false }
-        else
-          code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
-          { symbol: sym, index: idx, table_addr: table_addr, general: false,
-            kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc }
+      slots = {}
+      irep_entries.flat_map do |entry|
+        entry[:irep].symbols.each_with_index.map do |sym, idx|
+          symbol_mapping(sym, entry[:symbol_base] + idx * DEVICE_TABLE_STRIDE, idx, slots)
         end
+      end
+    end
+
+    # シンボル 1 つ分の割り当て。slots は汎用グローバルの名前 => アドレス
+    def symbol_mapping(sym, table_addr, idx, slots)
+      parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
+      if parsed
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: parsed[:family] ? SYMBOL_KIND_FAMILY : SYMBOL_KIND_VALUE,
+          device_type: parsed[:device_type], device_name: parsed[:device_name],
+          address: parsed[:address], z_offset: parsed[:z_offset],
+          access_type: parsed[:access_type], bit: parsed[:bit],
+          family: parsed[:family] || false }
+      elsif sym.start_with?("$")
+        # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
+        value_addr = (slots[sym] ||= layout.general_global_addr(slots.size))
+        { symbol: sym, index: idx, table_addr: table_addr, general: true,
+          kind: SYMBOL_KIND_VALUE,
+          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+          address: value_addr.to_s, z_offset: value_addr,
+          access_type: ACCESS_L, bit: false }
+      else
+        code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc }
       end
     end
 
@@ -162,6 +228,29 @@ module FaRuby
       return if actual <= limit
 
       raise CodegenError, "#{label}が上限を超えています (#{actual} > #{limit})"
+    end
+
+    # 幅優先に並べ、領域内の位置を先頭から詰めて決める
+    def build_irep_entries
+      entries = [{ irep: @irep }]
+      index = 0
+      while index < entries.size
+        entries[index][:first_child] = entries.size
+        entries.concat(entries[index][:irep].children.map { |child| { irep: child } })
+        index += 1
+      end
+
+      bytecode = pool = symbols = 0
+      entries.each_with_index do |entry, i|
+        entry[:index]         = i
+        entry[:bytecode_base] = layout.bytecode_base + bytecode
+        entry[:pool_base]     = layout.pool_base + pool * SLOT_WORDS
+        entry[:symbol_base]   = layout.device_table_base + symbols * DEVICE_TABLE_STRIDE
+        bytecode += entry[:irep].ilen
+        pool     += entry[:irep].pool.size
+        symbols  += entry[:irep].symbols.size
+      end
+      entries
     end
 
     # プールエントリの型タグを返す
@@ -189,6 +278,7 @@ module FaRuby
     def float_bits(value) = [value].pack("e").unpack1("V")
 
     def generate_vm_state
+      top = irep_entries.first
       lines = []
       lines << "' --- VM State ---"
       lines << "#{layout.device(layout.pc_addr)} = 0           ' PC = 0"
@@ -196,60 +286,87 @@ module FaRuby
       lines << "#{layout.device(layout.error_addr)} = 0           ' ERROR = none"
       lines << "#{layout.device_long(layout.step_count_addr)} = 0     ' STEP_COUNT = 0"
       lines << "#{layout.device(layout.steps_per_cycle_addr)} = #{@steps_per_cycle}          ' STEPS_PER_CYCLE"
-      lines << "#{layout.device(layout.bytecode_len_addr)} = #{@irep.ilen}         ' BYTECODE_LEN"
-      lines << "#{layout.device(layout.nregs_addr)} = #{@irep.nregs}          ' NREGS"
       lines << "#{layout.device(layout.nlocals_addr)} = #{@irep.nlocals}          ' NLOCALS"
       lines << "#{layout.device(layout.reset_req_addr)} = 0          ' RESET_REQ = off"
+      lines << "#{layout.device(layout.num_ireps_addr)} = #{irep_entries.size}          ' NUM_IREPS"
+      lines << "#{layout.device(layout.frame_sp_addr)} = 0          ' FRAME_SP = トップレベル"
+      lines << "#{layout.device(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
+               "          ' REG_BASE"
       lines << ""
-      lines << "' --- Clear Register File (#{SLOT_WORDS} words/slot) ---"
-      lines << "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_slot_addr(@irep.nregs) - 1}"
+      lines << "' --- Current IREP (実行はトップレベルの irep から始まる) ---"
+      lines.concat(current_irep_state(top).map { |addr, value| "#{layout.device(addr)} = #{value}" })
+      lines << ""
+      lines << "' --- Clear Register Stack (#{SLOT_WORDS} words/slot) ---"
+      lines << "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_slot_addr(layout.max_regs) - 1}"
       lines << "    #{layout.device_name}0:Z1 = 0"
       lines << "NEXT"
       lines
     end
 
+    # IREP テーブル。バイトコード・定数プール・シンボル表の位置を irep ごとに持つ
+    def generate_irep_table
+      lines = ["' --- IREP Table (#{irep_entries.size} ireps) ---"]
+      irep_entries.each do |entry|
+        lines << "' irep #{entry[:index]}: ilen=#{entry[:irep].ilen} " \
+                 "pool=#{entry[:irep].pool.size} syms=#{entry[:irep].symbols.size} " \
+                 "nregs=#{entry[:irep].nregs} children=#{entry[:irep].children.size}"
+        lines.concat(irep_table_words(entry).map { |addr, value| "#{layout.device(addr)} = #{value}" })
+      end
+      lines
+    end
+
     def generate_bytecode
       lines = []
-      lines << "' --- Bytecode (#{@irep.ilen} bytes) ---"
-
-      @irep.instructions.each_byte.each_with_index do |b, i|
-        lines << "#{layout.device(layout.bytecode_base + i)} = #{b}"
+      irep_entries.each do |entry|
+        lines << "' --- Bytecode: irep #{entry[:index]} (#{entry[:irep].ilen} bytes) ---"
+        entry[:irep].instructions.each_byte.each_with_index do |b, i|
+          lines << "#{layout.device(entry[:bytecode_base] + i)} = #{b}"
+        end
       end
-
       lines
     end
 
     def generate_pool
-      return [] if @irep.pool.empty?
-
       lines = []
-      lines << "' --- Constant Pool (#{@irep.pool.size} entries) ---"
+      irep_entries.each do |entry|
+        next if entry[:irep].pool.empty?
 
-      @irep.pool.each_with_index do |entry, i|
-        case entry.type
-        when :int32, :int64
-          lines << "#{layout.device(layout.pool_type_addr(i))} = #{TT_INTEGER}    ' Pool[#{i}] type=integer"
-          lines << "#{layout.device_long(layout.pool_addr(i))} = #{entry.value}    ' Pool[#{i}]"
-        when :float
-          lines << "#{layout.device(layout.pool_type_addr(i))} = #{TT_FLOAT}    ' Pool[#{i}] type=float"
-          lines << "#{layout.device(layout.pool_addr(i))} = #{float_bits(entry.value) & 0xFFFF}    " \
-                   "' Pool[#{i}] = #{entry.value} (IEEE754 下位)"
-          lines << "#{layout.device(layout.pool_addr(i) + 1)} = #{(float_bits(entry.value) >> 16) & 0xFFFF}    " \
-                   "' Pool[#{i}] = #{entry.value} (IEEE754 上位)"
-        else
-          lines << "' Pool[#{i}] = #{entry} (type #{entry.type} - not supported)"
+        lines << "' --- Constant Pool: irep #{entry[:index]} (#{entry[:irep].pool.size} entries) ---"
+        entry[:irep].pool.each_with_index do |pool_entry, i|
+          lines.concat(pool_entry_lines(entry, pool_entry, i))
         end
       end
-
       lines
     end
 
+    def pool_entry_lines(entry, pool_entry, index)
+      slot = entry[:pool_base] + index * SLOT_WORDS
+      type_addr  = layout.device(slot + SLOT_TYPE_OFFSET)
+      value_addr = slot + SLOT_VALUE_OFFSET
+      label = "Pool[#{index}]"
+
+      case pool_entry.type
+      when :int32, :int64
+        ["#{type_addr} = #{TT_INTEGER}    ' #{label} type=integer",
+         "#{layout.device_long(value_addr)} = #{pool_entry.value}    ' #{label}"]
+      when :float
+        bits = float_bits(pool_entry.value)
+        ["#{type_addr} = #{TT_FLOAT}    ' #{label} type=float",
+         "#{layout.device(value_addr)} = #{bits & 0xFFFF}    ' #{label} = #{pool_entry.value} (IEEE754 下位)",
+         "#{layout.device(value_addr + 1)} = #{(bits >> 16) & 0xFFFF}    " \
+         "' #{label} = #{pool_entry.value} (IEEE754 上位)"]
+      else
+        ["' #{label} = #{pool_entry} (type #{pool_entry.type} - not supported)"]
+      end
+    end
+
     def generate_device_table
-      return [] if @irep.symbols.empty?
+      symbol_count = irep_entries.sum { |e| e[:irep].symbols.size }
+      return [] if symbol_count.zero?
 
       lines = []
-      lines << "' --- Device Mapping Table (#{@irep.symbols.size} symbols) ---"
-      lines << "#{layout.device(layout.num_symbols_addr)} = #{@irep.symbols.size}    ' NUM_SYMBOLS"
+      lines << "' --- Symbol Table (#{symbol_count} symbols, #{irep_entries.size} ireps) ---"
+      lines << "#{layout.device(layout.num_symbols_addr)} = #{symbol_count}    ' NUM_SYMBOLS"
 
       mappings = device_mappings
       mappings.each do |m|
@@ -292,15 +409,16 @@ module FaRuby
     # 汎用グローバル変数のスロットを 0 初期化する
     # (memory_image と同じ初期化を KV スクリプト側でも行う)
     def generate_general_global_clear(mappings)
-      general = mappings.select { |m| m[:general] }
-      return [] if general.empty?
+      # 同じ名前が複数の irep に現れると同じスロットを指すため重複する
+      slots = mappings.select { |m| m[:general] }.map { |m| m[:z_offset] }.uniq
+      return [] if slots.empty?
 
       # 汎用グローバルは汎用グローバル領域の先頭から連続して割り当てられる
-      first = general.first[:z_offset] - SLOT_VALUE_OFFSET
-      last  = general.last[:z_offset] - SLOT_VALUE_OFFSET + SLOT_WORDS - 1
+      first = slots.min - SLOT_VALUE_OFFSET
+      last  = slots.max - SLOT_VALUE_OFFSET + SLOT_WORDS - 1
 
       ["",
-       "' --- Clear General Globals (#{general.size} slots × #{SLOT_WORDS} words) ---",
+       "' --- Clear General Globals (#{slots.size} slots × #{SLOT_WORDS} words) ---",
        "FOR Z1 = #{first} TO #{last}",
        "    EM0:Z1 = 0",
        "NEXT"]

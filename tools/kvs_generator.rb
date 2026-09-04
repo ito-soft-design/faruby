@@ -101,6 +101,18 @@ module FaRuby
     # Z に絶対アドレスを組み立てる式の末尾に足す項
     def block_offset(base) = "#{layout.offset_of(base)} + Z#{Z_INSTANCE}"
 
+    # 実行中の irep の領域を指す項
+    #
+    # irep が複数になったため、バイトコード・定数プール・シンボル表の位置は
+    # 定数ではありません。切り替え時に VM 状態へ写した値を足します。
+    # レジスタも呼び出しごとに窓がずれるため同じ形にします。
+    def current_offset(addr) = "#{state(addr)} + Z#{Z_INSTANCE}"
+
+    def bytecode_offset = current_offset(layout.cur_bytecode_addr)
+    def pool_offset     = current_offset(layout.cur_pool_addr)
+    def symbols_offset  = current_offset(layout.cur_symbols_addr)
+    def reg_offset      = current_offset(layout.reg_base_addr)
+
     # --- インスタンスループ ---
 
     # 実行するインスタンスを順に巡る
@@ -210,9 +222,9 @@ module FaRuby
       def word(offset) = "#{device_name}#{SLOT_VALUE_OFFSET + offset}:Z#{z}"
     end
 
-    def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", layout.reg_file_base)
-    def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", layout.reg_file_base)
-    def pool_slot(name)     = slot_ref([:pool, name], "#{operand(name)} * #{SLOT_WORDS}", layout.pool_base)
+    def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset)
+    def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", reg_offset)
+    def pool_slot(name)     = slot_ref([:pool, name], "#{operand(name)} * #{SLOT_WORDS}", pool_offset)
 
     def reg(name)      = reg_slot(name).value
     def reg_next(name) = reg_next_slot(name).value
@@ -279,7 +291,7 @@ module FaRuby
     def move_reg(dest_name, src_name)
       dest = reg_slot(dest_name)
       src = slot_ref([:reg_src, src_name], "#{operand(src_name)} * #{SLOT_WORDS}",
-                     layout.reg_file_base, z: Z_SECONDARY)
+                     reg_offset, z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
     end
@@ -457,7 +469,7 @@ module FaRuby
       ref = reg_slot(name)
       index = reg_next_slot(name)
       value = slot_ref([:reg_value, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}",
-                       layout.reg_file_base, z: Z_VALUE)
+                       reg_offset, z: Z_VALUE)
 
       if_else_block("#{ref.tag} = #{TT_DEVICE}") do
         device_ref_lookup(ref, index.value, error_code)
@@ -467,6 +479,37 @@ module FaRuby
       note "デバイス参照以外への添字代入は未対応"
       vm_error(error_code)
       end_block
+    end
+
+    # --- 実行中の irep ---
+
+    # 実行をトップレベルの irep に戻す (リセット時)
+    #
+    # IREP テーブルの 0 番から VM 状態へ写します。テーブルの内容はプログラムを
+    # 転送するたびに変わるため、生成コードに焼き込むことはできません。
+    def reset_to_top_irep
+      note "実行中の irep をトップレベル (0番) に戻す"
+      line "#{state(layout.frame_sp_addr)} = 0      ' 呼び出しの深さ"
+      line "#{state(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
+           "      ' レジスタ窓の先頭"
+      line "#{state(layout.cur_irep_addr)} = 0"
+      load_irep_state("#{layout.offset_of(layout.irep_table_base)} + Z#{Z_INSTANCE}")
+    end
+
+    # IREP テーブルの 1 エントリを VM 状態へ写す
+    #
+    # 命令ごとにテーブルを引くとスキャンタイムが延びるため、切り替え時に
+    # 写して使います。table_expr はエントリ先頭を指す Z の設定式。
+    def load_irep_state(table_expr)
+      note "IREP テーブルから実行中の irep の情報を写す"
+      line "Z#{Z_PRIMARY} = #{table_expr}"
+      { MemoryLayout::IREP_BYTECODE     => layout.cur_bytecode_addr,
+        MemoryLayout::IREP_BYTECODE_LEN => layout.bytecode_len_addr,
+        MemoryLayout::IREP_POOL         => layout.cur_pool_addr,
+        MemoryLayout::IREP_SYMBOLS      => layout.cur_symbols_addr,
+        MemoryLayout::IREP_NREGS        => layout.nregs_addr }.each do |field, addr|
+        line "#{state(addr)} = #{layout.device_name}#{field}:Z#{Z_PRIMARY}"
+      end
     end
 
     # --- 組み込みメソッド ---
@@ -578,8 +621,8 @@ module FaRuby
     #
     # Z5 = 種別, Z6 = アドレス, Z8 = アクセス幅, Z1 = デバイス族フラグ
     def device_table_lookup(name)
-      note "デバイスマッピングテーブル参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
-      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{block_offset(layout.device_table_base)}"
+      note "シンボル表参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
       line "Z4 = Z3 + 1"
       line "Z5 = #{indexed_base}:Z3"
       line "Z6 = #{indexed_base}:Z4"
@@ -723,7 +766,7 @@ module FaRuby
     # Z1 / Z2 は使わない。この後レジスタスロットの参照に使うため。
     def method_table_lookup(name)
       note "シンボル表参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
-      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{block_offset(layout.device_table_base)}"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
       line "Z5 = #{indexed_base}:Z3   ' メソッド番号"
       line "Z7 = Z3 + 2"
       line "Z8 = #{indexed_base}:Z7   ' 引数の数"
@@ -856,7 +899,7 @@ module FaRuby
     # GETGV/SETGV はデバイステーブルが Z3-Z8 を占有するため、
     # レジスタアドレスには副オペランド用の Z を使う
     def global_reg_slot(name)
-      slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", layout.reg_file_base, z: Z_SECONDARY)
+      slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset, z: Z_SECONDARY)
     end
 
     # 値スロットの先頭アドレスを Z に設定し、タグと値の参照を返す
@@ -865,18 +908,18 @@ module FaRuby
     # 型サフィックスはデバイス側に付ける (EM1.L:Z1)。
     # EM1:Z1.L と書くと .L がインデックスレジスタに結合し、
     # エラーにならないまま16ビットアクセスに退化する。
-    def slot_ref(key, index_expr, base, z: nil)
+    def slot_ref(key, index_expr, base_expr, z: nil)
       return @slot_cache[key] if @slot_cache.key?(key)
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
-      line "Z#{z} = #{index_expr} + #{block_offset(base)}"
+      line "Z#{z} = #{index_expr} + #{base_expr}"
       @slot_cache[key] = Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}",
                                   z, layout.device_name)
     end
 
     # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
     def read_bytecode_into(dest)
-      line "Z1 = #{pc} + #{block_offset(layout.bytecode_base)}"
+      line "Z1 = #{pc} + #{bytecode_offset}"
       line "#{dest} = #{indexed_base}:Z1"
       line "#{pc} = #{pc} + 1"
     end
@@ -1052,6 +1095,8 @@ module FaRuby
         e.line "#{e.error} = 0      ' ERROR = none"
         e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
         e.blank
+        e.reset_to_top_irep
+        e.blank
         e.note "レジスタファイルクリア " \
                "(ブロック先頭 +#{layout.offset_of(layout.reg_file_base)} から " \
                "#{layout.max_regs}スロット × #{SLOT_WORDS}ワード)"
@@ -1141,11 +1186,23 @@ module FaRuby
       e.note "  #{e.scratch_hi} = 32ビット合成スクラッチ 上位ワード"
       e.note "         #{layout.device_name} は無サフィックスだと16ビット符号なしのため、負値や"
       e.note "         65535 超の即値は一旦この2ワードに置いてから .L で読む"
-      e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタファイル (値スロット #{SLOT_WORDS}ワード/レジスタ)"
+      e.note "  #{e.state(layout.reg_base_addr)} = REG_BASE (レジスタ窓の先頭。呼び出しでずれる)"
+      e.note "  #{e.state(layout.cur_bytecode_addr)} = 実行中の irep のバイトコード先頭"
+      e.note "  #{e.state(layout.cur_pool_addr)} = 実行中の irep の定数プール先頭"
+      e.note "  #{e.state(layout.cur_symbols_addr)} = 実行中の irep のシンボル表先頭"
+      e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタスタック (値スロット #{SLOT_WORDS}ワード/レジスタ)"
+      e.note "  +#{layout.offset_of(layout.frame_stack_base)}~ = 呼び出しスタック " \
+             "(#{MemoryLayout::FRAME_WORDS}ワード/段)"
+      e.note "  +#{layout.offset_of(layout.irep_table_base)}~ = IREPテーブル " \
+             "(#{MemoryLayout::IREP_TABLE_STRIDE}ワード/irep)"
       e.note "  +#{layout.offset_of(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
       e.note "  +#{layout.offset_of(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
-      e.note "  +#{layout.offset_of(layout.device_table_base)}~ = デバイスマッピングテーブル " \
+      e.note "  +#{layout.offset_of(layout.device_table_base)}~ = シンボル表 " \
              "(#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      e.note ""
+      e.note "バイトコード・定数プール・シンボル表は全 irep で 1 つの領域を分け合う。"
+      e.note "irep ごとの位置は IREP テーブルにあり、切り替え時に VM 状態へ写す。"
+      e.note "そのため上の +オフセットは領域の先頭であって、実行中の位置ではない。"
       e.note ""
       e.note "Z#{KvsEmitter::USED_Z.first}-Z#{KvsEmitter::USED_Z.last} を使用 " \
              "(Z11/Z12 は特別な用途があり使用不可、Z10 はラダー用に残す)"
@@ -1164,7 +1221,7 @@ module FaRuby
 
     def emit_fetch(e)
       e.note "=== FETCH OPCODE ==="
-      e.line "Z1 = #{e.pc} + #{e.block_offset(layout.bytecode_base)}"
+      e.line "Z1 = #{e.pc} + #{e.bytecode_offset}"
       e.line "#{e.opcode} = #{e.indexed_base}:Z1"
       e.line "#{e.pc} = #{e.pc} + 1"
       e.blank

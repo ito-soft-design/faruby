@@ -393,6 +393,8 @@ end
     assert_includes script, "EM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
     assert_includes script, "EM#{layout.pool_addr(0)}.L = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
-    assert_includes script, "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_file_base + 2 * SLOT_WORDS - 1}"
+    # 窓が呼び出しごとにずれるため、irep の nregs ではなく領域全体を回る
+    assert_includes script,
+                    "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_slot_addr(layout.max_regs) - 1}"
   end
 end

@@ -33,6 +33,23 @@ module FaRuby
       @devices[0] = @em  # EM はメインメモリを共用
       @vm = SimVm.new(@em, @devices, layout: layout)
       @irep = nil
+      point_at_top_irep
+    end
+
+    # 実行中の irep とレジスタ窓を既定の位置に向ける
+    #
+    # irep が複数になってから、バイトコード・定数プール・シンボル表・レジスタの
+    # 位置は VM 状態から引くようになりました。メモリイメージを読まずにバイト
+    # コードを直接置いて動かす場合 (テスト) もここで既定値が入ります。
+    def point_at_top_irep
+      { layout.reg_base_addr     => layout.reg_file_base,
+        layout.cur_bytecode_addr => layout.bytecode_base,
+        layout.cur_pool_addr     => layout.pool_base,
+        layout.cur_symbols_addr  => layout.device_table_base }.each do |addr, target|
+        @em.write_u16(addr, layout.offset_of(target))
+      end
+      @em.write_u16(layout.cur_irep_addr, 0)
+      @em.write_u16(layout.frame_sp_addr, 0)
     end
 
     # メモリイメージをロードして実行

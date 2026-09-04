@@ -191,14 +191,15 @@ class TestKvsGenerator < Minitest::Test
   # === 値スロットのアドレス計算 ===
 
   # Z はスロット先頭を指し、タグと値の両方を1本で扱う
+  #
+  # 先頭は定数ではなく VM 状態から引く。irep が複数になり、呼び出しごとに
+  # レジスタ窓もずれるため、アドレスを焼き込めなくなった。
   def test_register_address_points_at_the_slot_head
-    base = emitter.block_offset(layout.reg_file_base)
-    assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{base}"
+    assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{emitter.reg_offset}"
   end
 
   def test_pool_address_points_at_the_slot_head
-    base = emitter.block_offset(layout.pool_base)
-    assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{base}"
+    assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{emitter.pool_offset}"
   end
 
   # 1本の Z でタグ (先頭) と値 (先頭+1) を指す
@@ -209,8 +210,7 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_device_table_stride
-    base = emitter.block_offset(layout.device_table_base)
-    assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{base}"
+    assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{emitter.symbols_offset}"
   end
 
   # 実数の 0 除算では、代入先を書き換える前に符号を確定させる。

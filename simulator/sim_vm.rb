@@ -63,7 +63,7 @@ module FaRuby
 
     def reg(name)      = read_reg(operand(name))
     def reg_next(name) = read_reg(operand(name) + 1)
-    def pool(name)     = @em.read_s32(layout.pool_addr(operand(name)))
+    def pool(name)     = @em.read_s32(pool_value_addr(operand(name)))
 
     def reg_tag(name)      = read_reg_tag(operand(name))
     def reg_next_tag(name) = read_reg_tag(operand(name) + 1)
@@ -123,8 +123,8 @@ module FaRuby
     def load_pool(dest_name, pool_name)
       index = operand(pool_name)
       write_slot(operand(dest_name),
-                 @em.read_u16(layout.pool_type_addr(index)),
-                 @em.read_s32(layout.pool_addr(index)))
+                 @em.read_u16(pool_type_addr(index)),
+                 @em.read_s32(pool_value_addr(index)))
     end
 
     def set_reg_bool(name, op, lhs, rhs)
@@ -309,15 +309,30 @@ module FaRuby
 
     def pc = @em.read_u16(layout.pc_addr)
 
-    def read_reg(index)     = @em.read_s32(layout.reg_addr(index))
-    def read_reg_tag(index) = @em.read_u16(layout.reg_type_addr(index))
+    # 実行中の irep とレジスタ窓の位置
+    #
+    # irep が複数になり、呼び出しごとにレジスタ窓もずれるため、これらの位置は
+    # 固定ではありません。生成コードと同じく VM 状態から引きます。値は
+    # ブロック先頭からのオフセットなので、絶対アドレスにするため origin を足します。
+    def reg_base      = layout.origin + @em.read_u16(layout.reg_base_addr)
+    def bytecode_base = layout.origin + @em.read_u16(layout.cur_bytecode_addr)
+    def pool_base     = layout.origin + @em.read_u16(layout.cur_pool_addr)
+    def symbol_base   = layout.origin + @em.read_u16(layout.cur_symbols_addr)
 
-    def write_reg(index, value) = @em.write_s32(layout.reg_addr(index), value)
+    def reg_addr(index)      = reg_base + index * SLOT_WORDS + SLOT_VALUE_OFFSET
+    def reg_type_addr(index) = reg_base + index * SLOT_WORDS + SLOT_TYPE_OFFSET
+    def pool_value_addr(index) = pool_base + index * SLOT_WORDS + SLOT_VALUE_OFFSET
+    def pool_type_addr(index)  = pool_base + index * SLOT_WORDS + SLOT_TYPE_OFFSET
+
+    def read_reg(index)     = @em.read_s32(reg_addr(index))
+    def read_reg_tag(index) = @em.read_u16(reg_type_addr(index))
+
+    def write_reg(index, value) = @em.write_s32(reg_addr(index), value)
 
     # 値スロットに型タグと値をまとめて書く
     def write_slot(index, tag, value)
-      @em.write_u16(layout.reg_type_addr(index), tag)
-      @em.write_s32(layout.reg_addr(index), value)
+      @em.write_u16(reg_type_addr(index), tag)
+      @em.write_s32(reg_addr(index), value)
     end
 
     def write_bool(index, value)
@@ -332,11 +347,11 @@ module FaRuby
     def numeric_tag?(tag) = tag >= TT_INTEGER
     def float_operand?(index) = read_reg_tag(index) == TT_FLOAT
 
-    def read_float(index) = SimVm.bits_to_float(@em.read_u32(layout.reg_addr(index)))
+    def read_float(index) = SimVm.bits_to_float(@em.read_u32(reg_addr(index)))
 
     def write_float(index, value)
-      @em.write_u16(layout.reg_type_addr(index), TT_FLOAT)
-      @em.write_u32(layout.reg_addr(index), SimVm.float_bits(value))
+      @em.write_u16(reg_type_addr(index), TT_FLOAT)
+      @em.write_u32(reg_addr(index), SimVm.float_bits(value))
     end
 
     # レジスタを数値として読む (タグに応じて整数か実数)
@@ -412,7 +427,7 @@ module FaRuby
     # バイトコードから1バイト読み、PC を進める
     def fetch_byte
       current = pc
-      value = @em.read_u16(layout.bytecode_addr(current))
+      value = @em.read_u16(bytecode_base + current)
       @em.write_u16(layout.pc_addr, current + 1)
       value & 0xFF
     end
@@ -433,7 +448,7 @@ module FaRuby
     end
 
     def device_entry(idx)
-      table_addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
+      table_addr = symbol_base + idx * DEVICE_TABLE_STRIDE
       [@em.read_u16(table_addr), @em.read_u16(table_addr + 1), @em.read_u16(table_addr + 2),
        @em.read_u16(table_addr + DEVICE_TABLE_KIND_OFFSET)]
     end
@@ -444,17 +459,17 @@ module FaRuby
     # 予備ワードを使うと OP_MOVE が4ワード目まで複製する必要が出るため。
 
     def write_device_ref(index, type, base, access)
-      @em.write_u16(layout.reg_type_addr(index), TT_DEVICE)
-      @em.write_u16(layout.reg_addr(index), base)
-      @em.write_u16(layout.reg_addr(index) + 1, type + access * DEVICE_REF_ACCESS_SCALE)
+      @em.write_u16(reg_type_addr(index), TT_DEVICE)
+      @em.write_u16(reg_addr(index), base)
+      @em.write_u16(reg_addr(index) + 1, type + access * DEVICE_REF_ACCESS_SCALE)
     end
 
     # レジスタがデバイス参照ならその内容、違えば nil
     def device_ref(index)
       return nil unless read_reg_tag(index) == TT_DEVICE
 
-      packed = @em.read_u16(layout.reg_addr(index) + 1)
-      { base: @em.read_u16(layout.reg_addr(index)),
+      packed = @em.read_u16(reg_addr(index) + 1)
+      { base: @em.read_u16(reg_addr(index)),
         type: packed % DEVICE_REF_ACCESS_SCALE,
         access: packed / DEVICE_REF_ACCESS_SCALE }
     end

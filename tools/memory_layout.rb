@@ -14,11 +14,17 @@
 # ブロック内の配置 (サイズ設定から詰めて計算):
 #
 #   +0                    VM状態 (VM_STATE_WORDS)
-#   +32                   レジスタファイル      max_regs   × 4
+#                         レジスタスタック      max_regs    × 4
+#                         呼び出しスタック      max_frames  × 4
+#                         IREPテーブル          max_ireps   × 8
 #                         バイトコード          max_bytecode
 #                         定数プール            max_pool    × 4
-#                         デバイステーブル      max_symbols × 4
+#                         シンボル表            max_symbols × 4
 #                         汎用グローバル変数    max_globals × 4
+#
+# バイトコード・定数プール・シンボル表は **全 irep 分をまとめた領域**です。
+# irep ごとの位置は IREP テーブルに入れ、実行時にそこから引きます。
+# 子 irep (メソッドの本体) を扱うために、アドレスを定数で焼き込めなくなりました。
 #
 # アドレスは生成される vm_core.kvs に定数として焼き込まれます。設定を変えたら
 # `rake vm_core` で再生成し、KV Studio に取り込み直す必要があります。
@@ -34,7 +40,31 @@ module FaRuby
     include VmConstants
 
     # VM 状態領域のワード数 (将来の追加に備えて余裕を持たせている)
-    VM_STATE_WORDS = 32
+    VM_STATE_WORDS = 48
+
+    # IREP テーブル 1 エントリのワード数
+    #   +0 バイトコード先頭 / +1 バイトコード長 / +2 定数プール先頭
+    #   +3 シンボル表先頭   / +4 nregs          / +5-7 予備
+    #
+    # 位置はいずれもブロック先頭からのオフセット。生成コードは Z9 を足して指す。
+    IREP_TABLE_STRIDE  = 8
+    IREP_BYTECODE      = 0
+    IREP_BYTECODE_LEN  = 1
+    IREP_POOL          = 2
+    IREP_SYMBOLS       = 3
+    IREP_NREGS         = 4
+    # 最初の子 irep の番号。irep は幅優先に並べてあり同じ親の子が連続するため、
+    # OP_METHOD のオペランド (親から見た子の番号) を足せば通し番号になる
+    IREP_FIRST_CHILD   = 5
+
+    # 呼び出しフレーム 1 個のワード数
+    #   +0 戻り先 PC / +1 戻り先 irep / +2 戻り先レジスタ基点 / +3 予備
+    #
+    # 予備はブロック (ロードマップ項目 4) で上位フレームへの参照を置くための枠。
+    FRAME_WORDS        = 4
+    FRAME_RETURN_PC    = 0
+    FRAME_RETURN_IREP  = 1
+    FRAME_RETURN_BASE  = 2
 
     # VM 状態領域内のオフセット
     OFFSET_PC              = 0
@@ -70,14 +100,29 @@ module FaRuby
     # 他のインスタンスの同じ位置は未使用のまま残る (8ワード)。
     OFFSET_Z_SAVE          = 21
 
+    # --- 実行中の irep (30 以降) ---
+    #
+    # irep が複数になったため、命令フェッチ・定数プール・シンボル表の位置は
+    # 定数ではなく「実行中の irep のもの」になります。命令ごとに IREP テーブルを
+    # 引くとスキャンタイムが延びるため、切り替え時にここへ写して使います。
+    OFFSET_CUR_IREP        = 30
+    OFFSET_FRAME_SP        = 31  # 呼び出しフレームの段数 (0 = トップレベル)
+    OFFSET_REG_BASE        = 32  # レジスタ窓の先頭 (ブロック内オフセット)
+    OFFSET_CUR_BYTECODE    = 33
+    OFFSET_CUR_POOL        = 34
+    OFFSET_CUR_SYMBOLS     = 35
+    OFFSET_NUM_IREPS       = 36
+
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "max_regs" => 80, "max_bytecode" => 3000,
-      "max_pool" => 200, "max_symbols" => 100, "max_globals" => 100,
+      "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
+      "max_ireps" => 16, "max_frames" => 16,
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
-                :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals
+                :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
+                :max_ireps, :max_frames
 
     # faruby_default.yml だけから作った配置
     #
@@ -97,13 +142,15 @@ module FaRuby
         device_name: c["device"], base: c["base"], instances: c["instances"],
         align: c["align"], max_regs: c["max_regs"], max_bytecode: c["max_bytecode"],
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
-        max_globals: c["max_globals"]
+        max_globals: c["max_globals"], max_ireps: c["max_ireps"],
+        max_frames: c["max_frames"]
       )
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
                    align: 1000, max_regs: 80, max_bytecode: 3000,
-                   max_pool: 200, max_symbols: 100, max_globals: 100)
+                   max_pool: 150, max_symbols: 100, max_globals: 100,
+                   max_ireps: 16, max_frames: 16)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
@@ -114,6 +161,8 @@ module FaRuby
       @max_pool       = Integer(max_pool)
       @max_symbols    = Integer(max_symbols)
       @max_globals    = Integer(max_globals)
+      @max_ireps      = Integer(max_ireps)
+      @max_frames     = Integer(max_frames)
       validate!
     end
 
@@ -124,7 +173,8 @@ module FaRuby
       self.class.new(
         device_name: device_name, base: base, instances: instances, instance_index: index,
         align: align, max_regs: max_regs, max_bytecode: max_bytecode,
-        max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals
+        max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
+        max_ireps: max_ireps, max_frames: max_frames
       )
     end
 
@@ -135,14 +185,17 @@ module FaRuby
 
     def vm_state_base       = origin
     def reg_file_base       = vm_state_base + VM_STATE_WORDS
-    def bytecode_base       = reg_file_base + max_regs * SLOT_WORDS
+    def frame_stack_base    = reg_file_base + max_regs * SLOT_WORDS
+    def irep_table_base     = frame_stack_base + max_frames * FRAME_WORDS
+    def bytecode_base       = irep_table_base + max_ireps * IREP_TABLE_STRIDE
     def pool_base           = bytecode_base + max_bytecode
     def device_table_base   = pool_base + max_pool * SLOT_WORDS
     def general_global_base = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
 
     # 各領域の合計 (パディングを含まない)
     def content_size
-      VM_STATE_WORDS + max_regs * SLOT_WORDS + max_bytecode +
+      VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
+        max_ireps * IREP_TABLE_STRIDE + max_bytecode +
         max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE +
         max_globals * SLOT_WORDS
     end
@@ -188,6 +241,13 @@ module FaRuby
     def temp32_addr          = vm_state_base + OFFSET_TEMP32
     def temp32_b_addr        = vm_state_base + OFFSET_TEMP32_B
     def loop_counter_addr    = vm_state_base + OFFSET_LOOP_COUNTER
+    def cur_irep_addr        = vm_state_base + OFFSET_CUR_IREP
+    def frame_sp_addr        = vm_state_base + OFFSET_FRAME_SP
+    def reg_base_addr        = vm_state_base + OFFSET_REG_BASE
+    def cur_bytecode_addr    = vm_state_base + OFFSET_CUR_BYTECODE
+    def cur_pool_addr        = vm_state_base + OFFSET_CUR_POOL
+    def cur_symbols_addr     = vm_state_base + OFFSET_CUR_SYMBOLS
+    def num_ireps_addr       = vm_state_base + OFFSET_NUM_IREPS
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
@@ -220,6 +280,9 @@ module FaRuby
 
     def device_table_addr(index) = device_table_base + index * DEVICE_TABLE_STRIDE
 
+    def irep_table_addr(index) = irep_table_base + index * IREP_TABLE_STRIDE
+    def frame_addr(index)      = frame_stack_base + index * FRAME_WORDS
+
     # 汎用グローバル変数。デバイスマッピングテーブルには「値ワード」の
     # アドレスを格納するため、GETGV/SETGV の EM デバイス経路をそのまま流用できる
     def general_global_slot_addr(index) = general_global_base + index * SLOT_WORDS
@@ -236,10 +299,12 @@ module FaRuby
     def regions
       list = [
         ["VM状態",            vm_state_base,       reg_file_base - 1],
-        ["レジスタファイル",  reg_file_base,       bytecode_base - 1],
+        ["レジスタスタック",  reg_file_base,       frame_stack_base - 1],
+        ["呼び出しスタック",  frame_stack_base,    irep_table_base - 1],
+        ["IREPテーブル",      irep_table_base,     bytecode_base - 1],
         ["バイトコード",      bytecode_base,       pool_base - 1],
         ["定数プール",        pool_base,           device_table_base - 1],
-        ["デバイステーブル",  device_table_base,   general_global_base - 1],
+        ["シンボル表",        device_table_base,   general_global_base - 1],
         ["汎用グローバル変数", general_global_base, general_global_base + max_globals * SLOT_WORDS - 1],
       ]
       list << ["予備 (端数調整)", origin + content_size, origin + instance_size - 1] if padding.positive?
@@ -258,7 +323,8 @@ module FaRuby
       raise LayoutError, "instances は 1 以上にしてください (#{@instances})" if @instances < 1
 
       { "max_regs" => @max_regs, "max_bytecode" => @max_bytecode, "max_pool" => @max_pool,
-        "max_symbols" => @max_symbols, "max_globals" => @max_globals }.each do |name, value|
+        "max_symbols" => @max_symbols, "max_globals" => @max_globals,
+        "max_ireps" => @max_ireps, "max_frames" => @max_frames }.each do |name, value|
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end
     end

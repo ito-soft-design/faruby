@@ -28,7 +28,9 @@ class TestMemoryLayout < Minitest::Test
 
     assert_equal 0, l.vm_state_base
     assert_equal Layout::VM_STATE_WORDS, l.reg_file_base
-    assert_equal l.reg_file_base + 10 * SLOT_WORDS, l.bytecode_base
+    assert_equal l.reg_file_base + 10 * SLOT_WORDS, l.frame_stack_base
+    assert_equal l.frame_stack_base + l.max_frames * Layout::FRAME_WORDS, l.irep_table_base
+    assert_equal l.irep_table_base + l.max_ireps * Layout::IREP_TABLE_STRIDE, l.bytecode_base
     assert_equal l.bytecode_base + 100, l.pool_base
     assert_equal l.pool_base + 5 * SLOT_WORDS, l.device_table_base
     assert_equal l.device_table_base + 4 * DEVICE_TABLE_STRIDE, l.general_global_base

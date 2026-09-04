@@ -223,8 +223,8 @@ class TestMethods < Minitest::Test
 
   # メソッド名は汎用グローバル変数の枠を消費しない
   def test_method_symbols_resolve_to_numbers
-    irep = Struct.new(:symbols, :pool, :instructions, :nregs, :nlocals, :children)
-                 .new(["$DM100", "abs", "push"], [], "", 8, 0, [])
+    irep = Struct.new(:symbols, :pool, :instructions, :ilen, :nregs, :nlocals, :children)
+                 .new(["$DM100", "abs", "push"], [], "", 0, 8, 0, [])
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal SYMBOL_KIND_VALUE, mappings[0][:kind]
