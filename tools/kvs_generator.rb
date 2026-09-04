@@ -652,8 +652,7 @@ module FaRuby
         vm_error(depth_code)
       end
       note "戻り先を積む"
-      line "Z3 = #{state(layout.frame_sp_addr)} * #{MemoryLayout::FRAME_WORDS} + " \
-           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      line "Z3 = #{frame_expr(state(layout.frame_sp_addr))}"
       { MemoryLayout::FRAME_RETURN_PC   => pc,
         MemoryLayout::FRAME_RETURN_IREP => state(layout.cur_irep_addr),
         MemoryLayout::FRAME_RETURN_BASE => state(layout.reg_base_addr),
@@ -703,16 +702,14 @@ module FaRuby
         vm_error(error_code)
       end
       note "定義元のフレームを #{level_name} 段たどる"
-      line "Z3 = (#{state(layout.frame_sp_addr)} - 1) * #{MemoryLayout::FRAME_WORDS} + " \
-           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      line "Z3 = #{top_frame_expr}"
       line "Z4 = #{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3"
       line "#{scratch_lo} = 0   ' 鎖が尽きた印"
       if_("#{operand(level_name)} > 0") do
         line "FOR Z5 = 1 TO #{operand(level_name)}"
         indent
         if_else_block("Z4 = #{MemoryLayout::FRAME_NONE}") { line "#{scratch_lo} = 1" }
-        line "Z3 = Z4 * #{MemoryLayout::FRAME_WORDS} + " \
-             "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+        line "Z3 = #{frame_expr('Z4')}"
         line "Z4 = #{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3"
         end_block
         dedent
@@ -726,8 +723,7 @@ module FaRuby
       note "たどり着いたフレームのレジスタ窓。FRAME_NONE ならトップレベル"
       line "Z6 = #{layout.offset_of(layout.reg_file_base)}"
       if_("Z4 <> #{MemoryLayout::FRAME_NONE}") do
-        line "Z3 = Z4 * #{MemoryLayout::FRAME_WORDS} + " \
-             "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+        line "Z3 = #{frame_expr('Z4')}"
         line "Z6 = #{layout.device_name}#{MemoryLayout::FRAME_OWN_BASE}:Z3"
       end
     end
@@ -864,7 +860,8 @@ module FaRuby
     # 積んであるフレームから PC・irep・レジスタ窓を復元する
     def pop_frame
       line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} - 1"
-      line "Z3 = #{top_frame_expr}"
+      note "外した段がそのまま戻り先。減らした後なので top_frame_expr ではない"
+      line "Z3 = #{frame_expr(state(layout.frame_sp_addr))}"
       line "#{pc} = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_PC}:Z3"
       line "Z5 = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_IREP}:Z3"
       line "#{state(layout.reg_base_addr)} = " \
@@ -873,11 +870,14 @@ module FaRuby
       load_irep_state("Z5 * #{MemoryLayout::IREP_TABLE_STRIDE} + #{irep_table_offset}")
     end
 
-    # 積んである一番上のフレームを指す式 (frame_sp - 1 段目)
-    def top_frame_expr
-      "(#{state(layout.frame_sp_addr)} - 1) * #{MemoryLayout::FRAME_WORDS} + " \
+    # index 段目のフレームを指す式
+    def frame_expr(index)
+      "#{index} * #{MemoryLayout::FRAME_WORDS} + " \
         "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
     end
+
+    # 積んである一番上のフレーム = 実行中のフレームを指す式 (frame_sp - 1 段目)
+    def top_frame_expr = frame_expr("(#{state(layout.frame_sp_addr)} - 1)")
 
     # --- 反復 ---
 

@@ -252,6 +252,27 @@ class TestMethodCalls < Minitest::Test
                     "レジスタ窓をずらす"
   end
 
+  # フレームを外した後に「一番上のフレーム」を指す式を使うと 1 段余分に下がり、
+  # 呼び出し元ではなくその 1 つ手前へ戻ってしまう。
+  #
+  # シミュレータは frame_sp を毎回読み直すため正しく動いてしまい、
+  # 生成コードを読むこのテストでしか捕まえられない。
+  def test_generated_code_pops_the_frame_it_just_left
+    source = FaRuby::KvsGenerator.new.source
+    emitter = FaRuby::KvsEmitter.new(layout: layout)
+
+    sp = emitter.state(layout.frame_sp_addr)
+    lines = source.lines.map(&:strip)
+    decrements = lines.each_index.select { |i| lines[i] == "#{sp} = #{sp} - 1" }
+    refute_empty decrements, "フレームを外す箇所が見つからない"
+
+    decrements.each do |i|
+      address = lines[(i + 1)..].find { |l| l.include?("* #{Layout::FRAME_WORDS} +") }
+      assert_includes address, "= #{sp} * #{Layout::FRAME_WORDS} +",
+                      "frame_sp を減らした後は減らした値がそのまま戻り先の段"
+    end
+  end
+
   # 実装済みのオペコードに揃っていること
   def test_call_opcodes_are_implemented
     codes = FaRuby::OpcodeTable.codes
