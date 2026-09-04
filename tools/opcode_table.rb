@@ -328,6 +328,24 @@ module FaRuby
         vm.load_child_irep(:a, :b, IREP_INDEX_ERROR)
       end
 
+      # --- ブロックと上位の変数 ---
+      #
+      # ブロックはメソッドと違い、外側のローカル変数を読み書きする。
+      # そのため本体の irep だけでなく定義元のフレームも覚えておく。
+
+      defs << OpcodeDef.new(0x57, "R[a] = 子 irep b から作ったブロック") do |vm|
+        vm.load_block(:a, :b, IREP_INDEX_ERROR)
+      end
+
+      # オペランド c は遡る段数。0 なら 1 つ外側
+      defs << OpcodeDef.new(0x21, "R[a] = 外側 c 段の R[b]") do |vm|
+        vm.load_upvar(:a, :b, :c, UPVAR_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x22, "外側 c 段の R[b] = R[a]") do |vm|
+        vm.store_upvar(:a, :b, :c, UPVAR_ERROR)
+      end
+
       defs << OpcodeDef.new(0x5F, "メソッド表に symbols[b] = R[a+1] を登録") do |vm|
         vm.define_method(:a, :b, UNKNOWN_METHOD_ERROR)
       end
@@ -424,8 +442,11 @@ module FaRuby
     # 引数の数または形が扱えない (省略可能引数・可変長・キーワードは未対応)
     ARGUMENT_ERROR = 6
 
-    # OP_METHOD が指す子 irep が無い
+    # OP_METHOD / OP_BLOCK が指す子 irep が無い
     IREP_INDEX_ERROR = 7
+
+    # 上位の変数に届かない (指定された段数だけ遡れなかった)
+    UPVAR_ERROR = 8
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {

@@ -551,18 +551,24 @@ module FaRuby
     # irep は幅優先に並べてあり同じ親の子が連続するため、実行中の irep の
     # 「最初の子の番号」に b を足せば通し番号になります。
     def load_child_irep(name, child_name, error_code)
+      child_irep_into(scratch_lo, child_name, error_code)
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{scratch_lo}   ' 本体の irep"
+      line "#{dest.word(1)} = #{MemoryLayout::FRAME_NONE}   ' メソッドは外側を見ない"
+      line "#{dest.tag} = #{TT_PROC}"
+    end
+
+    # 親から見た子の番号を通し番号に直す
+    def child_irep_into(dest, child_name, error_code)
       note "実行中の irep の最初の子の番号に、親から見た子の番号を足す"
       line "Z3 = #{state(layout.cur_irep_addr)} * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
            "#{irep_table_offset}"
       line "Z4 = Z3 + #{MemoryLayout::IREP_FIRST_CHILD}"
-      line "#{scratch_lo} = #{fixed_indexed_base}:Z4 + #{operand(child_name)}"
-      if_("#{scratch_lo} >= #{state(layout.num_ireps_addr)}") do
+      line "#{dest} = #{fixed_indexed_base}:Z4 + #{operand(child_name)}"
+      if_("#{dest} >= #{state(layout.num_ireps_addr)}") do
         note "指す先の irep が無い"
         vm_error(error_code)
       end
-      dest = reg_slot(name)
-      line "#{dest.value} = #{scratch_lo}"
-      line "#{dest.tag} = #{TT_PROC}"
     end
 
     # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
@@ -583,7 +589,7 @@ module FaRuby
       if_("#{body.tag} <> #{TT_PROC}") { vm_error(error_code) }
       note "メソッド表 (ID => 本体の irep 番号)"
       line "Z3 = Z5 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
-      line "#{indexed_base}:Z3 = #{body.value}"
+      line "#{indexed_base}:Z3 = #{body.word(0)}"
       note "OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる"
       dest = reg_slot(name)
       line "#{dest.value} = #{operand(sym_name)}"
@@ -628,30 +634,122 @@ module FaRuby
         vm_error(unknown_code)
       end
 
-      push_frame(depth_code)
-      note "レジスタ窓を R[a] までずらす。呼ばれた側の R[0] が呼んだ側の R[a]"
-      line "#{state(layout.reg_base_addr)} = #{state(layout.reg_base_addr)} + " \
-           "#{operand(name)} * #{SLOT_WORDS}"
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE)
       line "#{state(layout.call_argc_addr)} = #{operand(argc_name)}"
       switch_to_irep("Z5", depth_code)
       line "#{pc} = 0"
     end
 
-    # 戻り先を呼び出しスタックに積む
-    def push_frame(depth_code)
+    # 戻り先を呼び出しスタックに積み、レジスタ窓をずらす
+    #
+    # shift はレジスタ窓を進める量 (呼び出しなら R[a] まで)。呼ばれた側の R[0] が
+    # 呼んだ側の R[a] になるため、戻り値の受け渡しが要りません。
+    # outer は上位の変数を辿る鎖。メソッドは上位を見ないので FRAME_NONE です。
+    def push_frame(depth_code, shift, outer:, kind: MemoryLayout::FRAME_KIND_CALL)
       if_("#{state(layout.frame_sp_addr)} >= #{layout.max_frames}") do
         note "呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない"
         vm_error(depth_code)
       end
-      note "戻り先 (PC・irep・レジスタ窓) を積む"
+      note "戻り先を積む"
       line "Z3 = #{state(layout.frame_sp_addr)} * #{MemoryLayout::FRAME_WORDS} + " \
            "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
       { MemoryLayout::FRAME_RETURN_PC   => pc,
         MemoryLayout::FRAME_RETURN_IREP => state(layout.cur_irep_addr),
-        MemoryLayout::FRAME_RETURN_BASE => state(layout.reg_base_addr) }.each do |field, value|
+        MemoryLayout::FRAME_RETURN_BASE => state(layout.reg_base_addr),
+        MemoryLayout::FRAME_OUTER       => outer,
+        MemoryLayout::FRAME_KIND        => kind }.each do |field, value|
         line "#{layout.device_name}#{field}:Z3 = #{value}"
       end
+      note "レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]"
+      line "#{state(layout.reg_base_addr)} = #{state(layout.reg_base_addr)} + #{shift}"
+      line "#{layout.device_name}#{MemoryLayout::FRAME_OWN_BASE}:Z3 = " \
+           "#{state(layout.reg_base_addr)}   ' このフレームの窓 (OP_GETUPVAR が見る)"
       line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} + 1"
+    end
+
+    # --- ブロックと上位の変数 ---
+
+    # R[a] = 子 irep b から作ったブロック (OP_BLOCK)
+    #
+    # メソッドと違い、ブロックは外側のローカル変数を読み書きします。そのため
+    # 本体の irep だけでなく **定義元のフレーム**も覚えておきます。
+    # 値スロットは 2 ワードあるので下位に irep、上位にフレーム番号を入れます。
+    def load_block(name, child_name, error_code)
+      child_irep_into(scratch_lo, child_name, error_code)
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{scratch_lo}   ' 本体の irep"
+      line "#{dest.word(1)} = #{current_frame_expr}   ' 定義元のフレーム"
+      line "#{dest.tag} = #{TT_PROC}"
+    end
+
+    # 実行中のフレーム番号。トップレベルなら FRAME_NONE
+    def current_frame_expr
+      line "Z4 = #{MemoryLayout::FRAME_NONE}"
+      if_("#{state(layout.frame_sp_addr)} > 0") do
+        line "Z4 = #{state(layout.frame_sp_addr)} - 1"
+      end
+      "Z4"
+    end
+
+    # 上位の変数の入っているレジスタ窓を Z6 に求める (OP_GETUPVAR / OP_SETUPVAR)
+    #
+    # オペランド c は遡る段数です。フレームの「定義元」を c 回辿ります。
+    # 辿り切る前に鎖が尽きたらエラーですが、**FOR の中で BREAK すると FOR を
+    # 抜けるだけ**なので、印を立てておいて外で判定します。
+    def upvar_base(level_name, error_code)
+      if_("#{state(layout.frame_sp_addr)} = 0") do
+        note "トップレベルには外側が無い"
+        vm_error(error_code)
+      end
+      note "定義元のフレームを #{level_name} 段たどる"
+      line "Z3 = (#{state(layout.frame_sp_addr)} - 1) * #{MemoryLayout::FRAME_WORDS} + " \
+           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      line "Z4 = #{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3"
+      line "#{scratch_lo} = 0   ' 鎖が尽きた印"
+      if_("#{operand(level_name)} > 0") do
+        line "FOR Z5 = 1 TO #{operand(level_name)}"
+        indent
+        if_else_block("Z4 = #{MemoryLayout::FRAME_NONE}") { line "#{scratch_lo} = 1" }
+        line "Z3 = Z4 * #{MemoryLayout::FRAME_WORDS} + " \
+             "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+        line "Z4 = #{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3"
+        end_block
+        dedent
+        line "NEXT"
+      end
+      if_("#{scratch_lo} <> 0") do
+        note "指定された段数だけ遡れなかった"
+        vm_error(error_code)
+      end
+
+      note "たどり着いたフレームのレジスタ窓。FRAME_NONE ならトップレベル"
+      line "Z6 = #{layout.offset_of(layout.reg_file_base)}"
+      if_("Z4 <> #{MemoryLayout::FRAME_NONE}") do
+        line "Z3 = Z4 * #{MemoryLayout::FRAME_WORDS} + " \
+             "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+        line "Z6 = #{layout.device_name}#{MemoryLayout::FRAME_OWN_BASE}:Z3"
+      end
+    end
+
+    # R[a] = 外側の R[b] (OP_GETUPVAR)
+    def load_upvar(name, index_name, level_name, error_code)
+      upvar_base(level_name, error_code)
+      src = slot_ref([:upvar, name], "#{operand(index_name)} * #{SLOT_WORDS}",
+                     "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
+      dest = reg_slot(name)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+    end
+
+    # 外側の R[b] = R[a] (OP_SETUPVAR)
+    def store_upvar(name, index_name, level_name, error_code)
+      src = reg_slot(name)
+      upvar_base(level_name, error_code)
+      dest = slot_ref([:upvar, name], "#{operand(index_name)} * #{SLOT_WORDS}",
+                      "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
     end
 
     # 実行中の irep を切り替える。レジスタ窓が領域に収まるかも見る

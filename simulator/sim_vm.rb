@@ -183,10 +183,44 @@ module FaRuby
     # irep は幅優先に並べてあり同じ親の子が連続するため、実行中の irep の
     # 最初の子の番号に b を足せば通し番号になる。
     def load_child_irep(name, child_name, error_code)
-      index = irep_word(cur_irep, MemoryLayout::IREP_FIRST_CHILD) + operand(child_name)
-      return vm_error(error_code) if index >= @em.read_u16(layout.num_ireps_addr)
+      index = child_irep(child_name)
+      return vm_error(error_code) unless index
 
-      write_slot(operand(name), TT_PROC, index)
+      write_proc(operand(name), index, MemoryLayout::FRAME_NONE)
+    end
+
+    # --- ブロックと上位の変数 ---
+
+    # R[a] = 子 irep b から作ったブロック (OP_BLOCK)
+    #
+    # ブロックは外側のローカル変数を読み書きするため、本体の irep だけでなく
+    # 定義元のフレームも覚えておく。
+    def load_block(name, child_name, error_code)
+      index = child_irep(child_name)
+      return vm_error(error_code) unless index
+
+      write_proc(operand(name), index, current_frame)
+    end
+
+    # R[a] = 外側 c 段の R[b] (OP_GETUPVAR)
+    def load_upvar(name, index_name, level_name, error_code)
+      base = upvar_base(operand(level_name))
+      return vm_error(error_code) unless base
+
+      addr = base + operand(index_name) * SLOT_WORDS
+      write_slot(operand(name), @em.read_u16(addr + SLOT_TYPE_OFFSET),
+                 @em.read_s32(addr + SLOT_VALUE_OFFSET))
+    end
+
+    # 外側 c 段の R[b] = R[a] (OP_SETUPVAR)
+    def store_upvar(name, index_name, level_name, error_code)
+      base = upvar_base(operand(level_name))
+      return vm_error(error_code) unless base
+
+      index = operand(name)
+      addr = base + operand(index_name) * SLOT_WORDS
+      @em.write_u16(addr + SLOT_TYPE_OFFSET, read_reg_tag(index))
+      @em.write_s32(addr + SLOT_VALUE_OFFSET, read_reg(index))
     end
 
     # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
@@ -198,7 +232,8 @@ module FaRuby
       body = operand(name) + 1
       return vm_error(error_code) unless read_reg_tag(body) == TT_PROC
 
-      @em.write_u16(layout.method_table_addr(method_id), read_reg(body))
+      # 本体の irep は値スロットの下位ワード (上位は定義元のフレーム)
+      @em.write_u16(layout.method_table_addr(method_id), @em.read_u16(reg_addr(body)))
       write_slot(operand(name), TT_SYMBOL, operand(sym_name))
     end
 
@@ -224,10 +259,7 @@ module FaRuby
       return vm_error(unknown_code) if irep == METHOD_UNDEFINED
       return vm_error(depth_code) if frame_sp >= layout.max_frames
 
-      push_frame
-      # 呼ばれた側の R[0] は呼んだ側の R[a] と同じ場所になる
-      @em.write_u16(layout.reg_base_addr,
-                    @em.read_u16(layout.reg_base_addr) + index * SLOT_WORDS)
+      push_frame(index * SLOT_WORDS)
       @em.write_u16(layout.call_argc_addr, argc)
       switch_to_irep(irep)
       return vm_error(depth_code) unless register_window_fits?
@@ -426,13 +458,55 @@ module FaRuby
 
     def irep_word(index, field) = @fixed.read_u16(layout.irep_table_addr(index) + field)
 
-    # 戻り先 (PC・irep・レジスタ窓) を積む
-    def push_frame
+    # 戻り先を積み、レジスタ窓を shift だけ進める
+    #
+    # 呼ばれた側の R[0] が呼んだ側の R[a] になるため、戻り値の受け渡しが要らない。
+    # outer は上位の変数を辿る鎖。メソッドは上位を見ないので FRAME_NONE。
+    def push_frame(shift, outer: MemoryLayout::FRAME_NONE,
+                   kind: MemoryLayout::FRAME_KIND_CALL)
       addr = layout.frame_addr(frame_sp)
       @em.write_u16(addr + MemoryLayout::FRAME_RETURN_PC, pc)
       @em.write_u16(addr + MemoryLayout::FRAME_RETURN_IREP, cur_irep)
       @em.write_u16(addr + MemoryLayout::FRAME_RETURN_BASE, @em.read_u16(layout.reg_base_addr))
+      @em.write_u16(addr + MemoryLayout::FRAME_OUTER, outer)
+      @em.write_u16(addr + MemoryLayout::FRAME_KIND, kind)
+
+      @em.write_u16(layout.reg_base_addr, @em.read_u16(layout.reg_base_addr) + shift)
+      @em.write_u16(addr + MemoryLayout::FRAME_OWN_BASE, @em.read_u16(layout.reg_base_addr))
       @em.write_u16(layout.frame_sp_addr, frame_sp + 1)
+    end
+
+    # 実行中のフレーム番号。トップレベルなら FRAME_NONE
+    def current_frame = frame_sp.zero? ? MemoryLayout::FRAME_NONE : frame_sp - 1
+
+    def frame_word(index, field) = @em.read_u16(layout.frame_addr(index) + field)
+
+    # 親から見た子の番号を通し番号に直す。範囲外なら nil
+    def child_irep(child_name)
+      index = irep_word(cur_irep, MemoryLayout::IREP_FIRST_CHILD) + operand(child_name)
+      index < @em.read_u16(layout.num_ireps_addr) ? index : nil
+    end
+
+    # 本体の irep と定義元のフレームを 2 ワードに詰める
+    def write_proc(index, irep, frame)
+      @em.write_u16(layout.reg_type_addr(index), TT_PROC)
+      @em.write_u16(reg_addr(index), irep)
+      @em.write_u16(reg_addr(index) + 1, frame)
+    end
+
+    # 上位の変数の入っているレジスタ窓。辿れなければ nil
+    def upvar_base(level)
+      return nil if frame_sp.zero?
+
+      frame = frame_word(current_frame, MemoryLayout::FRAME_OUTER)
+      level.times do
+        return nil if frame == MemoryLayout::FRAME_NONE
+
+        frame = frame_word(frame, MemoryLayout::FRAME_OUTER)
+      end
+      return layout.reg_file_base if frame == MemoryLayout::FRAME_NONE
+
+      layout.origin + frame_word(frame, MemoryLayout::FRAME_OWN_BASE)
     end
 
     # 実行中の irep を切り替え、位置を VM 状態へ写す

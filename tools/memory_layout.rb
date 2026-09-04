@@ -86,13 +86,34 @@ module FaRuby
     IREP_FIRST_CHILD   = 5
 
     # 呼び出しフレーム 1 個のワード数
-    #   +0 戻り先 PC / +1 戻り先 irep / +2 戻り先レジスタ基点 / +3 予備
     #
-    # 予備はブロック (ロードマップ項目 4) で上位フレームへの参照を置くための枠。
-    FRAME_WORDS        = 4
+    #   +0 戻り先 PC        呼び出し元へ戻る位置
+    #   +1 戻り先 irep
+    #   +2 戻り先レジスタ窓  呼び出し元の窓
+    #   +3 自分のレジスタ窓  OP_GETUPVAR がここを見る
+    #   +4 定義元フレーム    上位の変数を辿る鎖。ブロック用
+    #   +5 種別             通常の呼び出しか反復か
+    #   +6,+7 反復の現在値   32ビット。times / upto がブロックへ渡す値
+    #   +8,+9 反復の上限     32ビット。この値まで繰り返す (含む)
+    FRAME_WORDS        = 10
     FRAME_RETURN_PC    = 0
     FRAME_RETURN_IREP  = 1
     FRAME_RETURN_BASE  = 2
+    FRAME_OWN_BASE     = 3
+    FRAME_OUTER        = 4
+    FRAME_KIND         = 5
+    FRAME_INDEX        = 6
+    FRAME_LIMIT        = 8
+
+    # フレームの種別
+    FRAME_KIND_CALL     = 0   # 通常のメソッド呼び出し
+    FRAME_KIND_ITERATE  = 1   # ブロックの反復 (times / upto)
+
+    # 「フレームが無い」を表す番号。トップレベルで定義されたブロックの定義元
+    #
+    # レジスタ窓はレジスタ領域の先頭になる。実在するフレーム番号
+    # (0 から max_frames - 1) と重ならない値を使う。
+    FRAME_NONE = 0xFFFF
 
     # VM 状態領域内のオフセット
     OFFSET_PC              = 0
