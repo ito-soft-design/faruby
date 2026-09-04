@@ -33,7 +33,8 @@ class TestMemoryLayout < Minitest::Test
     assert_equal l.irep_table_base + l.max_ireps * Layout::IREP_TABLE_STRIDE, l.bytecode_base
     assert_equal l.bytecode_base + 100, l.pool_base
     assert_equal l.pool_base + 5 * SLOT_WORDS, l.device_table_base
-    assert_equal l.device_table_base + 4 * DEVICE_TABLE_STRIDE, l.general_global_base
+    assert_equal l.device_table_base + 4 * DEVICE_TABLE_STRIDE, l.method_table_base
+    assert_equal l.method_table_base + l.max_methods, l.general_global_base
   end
 
   # 領域が重ならず、隙間なく並ぶ

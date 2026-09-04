@@ -173,16 +173,110 @@ module FaRuby
       read_device_into(dev, addr, access, operand(dest), bit_device: bit_device?(type))
     end
 
+    # --- メソッドの定義と呼び出し ---
+
+    # R[a] = 子 irep b への参照 (OP_METHOD)
+    #
+    # irep は幅優先に並べてあり同じ親の子が連続するため、実行中の irep の
+    # 最初の子の番号に b を足せば通し番号になる。
+    def load_child_irep(name, child_name, error_code)
+      index = irep_word(cur_irep, MemoryLayout::IREP_FIRST_CHILD) + operand(child_name)
+      return vm_error(error_code) if index >= @em.read_u16(layout.num_ireps_addr)
+
+      write_slot(operand(name), TT_PROC, index)
+    end
+
+    # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
+    def define_method(name, sym_name, error_code)
+      _code, method_id, _argc, kind = device_entry(operand(sym_name))
+      return vm_error(error_code) unless kind == SYMBOL_KIND_METHOD
+      return vm_error(error_code) if method_id == METHOD_ID_NONE
+
+      body = operand(name) + 1
+      return vm_error(error_code) unless read_reg_tag(body) == TT_PROC
+
+      @em.write_u16(layout.method_table_addr(method_id), read_reg(body))
+      write_slot(operand(name), TT_SYMBOL, operand(sym_name))
+    end
+
+    # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
+    def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
+                         zero_code, depth_code)
+      index = operand(name)
+      write_slot(index, read_reg_tag(0), read_reg(0))   # regs[a] = self
+
+      code, method_id, argc, kind = device_entry(operand(sym_name))
+      return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
+      return dispatch_builtin(code, index, operand(argc_name), argc,
+                              unknown_code, type_code, zero_code) unless code == METHOD_NONE
+
+      call_user_method(index, method_id, operand(argc_name), unknown_code, depth_code)
+    end
+
+    # ユーザー定義メソッドへ移る
+    def call_user_method(index, method_id, argc, unknown_code, depth_code)
+      return vm_error(unknown_code) if method_id == METHOD_ID_NONE
+
+      irep = @em.read_u16(layout.method_table_addr(method_id))
+      return vm_error(unknown_code) if irep == METHOD_UNDEFINED
+      return vm_error(depth_code) if frame_sp >= layout.max_frames
+
+      push_frame
+      # 呼ばれた側の R[0] は呼んだ側の R[a] と同じ場所になる
+      @em.write_u16(layout.reg_base_addr,
+                    @em.read_u16(layout.reg_base_addr) + index * SLOT_WORDS)
+      @em.write_u16(layout.call_argc_addr, argc)
+      switch_to_irep(irep)
+      return vm_error(depth_code) unless register_window_fits?
+
+      @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # メソッド本体の入口 (OP_ENTER)
+    #
+    # 生成コード側は aspec を上位バイトと下位2バイトに分けて持つ (16ビットに
+    # 収まらないため)。こちらは 24 ビットのまま扱うが、判定は同じ。
+    def enter_method(name, error_code)
+      aspec = operand(name)
+      required = aspec >> ASPEC_REQ_SHIFT
+      return vm_error(error_code) unless aspec == required << ASPEC_REQ_SHIFT
+      return vm_error(error_code) unless @em.read_u16(layout.call_argc_addr) == required
+
+      # 引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)
+      ((required + 1)...@em.read_u16(layout.nregs_addr)).each do |i|
+        SLOT_WORDS.times { |w| @em.write_u16(reg_base + i * SLOT_WORDS + w, 0) }
+      end
+    end
+
+    # 呼び出し元へ戻る (OP_RETURN)
+    def return_from_method(name)
+      return vm_finish if frame_sp.zero?
+
+      # R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所
+      index = operand(name)
+      write_slot(0, read_reg_tag(index), read_reg(index))
+
+      @em.write_u16(layout.frame_sp_addr, frame_sp - 1)
+      addr = layout.frame_addr(frame_sp)
+      @em.write_u16(layout.pc_addr, @em.read_u16(addr + MemoryLayout::FRAME_RETURN_PC))
+      @em.write_u16(layout.reg_base_addr, @em.read_u16(addr + MemoryLayout::FRAME_RETURN_BASE))
+      switch_to_irep(@em.read_u16(addr + MemoryLayout::FRAME_RETURN_IREP))
+    end
+
     # --- 組み込みメソッド ---
     #
     # 呼び出しフレームは作らない。引数は R[a+1] から連続して並び、
     # 結果は R[a] に返る。生成コードと同じ規則で計算する。
     def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code)
-      code, _unused, argc, kind = device_entry(operand(sym_name))
+      code, _id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
-      return vm_error(unknown_code) unless operand(argc_name) == argc
 
-      index = operand(name)
+      dispatch_builtin(code, operand(name), operand(argc_name), argc,
+                       unknown_code, type_code, zero_code)
+    end
+
+    def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code, zero_code)
+      return vm_error(unknown_code) unless given_argc == argc
       return vm_error(type_code) if code >= METHOD_NUMERIC_MIN && !numeric_tag?(read_reg_tag(index))
       return vm_error(unknown_code) unless METHOD_NAMES.key?(code)
 
@@ -318,6 +412,38 @@ module FaRuby
     def bytecode_base = layout.origin + @em.read_u16(layout.cur_bytecode_addr)
     def pool_base     = layout.origin + @em.read_u16(layout.cur_pool_addr)
     def symbol_base   = layout.origin + @em.read_u16(layout.cur_symbols_addr)
+
+    def cur_irep = @em.read_u16(layout.cur_irep_addr)
+    def frame_sp = @em.read_u16(layout.frame_sp_addr)
+
+    def irep_word(index, field) = @em.read_u16(layout.irep_table_addr(index) + field)
+
+    # 戻り先 (PC・irep・レジスタ窓) を積む
+    def push_frame
+      addr = layout.frame_addr(frame_sp)
+      @em.write_u16(addr + MemoryLayout::FRAME_RETURN_PC, pc)
+      @em.write_u16(addr + MemoryLayout::FRAME_RETURN_IREP, cur_irep)
+      @em.write_u16(addr + MemoryLayout::FRAME_RETURN_BASE, @em.read_u16(layout.reg_base_addr))
+      @em.write_u16(layout.frame_sp_addr, frame_sp + 1)
+    end
+
+    # 実行中の irep を切り替え、位置を VM 状態へ写す
+    def switch_to_irep(index)
+      @em.write_u16(layout.cur_irep_addr, index)
+      { MemoryLayout::IREP_BYTECODE     => layout.cur_bytecode_addr,
+        MemoryLayout::IREP_BYTECODE_LEN => layout.bytecode_len_addr,
+        MemoryLayout::IREP_POOL         => layout.cur_pool_addr,
+        MemoryLayout::IREP_SYMBOLS      => layout.cur_symbols_addr,
+        MemoryLayout::IREP_NREGS        => layout.nregs_addr }.each do |field, addr|
+        @em.write_u16(addr, irep_word(index, field))
+      end
+    end
+
+    # レジスタ窓が領域に収まるか
+    def register_window_fits?
+      @em.read_u16(layout.reg_base_addr) + @em.read_u16(layout.nregs_addr) * SLOT_WORDS <=
+        layout.offset_of(layout.reg_slot_addr(layout.max_regs))
+    end
 
     def reg_addr(index)      = reg_base + index * SLOT_WORDS + SLOT_VALUE_OFFSET
     def reg_type_addr(index) = reg_base + index * SLOT_WORDS + SLOT_TYPE_OFFSET

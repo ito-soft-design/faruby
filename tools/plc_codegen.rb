@@ -68,6 +68,8 @@ module FaRuby
       lines.concat(generate_pool)
       lines << ""
       lines.concat(generate_device_table)
+      lines << ""
+      lines.concat(generate_method_table_clear)
 
       lines.join("\n")
     end
@@ -89,7 +91,12 @@ module FaRuby
       image[layout.nlocals_addr] = @irep.nlocals
       image[layout.num_ireps_addr] = irep_entries.size
       image[layout.frame_sp_addr] = 0
+      image[layout.call_argc_addr] = 0
       image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
+
+      # メソッド表 (ユーザー定義メソッド ID => 本体の irep 番号)
+      # 登録は OP_DEF が実行時に行うため、ここでは未定義で埋める
+      layout.max_methods.times { |id| image[layout.method_table_addr(id)] = METHOD_UNDEFINED }
       # 実行はトップレベルの irep から始まる
       current_irep_state(top).each { |addr, value| image[addr] = value }
 
@@ -126,7 +133,7 @@ module FaRuby
         image[m[:table_addr] + DEVICE_TABLE_KIND_OFFSET] = m[:kind]
         if m[:kind] == SYMBOL_KIND_METHOD
           image[m[:table_addr]]     = m[:method_code]
-          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 1] = m[:method_id]
           image[m[:table_addr] + 2] = m[:argc]
           next
         end
@@ -189,16 +196,29 @@ module FaRuby
     #
     # z_offset は「値ワード」のアドレス (シンボル表に格納する値)。
     def device_mappings
-      slots = {}
-      irep_entries.flat_map do |entry|
-        entry[:irep].symbols.each_with_index.map do |sym, idx|
-          symbol_mapping(sym, entry[:symbol_base] + idx * DEVICE_TABLE_STRIDE, idx, slots)
+      @device_mappings ||= begin
+        slots = {}
+        method_ids = {}
+        irep_entries.flat_map do |entry|
+          entry[:irep].symbols.each_with_index.map do |sym, idx|
+            symbol_mapping(sym, entry[:symbol_base] + idx * DEVICE_TABLE_STRIDE,
+                           idx, slots, method_ids)
+          end
         end
       end
     end
 
-    # シンボル 1 つ分の割り当て。slots は汎用グローバルの名前 => アドレス
-    def symbol_mapping(sym, table_addr, idx, slots)
+    # ユーザー定義メソッド名 => ID (1 から)
+    def method_ids
+      device_mappings
+        .select { |m| m[:kind] == SYMBOL_KIND_METHOD && m[:method_id] != METHOD_ID_NONE }
+        .to_h { |m| [m[:symbol], m[:method_id]] }
+    end
+
+    # シンボル 1 つ分の割り当て
+    #   slots      汎用グローバルの名前 => アドレス
+    #   method_ids ユーザー定義メソッド名 => ID
+    def symbol_mapping(sym, table_addr, idx, slots, method_ids)
       parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
       if parsed
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
@@ -217,8 +237,11 @@ module FaRuby
           access_type: ACCESS_L, bit: false }
       else
         code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
+        # 組み込みに無い名前には 1 から通し番号を振る。シンボル表は irep ごとに
+        # 別なので、番号を挟まないと同じメソッドに行き着かない
+        id = code == METHOD_NONE ? (method_ids[sym] ||= method_ids.size + 1) : METHOD_ID_NONE
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
-          kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc }
+          kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc, method_id: id }
       end
     end
 
@@ -397,13 +420,21 @@ module FaRuby
     # メソッド名のエントリ。VM は名前ではなく番号で振り分ける
     def method_table_lines(mapping)
       addr = mapping[:table_addr]
-      note = mapping[:method_code] == METHOD_NONE ? "未対応 (呼ぶと実行時エラー)" : "組み込みメソッド"
+      note = mapping[:method_code] == METHOD_NONE ? "ユーザー定義" : "組み込みメソッド"
       [
         "#{layout.device(addr)} = #{mapping[:method_code]}    ' #{mapping[:symbol]} #{note}",
-        "#{layout.device(addr + 1)} = 0    ' #{mapping[:symbol]} 未使用",
+        "#{layout.device(addr + 1)} = #{mapping[:method_id]}    ' #{mapping[:symbol]} ユーザー定義ID",
         "#{layout.device(addr + 2)} = #{mapping[:argc]}    ' #{mapping[:symbol]} 引数の数",
         "#{layout.device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_METHOD}    ' #{mapping[:symbol]} メソッド名",
       ]
+    end
+
+    # メソッド表を未定義で埋める。登録は OP_DEF が実行時に行う
+    def generate_method_table_clear
+      ["' --- Clear Method Table (#{layout.max_methods} entries) ---",
+       "FOR Z1 = #{layout.method_table_base} TO #{layout.method_table_base + layout.max_methods - 1}",
+       "    #{layout.device_name}0:Z1 = #{METHOD_UNDEFINED}",
+       "NEXT"]
     end
 
     # 汎用グローバル変数のスロットを 0 初期化する

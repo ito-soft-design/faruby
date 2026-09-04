@@ -20,6 +20,7 @@
 #                         バイトコード          max_bytecode
 #                         定数プール            max_pool    × 4
 #                         シンボル表            max_symbols × 4
+#                         メソッド表            max_methods × 1
 #                         汎用グローバル変数    max_globals × 4
 #
 # バイトコード・定数プール・シンボル表は **全 irep 分をまとめた領域**です。
@@ -112,17 +113,19 @@ module FaRuby
     OFFSET_CUR_POOL        = 34
     OFFSET_CUR_SYMBOLS     = 35
     OFFSET_NUM_IREPS       = 36
+    # 呼び出し中の実引数の数。OP_SSEND が置き、OP_ENTER が定義と突き合わせる
+    OFFSET_CALL_ARGC       = 37
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
-      "max_ireps" => 16, "max_frames" => 16,
+      "max_ireps" => 16, "max_frames" => 16, "max_methods" => 32,
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
-                :max_ireps, :max_frames
+                :max_ireps, :max_frames, :max_methods
 
     # faruby_default.yml だけから作った配置
     #
@@ -143,14 +146,14 @@ module FaRuby
         align: c["align"], max_regs: c["max_regs"], max_bytecode: c["max_bytecode"],
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
         max_globals: c["max_globals"], max_ireps: c["max_ireps"],
-        max_frames: c["max_frames"]
+        max_frames: c["max_frames"], max_methods: c["max_methods"]
       )
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
                    align: 1000, max_regs: 80, max_bytecode: 3000,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
-                   max_ireps: 16, max_frames: 16)
+                   max_ireps: 16, max_frames: 16, max_methods: 32)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
@@ -163,6 +166,7 @@ module FaRuby
       @max_globals    = Integer(max_globals)
       @max_ireps      = Integer(max_ireps)
       @max_frames     = Integer(max_frames)
+      @max_methods    = Integer(max_methods)
       validate!
     end
 
@@ -174,7 +178,7 @@ module FaRuby
         device_name: device_name, base: base, instances: instances, instance_index: index,
         align: align, max_regs: max_regs, max_bytecode: max_bytecode,
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
-        max_ireps: max_ireps, max_frames: max_frames
+        max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods
       )
     end
 
@@ -190,14 +194,15 @@ module FaRuby
     def bytecode_base       = irep_table_base + max_ireps * IREP_TABLE_STRIDE
     def pool_base           = bytecode_base + max_bytecode
     def device_table_base   = pool_base + max_pool * SLOT_WORDS
-    def general_global_base = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
+    def method_table_base   = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
+    def general_global_base = method_table_base + max_methods
 
     # 各領域の合計 (パディングを含まない)
     def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
         max_ireps * IREP_TABLE_STRIDE + max_bytecode +
         max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE +
-        max_globals * SLOT_WORDS
+        max_methods + max_globals * SLOT_WORDS
     end
 
     # 1インスタンスが占有するワード数
@@ -248,6 +253,7 @@ module FaRuby
     def cur_pool_addr        = vm_state_base + OFFSET_CUR_POOL
     def cur_symbols_addr     = vm_state_base + OFFSET_CUR_SYMBOLS
     def num_ireps_addr       = vm_state_base + OFFSET_NUM_IREPS
+    def call_argc_addr       = vm_state_base + OFFSET_CALL_ARGC
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
@@ -283,6 +289,9 @@ module FaRuby
     def irep_table_addr(index) = irep_table_base + index * IREP_TABLE_STRIDE
     def frame_addr(index)      = frame_stack_base + index * FRAME_WORDS
 
+    # ユーザー定義メソッド ID => 本体の irep 番号 (0 = 未定義)
+    def method_table_addr(id)  = method_table_base + id
+
     # 汎用グローバル変数。デバイスマッピングテーブルには「値ワード」の
     # アドレスを格納するため、GETGV/SETGV の EM デバイス経路をそのまま流用できる
     def general_global_slot_addr(index) = general_global_base + index * SLOT_WORDS
@@ -304,7 +313,8 @@ module FaRuby
         ["IREPテーブル",      irep_table_base,     bytecode_base - 1],
         ["バイトコード",      bytecode_base,       pool_base - 1],
         ["定数プール",        pool_base,           device_table_base - 1],
-        ["シンボル表",        device_table_base,   general_global_base - 1],
+        ["シンボル表",        device_table_base,   method_table_base - 1],
+        ["メソッド表",        method_table_base,   general_global_base - 1],
         ["汎用グローバル変数", general_global_base, general_global_base + max_globals * SLOT_WORDS - 1],
       ]
       list << ["予備 (端数調整)", origin + content_size, origin + instance_size - 1] if padding.positive?
@@ -324,7 +334,8 @@ module FaRuby
 
       { "max_regs" => @max_regs, "max_bytecode" => @max_bytecode, "max_pool" => @max_pool,
         "max_symbols" => @max_symbols, "max_globals" => @max_globals,
-        "max_ireps" => @max_ireps, "max_frames" => @max_frames }.each do |name, value|
+        "max_ireps" => @max_ireps, "max_frames" => @max_frames,
+        "max_methods" => @max_methods }.each do |name, value|
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end
     end

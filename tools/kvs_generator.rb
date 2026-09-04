@@ -512,6 +512,188 @@ module FaRuby
       end
     end
 
+    # --- メソッドの定義と呼び出し ---
+
+    # R[a] = 子 irep b への参照 (OP_METHOD)
+    #
+    # irep は幅優先に並べてあり同じ親の子が連続するため、実行中の irep の
+    # 「最初の子の番号」に b を足せば通し番号になります。
+    def load_child_irep(name, child_name, error_code)
+      note "実行中の irep の最初の子の番号に、親から見た子の番号を足す"
+      line "Z3 = #{state(layout.cur_irep_addr)} * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
+           "#{layout.offset_of(layout.irep_table_base)} + Z#{Z_INSTANCE}"
+      line "Z4 = Z3 + #{MemoryLayout::IREP_FIRST_CHILD}"
+      line "#{scratch_lo} = #{indexed_base}:Z4 + #{operand(child_name)}"
+      if_("#{scratch_lo} >= #{state(layout.num_ireps_addr)}") do
+        note "指す先の irep が無い"
+        vm_error(error_code)
+      end
+      dest = reg_slot(name)
+      line "#{dest.value} = #{scratch_lo}"
+      line "#{dest.tag} = #{TT_PROC}"
+    end
+
+    # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
+    #
+    # 名前はホスト側でユーザー定義メソッド ID に解決済みです。シンボル表は
+    # irep ごとに別なので、ID を挟まないとどのエントリから呼んでも同じ
+    # メソッドに行き着きません。
+    def define_method(name, sym_name, error_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(error_code) }
+      line "Z6 = #{indexed_base}:Z3   ' 組み込みメソッド番号"
+      line "Z3 = Z3 + 1"
+      line "Z5 = #{indexed_base}:Z3   ' ユーザー定義メソッドID"
+      if_("Z5 = #{METHOD_ID_NONE}") do
+        note "組み込みと同じ名前は再定義できない"
+        vm_error(error_code)
+      end
+      body = reg_next_slot(name)
+      if_("#{body.tag} <> #{TT_PROC}") { vm_error(error_code) }
+      note "メソッド表 (ID => 本体の irep 番号)"
+      line "Z3 = Z5 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      line "#{indexed_base}:Z3 = #{body.value}"
+      note "OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる"
+      dest = reg_slot(name)
+      line "#{dest.value} = #{operand(sym_name)}"
+      line "#{dest.tag} = #{TT_SYMBOL}"
+    end
+
+    # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
+    #
+    # mruby は R[a] に self を置いてから OP_SEND と同じ経路に入ります。
+    # 組み込みならその場で計算し、ユーザー定義ならフレームを積んで移ります。
+    def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
+                         zero_code, depth_code)
+      note "self をレシーバ位置に置く (mruby の regs[a] = regs[0])"
+      self_slot = slot_ref([:reg_self, name], "0", reg_offset, z: Z_VALUE)
+      dest = reg_slot(name)
+      line "#{dest.value} = #{self_slot.value}"
+      line "#{dest.tag} = #{self_slot.tag}"
+
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
+      line "Z3 = Z3 + 1"
+      line "Z6 = #{indexed_base}:Z3   ' ユーザー定義メソッドID"
+
+      if_else_block("Z5 <> #{METHOD_NONE}") do
+        note "組み込みメソッド。フレームを積まずその場で計算する"
+        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
+      end
+      call_user_method(name, argc_name, unknown_code, depth_code)
+      end_block
+    end
+
+    # ユーザー定義メソッドへ移る
+    def call_user_method(name, argc_name, unknown_code, depth_code)
+      if_("Z6 = #{METHOD_ID_NONE}") do
+        note "組み込みでもユーザー定義でもない"
+        vm_error(unknown_code)
+      end
+      line "Z3 = Z6 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      line "Z5 = #{indexed_base}:Z3   ' 本体の irep 番号"
+      if_("Z5 = #{METHOD_UNDEFINED}") do
+        note "まだ def が実行されていない"
+        vm_error(unknown_code)
+      end
+
+      push_frame(depth_code)
+      note "レジスタ窓を R[a] までずらす。呼ばれた側の R[0] が呼んだ側の R[a]"
+      line "#{state(layout.reg_base_addr)} = #{state(layout.reg_base_addr)} + " \
+           "#{operand(name)} * #{SLOT_WORDS}"
+      line "#{state(layout.call_argc_addr)} = #{operand(argc_name)}"
+      switch_to_irep("Z5", depth_code)
+      line "#{pc} = 0"
+    end
+
+    # 戻り先を呼び出しスタックに積む
+    def push_frame(depth_code)
+      if_("#{state(layout.frame_sp_addr)} >= #{layout.max_frames}") do
+        note "呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない"
+        vm_error(depth_code)
+      end
+      note "戻り先 (PC・irep・レジスタ窓) を積む"
+      line "Z3 = #{state(layout.frame_sp_addr)} * #{MemoryLayout::FRAME_WORDS} + " \
+           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      { MemoryLayout::FRAME_RETURN_PC   => pc,
+        MemoryLayout::FRAME_RETURN_IREP => state(layout.cur_irep_addr),
+        MemoryLayout::FRAME_RETURN_BASE => state(layout.reg_base_addr) }.each do |field, value|
+        line "#{layout.device_name}#{field}:Z3 = #{value}"
+      end
+      line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} + 1"
+    end
+
+    # 実行中の irep を切り替える。レジスタ窓が領域に収まるかも見る
+    def switch_to_irep(index_expr, depth_code)
+      line "#{state(layout.cur_irep_addr)} = #{index_expr}"
+      load_irep_state("#{index_expr} * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
+                      "#{layout.offset_of(layout.irep_table_base)} + Z#{Z_INSTANCE}")
+      note "レジスタ窓が領域からはみ出さないこと"
+      line "#{scratch_lo} = #{state(layout.reg_base_addr)} + " \
+           "#{state(layout.nregs_addr)} * #{SLOT_WORDS}"
+      if_("#{scratch_lo} > #{layout.offset_of(layout.reg_slot_addr(layout.max_regs))}") do
+        vm_error(depth_code)
+      end
+    end
+
+    # メソッド本体の入口 (OP_ENTER)
+    #
+    # aspec は 24 ビットで、16 ビットの #{layout.device_name} には収まりません。
+    # そのため上位バイトを operand a、下位 2 バイトを operand b に分けて持ちます
+    # (fetch_u24 を参照)。必須引数の数は `aspec >> 18` で、これは上位バイトを
+    # 4 で割った値と同じです。残りのビットが立っていれば省略可能引数・可変長・
+    # キーワードのいずれかで、いずれも未対応です。
+    def enter_method(name, error_code)
+      note "必須引数の数 = aspec >> #{ASPEC_REQ_SHIFT}。上位バイトを 4 で割った値と同じ"
+      line "Z3 = #{operand(name)} / 4"
+      if_("#{operand(name)} <> Z3 * 4") do
+        note "必須引数以外の指定 (省略可能・可変長・キーワード) は未対応"
+        vm_error(error_code)
+      end
+      if_("#{operand(:b)} <> 0") { vm_error(error_code) }
+      if_("#{state(layout.call_argc_addr)} <> Z3") do
+        note "実引数の数が定義と違う"
+        vm_error(error_code)
+      end
+
+      note "引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)"
+      line "Z4 = (Z3 + 1) * #{SLOT_WORDS} + #{reg_offset}"
+      line "Z5 = #{state(layout.nregs_addr)} * #{SLOT_WORDS} + #{reg_offset} - 1"
+      if_("Z4 <= Z5") do
+        line "FOR Z6 = Z4 TO Z5"
+        indent
+        line "#{indexed_base}:Z6 = 0"
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # 呼び出し元へ戻る (OP_RETURN)
+    def return_from_method(name)
+      if_else_block("#{state(layout.frame_sp_addr)} = 0") do
+        note "トップレベルの return は VM 停止"
+        vm_finish
+      end
+      note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
+      note "これで戻り値が呼び出し元から見える位置に入る"
+      src = reg_slot(name)
+      dest = slot_ref([:reg_self, name], "0", reg_offset, z: Z_SECONDARY)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+
+      line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} - 1"
+      line "Z3 = #{state(layout.frame_sp_addr)} * #{MemoryLayout::FRAME_WORDS} + " \
+           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      line "#{pc} = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_PC}:Z3"
+      line "Z5 = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_IREP}:Z3"
+      line "#{state(layout.reg_base_addr)} = " \
+           "#{layout.device_name}#{MemoryLayout::FRAME_RETURN_BASE}:Z3"
+      line "#{state(layout.cur_irep_addr)} = Z5"
+      load_irep_state("Z5 * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
+                      "#{layout.offset_of(layout.irep_table_base)} + Z#{Z_INSTANCE}")
+      end_block
+    end
+
     # --- 組み込みメソッド ---
     #
     # 呼び出しフレームは作りません。引数は R[a+1] から連続して並び、結果は
@@ -527,6 +709,11 @@ module FaRuby
         note "メソッド名でないシンボルへの呼び出し"
         vm_error(unknown_code)
       end
+      builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
+    end
+
+    # Z5 (メソッド番号) と Z8 (引数の数) を読んだ後の共通部分
+    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
       if_("#{operand(argc_name)} <> Z8") do
         note "引数の数が定義と違う"
         note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
@@ -611,7 +798,11 @@ module FaRuby
     def fetch_operands(sizes)
       sizes.each_with_index do |bytes, i|
         target = operand(OPERAND_NAMES[i])
-        bytes == 1 ? fetch_byte(target) : fetch_u16(target)
+        case bytes
+        when 1 then fetch_byte(target)
+        when 2 then fetch_u16(target)
+        else        fetch_u24(target)
+        end
       end
     end
 
@@ -932,6 +1123,19 @@ module FaRuby
       read_bytecode_into("Z3")
       read_bytecode_into("Z4")
       line "#{target} = Z3 * 256 + Z4"
+    end
+
+    # 24ビットビッグエンディアン (OP_ENTER の aspec)
+    #
+    # #{layout.device_name} は16ビットなので 1 ワードに収まりません。上位バイトを
+    # そのオペランドに、下位 2 バイトを次のオペランドに分けて置きます。
+    # 使う側 (enter_method) はこの分け方を前提にしています。
+    def fetch_u24(target)
+      note "24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける"
+      read_bytecode_into(target)
+      read_bytecode_into("Z3")
+      read_bytecode_into("Z4")
+      line "#{operand(:b)} = Z3 * 256 + Z4   ' aspec の下位2バイト"
     end
 
     def chain_head(first, cond)

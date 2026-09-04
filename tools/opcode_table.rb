@@ -315,6 +315,36 @@ module FaRuby
         vm.if_nil(:a) { vm.jump_relative(:b) }
       end
 
+      # --- メソッドの定義 ---
+      #
+      # def は OP_TCLASS + OP_METHOD + OP_DEF の3命令になる。
+      # トップレベルにクラスは無いため、定義先は self (main) 固定。
+
+      defs << OpcodeDef.new(0x63, "R[a] = 定義先クラス (トップレベルは main)") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_OBJECT)
+      end
+
+      defs << OpcodeDef.new(0x58, "R[a] = 子 irep b への参照") do |vm|
+        vm.load_child_irep(:a, :b, IREP_INDEX_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x5F, "メソッド表に symbols[b] = R[a+1] を登録") do |vm|
+        vm.define_method(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
+      # レシーバを書かない呼び出し (foo(1) や再帰) はこちら。
+      # mruby の vm.c は regs[a] = regs[0] で self をレシーバ位置に置いてから
+      # OP_SEND と同じ経路へ入る。
+      defs << OpcodeDef.new(0x2D, "R[a] = self.symbols[b](R[a+1]..)") do |vm|
+        vm.send_self_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
+                            DIVIDE_BY_ZERO_ERROR, CALL_DEPTH_ERROR)
+      end
+
+      # メソッド本体の入口。引数の数を定義と突き合わせる
+      defs << OpcodeDef.new(0x34, "引数の数を検査し、残りのレジスタを空にする") do |vm|
+        vm.enter_method(:a, ARGUMENT_ERROR)
+      end
+
       # 組み込みメソッドの呼び出し。呼び出しフレームは作らない。
       # 引数は R[a+1] から連続して並び、結果は R[a] に返る。
       # メソッド名はホスト側で番号に解決してシンボル表に載せてある。
@@ -327,8 +357,11 @@ module FaRuby
         vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR, DIVIDE_BY_ZERO_ERROR)
       end
 
-      defs << OpcodeDef.new(0x38, "トップレベルでは VM 停止") do |vm|
-        vm.vm_finish
+      # メソッドの中なら呼び出し元へ戻り、トップレベルなら VM 停止。
+      # 呼ばれた側の R[0] は呼んだ側の R[a] と同じ場所なので、
+      # R[b] を R[0] へ写せば戻り値のコピーは要らない。
+      defs << OpcodeDef.new(0x38, "R[b] を返して呼び出し元へ (トップレベルでは VM 停止)") do |vm|
+        vm.return_from_method(:a)
       end
 
       # 二項算術: R[a] = R[a] <op> R[a+1]
@@ -383,6 +416,16 @@ module FaRuby
 
     # メソッドのレシーバまたは引数の型が扱えない
     METHOD_TYPE_ERROR = 4
+
+    # 呼び出しが深すぎる (フレームまたはレジスタが足りない)
+    # PLC はメモリが固定なので、深さの上限を決めてエラーにするしかない
+    CALL_DEPTH_ERROR = 5
+
+    # 引数の数または形が扱えない (省略可能引数・可変長・キーワードは未対応)
+    ARGUMENT_ERROR = 6
+
+    # OP_METHOD が指す子 irep が無い
+    IREP_INDEX_ERROR = 7
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {

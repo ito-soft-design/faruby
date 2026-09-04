@@ -44,6 +44,7 @@ module FaRuby
     TT_HASH    = 9
     TT_OBJECT  = 10
     TT_DEVICE  = 11    # デバイス族への参照 ($DM など)
+    TT_PROC    = 12    # メソッドの本体への参照。値は irep 番号
 
     # --- デバイス参照 (TT_DEVICE) の表現 ---
     #
@@ -147,7 +148,7 @@ module FaRuby
     #
     #   種別 0 (値)         +0 device_type / +1 device_address / +2 access_type
     #   種別 1 (デバイス族) 同上。アドレスを持たず、添字で決める
-    #   種別 2 (メソッド)   +0 METHOD_* / +1 未使用 / +2 引数の数
+    #   種別 2 (メソッド)   +0 METHOD_* / +1 ユーザー定義メソッドID / +2 引数の数
     DEVICE_TABLE_STRIDE = 4
     DEVICE_TABLE_KIND_OFFSET = 3
 
@@ -193,5 +194,28 @@ module FaRuby
     }.freeze
 
     METHOD_NAMES = BUILTIN_METHODS.to_h { |name, (code, _argc)| [code, name] }.freeze
+
+    # --- ユーザー定義メソッド ---
+    #
+    # 組み込みに無い名前にはホスト側で 1 から通し番号を振ります。シンボル表は
+    # irep ごとに別なので、同じ名前が複数のエントリに現れます。番号を挟むことで
+    # どのエントリから呼んでも同じメソッドに行き着きます。
+    #
+    # `OP_DEF` が「メソッド表[番号] = irep 番号」を書き、`OP_SSEND` が引きます。
+    # 0 は「ユーザー定義メソッドではない」印なので、番号は 1 から始めます。
+    METHOD_ID_NONE = 0
+
+    # メソッド表に入っている irep 番号 0 は「まだ定義されていない」を表します。
+    # irep 0 はトップレベルでメソッドの本体にはならないため、印として使えます。
+    METHOD_UNDEFINED = 0
+
+    # OP_ENTER のオペランド (aspec) から必須引数の数を取り出すシフト量
+    #
+    #   引数 1 個 → 0x040000 (262144)
+    #   引数 2 個 → 0x080000 (524288)
+    #
+    # 残りのビットが立っていれば省略可能引数・可変長・キーワードのいずれかで、
+    # faRuby はいずれも未対応です。
+    ASPEC_REQ_SHIFT = 18
   end
 end

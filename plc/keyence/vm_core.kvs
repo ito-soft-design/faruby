@@ -1319,6 +1319,255 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     EM0:Z9 = EM0:Z9 + EM8:Z9
                 END IF
 
+            ELSE IF EM6:Z9 = 45 THEN
+                ' OP_SSEND (BBB): R[a] = self.symbols[b](R[a+1]..)
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM8:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM9:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' self をレシーバ位置に置く (mruby の regs[a] = regs[0])
+                Z3 = 0 + EM32:Z9 + Z9
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                EM1.L:Z1 = EM1.L:Z3
+                EM0:Z1 = EM0:Z3
+                ' シンボル表参照 (4ワード/エントリ)
+                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
+                Z5 = EM0:Z3   ' メソッド番号
+                Z7 = Z3 + 2
+                Z8 = EM0:Z7   ' 引数の数
+                Z7 = Z3 + 3
+                Z4 = EM0:Z7   ' シンボル種別
+                IF Z4 <> 2 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                Z3 = Z3 + 1
+                Z6 = EM0:Z3   ' ユーザー定義メソッドID
+                IF Z5 <> 0 THEN
+                    ' 組み込みメソッド。フレームを積まずその場で計算する
+                    IF EM9:Z9 <> Z8 THEN
+                        ' 引数の数が定義と違う
+                        ' オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。
+                        ' 普通の呼び出しでは引数の数と一致し、スプラットやキーワード付きは弾かれる
+                        EM1:Z9 = 3
+                        EM2:Z9 = 3
+                        BREAK
+                    END IF
+                    Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                    IF Z5 >= 3 THEN
+                        ' 3 以上のメソッドはレシーバが数値であること
+                        IF EM0:Z1 < 4 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    END IF
+                    IF Z5 = 1 THEN
+                        ' !=
+                        ' 数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)
+                        ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
+                        ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
+                        EM16:Z9 = 0
+                        IF EM0:Z1 >= 4 THEN
+                            IF EM0:Z2 >= 4 THEN
+                                IF EM0:Z1 = 5 THEN
+                                    IF EM0:Z2 = 5 THEN
+                                        IF EM1.F:Z1 = EM1.F:Z2 THEN
+                                            EM16:Z9 = 1
+                                        END IF
+                                    ELSE
+                                        IF EM1.F:Z1 = EM1.L:Z2 THEN
+                                            EM16:Z9 = 1
+                                        END IF
+                                    END IF
+                                ELSE
+                                    IF EM0:Z2 = 5 THEN
+                                        IF EM1.L:Z1 = EM1.F:Z2 THEN
+                                            EM16:Z9 = 1
+                                        END IF
+                                    ELSE
+                                        IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                            EM16:Z9 = 1
+                                        END IF
+                                    END IF
+                                END IF
+                            ELSE
+                                ' 数値と非数値は等しくない
+                            END IF
+                        ELSE
+                            IF EM0:Z1 = EM0:Z2 THEN
+                                IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            END IF
+                        END IF
+                        IF EM16:Z9 = 1 THEN
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        ELSE
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        END IF
+                    ELSE IF Z5 = 2 THEN
+                        ' !
+                        IF EM0:Z1 > 2 THEN
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        ELSE
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        END IF
+                    ELSE IF Z5 = 3 THEN
+                        ' %
+                        ' 整数どうしのみ。実数の % は未対応
+                        IF EM0:Z2 = 4 THEN
+                            IF EM0:Z1 = 4 THEN
+                                IF EM1.L:Z2 <> 0 THEN
+                                    EM16.L:Z9 = EM1.L:Z1       ' 被除数を退避
+                                    EM1.L:Z1 = EM1.L:Z1 / EM1.L:Z2   ' 0方向へ切り捨てた商
+                                    EM18.L:Z9 = EM16.L:Z9 - EM1.L:Z1 * EM1.L:Z2   ' 余り
+                                    IF EM18.L:Z9 <> 0 THEN
+                                        ' 符号が違うときだけ除数を足して符号を合わせる
+                                        IF EM16.L:Z9 < 0 THEN
+                                            IF EM1.L:Z2 > 0 THEN
+                                                EM18.L:Z9 = EM18.L:Z9 + EM1.L:Z2
+                                            END IF
+                                        ELSE
+                                            IF EM1.L:Z2 < 0 THEN
+                                                EM18.L:Z9 = EM18.L:Z9 + EM1.L:Z2
+                                            END IF
+                                        END IF
+                                    END IF
+                                    EM1.L:Z1 = EM18.L:Z9
+                                    EM0:Z1 = 4
+                                ELSE
+                                    EM1:Z9 = 3
+                                    EM2:Z9 = 1
+                                    BREAK
+                                END IF
+                            ELSE
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 = 4 THEN
+                        ' abs
+                        IF EM0:Z1 = 5 THEN
+                            IF EM1.F:Z1 < 0 THEN
+                                EM1.F:Z1 = 0 - EM1.F:Z1
+                            END IF
+                        ELSE
+                            IF EM1.L:Z1 < 0 THEN
+                                EM1.L:Z1 = 0 - EM1.L:Z1
+                            END IF
+                        END IF
+                    ELSE IF Z5 = 5 THEN
+                        ' to_i
+                        IF EM0:Z1 = 5 THEN
+                            ' 0 方向へ切り捨て (Ruby の Float#to_i と同じ)
+                            EM16.L:Z9 = EM1.F:Z1
+                            EM1.L:Z1 = EM16.L:Z9
+                            EM0:Z1 = 4
+                        END IF
+                    ELSE IF Z5 = 6 THEN
+                        ' to_f
+                        IF EM0:Z1 = 4 THEN
+                            ' 整数→実数。同じスロットを .L で読んで .F で書くためスクラッチを挟む
+                            EM18.F:Z9 = EM1.L:Z1
+                            EM1.F:Z1 = EM18.F:Z9
+                            EM0:Z1 = 5
+                        END IF
+                    ELSE IF Z5 = 7 THEN
+                        ' floor
+                        IF EM0:Z1 = 5 THEN
+                            ' KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く
+                            EM16.L:Z9 = EM1.F:Z1
+                            IF EM1.F:Z1 < 0 THEN
+                                IF EM16.L:Z9 <> EM1.F:Z1 THEN
+                                    EM16.L:Z9 = EM16.L:Z9 - 1
+                                END IF
+                            END IF
+                            EM1.L:Z1 = EM16.L:Z9
+                            EM0:Z1 = 4
+                        END IF
+                    ELSE IF Z5 = 8 THEN
+                        ' round
+                        IF EM0:Z1 = 5 THEN
+                            ' Ruby の round は 0 から遠い方へ丸める (2.5→3, -2.5→-3)
+                            IF EM1.F:Z1 >= 0 THEN
+                                EM18.F:Z9 = EM1.F:Z1 + 0.5
+                            ELSE
+                                EM18.F:Z9 = EM1.F:Z1 - 0.5
+                            END IF
+                            EM16.L:Z9 = EM18.F:Z9
+                            EM1.L:Z1 = EM16.L:Z9
+                            EM0:Z1 = 4
+                        END IF
+                    ELSE
+                        ' 未対応のメソッド
+                        EM1:Z9 = 3
+                        EM2:Z9 = 3
+                        BREAK
+                    END IF
+                ELSE
+                    IF Z6 = 0 THEN
+                        ' 組み込みでもユーザー定義でもない
+                        EM1:Z9 = 3
+                        EM2:Z9 = 3
+                        BREAK
+                    END IF
+                    Z3 = Z6 + 4560 + Z9
+                    Z5 = EM0:Z3   ' 本体の irep 番号
+                    IF Z5 = 0 THEN
+                        ' まだ def が実行されていない
+                        EM1:Z9 = 3
+                        EM2:Z9 = 3
+                        BREAK
+                    END IF
+                    IF EM31:Z9 >= 16 THEN
+                        ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+                        EM1:Z9 = 3
+                        EM2:Z9 = 5
+                        BREAK
+                    END IF
+                    ' 戻り先 (PC・irep・レジスタ窓) を積む
+                    Z3 = EM31:Z9 * 4 + 368 + Z9
+                    EM0:Z3 = EM0:Z9
+                    EM1:Z3 = EM30:Z9
+                    EM2:Z3 = EM32:Z9
+                    EM31:Z9 = EM31:Z9 + 1
+                    ' レジスタ窓を R[a] までずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+                    EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+                    EM37:Z9 = EM9:Z9
+                    EM30:Z9 = Z5
+                    ' IREP テーブルから実行中の irep の情報を写す
+                    Z1 = Z5 * 8 + 432 + Z9
+                    EM33:Z9 = EM0:Z1
+                    EM10:Z9 = EM1:Z1
+                    EM34:Z9 = EM2:Z1
+                    EM35:Z9 = EM3:Z1
+                    EM11:Z9 = EM4:Z1
+                    ' レジスタ窓が領域からはみ出さないこと
+                    EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+                    IF EM16:Z9 > 368 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 5
+                        BREAK
+                    END IF
+                    EM0:Z9 = 0
+                END IF
+
             ELSE IF EM6:Z9 = 47 THEN
                 ' OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)
                 Z1 = EM0:Z9 + EM33:Z9 + Z9
@@ -1514,13 +1763,77 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                     BREAK
                 END IF
 
-            ELSE IF EM6:Z9 = 56 THEN
-                ' OP_RETURN (B): トップレベルでは VM 停止
+            ELSE IF EM6:Z9 = 52 THEN
+                ' OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
+                ' 24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける
                 Z1 = EM0:Z9 + EM33:Z9 + Z9
                 EM7:Z9 = EM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
-                EM1:Z9 = 2
-                BREAK
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                Z3 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                Z4 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                EM8:Z9 = Z3 * 256 + Z4   ' aspec の下位2バイト
+                ' 必須引数の数 = aspec >> 18。上位バイトを 4 で割った値と同じ
+                Z3 = EM7:Z9 / 4
+                IF EM7:Z9 <> Z3 * 4 THEN
+                    ' 必須引数以外の指定 (省略可能・可変長・キーワード) は未対応
+                    EM1:Z9 = 3
+                    EM2:Z9 = 6
+                    BREAK
+                END IF
+                IF EM8:Z9 <> 0 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 6
+                    BREAK
+                END IF
+                IF EM37:Z9 <> Z3 THEN
+                    ' 実引数の数が定義と違う
+                    EM1:Z9 = 3
+                    EM2:Z9 = 6
+                    BREAK
+                END IF
+                ' 引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)
+                Z4 = (Z3 + 1) * 4 + EM32:Z9 + Z9
+                Z5 = EM11:Z9 * 4 + EM32:Z9 + Z9 - 1
+                IF Z4 <= Z5 THEN
+                    FOR Z6 = Z4 TO Z5
+                        EM0:Z6 = 0
+                    NEXT
+                END IF
+
+            ELSE IF EM6:Z9 = 56 THEN
+                ' OP_RETURN (B): R[b] を返して呼び出し元へ (トップレベルでは VM 停止)
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                IF EM31:Z9 = 0 THEN
+                    ' トップレベルの return は VM 停止
+                    EM1:Z9 = 2
+                    BREAK
+                ELSE
+                    ' R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので
+                    ' これで戻り値が呼び出し元から見える位置に入る
+                    Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                    Z2 = 0 + EM32:Z9 + Z9
+                    EM1.L:Z2 = EM1.L:Z1
+                    EM0:Z2 = EM0:Z1
+                    EM31:Z9 = EM31:Z9 - 1
+                    Z3 = EM31:Z9 * 4 + 368 + Z9
+                    EM0:Z9 = EM0:Z3
+                    Z5 = EM1:Z3
+                    EM32:Z9 = EM2:Z3
+                    EM30:Z9 = Z5
+                    ' IREP テーブルから実行中の irep の情報を写す
+                    Z1 = Z5 * 8 + 432 + Z9
+                    EM33:Z9 = EM0:Z1
+                    EM10:Z9 = EM1:Z1
+                    EM34:Z9 = EM2:Z1
+                    EM35:Z9 = EM3:Z1
+                    EM11:Z9 = EM4:Z1
+                END IF
 
             ELSE IF EM6:Z9 = 60 THEN
                 ' OP_ADD (B): R[a] = R[a] + R[a+1]
@@ -1959,6 +2272,80 @@ FOR Z9 = 20000 TO 25000 STEP 5000
                         END IF
                     END IF
                 END IF
+
+            ELSE IF EM6:Z9 = 88 THEN
+                ' OP_METHOD (BB): R[a] = 子 irep b への参照
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM8:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
+                Z3 = EM30:Z9 * 8 + 432 + Z9
+                Z4 = Z3 + 5
+                EM16:Z9 = EM0:Z4 + EM8:Z9
+                IF EM16:Z9 >= EM36:Z9 THEN
+                    ' 指す先の irep が無い
+                    EM1:Z9 = 3
+                    EM2:Z9 = 7
+                    BREAK
+                END IF
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                EM1.L:Z1 = EM16:Z9
+                EM0:Z1 = 12
+
+            ELSE IF EM6:Z9 = 95 THEN
+                ' OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM8:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' シンボル表参照 (4ワード/エントリ)
+                Z3 = EM8:Z9 * 4 + EM35:Z9 + Z9
+                Z5 = EM0:Z3   ' メソッド番号
+                Z7 = Z3 + 2
+                Z8 = EM0:Z7   ' 引数の数
+                Z7 = Z3 + 3
+                Z4 = EM0:Z7   ' シンボル種別
+                IF Z4 <> 2 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                Z6 = EM0:Z3   ' 組み込みメソッド番号
+                Z3 = Z3 + 1
+                Z5 = EM0:Z3   ' ユーザー定義メソッドID
+                IF Z5 = 0 THEN
+                    ' 組み込みと同じ名前は再定義できない
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                IF EM0:Z2 <> 12 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                ' メソッド表 (ID => 本体の irep 番号)
+                Z3 = Z5 + 4560 + Z9
+                EM0:Z3 = EM1.L:Z2
+                ' OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                EM1.L:Z1 = EM8:Z9
+                EM0:Z1 = 6
+
+            ELSE IF EM6:Z9 = 99 THEN
+                ' OP_TCLASS (B): R[a] = 定義先クラス (トップレベルは main)
+                Z1 = EM0:Z9 + EM33:Z9 + Z9
+                EM7:Z9 = EM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                EM1.L:Z1 = 0
+                EM0:Z1 = 10
 
             ELSE IF EM6:Z9 = 105 THEN
                 ' OP_STOP (Z): VM 停止
