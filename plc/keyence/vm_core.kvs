@@ -1621,7 +1621,7 @@ FOR Z9 = 20000 TO 21000 STEP 1000
                             EM0:Z1 = 4
                         END IF
                     ELSE
-                        ' 未対応のメソッド
+                        ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                         EM1:Z9 = 3
                         EM2:Z9 = 3
                         BREAK
@@ -1866,11 +1866,123 @@ FOR Z9 = 20000 TO 21000 STEP 1000
                         EM0:Z1 = 4
                     END IF
                 ELSE
-                    ' 未対応のメソッド
+                    ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                     EM1:Z9 = 3
                     EM2:Z9 = 3
                     BREAK
                 END IF
+
+            ELSE IF EM6:Z9 = 48 THEN
+                ' OP_SENDB (BBB): R[a].symbols[b](R[a+1]..) { ブロック }
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM9:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' シンボル表参照 (4ワード/エントリ)
+                Z3 = EM8:Z9 * 4 + EM35:Z9
+                Z5 = FM0:Z3   ' メソッド番号
+                Z7 = Z3 + 2
+                Z8 = FM0:Z7   ' 引数の数
+                Z7 = Z3 + 3
+                Z4 = FM0:Z7   ' シンボル種別
+                IF Z4 <> 2 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                IF Z5 < 9 THEN
+                    ' ブロックを取らないメソッドにブロックを渡した
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                IF EM9:Z9 <> Z8 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 3
+                    BREAK
+                END IF
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                IF EM0:Z1 <> 4 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 4
+                    BREAK
+                END IF
+                ' ブロックは引数の後ろ R[a + 引数の数 + 1] にある
+                Z3 = (EM7:Z9 + EM9:Z9 + 1) * 4 + EM32:Z9 + Z9
+                IF EM0:Z3 <> 12 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 9
+                    BREAK
+                END IF
+                IF Z5 = 9 THEN
+                    ' n.times は 0 から n-1 まで
+                    EM16.L:Z9 = 0
+                    EM18.L:Z9 = EM1.L:Z1 - 1
+                ELSE
+                    ' a.upto(b) は a から b まで
+                    Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                    IF EM0:Z2 <> 4 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 4
+                        BREAK
+                    END IF
+                    EM16.L:Z9 = EM1.L:Z1
+                    EM18.L:Z9 = EM1.L:Z2
+                END IF
+                IF EM16.L:Z9 <= EM18.L:Z9 THEN
+                    IF EM31:Z9 >= 16 THEN
+                        ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+                        EM1:Z9 = 3
+                        EM2:Z9 = 5
+                        BREAK
+                    END IF
+                    ' 戻り先を積む
+                    Z3 = EM31:Z9 * 10 + 368 + Z9
+                    EM0:Z3 = EM0:Z9
+                    EM1:Z3 = EM30:Z9
+                    EM2:Z3 = EM32:Z9
+                    EM4:Z3 = 65535
+                    EM5:Z3 = 1
+                    ' レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+                    EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+                    EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
+                    EM31:Z9 = EM31:Z9 + 1
+                    ' 窓をずらした後、ブロックは R[引数の数 + 1] にある
+                    Z2 = (EM9:Z9 + 1) * 4 + EM32:Z9 + Z9
+                    Z6 = EM1:Z2       ' 本体の irep
+                    Z7 = EM2:Z2   ' 定義元のフレーム
+                    ' 反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)
+                    EM4:Z3 = Z7
+                    EM6.L:Z3 = EM16.L:Z9
+                    EM8.L:Z3 = EM18.L:Z9
+                    Z2 = 4 + EM32:Z9 + Z9
+                    EM1.L:Z2 = EM16.L:Z9
+                    EM0:Z2 = 4
+                    ' ブロックの引数は常に 1 個。引数を書かないブロックでも渡す
+                    EM37:Z9 = 1
+                    EM30:Z9 = Z6
+                    ' IREP テーブルから実行中の irep の情報を写す
+                    Z1 = Z6 * 8 + EM38:Z9
+                    EM33:Z9 = FM0:Z1
+                    EM10:Z9 = FM1:Z1
+                    EM34:Z9 = FM2:Z1
+                    EM35:Z9 = FM3:Z1
+                    EM11:Z9 = FM4:Z1
+                    ' レジスタ窓が領域からはみ出さないこと
+                    EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+                    IF EM16:Z9 > 368 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 5
+                        BREAK
+                    END IF
+                    EM0:Z9 = 0
+                END IF
+                ' 1 回も回らないときはレシーバがそのまま呼び出しの値になる
 
             ELSE IF EM6:Z9 = 52 THEN
                 ' OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
@@ -1898,13 +2010,28 @@ FOR Z9 = 20000 TO 21000 STEP 1000
                     EM2:Z9 = 6
                     BREAK
                 END IF
-                IF EM37:Z9 <> Z3 THEN
-                    ' 実引数の数が定義と違う
-                    EM1:Z9 = 3
-                    EM2:Z9 = 6
-                    BREAK
+                ' ブロックは引数の数を検査しない。Ruby は足りなければ nil、余れば捨てる
+                ' (引数を書かないブロックでも times は 1 個渡す)
+                Z4 = 0
+                IF EM31:Z9 > 0 THEN
+                    Z5 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                    IF EM5:Z5 = 1 THEN
+                        Z4 = 1
+                    END IF
+                END IF
+                IF Z4 = 0 THEN
+                    IF EM37:Z9 <> Z3 THEN
+                        ' 実引数の数が定義と違う
+                        EM1:Z9 = 3
+                        EM2:Z9 = 6
+                        BREAK
+                    END IF
                 END IF
                 ' 引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)
+                ' 受け取れなかった引数も空になる (Ruby の nil に相当)
+                IF EM37:Z9 < Z3 THEN
+                    Z3 = EM37:Z9
+                END IF
                 Z4 = (Z3 + 1) * 4 + EM32:Z9 + Z9
                 Z5 = EM11:Z9 * 4 + EM32:Z9 + Z9 - 1
                 IF Z4 <= Z5 THEN
@@ -1923,26 +2050,91 @@ FOR Z9 = 20000 TO 21000 STEP 1000
                     EM1:Z9 = 2
                     BREAK
                 ELSE
-                    ' R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので
-                    ' これで戻り値が呼び出し元から見える位置に入る
-                    Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                    Z2 = 0 + EM32:Z9 + Z9
-                    EM1.L:Z2 = EM1.L:Z1
-                    EM0:Z2 = EM0:Z1
-                    EM31:Z9 = EM31:Z9 - 1
-                    Z3 = EM31:Z9 * 10 + 368 + Z9
-                    EM0:Z9 = EM0:Z3
-                    Z5 = EM1:Z3
-                    EM32:Z9 = EM2:Z3
-                    EM30:Z9 = Z5
-                    ' IREP テーブルから実行中の irep の情報を写す
-                    Z1 = Z5 * 8 + EM38:Z9
-                    EM33:Z9 = FM0:Z1
-                    EM10:Z9 = FM1:Z1
-                    EM34:Z9 = FM2:Z1
-                    EM35:Z9 = FM3:Z1
-                    EM11:Z9 = FM4:Z1
+                    Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                    IF EM5:Z3 = 1 THEN
+                        EM16.L:Z9 = EM6.L:Z3 + 1
+                        IF EM16.L:Z9 <= EM8.L:Z3 THEN
+                            ' 次の回。PC を 0 に戻し、ブロックの引数を更新するだけ
+                            ' irep もレジスタ窓もそのまま使い回す
+                            EM6.L:Z3 = EM16.L:Z9
+                            Z2 = 4 + EM32:Z9 + Z9
+                            EM1.L:Z2 = EM16.L:Z9
+                            EM0:Z2 = 4
+                            EM0:Z9 = 0
+                        ELSE
+                            ' 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
+                            EM31:Z9 = EM31:Z9 - 1
+                            Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                            EM0:Z9 = EM0:Z3
+                            Z5 = EM1:Z3
+                            EM32:Z9 = EM2:Z3
+                            EM30:Z9 = Z5
+                            ' IREP テーブルから実行中の irep の情報を写す
+                            Z1 = Z5 * 8 + EM38:Z9
+                            EM33:Z9 = FM0:Z1
+                            EM10:Z9 = FM1:Z1
+                            EM34:Z9 = FM2:Z1
+                            EM35:Z9 = FM3:Z1
+                            EM11:Z9 = FM4:Z1
+                        END IF
+                    ELSE
+                        ' R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので
+                        ' これで戻り値が呼び出し元から見える位置に入る
+                        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                        Z2 = 0 + EM32:Z9 + Z9
+                        EM1.L:Z2 = EM1.L:Z1
+                        EM0:Z2 = EM0:Z1
+                        EM31:Z9 = EM31:Z9 - 1
+                        Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                        EM0:Z9 = EM0:Z3
+                        Z5 = EM1:Z3
+                        EM32:Z9 = EM2:Z3
+                        EM30:Z9 = Z5
+                        ' IREP テーブルから実行中の irep の情報を写す
+                        Z1 = Z5 * 8 + EM38:Z9
+                        EM33:Z9 = FM0:Z1
+                        EM10:Z9 = FM1:Z1
+                        EM34:Z9 = FM2:Z1
+                        EM35:Z9 = FM3:Z1
+                        EM11:Z9 = FM4:Z1
+                    END IF
                 END IF
+
+            ELSE IF EM6:Z9 = 58 THEN
+                ' OP_BREAK (B): 反復を打ち切って R[a] を返す
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                IF EM31:Z9 = 0 THEN
+                    ' 反復の外での break
+                    EM1:Z9 = 3
+                    EM2:Z9 = 9
+                    BREAK
+                END IF
+                Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                IF EM5:Z3 <> 1 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 9
+                    BREAK
+                END IF
+                ' break の値を R[0] へ。R[0] は呼んだ側の R[a] と同じ場所
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                Z2 = 0 + EM32:Z9 + Z9
+                EM1.L:Z2 = EM1.L:Z1
+                EM0:Z2 = EM0:Z1
+                EM31:Z9 = EM31:Z9 - 1
+                Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                EM0:Z9 = EM0:Z3
+                Z5 = EM1:Z3
+                EM32:Z9 = EM2:Z3
+                EM30:Z9 = Z5
+                ' IREP テーブルから実行中の irep の情報を写す
+                Z1 = Z5 * 8 + EM38:Z9
+                EM33:Z9 = FM0:Z1
+                EM10:Z9 = FM1:Z1
+                EM34:Z9 = FM2:Z1
+                EM35:Z9 = FM3:Z1
+                EM11:Z9 = FM4:Z1
 
             ELSE IF EM6:Z9 = 60 THEN
                 ' OP_ADD (B): R[a] = R[a] + R[a+1]

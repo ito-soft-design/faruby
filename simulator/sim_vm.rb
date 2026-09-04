@@ -275,27 +275,133 @@ module FaRuby
       aspec = operand(name)
       required = aspec >> ASPEC_REQ_SHIFT
       return vm_error(error_code) unless aspec == required << ASPEC_REQ_SHIFT
-      return vm_error(error_code) unless @em.read_u16(layout.call_argc_addr) == required
+
+      argc = @em.read_u16(layout.call_argc_addr)
+      # ブロックは引数の数を検査しない。Ruby は足りなければ nil、余れば捨てる
+      return vm_error(error_code) if !in_block? && argc != required
 
       # 引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)
-      ((required + 1)...@em.read_u16(layout.nregs_addr)).each do |i|
+      # 受け取れなかった引数も空になる (Ruby の nil に相当)
+      (([required, argc].min + 1)...@em.read_u16(layout.nregs_addr)).each do |i|
         SLOT_WORDS.times { |w| @em.write_u16(reg_base + i * SLOT_WORDS + w, 0) }
       end
     end
 
+    # 実行中のフレームが反復 (ブロック) かどうか
+    def in_block?
+      return false if frame_sp.zero?
+
+      frame_word(current_frame, MemoryLayout::FRAME_KIND) ==
+        MemoryLayout::FRAME_KIND_ITERATE
+    end
+
     # 呼び出し元へ戻る (OP_RETURN)
+    #
+    # 反復のフレームなら「戻る」のではなく次の回に入り直す。
+    # VM は再帰できないため、繰り返しはここで組み立てる。
     def return_from_method(name)
       return vm_finish if frame_sp.zero?
+
+      addr = layout.frame_addr(current_frame)
+      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_ITERATE
+        return advance_iteration(addr)
+      end
 
       # R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所
       index = operand(name)
       write_slot(0, read_reg_tag(index), read_reg(index))
+      pop_frame
+    end
 
+    # 次の回があれば入り直し、無ければ抜ける
+    def advance_iteration(addr)
+      index = @em.read_s32(addr + MemoryLayout::FRAME_INDEX) + 1
+      # 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
+      return pop_frame if index > @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
+
+      @em.write_s32(addr + MemoryLayout::FRAME_INDEX, index)
+      write_slot(1, TT_INTEGER, index)
+      @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # 積んであるフレームから PC・irep・レジスタ窓を復元する
+    def pop_frame
       @em.write_u16(layout.frame_sp_addr, frame_sp - 1)
       addr = layout.frame_addr(frame_sp)
       @em.write_u16(layout.pc_addr, @em.read_u16(addr + MemoryLayout::FRAME_RETURN_PC))
       @em.write_u16(layout.reg_base_addr, @em.read_u16(addr + MemoryLayout::FRAME_RETURN_BASE))
       switch_to_irep(@em.read_u16(addr + MemoryLayout::FRAME_RETURN_IREP))
+    end
+
+    # --- 反復 ---
+
+    # R[a].メソッド(R[a+1]..) { ブロック } (OP_SENDB)
+    def send_block_method(name, sym_name, argc_name, unknown_code, type_code,
+                          block_code, depth_code)
+      code, _id, argc, kind = device_entry(operand(sym_name))
+      return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
+      return vm_error(unknown_code) if code < METHOD_BLOCK_MIN
+      return vm_error(unknown_code) unless operand(argc_name) == argc
+
+      index = operand(name)
+      return vm_error(type_code) unless read_reg_tag(index) == TT_INTEGER
+
+      # ブロックは引数の後ろ R[a + 引数の数 + 1] にある
+      block = index + argc + 1
+      return vm_error(block_code) unless read_reg_tag(block) == TT_PROC
+
+      from, limit = iteration_range(code, index, argc)
+      return vm_error(type_code) unless from
+      # 1 回も回らないときはレシーバがそのまま呼び出しの値になる
+      return if from > limit
+
+      enter_iteration(index, block, from, limit, depth_code)
+    end
+
+    # 反復の範囲 [開始, 上限]。扱えない型なら nil
+    def iteration_range(code, index, _argc)
+      return [0, read_reg(index) - 1] if code == METHOD_TIMES
+
+      limit = index + 1
+      return nil unless read_reg_tag(limit) == TT_INTEGER
+
+      [read_reg(index), read_reg(limit)]
+    end
+
+    # 反復フレームを積み、ブロックの本体へ移る
+    def enter_iteration(index, block, from, limit, depth_code)
+      return vm_error(depth_code) if frame_sp >= layout.max_frames
+
+      irep  = @em.read_u16(reg_addr(block))
+      outer = @em.read_u16(reg_addr(block) + 1)
+
+      push_frame(index * SLOT_WORDS, outer: outer,
+                 kind: MemoryLayout::FRAME_KIND_ITERATE)
+      addr = layout.frame_addr(current_frame)
+      @em.write_s32(addr + MemoryLayout::FRAME_INDEX, from)
+      @em.write_s32(addr + MemoryLayout::FRAME_LIMIT, limit)
+
+      # ブロックの引数は常に 1 個。引数を書かないブロックでも渡す
+      write_slot(1, TT_INTEGER, from)
+      @em.write_u16(layout.call_argc_addr, 1)
+      switch_to_irep(irep)
+      return vm_error(depth_code) unless register_window_fits?
+
+      @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # 反復を打ち切って R[a] を返す (OP_BREAK)
+    def break_from_block(name, block_code)
+      return vm_error(block_code) if frame_sp.zero?
+
+      addr = layout.frame_addr(current_frame)
+      unless @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_ITERATE
+        return vm_error(block_code)
+      end
+
+      index = operand(name)
+      write_slot(0, read_reg_tag(index), read_reg(index))
+      pop_frame
     end
 
     # --- 組み込みメソッド ---
@@ -311,9 +417,10 @@ module FaRuby
     end
 
     def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code, zero_code)
+      # ブロックを取るメソッドはブロック無しでは呼べない
+      return vm_error(unknown_code) unless BUILTIN_PLAIN_METHODS.key?(code)
       return vm_error(unknown_code) unless given_argc == argc
       return vm_error(type_code) if code >= METHOD_NUMERIC_MIN && !numeric_tag?(read_reg_tag(index))
-      return vm_error(unknown_code) unless METHOD_NAMES.key?(code)
 
       apply_method(code, index, type_code, zero_code)
     end
@@ -489,7 +596,8 @@ module FaRuby
 
     # 本体の irep と定義元のフレームを 2 ワードに詰める
     def write_proc(index, irep, frame)
-      @em.write_u16(layout.reg_type_addr(index), TT_PROC)
+      # レジスタ窓を見る reg_type_addr を使う。layout の方は窓のずれを知らない
+      @em.write_u16(reg_type_addr(index), TT_PROC)
       @em.write_u16(reg_addr(index), irep)
       @em.write_u16(reg_addr(index) + 1, frame)
     end

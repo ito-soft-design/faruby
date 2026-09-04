@@ -243,8 +243,18 @@ class TestMethods < Minitest::Test
 
     assert_includes source, "' メソッド番号"
     assert_includes source, "IF Z5 >= #{METHOD_NUMERIC_MIN} THEN"
-    METHOD_NAMES.each_key do |code|
+    BUILTIN_PLAIN_METHODS.each_key do |code|
       assert_includes source, "IF Z5 = #{code} THEN", "メソッド番号 #{code} の分岐"
+    end
+  end
+
+  # ブロックを取るメソッドは OP_SEND の振り分けに入れない。
+  # ブロック無しで呼ばれたら「未対応のメソッド」で止まる
+  def test_block_methods_are_not_in_the_plain_dispatch
+    %w[times upto].each do |name|
+      code = BUILTIN_METHODS.fetch(name).first
+      refute_includes BUILTIN_PLAIN_METHODS.keys, code, name
+      assert_operator code, :>=, METHOD_BLOCK_MIN, name
     end
   end
 end

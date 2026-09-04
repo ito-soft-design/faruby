@@ -177,9 +177,16 @@ module FaRuby
     METHOD_TO_F  = 6
     METHOD_FLOOR = 7
     METHOD_ROUND = 8
+    METHOD_TIMES = 9    # ブロックを取る
+    METHOD_UPTO  = 10   # ブロックを取る
 
     # これ以上のメソッドはレシーバが数値であること
     METHOD_NUMERIC_MIN = METHOD_MOD
+
+    # これ以上のメソッドはブロックを取る (OP_SENDB でしか呼べない)
+    #
+    # 並びに意味があるのは真偽判定のタグ順と同じ理由です。1 比較で振り分けます。
+    METHOD_BLOCK_MIN = METHOD_TIMES
 
     # メソッド名 => [番号, 引数の数]
     BUILTIN_METHODS = {
@@ -191,9 +198,15 @@ module FaRuby
       "to_f"  => [METHOD_TO_F,  0],
       "floor" => [METHOD_FLOOR, 0],
       "round" => [METHOD_ROUND, 0],
+      "times" => [METHOD_TIMES, 0],
+      "upto"  => [METHOD_UPTO,  1],
     }.freeze
 
     METHOD_NAMES = BUILTIN_METHODS.to_h { |name, (code, _argc)| [code, name] }.freeze
+
+    # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
+    BUILTIN_PLAIN_METHODS =
+      METHOD_NAMES.reject { |code, _| code >= METHOD_BLOCK_MIN }.freeze
 
     # --- ユーザー定義メソッド ---
     #

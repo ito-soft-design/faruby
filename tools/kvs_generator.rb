@@ -780,12 +780,29 @@ module FaRuby
         vm_error(error_code)
       end
       if_("#{operand(:b)} <> 0") { vm_error(error_code) }
-      if_("#{state(layout.call_argc_addr)} <> Z3") do
-        note "実引数の数が定義と違う"
-        vm_error(error_code)
+
+      note "ブロックは引数の数を検査しない。Ruby は足りなければ nil、余れば捨てる"
+      note "(引数を書かないブロックでも times は 1 個渡す)"
+      line "Z4 = 0"
+      if_("#{state(layout.frame_sp_addr)} > 0") do
+        line "Z5 = #{top_frame_expr}"
+        if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z5 = " \
+            "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+          line "Z4 = 1"
+        end
+      end
+      if_("Z4 = 0") do
+        if_("#{state(layout.call_argc_addr)} <> Z3") do
+          note "実引数の数が定義と違う"
+          vm_error(error_code)
+        end
       end
 
       note "引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)"
+      note "受け取れなかった引数も空になる (Ruby の nil に相当)"
+      if_("#{state(layout.call_argc_addr)} < Z3") do
+        line "Z3 = #{state(layout.call_argc_addr)}"
+      end
       line "Z4 = (Z3 + 1) * #{SLOT_WORDS} + #{reg_offset}"
       line "Z5 = #{state(layout.nregs_addr)} * #{SLOT_WORDS} + #{reg_offset} - 1"
       if_("Z4 <= Z5") do
@@ -798,10 +815,18 @@ module FaRuby
     end
 
     # 呼び出し元へ戻る (OP_RETURN)
+    #
+    # 反復のフレームなら「戻る」のではなく **次の回に入り直します**。
+    # VM は再帰できないため、繰り返しはここで組み立てます。
     def return_from_method(name)
       if_else_block("#{state(layout.frame_sp_addr)} = 0") do
         note "トップレベルの return は VM 停止"
         vm_finish
+      end
+      line "Z3 = #{top_frame_expr}"
+      if_else_block("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
+                    "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+        advance_iteration
       end
       note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
       note "これで戻り値が呼び出し元から見える位置に入る"
@@ -809,18 +834,136 @@ module FaRuby
       dest = slot_ref([:reg_self, name], "0", reg_offset, z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
+      pop_frame
+      end_block
+      end_block
+    end
 
+    # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
+    def advance_iteration
+      line "#{scratch32} = #{layout.device_name}#{MemoryLayout::FRAME_INDEX}.L:Z3 + 1"
+      if_else_block("#{scratch32} <= #{layout.device_name}#{MemoryLayout::FRAME_LIMIT}.L:Z3") do
+        note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
+        note "irep もレジスタ窓もそのまま使い回す"
+        line "#{layout.device_name}#{MemoryLayout::FRAME_INDEX}.L:Z3 = #{scratch32}"
+        set_block_argument
+        line "#{pc} = 0"
+      end
+      note "反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる"
+      pop_frame
+      end_block
+    end
+
+    # ブロックの引数 (R[1]) に反復の現在値を置く
+    def set_block_argument
+      line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
+      line "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z2 = #{scratch32}"
+      line "#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z2 = #{TT_INTEGER}"
+    end
+
+    # 積んであるフレームから PC・irep・レジスタ窓を復元する
+    def pop_frame
       line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} - 1"
-      line "Z3 = #{state(layout.frame_sp_addr)} * #{MemoryLayout::FRAME_WORDS} + " \
-           "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+      line "Z3 = #{top_frame_expr}"
       line "#{pc} = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_PC}:Z3"
       line "Z5 = #{layout.device_name}#{MemoryLayout::FRAME_RETURN_IREP}:Z3"
       line "#{state(layout.reg_base_addr)} = " \
            "#{layout.device_name}#{MemoryLayout::FRAME_RETURN_BASE}:Z3"
       line "#{state(layout.cur_irep_addr)} = Z5"
-      load_irep_state("Z5 * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
-                      "#{irep_table_offset}")
+      load_irep_state("Z5 * #{MemoryLayout::IREP_TABLE_STRIDE} + #{irep_table_offset}")
+    end
+
+    # 積んである一番上のフレームを指す式 (frame_sp - 1 段目)
+    def top_frame_expr
+      "(#{state(layout.frame_sp_addr)} - 1) * #{MemoryLayout::FRAME_WORDS} + " \
+        "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+    end
+
+    # --- 反復 ---
+
+    # R[a].メソッド(R[a+1]..) { ブロック } (OP_SENDB)
+    #
+    # `3.times do |i| ... end` は OP_SENDB ですが、繰り返すのは `Integer#times`
+    # の側です。VM は再帰できないため、反復フレームに「今何回目か」と「上限」を
+    # 持たせ、ブロックの OP_RETURN で次の回に入り直します。
+    def send_block_method(name, sym_name, argc_name, unknown_code, type_code,
+                          block_code, depth_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
+      if_("Z5 < #{METHOD_BLOCK_MIN}") do
+        note "ブロックを取らないメソッドにブロックを渡した"
+        vm_error(unknown_code)
+      end
+      if_("#{operand(argc_name)} <> Z8") { vm_error(unknown_code) }
+
+      recv = reg_slot(name)
+      if_("#{recv.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+
+      note "ブロックは引数の後ろ R[a + 引数の数 + 1] にある"
+      block = slot_ref([:block, name],
+                       "(#{operand(name)} + #{operand(argc_name)} + 1) * #{SLOT_WORDS}",
+                       reg_offset, z: Z_VALUE)
+      if_("#{block.tag} <> #{TT_PROC}") { vm_error(block_code) }
+
+      iteration_range(name, recv, type_code)
+      if_("#{scratch32} <= #{scratch32_b}") do
+        enter_iteration(name, argc_name, depth_code)
+      end
+      note "1 回も回らないときはレシーバがそのまま呼び出しの値になる"
+    end
+
+    # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
+    def iteration_range(name, recv, type_code)
+      if_else_block("Z5 = #{METHOD_TIMES}") do
+        note "n.times は 0 から n-1 まで"
+        line "#{scratch32} = 0"
+        line "#{scratch32_b} = #{recv.value} - 1"
+      end
+      note "a.upto(b) は a から b まで"
+      limit = reg_next_slot(name)
+      if_("#{limit.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      line "#{scratch32} = #{recv.value}"
+      line "#{scratch32_b} = #{limit.value}"
       end_block
+    end
+
+    # 反復フレームを積み、ブロックの本体へ移る
+    def enter_iteration(name, argc_name, depth_code)
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE,
+                 kind: MemoryLayout::FRAME_KIND_ITERATE)
+      note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
+      line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
+      line "Z6 = #{layout.device_name}#{SLOT_VALUE_OFFSET}:Z2       ' 本体の irep"
+      line "Z7 = #{layout.device_name}#{SLOT_VALUE_OFFSET + 1}:Z2   ' 定義元のフレーム"
+      note "反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)"
+      line "#{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3 = Z7"
+      line "#{layout.device_name}#{MemoryLayout::FRAME_INDEX}.L:Z3 = #{scratch32}"
+      line "#{layout.device_name}#{MemoryLayout::FRAME_LIMIT}.L:Z3 = #{scratch32_b}"
+      set_block_argument
+      note "ブロックの引数は常に 1 個。引数を書かないブロックでも渡す"
+      line "#{state(layout.call_argc_addr)} = 1"
+      switch_to_irep("Z6", depth_code)
+      line "#{pc} = 0"
+    end
+
+    # 反復を打ち切って R[a] を返す (OP_BREAK)
+    def break_from_block(name, block_code)
+      if_("#{state(layout.frame_sp_addr)} = 0") do
+        note "反復の外での break"
+        vm_error(block_code)
+      end
+      line "Z3 = #{top_frame_expr}"
+      if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 <> " \
+          "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+        vm_error(block_code)
+      end
+      note "break の値を R[0] へ。R[0] は呼んだ側の R[a] と同じ場所"
+      src = reg_slot(name)
+      dest = slot_ref([:reg_self, name], "0", reg_offset, z: Z_SECONDARY)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+      pop_frame
     end
 
     # --- 組み込みメソッド ---
@@ -859,7 +1002,7 @@ module FaRuby
       end
 
       first = true
-      METHOD_NAMES.each_key do |code|
+      BUILTIN_PLAIN_METHODS.each_key do |code|
         chain_head(first, "Z5 = #{code}")
         first = false
         indent
@@ -869,7 +1012,7 @@ module FaRuby
       end
       line "ELSE"
       indent
-      note "未対応のメソッド"
+      note "未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)"
       vm_error(unknown_code)
       dedent
       line "END IF"

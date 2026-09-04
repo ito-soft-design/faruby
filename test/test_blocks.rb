@@ -202,6 +202,171 @@ class TestBlocks < Minitest::Test
     assert_equal UPVAR_ERROR, error
   end
 
+  # === 反復 (Ruby から動かす) ===
+
+  def mrbc_path
+    @mrbc_path ||= begin
+      require_relative "../tools/config"
+      FaRuby::Config.new(nil).mrbc_path
+    rescue StandardError
+      nil
+    end
+  end
+
+  def run_source(source)
+    skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
+
+    dir = File.expand_path("../tmp", __dir__)
+    Dir.mkdir(dir) unless Dir.exist?(dir)
+    src = File.join(dir, "blocks_test.rb")
+    mrb = File.join(dir, "blocks_test.mrb")
+    File.binwrite(src, source)
+    assert system(mrbc_path, "-o", mrb, src, out: File::NULL, err: File::NULL), "mrbc に失敗"
+
+    parser = FaRuby::MrbParser.new(File.binread(mrb))
+    parser.parse
+    sim = FaRuby::KvVmSimulator.new(layout: layout)
+    sim.load_irep_and_run(parser.irep, max_steps: 200_000)
+    sim
+  ensure
+    [src, mrb].each { |f| File.delete(f) if f && File.exist?(f) }
+  end
+
+  def dm0(sim)
+    value = sim.devices[DEVICE_TYPE_DM].read_u16(0)
+    value > 32_767 ? value - 65_536 : value
+  end
+
+  def assert_result(expected, source, message = nil)
+    sim = run_source(source)
+    err = sim.em.read_u16(layout.error_addr)
+    assert_equal VM_FINISHED, sim.status, "#{message} 実行が完了しなかった (error=#{err})"
+    assert_equal expected, dm0(sim), message
+  end
+
+  def test_times_passes_the_index
+    assert_result 3, <<~RUBY
+      sum = 0
+      3.times do |i|
+        sum = sum + i
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  # 引数を書かないブロックにも times は 1 個渡す。
+  # メソッドと同じ検査をすると引数の数が合わずに止まる
+  def test_a_block_without_parameters
+    assert_result 4, <<~RUBY
+      n = 0
+      4.times do
+        n = n + 1
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  def test_zero_times_never_enters_the_block
+    assert_result 0, <<~RUBY
+      n = 0
+      0.times do
+        n = n + 1
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  def test_upto
+    assert_result 12, <<~RUBY
+      sum = 0
+      3.upto(5) do |i|
+        sum = sum + i
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  def test_upto_with_a_smaller_limit_never_enters_the_block
+    assert_result 0, <<~RUBY
+      n = 0
+      5.upto(3) do
+        n = n + 1
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  # 内側のブロックから外側の外側を読む。段数 1 の OP_GETUPVAR になる
+  def test_nested_blocks_reach_the_outermost_variable
+    assert_result 6, <<~RUBY
+      s = 0
+      3.times do |i|
+        2.times do |j|
+          s = s + i
+        end
+      end
+      $DM0 = s
+    RUBY
+  end
+
+  def test_break_stops_the_iteration
+    assert_result 3, <<~RUBY
+      n = 0
+      10.times do |i|
+        break if i == 3
+        n = n + 1
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  # メソッドのフレームの上に反復のフレームが積まれる
+  def test_a_block_inside_a_method
+    assert_result 6, <<~RUBY
+      def total(n)
+        s = 0
+        n.times do |i|
+          s = s + i
+        end
+        s
+      end
+      $DM0 = total(4)
+    RUBY
+  end
+
+  def test_calling_a_method_from_inside_a_block
+    assert_result 6, <<~RUBY
+      def twice(v)
+        v * 2
+      end
+      s = 0
+      3.times do |i|
+        s = s + twice(i)
+      end
+      $DM0 = s
+    RUBY
+  end
+
+  # 反復が終わったら呼び出し元の続きに戻る
+  def test_execution_continues_after_the_block
+    assert_result 15, <<~RUBY
+      s = 0
+      3.times do |i|
+        s = s + i
+      end
+      s = s + 12
+      $DM0 = s
+    RUBY
+  end
+
+  # ブロックを取るメソッドはブロック無しでは呼べない
+  def test_times_without_a_block_stops_the_vm
+    sim = run_source("$DM0 = 3.times\n")
+
+    assert_equal VM_ERROR, sim.status
+    assert_equal UNKNOWN_METHOD_ERROR, sim.em.read_u16(layout.error_addr)
+  end
+
   # === 生成コード ===
 
   # FOR の中で BREAK すると FOR を抜けるだけで命令ループから出られない。

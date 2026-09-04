@@ -346,6 +346,20 @@ module FaRuby
         vm.store_upvar(:a, :b, :c, UPVAR_ERROR)
       end
 
+      # ブロック付きの呼び出し。times / upto だけが受け付ける。
+      #
+      # OP_SENDB は呼び出しの仕組みでしかなく、繰り返すのは times の側。
+      # VM は再帰できないため、反復はフレームの状態として持つ。
+      defs << OpcodeDef.new(0x30, "R[a].symbols[b](R[a+1]..) { ブロック }") do |vm|
+        vm.send_block_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
+                             BLOCK_ERROR, CALL_DEPTH_ERROR)
+      end
+
+      # ブロックの中の break。反復を打ち切り、値を呼び出し全体の値にする
+      defs << OpcodeDef.new(0x3A, "反復を打ち切って R[a] を返す") do |vm|
+        vm.break_from_block(:a, BLOCK_ERROR)
+      end
+
       defs << OpcodeDef.new(0x5F, "メソッド表に symbols[b] = R[a+1] を登録") do |vm|
         vm.define_method(:a, :b, UNKNOWN_METHOD_ERROR)
       end
@@ -447,6 +461,10 @@ module FaRuby
 
     # 上位の変数に届かない (指定された段数だけ遡れなかった)
     UPVAR_ERROR = 8
+
+    # ブロックの扱いが不正
+    # ブロックでない値を渡した、反復の外で break した、など
+    BLOCK_ERROR = 9
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {
