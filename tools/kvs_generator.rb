@@ -1431,16 +1431,29 @@ module FaRuby
       e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタスタック (値スロット #{SLOT_WORDS}ワード/レジスタ)"
       e.note "  +#{layout.offset_of(layout.frame_stack_base)}~ = 呼び出しスタック " \
              "(#{MemoryLayout::FRAME_WORDS}ワード/段)"
-      e.note "  +#{layout.offset_of(layout.irep_table_base)}~ = IREPテーブル " \
+      e.note "  +#{layout.offset_of(layout.method_table_base)}~ = メソッド表 (1ワード/メソッド)"
+      e.note "  +#{layout.offset_of(layout.general_global_base)}~ = 汎用グローバル変数 " \
+             "(値スロット #{SLOT_WORDS}ワード/変数)"
+      e.note ""
+      e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
+             "(#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの) に置く。"
+      e.note "スクリプトの先頭で FRSET(#{MemoryLayout::FIXED_BANK}) を実行済みのため、" \
+             "#{layout.fixed_device_name} のアドレスで直接指せる。"
+      e.note "インスタンス#{layout.instance_index}のブロックは " \
+             "#{layout.fixed_device(layout.fixed_origin)}-" \
+             "#{layout.fixed_device(layout.fixed_origin + layout.fixed_instance_size - 1)}:"
+      e.note "  #{layout.fixed_device(layout.irep_table_base)}~ = IREPテーブル " \
              "(#{MemoryLayout::IREP_TABLE_STRIDE}ワード/irep)"
-      e.note "  +#{layout.offset_of(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
-      e.note "  +#{layout.offset_of(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
-      e.note "  +#{layout.offset_of(layout.device_table_base)}~ = シンボル表 " \
+      e.note "  #{layout.fixed_device(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
+      e.note "  #{layout.fixed_device(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
+      e.note "  #{layout.fixed_device(layout.device_table_base)}~ = シンボル表 " \
              "(#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
       e.note ""
       e.note "バイトコード・定数プール・シンボル表は全 irep で 1 つの領域を分け合う。"
       e.note "irep ごとの位置は IREP テーブルにあり、切り替え時に VM 状態へ写す。"
-      e.note "そのため上の +オフセットは領域の先頭であって、実行中の位置ではない。"
+      e.note "そのため上のアドレスは領域の先頭であって、実行中の位置ではない。"
+      e.note "**インスタンスごとに位置が違うため、EM#{layout.offset_of(layout.irep_table_addr_addr)}:Z9 " \
+             "から引く。**"
       e.note ""
       e.note "Z#{KvsEmitter::USED_Z.first}-Z#{KvsEmitter::USED_Z.last} を使用 " \
              "(Z11/Z12 は特別な用途があり使用不可、Z10 はラダー用に残す)"
