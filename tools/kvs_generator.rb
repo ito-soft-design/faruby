@@ -522,6 +522,7 @@ module FaRuby
     def reset_to_top_irep
       note "実行中の irep をトップレベル (0番) に戻す"
       line "#{state(layout.frame_sp_addr)} = 0      ' 呼び出しの深さ"
+      line "#{state(layout.array_sp_addr)} = 0      ' 配列プールの空き先頭"
       line "#{state(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
            "      ' レジスタ窓の先頭"
       line "#{state(layout.cur_irep_addr)} = 0"
@@ -665,6 +666,55 @@ module FaRuby
       line "#{layout.device_name}#{MemoryLayout::FRAME_OWN_BASE}:Z3 = " \
            "#{state(layout.reg_base_addr)}   ' このフレームの窓 (OP_GETUPVAR が見る)"
       line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} + 1"
+    end
+
+    # --- 配列 ---
+
+    # R[dest] = [R[first] .. R[first+count-1]] (OP_ARRAY / OP_ARRAY2)
+    #
+    # 実体は配列プールのスロットに置き、レジスタにはスロット番号だけを
+    # 入れます。スロットは順に渡して返しません。使い切ったら止まります。
+    #
+    # OP_ARRAY は dest と first が同じレジスタなので、**要素を写し終えて
+    # から R[dest] を書きます。**
+    def new_array(dest_name, first_name, count_name, error_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("#{operand(count_name)} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える要素数"
+        vm_error(error_code)
+      end
+      note "スロットの見出し"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z2 = #{operand(count_name)}"
+      note "要素を写す。要素数 0 (空配列) では引き算もしない"
+      note "EM は16ビット符号なしのため、0 - 1 は 65535 になり得る"
+      if_("#{operand(count_name)} > 0") do
+        line "Z3 = #{operand(count_name)} - 1"
+        line "FOR Z4 = 0 TO Z3"
+        indent
+        line "Z5 = (#{operand(first_name)} + Z4) * #{SLOT_WORDS} + #{reg_offset}"
+        line "Z6 = Z4 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        src = slot_on(5)
+        element = slot_on(6)
+        line "#{element.value} = #{src.value}"
+        line "#{element.tag} = #{src.tag}"
+        dedent
+        line "NEXT"
+      end
+      dest = reg_slot(dest_name)
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # 既に Z に載っている先頭アドレスを値スロットとして扱う
+    #
+    # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
+    # 自分で載せた場合に使います。
+    def slot_on(z)
+      Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}", z, layout.device_name)
     end
 
     # --- ブロックと上位の変数 ---
@@ -1669,12 +1719,15 @@ module FaRuby
       e.note "  #{e.state(layout.cur_bytecode_addr)} = 実行中の irep のバイトコード先頭"
       e.note "  #{e.state(layout.cur_pool_addr)} = 実行中の irep の定数プール先頭"
       e.note "  #{e.state(layout.cur_symbols_addr)} = 実行中の irep のシンボル表先頭"
+      e.note "  #{e.state(layout.array_sp_addr)} = ARRAY_SP (次に渡す配列スロット。返さないので減らない)"
       e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタスタック (値スロット #{SLOT_WORDS}ワード/レジスタ)"
       e.note "  +#{layout.offset_of(layout.frame_stack_base)}~ = 呼び出しスタック " \
              "(#{MemoryLayout::FRAME_WORDS}ワード/段)"
       e.note "  +#{layout.offset_of(layout.method_table_base)}~ = メソッド表 (1ワード/メソッド)"
       e.note "  +#{layout.offset_of(layout.general_global_base)}~ = 汎用グローバル変数 " \
              "(値スロット #{SLOT_WORDS}ワード/変数)"
+      e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
+             "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
       e.note ""
       e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
              "(#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの) に置く。"

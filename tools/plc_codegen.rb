@@ -91,6 +91,7 @@ module FaRuby
       image[layout.nlocals_addr] = @irep.nlocals
       image[layout.num_ireps_addr] = irep_entries.size
       image[layout.frame_sp_addr] = 0
+      image[layout.array_sp_addr] = 0
       image[layout.call_argc_addr] = 0
       image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
       image[layout.irep_table_addr_addr] = layout.irep_table_base
@@ -326,6 +327,7 @@ module FaRuby
       lines << "#{layout.device(layout.reset_req_addr)} = 0          ' RESET_REQ = off"
       lines << "#{layout.device(layout.num_ireps_addr)} = #{irep_entries.size}          ' NUM_IREPS"
       lines << "#{layout.device(layout.frame_sp_addr)} = 0          ' FRAME_SP = トップレベル"
+      lines << "#{layout.device(layout.array_sp_addr)} = 0          ' ARRAY_SP = プールの先頭"
       lines << "#{layout.device(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
                "          ' REG_BASE"
       lines << ""

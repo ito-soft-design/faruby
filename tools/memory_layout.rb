@@ -16,9 +16,10 @@
 #
 #   +0                    VM状態 (VM_STATE_WORDS)
 #                         レジスタスタック      max_regs    × 4
-#                         呼び出しスタック      max_frames  × 4
+#                         呼び出しスタック      max_frames  × 10
 #                         メソッド表            max_methods × 1
 #                         汎用グローバル変数    max_globals × 4
+#                         配列プール            max_arrays  × (2 + max_array_len × 4)
 #
 # 固定ブロックの配置:
 #
@@ -109,6 +110,21 @@ module FaRuby
     FRAME_KIND_CALL     = 0   # 通常のメソッド呼び出し
     FRAME_KIND_ITERATE  = 1   # ブロックの反復 (times / upto)
 
+    # 配列プール 1 スロットの見出し
+    #
+    #   +0 要素数
+    #   +1 予備
+    #   +2~ 要素 (値スロット 4 ワード/要素)
+    #
+    # 要素をレジスタや定数プールと同じ 4 ワードにするのは、既存の値の
+    # 読み書きをそのまま使えるようにするためです。3 ワードに詰めると
+    # 1 要素あたり 1 ワード浮きますが、専用の読み書きが要ります。
+    #
+    # 全スロットが同じ容量です。可変長にすると空き管理が要り、
+    # 断片化の面倒を PLC に持ち込むことになります。
+    ARRAY_HEADER_WORDS = 2
+    ARRAY_LENGTH       = 0
+
     # 「フレームが無い」を表す番号。トップレベルで定義されたブロックの定義元
     #
     # レジスタ窓はレジスタ領域の先頭になる。実在するフレーム番号
@@ -170,6 +186,9 @@ module FaRuby
     # 固定領域はインスタンスごとに位置が違い、Z9 (可変ブロックの先頭) からは
     # 割り算なしに求められないため、読み込み時にここへ書いておく。
     OFFSET_IREP_TABLE      = 38
+    # 次に渡す配列スロットの番号。順に渡して返さないため、これが
+    # max_arrays に達したら領域が足りない (回収は行わない)
+    OFFSET_ARRAY_SP        = 39
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -177,12 +196,13 @@ module FaRuby
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 32,
+      "max_arrays" => 16, "max_array_len" => 12,
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
                 :fixed_base, :fixed_align,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
-                :max_ireps, :max_frames, :max_methods
+                :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len
 
     # faruby_default.yml だけから作った配置
     #
@@ -204,6 +224,7 @@ module FaRuby
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
         max_globals: c["max_globals"], max_ireps: c["max_ireps"],
         max_frames: c["max_frames"], max_methods: c["max_methods"],
+        max_arrays: c["max_arrays"], max_array_len: c["max_array_len"],
         fixed_base: c["fixed_base"], fixed_align: c["fixed_align"]
       )
     end
@@ -212,6 +233,7 @@ module FaRuby
                    align: 1000, max_regs: 80, max_bytecode: 3000,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 32,
+                   max_arrays: 16, max_array_len: 12,
                    fixed_base: 0, fixed_align: 1000)
       @device_name    = device_name
       @base           = Integer(base)
@@ -228,6 +250,8 @@ module FaRuby
       @max_ireps      = Integer(max_ireps)
       @max_frames     = Integer(max_frames)
       @max_methods    = Integer(max_methods)
+      @max_arrays     = Integer(max_arrays)
+      @max_array_len  = Integer(max_array_len)
       validate!
     end
 
@@ -240,6 +264,7 @@ module FaRuby
         align: align, max_regs: max_regs, max_bytecode: max_bytecode,
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
         max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
+        max_arrays: max_arrays, max_array_len: max_array_len,
         fixed_base: fixed_base, fixed_align: fixed_align
       )
     end
@@ -256,6 +281,10 @@ module FaRuby
     def frame_stack_base    = reg_file_base + max_regs * SLOT_WORDS
     def method_table_base   = frame_stack_base + max_frames * FRAME_WORDS
     def general_global_base = method_table_base + max_methods
+    def array_pool_base     = general_global_base + max_globals * SLOT_WORDS
+
+    # 配列スロット 1 個のワード数。全スロット同じ
+    def array_slot_words = ARRAY_HEADER_WORDS + max_array_len * SLOT_WORDS
 
     # このインスタンスの固定ブロック先頭 (FM の絶対アドレス)
     def fixed_origin = fixed_base + instance_index * fixed_instance_size
@@ -277,7 +306,7 @@ module FaRuby
     # 可変領域の合計 (パディングを含まない)
     def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
-        max_methods + max_globals * SLOT_WORDS
+        max_methods + max_globals * SLOT_WORDS + max_arrays * array_slot_words
     end
 
     # 固定領域の合計 (パディングを含まない)
@@ -336,6 +365,7 @@ module FaRuby
     def num_ireps_addr       = vm_state_base + OFFSET_NUM_IREPS
     def call_argc_addr       = vm_state_base + OFFSET_CALL_ARGC
     def irep_table_addr_addr = vm_state_base + OFFSET_IREP_TABLE
+    def array_sp_addr        = vm_state_base + OFFSET_ARRAY_SP
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
@@ -379,6 +409,14 @@ module FaRuby
     def general_global_slot_addr(index) = general_global_base + index * SLOT_WORDS
     def general_global_addr(index)      = general_global_slot_addr(index) + SLOT_VALUE_OFFSET
 
+    # 配列プール。スロット番号から見出しの先頭を求める
+    def array_slot_addr(index) = array_pool_base + index * array_slot_words
+
+    # スロット内の要素 (値スロット) の先頭
+    def array_element_addr(index, element)
+      array_slot_addr(index) + ARRAY_HEADER_WORDS + element * SLOT_WORDS
+    end
+
     # --- デバイス文字列 ---
 
     def device(addr)      = "#{device_name}#{addr}"
@@ -397,7 +435,8 @@ module FaRuby
         ["レジスタスタック",  reg_file_base,       frame_stack_base - 1],
         ["呼び出しスタック",  frame_stack_base,    method_table_base - 1],
         ["メソッド表",        method_table_base,   general_global_base - 1],
-        ["汎用グローバル変数", general_global_base, general_global_base + max_globals * SLOT_WORDS - 1],
+        ["汎用グローバル変数", general_global_base, array_pool_base - 1],
+        ["配列プール",        array_pool_base,     array_pool_base + max_arrays * array_slot_words - 1],
       ]
       list << ["予備 (端数調整)", origin + content_size, origin + instance_size - 1] if padding.positive?
       list.map { |name, from, to| [name, from, to, to - from + 1] }
@@ -440,7 +479,8 @@ module FaRuby
       { "max_regs" => @max_regs, "max_bytecode" => @max_bytecode, "max_pool" => @max_pool,
         "max_symbols" => @max_symbols, "max_globals" => @max_globals,
         "max_ireps" => @max_ireps, "max_frames" => @max_frames,
-        "max_methods" => @max_methods }.each do |name, value|
+        "max_methods" => @max_methods, "max_arrays" => @max_arrays,
+        "max_array_len" => @max_array_len }.each do |name, value|
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end
 

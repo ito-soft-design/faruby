@@ -189,6 +189,33 @@ module FaRuby
       write_proc(operand(name), index, MemoryLayout::FRAME_NONE)
     end
 
+    # --- 配列 ---
+
+    # R[dest] = [R[first] .. R[first+count-1]] (OP_ARRAY / OP_ARRAY2)
+    #
+    # スロットは順に渡して返さない。使い切ったら停止する。
+    # OP_ARRAY は dest と first が同じレジスタなので、要素を写し終えてから
+    # R[dest] を書く。
+    def new_array(dest_name, first_name, count_name, error_code)
+      index = array_sp
+      count = operand(count_name)
+      return vm_error(error_code) if index >= layout.max_arrays
+      return vm_error(error_code) if count > layout.max_array_len
+
+      @em.write_u16(layout.array_slot_addr(index) + MemoryLayout::ARRAY_LENGTH, count)
+      first = operand(first_name)
+      count.times do |i|
+        addr = layout.array_element_addr(index, i)
+        @em.write_u16(addr + SLOT_TYPE_OFFSET, read_reg_tag(first + i))
+        @em.write_s32(addr + SLOT_VALUE_OFFSET, read_reg(first + i))
+      end
+      write_slot(operand(dest_name), TT_ARRAY, index)
+      @em.write_u16(layout.array_sp_addr, index + 1)
+    end
+
+    # 次に渡すスロット番号
+    def array_sp = @em.read_u16(layout.array_sp_addr)
+
     # --- ブロックと上位の変数 ---
 
     # R[a] = 子 irep b から作ったブロック (OP_BLOCK)

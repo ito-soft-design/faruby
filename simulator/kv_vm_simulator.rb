@@ -58,6 +58,7 @@ module FaRuby
       end
       @em.write_u16(layout.cur_irep_addr, 0)
       @em.write_u16(layout.frame_sp_addr, 0)
+      @em.write_u16(layout.array_sp_addr, 0)
     end
 
     # メモリイメージをロードして実行

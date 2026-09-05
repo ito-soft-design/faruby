@@ -293,6 +293,22 @@ module FaRuby
         vm.store_device_index(:a, DEVICE_INDEX_ERROR)
       end
 
+      # --- 配列 ---
+      #
+      # 実体は固定数のスロットを並べた配列プールに置き、レジスタには
+      # スロット番号だけを入れる。スロットは順に渡して返さない。
+      # 使い切ったら停止する (回収は行わない)。
+      #
+      # OP_ARRAY は R[a] が要素の先頭と結果の両方を兼ねるため、
+      # 要素を写し終えてから R[a] を書く。
+      defs << OpcodeDef.new(0x47, "R[a] = [R[a] .. R[a+b-1]]") do |vm|
+        vm.new_array(:a, :a, :b, HEAP_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x48, "R[a] = [R[b] .. R[b+c-1]]") do |vm|
+        vm.new_array(:a, :b, :c, HEAP_ERROR)
+      end
+
       defs << OpcodeDef.new(0x25, "PC += signed16(a)") do |vm|
         vm.normalize_signed16(:a)
         vm.jump_relative(:a)
@@ -465,6 +481,11 @@ module FaRuby
     # ブロックの扱いが不正
     # ブロックでない値を渡した、反復の外で break した、など
     BLOCK_ERROR = 9
+
+    # 配列の領域が足りない
+    # プールのスロットを使い切った、または要素数が 1 スロットの容量を超えた。
+    # 回収を持たないため、ループの中で作り続けるとここで止まる
+    HEAP_ERROR = 10
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {
