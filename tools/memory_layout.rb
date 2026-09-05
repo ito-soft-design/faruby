@@ -107,8 +107,12 @@ module FaRuby
     FRAME_LIMIT        = 8
 
     # フレームの種別
+    #
+    # 【重要】並び順に意味があります。FRAME_KIND_ITERATE 以上が「反復中」で、
+    # 判定を 1 比較で済ませています。並べ替えないでください。
     FRAME_KIND_CALL     = 0   # 通常のメソッド呼び出し
-    FRAME_KIND_ITERATE  = 1   # ブロックの反復 (times / upto)
+    FRAME_KIND_ITERATE  = 1   # 反復。ブロックに渡すのは添字 (times / upto)
+    FRAME_KIND_EACH     = 2   # 反復。ブロックに渡すのは要素 (each)
 
     # 配列プール 1 スロットの見出し
     #

@@ -185,6 +185,7 @@ module FaRuby
     METHOD_UPTO   = 10   # ブロックを取る
     METHOD_LENGTH = 11
     METHOD_PUSH   = 12   # << と push
+    METHOD_EACH   = 13   # ブロックを取る
 
     # レシーバが数値でなければならない範囲
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -209,13 +210,14 @@ module FaRuby
       "size"   => [METHOD_LENGTH, 0],
       "<<"     => [METHOD_PUSH,   1],
       "push"   => [METHOD_PUSH,   1],
+      "each"   => [METHOD_EACH,   0],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない
     #
     # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
     # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
-    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO].freeze
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH].freeze
 
     # 番号 => 生成コードのコメントに使う名前
     #

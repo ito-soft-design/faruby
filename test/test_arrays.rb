@@ -377,6 +377,34 @@ class TestArrays < Minitest::Test
     assert_equal METHOD_TYPE_ERROR, error
   end
 
+  # === each のフレーム ===
+
+  # each はブロックに添字ではなく要素を渡す。反復フレームの種別で分ける
+  def test_each_uses_its_own_frame_kind
+    refute_equal Layout::FRAME_KIND_ITERATE, Layout::FRAME_KIND_EACH
+    assert_operator Layout::FRAME_KIND_EACH, :>, Layout::FRAME_KIND_ITERATE,
+                    "「反復中か」を 1 比較で判定するため ITERATE 以上に置く"
+    assert_operator Layout::FRAME_KIND_CALL, :<, Layout::FRAME_KIND_ITERATE
+  end
+
+  def test_each_takes_a_block_and_an_array_receiver
+    code, argc = BUILTIN_METHODS.fetch("each")
+
+    assert_includes BLOCK_METHODS, code, "each はブロックを取る"
+    assert_operator code, :>=, METHOD_ARRAY_MIN, "each のレシーバは配列"
+    assert_equal 0, argc
+  end
+
+  # 生成コードは「反復中か」を範囲で見る。等値のままだと each が素通りする
+  def test_generated_code_treats_each_as_an_iteration
+    source = FaRuby::KvsGenerator.new.source
+    kind = "#{layout.device_name}#{Layout::FRAME_KIND}"
+
+    refute_includes source, "#{kind}:Z3 = #{Layout::FRAME_KIND_ITERATE} THEN",
+                    "反復の判定が等値のままになっている"
+    assert_includes source, "#{kind}:Z3 >= #{Layout::FRAME_KIND_ITERATE} THEN"
+  end
+
   # === 生成コード ===
 
   # Z1 は配列、Z2 は添字、Z3 は書き込む値が使っている。

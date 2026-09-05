@@ -2053,6 +2053,9 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 IF Z5 = 10 THEN
                     Z6 = 1
                 END IF
+                IF Z5 = 13 THEN
+                    Z6 = 1
+                END IF
                 IF Z6 = 0 THEN
                     ' ブロックを取らないメソッドにブロックを渡した
                     EM1:Z9 = 3
@@ -2098,6 +2101,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     ' n.times は 0 から n-1 まで
                     EM16.L:Z9 = 0
                     EM18.L:Z9 = EM1.L:Z1 - 1
+                ELSE IF Z5 = 13 THEN
+                    ' a.each は 0 から要素数-1 まで
+                    ' スロットの見出し。R[a] を書き換える前に読む
+                    Z4 = EM1.L:Z1
+                    Z4 = Z4 * 50 + 960 + Z9
+                    EM18.L:Z9 = EM0:Z4   ' 要素数
+                    EM16.L:Z9 = 0
+                    EM18.L:Z9 = EM18.L:Z9 - 1
                 ELSE
                     ' a.upto(b) は a から b まで
                     Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
@@ -2127,6 +2138,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
                     EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
                     EM31:Z9 = EM31:Z9 + 1
+                    IF Z5 = 13 THEN
+                        ' each はブロックに添字ではなく要素を渡す
+                        EM5:Z3 = 2
+                    END IF
                     ' 窓をずらした後、ブロックは R[引数の数 + 1] にある
                     Z2 = (EM9:Z9 + 1) * 4 + EM32:Z9 + Z9
                     Z6 = EM1:Z2       ' 本体の irep
@@ -2136,8 +2151,20 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM6.L:Z3 = EM16.L:Z9
                     EM8.L:Z3 = EM18.L:Z9
                     Z2 = 4 + EM32:Z9 + Z9
-                    EM1.L:Z2 = EM16.L:Z9
-                    EM0:Z2 = 4
+                    IF EM5:Z3 = 2 THEN
+                        ' each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
+                        Z4 = 0 + EM32:Z9 + Z9
+                        Z7 = EM1.L:Z4   ' スロット番号
+                        Z7 = Z7 * 50 + 960 + Z9
+                        Z5 = EM16.L:Z9
+                        Z5 = Z5 * 4 + Z7 + 2
+                        EM1.L:Z2 = EM1.L:Z5
+                        EM0:Z2 = EM0:Z5
+                    ELSE
+                        ' times / upto は添字を渡す
+                        EM1.L:Z2 = EM16.L:Z9
+                        EM0:Z2 = 4
+                    END IF
                     ' ブロックの引数は常に 1 個。引数を書かないブロックでも渡す
                     EM37:Z9 = 1
                     EM30:Z9 = Z6
@@ -2190,7 +2217,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 Z4 = 0
                 IF EM31:Z9 > 0 THEN
                     Z5 = (EM31:Z9 - 1) * 10 + 368 + Z9
-                    IF EM5:Z5 = 1 THEN
+                    IF EM5:Z5 >= 1 THEN
                         Z4 = 1
                     END IF
                 END IF
@@ -2226,15 +2253,27 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 ELSE
                     Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
-                    IF EM5:Z3 = 1 THEN
+                    IF EM5:Z3 >= 1 THEN
                         EM16.L:Z9 = EM6.L:Z3 + 1
                         IF EM16.L:Z9 <= EM8.L:Z3 THEN
                             ' 次の回。PC を 0 に戻し、ブロックの引数を更新するだけ
                             ' irep もレジスタ窓もそのまま使い回す
                             EM6.L:Z3 = EM16.L:Z9
                             Z2 = 4 + EM32:Z9 + Z9
-                            EM1.L:Z2 = EM16.L:Z9
-                            EM0:Z2 = 4
+                            IF EM5:Z3 = 2 THEN
+                                ' each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
+                                Z4 = 0 + EM32:Z9 + Z9
+                                Z7 = EM1.L:Z4   ' スロット番号
+                                Z7 = Z7 * 50 + 960 + Z9
+                                Z5 = EM16.L:Z9
+                                Z5 = Z5 * 4 + Z7 + 2
+                                EM1.L:Z2 = EM1.L:Z5
+                                EM0:Z2 = EM0:Z5
+                            ELSE
+                                ' times / upto は添字を渡す
+                                EM1.L:Z2 = EM16.L:Z9
+                                EM0:Z2 = 4
+                            END IF
                             EM0:Z9 = 0
                         ELSE
                             ' 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
@@ -2289,7 +2328,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
-                IF EM5:Z3 <> 1 THEN
+                IF EM5:Z3 < 1 THEN
                     EM1:Z9 = 3
                     EM2:Z9 = 9
                     BREAK

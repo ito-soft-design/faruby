@@ -11,7 +11,7 @@
 - 組み込みメソッド (`!=` / `!` / `%` / `abs` / `to_i` / `to_f` / `floor` / `round`)
 - メソッドの定義と呼び出し (引数・再帰・途中の `return`)
 - ブロックと反復 (`times` / `upto` / `break`)
-- 配列 (リテラル・添字・`length` / `size` / `<<` / `push`)
+- 配列 (リテラル・添字・`length` / `size` / `<<` / `push` / `each`)
 - 複数プログラムの並行実行
 
 実装済みの命令は 54 個です。詳細は [対応オペコード一覧](opcodes.md)。
@@ -181,8 +181,8 @@ end
 実行速度は 32,449 命令/秒、スキャン周期 1.54 ms です。
 
 `loop` は `OP_SSENDB` (self への呼び出し) で別命令のため未対応です
-(`while true` で代用できます)。`each` は Array が要るため項目 6 の後です。
-`yield` とブロック引数 (`&blk`) も未対応です。
+(`while true` で代用できます)。`yield` とブロック引数 (`&blk`) も未対応です。
+`each` は Array と一緒に項目 5 で入りました。
 
 ## 5. ヒープ設計
 
@@ -201,16 +201,19 @@ GC が難しいのは停止時間が読めないからですが、faRuby は**�
 は `OP_SEND`、`each` は `OP_SENDB` です。新しく要るのは `OP_ARRAY` /
 `OP_ARRAY2` と実体の置き場所です。
 
-配列を作って添字で読み書きするところまで動きます。`length` / `<<` / `push` /
-`each` は未対応です。実機で確認済みです
+リテラル・添字・`length` / `size` / `<<` / `push` / `each` が動きます。
+実機で確認済みなのは添字までで、メソッドと `each` は未確認です
 ([test_21_arrays.rb](../test/ruby_programs/test_21_arrays.rb))。
-実行速度は 32,612 命令/秒、スキャン周期 1.53 ms で、配列を入れる前から
-変わっていません。
 
 ```ruby
 a = [11, 22, 33]
 $DM100 = a[1]     # 22
 a[1] = 99
+
+s = 0
+a.each do |v|
+  s = s + v
+end
 ```
 
 ## 6. Array / String / Hash

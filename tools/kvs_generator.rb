@@ -950,7 +950,7 @@ module FaRuby
       line "Z4 = 0"
       if_("#{state(layout.frame_sp_addr)} > 0") do
         line "Z5 = #{top_frame_expr}"
-        if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z5 = " \
+        if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z5 >= " \
             "#{MemoryLayout::FRAME_KIND_ITERATE}") do
           line "Z4 = 1"
         end
@@ -988,7 +988,7 @@ module FaRuby
         vm_finish
       end
       line "Z3 = #{top_frame_expr}"
-      if_else_block("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
+      if_else_block("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 >= " \
                     "#{MemoryLayout::FRAME_KIND_ITERATE}") do
         advance_iteration
       end
@@ -1018,11 +1018,32 @@ module FaRuby
       end_block
     end
 
-    # ブロックの引数 (R[1]) に反復の現在値を置く
+    # ブロックの引数 (R[1]) を置く
+    #
+    # 何を渡すかはフレームの種別で決まります。times / upto は添字、each は
+    # その位置の要素です。Z3 は呼ぶ側がフレームを指したままにしています。
+    #
+    # **Z6 は使えません。** enter_iteration が移り先の irep を載せています。
     def set_block_argument
       line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
-      line "#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z2 = #{scratch32}"
-      line "#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z2 = #{TT_INTEGER}"
+      argument = slot_on(2)
+      if_else_block("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
+                    "#{MemoryLayout::FRAME_KIND_EACH}") do
+        note "each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
+        line "Z4 = 0 + #{reg_offset}"
+        line "Z7 = #{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z4   ' スロット番号"
+        line "Z7 = Z7 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+        line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
+        line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z7 + " \
+             "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+        element = slot_on(Z_ARRAY_ELEMENT)
+        line "#{argument.value} = #{element.value}"
+        line "#{argument.tag} = #{element.tag}"
+      end
+      note "times / upto は添字を渡す"
+      line "#{argument.value} = #{scratch32}"
+      line "#{argument.tag} = #{TT_INTEGER}"
+      end_block
     end
 
     # 積んであるフレームから PC・irep・レジスタ窓を復元する
@@ -1085,11 +1106,21 @@ module FaRuby
 
     # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
     def iteration_range(name, recv, type_code)
-      if_else_block("Z5 = #{METHOD_TIMES}") do
-        note "n.times は 0 から n-1 まで"
-        line "#{scratch32} = 0"
-        line "#{scratch32_b} = #{recv.value} - 1"
-      end
+      line "IF Z5 = #{METHOD_TIMES} THEN"
+      indent
+      note "n.times は 0 から n-1 まで"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{recv.value} - 1"
+      dedent
+      line "ELSE IF Z5 = #{METHOD_EACH} THEN"
+      indent
+      note "a.each は 0 から要素数-1 まで"
+      array_slot_into_z(recv)
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{scratch32_b} - 1"
+      dedent
+      line "ELSE"
+      indent
       note "a.upto(b) は a から b まで"
       limit = reg_next_slot(name)
       if_("#{limit.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
@@ -1103,6 +1134,11 @@ module FaRuby
       push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
                  outer: MemoryLayout::FRAME_NONE,
                  kind: MemoryLayout::FRAME_KIND_ITERATE)
+      if_("Z5 = #{METHOD_EACH}") do
+        note "each はブロックに添字ではなく要素を渡す"
+        line "#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
+             "#{MemoryLayout::FRAME_KIND_EACH}"
+      end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
       line "Z6 = #{layout.device_name}#{SLOT_VALUE_OFFSET}:Z2       ' 本体の irep"
@@ -1125,7 +1161,7 @@ module FaRuby
         vm_error(block_code)
       end
       line "Z3 = #{top_frame_expr}"
-      if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 <> " \
+      if_("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 < " \
           "#{MemoryLayout::FRAME_KIND_ITERATE}") do
         vm_error(block_code)
       end

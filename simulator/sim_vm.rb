@@ -316,10 +316,12 @@ module FaRuby
     end
 
     # 実行中のフレームが反復 (ブロック) かどうか
+    #
+    # 種別は FRAME_KIND_ITERATE 以上が反復。each は渡す値が違うだけで反復。
     def in_block?
       return false if frame_sp.zero?
 
-      frame_word(current_frame, MemoryLayout::FRAME_KIND) ==
+      frame_word(current_frame, MemoryLayout::FRAME_KIND) >=
         MemoryLayout::FRAME_KIND_ITERATE
     end
 
@@ -331,7 +333,7 @@ module FaRuby
       return vm_finish if frame_sp.zero?
 
       addr = layout.frame_addr(current_frame)
-      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_ITERATE
+      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) >= MemoryLayout::FRAME_KIND_ITERATE
         return advance_iteration(addr)
       end
 
@@ -348,8 +350,22 @@ module FaRuby
       return pop_frame if index > @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
 
       @em.write_s32(addr + MemoryLayout::FRAME_INDEX, index)
-      write_slot(1, TT_INTEGER, index)
+      set_block_argument(addr, index)
       @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # ブロックの引数 (R[1]) を置く
+    #
+    # 何を渡すかはフレームの種別で決まる。times / upto は添字、each は
+    # その位置の要素。each のレシーバ (配列) は R[0] に残っている。
+    def set_block_argument(addr, index)
+      unless @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_EACH
+        return write_slot(1, TT_INTEGER, index)
+      end
+
+      element = layout.array_element_addr(read_reg(0), index)
+      write_slot(1, @em.read_u16(element + SLOT_TYPE_OFFSET),
+                 @em.read_s32(element + SLOT_VALUE_OFFSET))
     end
 
     # 積んであるフレームから PC・irep・レジスタ窓を復元する
@@ -384,12 +400,13 @@ module FaRuby
       # 1 回も回らないときはレシーバがそのまま呼び出しの値になる
       return if from > limit
 
-      enter_iteration(index, block, from, limit, depth_code)
+      enter_iteration(index, block, from, limit, depth_code, code)
     end
 
     # 反復の範囲 [開始, 上限]。扱えない型なら nil
     def iteration_range(code, index, _argc)
       return [0, read_reg(index) - 1] if code == METHOD_TIMES
+      return [0, array_length(read_reg(index)) - 1] if code == METHOD_EACH
 
       limit = index + 1
       return nil unless read_reg_tag(limit) == TT_INTEGER
@@ -398,20 +415,21 @@ module FaRuby
     end
 
     # 反復フレームを積み、ブロックの本体へ移る
-    def enter_iteration(index, block, from, limit, depth_code)
+    def enter_iteration(index, block, from, limit, depth_code, code)
       return vm_error(depth_code) if frame_sp >= layout.max_frames
 
       irep  = @em.read_u16(reg_addr(block))
       outer = @em.read_u16(reg_addr(block) + 1)
+      kind = code == METHOD_EACH ? MemoryLayout::FRAME_KIND_EACH
+                                 : MemoryLayout::FRAME_KIND_ITERATE
 
-      push_frame(index * SLOT_WORDS, outer: outer,
-                 kind: MemoryLayout::FRAME_KIND_ITERATE)
+      push_frame(index * SLOT_WORDS, outer: outer, kind: kind)
       addr = layout.frame_addr(current_frame)
       @em.write_s32(addr + MemoryLayout::FRAME_INDEX, from)
       @em.write_s32(addr + MemoryLayout::FRAME_LIMIT, limit)
 
       # ブロックの引数は常に 1 個。引数を書かないブロックでも渡す
-      write_slot(1, TT_INTEGER, from)
+      set_block_argument(addr, from)
       @em.write_u16(layout.call_argc_addr, 1)
       switch_to_irep(irep)
       return vm_error(depth_code) unless register_window_fits?
@@ -424,7 +442,7 @@ module FaRuby
       return vm_error(block_code) if frame_sp.zero?
 
       addr = layout.frame_addr(current_frame)
-      unless @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_ITERATE
+      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) < MemoryLayout::FRAME_KIND_ITERATE
         return vm_error(block_code)
       end
 
