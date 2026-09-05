@@ -1532,12 +1532,26 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                    ' 3-10 はレシーバが数値、11 以上は配列であること
                     IF Z5 >= 3 THEN
-                        ' 3 以上のメソッドはレシーバが数値であること
-                        IF EM0:Z1 < 4 THEN
-                            EM1:Z9 = 3
-                            EM2:Z9 = 4
-                            BREAK
+                        IF Z5 <= 10 THEN
+                            ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                            IF EM0:Z1 < 4 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            IF EM0:Z1 > 5 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE
+                            IF EM0:Z1 <> 8 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
                         END IF
                     END IF
                     IF Z5 = 1 THEN
@@ -1686,6 +1700,34 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM1.L:Z1 = EM16.L:Z9
                             EM0:Z1 = 4
                         END IF
+                    ELSE IF Z5 = 11 THEN
+                        ' length
+                        ' スロットの見出し。R[a] を書き換える前に読む
+                        Z4 = EM1.L:Z1
+                        Z4 = Z4 * 50 + 960 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                        EM1.L:Z1 = EM18.L:Z9
+                        EM0:Z1 = 4
+                    ELSE IF Z5 = 12 THEN
+                        ' <<
+                        ' スロットの見出し。R[a] を書き換える前に読む
+                        Z4 = EM1.L:Z1
+                        Z4 = Z4 * 50 + 960 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                        IF EM18.L:Z9 >= 12 THEN
+                            ' 1 スロットの容量がいっぱい
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        ' 末尾に足して要素数を 1 増やす
+                        EM16.L:Z9 = EM18.L:Z9
+                        Z5 = EM16.L:Z9
+                        Z5 = Z5 * 4 + Z4 + 2
+                        EM1.L:Z5 = EM1.L:Z2
+                        EM0:Z5 = EM0:Z2
+                        Z6 = EM18.L:Z9
+                        EM0:Z4 = Z6 + 1
                     ELSE
                         ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                         EM1:Z9 = 3
@@ -1777,12 +1819,26 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                ' 3-10 はレシーバが数値、11 以上は配列であること
                 IF Z5 >= 3 THEN
-                    ' 3 以上のメソッドはレシーバが数値であること
-                    IF EM0:Z1 < 4 THEN
-                        EM1:Z9 = 3
-                        EM2:Z9 = 4
-                        BREAK
+                    IF Z5 <= 10 THEN
+                        ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                        IF EM0:Z1 < 4 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 5 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE
+                        IF EM0:Z1 <> 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
                     END IF
                 END IF
                 IF Z5 = 1 THEN
@@ -1931,6 +1987,34 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = EM16.L:Z9
                         EM0:Z1 = 4
                     END IF
+                ELSE IF Z5 = 11 THEN
+                    ' length
+                    ' スロットの見出し。R[a] を書き換える前に読む
+                    Z4 = EM1.L:Z1
+                    Z4 = Z4 * 50 + 960 + Z9
+                    EM18.L:Z9 = EM0:Z4   ' 要素数
+                    EM1.L:Z1 = EM18.L:Z9
+                    EM0:Z1 = 4
+                ELSE IF Z5 = 12 THEN
+                    ' <<
+                    ' スロットの見出し。R[a] を書き換える前に読む
+                    Z4 = EM1.L:Z1
+                    Z4 = Z4 * 50 + 960 + Z9
+                    EM18.L:Z9 = EM0:Z4   ' 要素数
+                    IF EM18.L:Z9 >= 12 THEN
+                        ' 1 スロットの容量がいっぱい
+                        EM1:Z9 = 3
+                        EM2:Z9 = 10
+                        BREAK
+                    END IF
+                    ' 末尾に足して要素数を 1 増やす
+                    EM16.L:Z9 = EM18.L:Z9
+                    Z5 = EM16.L:Z9
+                    Z5 = Z5 * 4 + Z4 + 2
+                    EM1.L:Z5 = EM1.L:Z2
+                    EM0:Z5 = EM0:Z2
+                    Z6 = EM18.L:Z9
+                    EM0:Z4 = Z6 + 1
                 ELSE
                     ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                     EM1:Z9 = 3
@@ -1961,7 +2045,15 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM2:Z9 = 3
                     BREAK
                 END IF
-                IF Z5 < 9 THEN
+                ' ブロックを取るメソッドはレシーバの型で並んでいるため連続していない
+                Z6 = 0
+                IF Z5 = 9 THEN
+                    Z6 = 1
+                END IF
+                IF Z5 = 10 THEN
+                    Z6 = 1
+                END IF
+                IF Z6 = 0 THEN
                     ' ブロックを取らないメソッドにブロックを渡した
                     EM1:Z9 = 3
                     EM2:Z9 = 3
@@ -1973,10 +2065,27 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                IF EM0:Z1 <> 4 THEN
-                    EM1:Z9 = 3
-                    EM2:Z9 = 4
-                    BREAK
+                ' 3-10 はレシーバが数値、11 以上は配列であること
+                IF Z5 >= 3 THEN
+                    IF Z5 <= 10 THEN
+                        ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                        IF EM0:Z1 < 4 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 5 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE
+                        IF EM0:Z1 <> 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    END IF
                 END IF
                 ' ブロックは引数の後ろ R[a + 引数の数 + 1] にある
                 Z3 = (EM7:Z9 + EM9:Z9 + 1) * 4 + EM32:Z9 + Z9

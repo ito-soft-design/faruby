@@ -76,15 +76,18 @@ class TestMethods < Minitest::Test
 
   # === 定数表 ===
 
-  # 数値レシーバを要求するメソッドを連続した番号に並べてあるため、
-  # 生成コードは `Z5 >= METHOD_NUMERIC_MIN` の1比較で判定できる。
-  # 並べ替えるとレシーバの型検査が壊れる。
-  def test_numeric_methods_sort_above_the_others
+  # レシーバの型ごとに番号を連続させてあるため、生成コードは範囲比較で
+  # 判定できる。並べ替えるとレシーバの型検査が壊れる。
+  def test_methods_sort_by_receiver_type
     %w[! !=].each do |name|
       assert_operator BUILTIN_METHODS.fetch(name).first, :<, METHOD_NUMERIC_MIN, name
     end
-    %w[% abs to_i to_f floor round].each do |name|
-      assert_operator BUILTIN_METHODS.fetch(name).first, :>=, METHOD_NUMERIC_MIN, name
+    %w[% abs to_i to_f floor round times upto].each do |name|
+      assert_includes (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX),
+                      BUILTIN_METHODS.fetch(name).first, name
+    end
+    %w[length size << push].each do |name|
+      assert_operator BUILTIN_METHODS.fetch(name).first, :>=, METHOD_ARRAY_MIN, name
     end
   end
 
@@ -192,7 +195,7 @@ class TestMethods < Minitest::Test
   # === エラー ===
 
   def test_unknown_method_stops_the_vm
-    call("push", INT.(3))
+    call("pop", INT.(3))
     assert_equal VM_ERROR, status
     assert_equal UNKNOWN_METHOD_ERROR, error
   end
@@ -226,7 +229,7 @@ class TestMethods < Minitest::Test
   # メソッド名は汎用グローバル変数の枠を消費しない
   def test_method_symbols_resolve_to_numbers
     irep = Struct.new(:symbols, :pool, :instructions, :ilen, :nregs, :nlocals, :children)
-                 .new(["$DM100", "abs", "push"], [], "", 0, 8, 0, [])
+                 .new(["$DM100", "abs", "pop"], [], "", 0, 8, 0, [])
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal SYMBOL_KIND_VALUE, mappings[0][:kind]
@@ -254,7 +257,17 @@ class TestMethods < Minitest::Test
     %w[times upto].each do |name|
       code = BUILTIN_METHODS.fetch(name).first
       refute_includes BUILTIN_PLAIN_METHODS.keys, code, name
-      assert_operator code, :>=, METHOD_BLOCK_MIN, name
+      assert_includes BLOCK_METHODS, code, name
     end
+  end
+
+  # レシーバの型ごとに番号が連続していないと、型検査が範囲比較で済まなくなる
+  def test_methods_are_grouped_by_receiver_type
+    numeric = (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX).to_a
+    array = (METHOD_ARRAY_MIN..METHOD_NAMES.keys.max).to_a
+
+    assert_equal numeric.max + 1, array.min, "数値と配列の範囲が隣り合っていない"
+    assert_empty METHOD_NAMES.keys - ([METHOD_NE, METHOD_NOT] + numeric + array),
+                 "どの型の範囲にも属さないメソッドがある"
   end
 end

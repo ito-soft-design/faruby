@@ -720,7 +720,7 @@ module FaRuby
     # mruby は R[a] に self を置いてから OP_SEND と同じ経路に入ります。
     # 組み込みならその場で計算し、ユーザー定義ならフレームを積んで移ります。
     def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
-                         zero_code, depth_code)
+                         zero_code, heap_code, depth_code)
       note "self をレシーバ位置に置く (mruby の regs[a] = regs[0])"
       self_slot = slot_ref([:reg_self, name], "0", reg_offset, z: Z_VALUE)
       dest = reg_slot(name)
@@ -734,7 +734,7 @@ module FaRuby
 
       if_else_block("Z5 <> #{METHOD_NONE}") do
         note "組み込みメソッド。フレームを積まずその場で計算する"
-        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
+        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
       end
       call_user_method(name, argc_name, unknown_code, depth_code)
       end_block
@@ -1058,14 +1058,17 @@ module FaRuby
                           block_code, depth_code)
       method_table_lookup(sym_name)
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
-      if_("Z5 < #{METHOD_BLOCK_MIN}") do
+      note "ブロックを取るメソッドはレシーバの型で並んでいるため連続していない"
+      line "Z6 = 0"
+      BLOCK_METHODS.each { |code| if_("Z5 = #{code}") { line "Z6 = 1" } }
+      if_("Z6 = 0") do
         note "ブロックを取らないメソッドにブロックを渡した"
         vm_error(unknown_code)
       end
       if_("#{operand(argc_name)} <> Z8") { vm_error(unknown_code) }
 
       recv = reg_slot(name)
-      if_("#{recv.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      check_receiver_type(recv, type_code)
 
       note "ブロックは引数の後ろ R[a + 引数の数 + 1] にある"
       block = slot_ref([:block, name],
@@ -1143,17 +1146,17 @@ module FaRuby
     # VM は文字列を持たず、整数の分岐だけで振り分けます。
 
     # R[a] = R[a].メソッド(R[a+1])
-    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code)
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code, heap_code)
       method_table_lookup(sym_name)
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
         note "メソッド名でないシンボルへの呼び出し"
         vm_error(unknown_code)
       end
-      builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
+      builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
     end
 
     # Z5 (メソッド番号) と Z8 (引数の数) を読んだ後の共通部分
-    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code)
+    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
       if_("#{operand(argc_name)} <> Z8") do
         note "引数の数が定義と違う"
         note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
@@ -1164,10 +1167,7 @@ module FaRuby
       dest = reg_slot(name)
       rhs = reg_next_slot(name)
 
-      if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
-        note "#{METHOD_NUMERIC_MIN} 以上のメソッドはレシーバが数値であること"
-        if_("#{dest.tag} < #{TT_INTEGER}") { vm_error(type_code) }
-      end
+      check_receiver_type(dest, type_code)
 
       first = true
       BUILTIN_PLAIN_METHODS.each_key do |code|
@@ -1175,7 +1175,7 @@ module FaRuby
         first = false
         indent
         note METHOD_NAMES.fetch(code)
-        method_body(code, dest, rhs, type_code, zero_code)
+        method_body(code, dest, rhs, type_code, zero_code, heap_code)
         dedent
       end
       line "ELSE"
@@ -1184,6 +1184,24 @@ module FaRuby
       vm_error(unknown_code)
       dedent
       line "END IF"
+    end
+
+    # メソッド番号からレシーバに要求される型を検査する
+    #
+    # レシーバの型ごとに番号を連続させてあるので、範囲比較で済みます。
+    # 配列は末尾なので上限が要らず、1 比較で決まります。
+    def check_receiver_type(recv, type_code)
+      note "#{METHOD_NUMERIC_MIN}-#{METHOD_NUMERIC_MAX} はレシーバが数値、" \
+           "#{METHOD_ARRAY_MIN} 以上は配列であること"
+      if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
+        if_else_block("Z5 <= #{METHOD_NUMERIC_MAX}") do
+          note "数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけ。上限も見る"
+          if_("#{recv.tag} < #{TT_INTEGER}") { vm_error(type_code) }
+          if_("#{recv.tag} > #{TT_FLOAT}") { vm_error(type_code) }
+        end
+        if_("#{recv.tag} <> #{TT_ARRAY}") { vm_error(type_code) }
+        end_block
+      end
     end
 
     # --- 真偽判定 ---
@@ -1405,7 +1423,7 @@ module FaRuby
       line "Z4 = #{fixed_indexed_base}:Z7   ' シンボル種別"
     end
 
-    def method_body(code, dest, rhs, type_code, zero_code)
+    def method_body(code, dest, rhs, type_code, zero_code, heap_code)
       case code
       when METHOD_NE    then eq_into(dest, rhs, negate: true)
       when METHOD_NOT   then not_into(dest)
@@ -1415,8 +1433,35 @@ module FaRuby
       when METHOD_TO_F  then to_f_into(dest)
       when METHOD_FLOOR then floor_into(dest)
       when METHOD_ROUND then round_into(dest)
+      when METHOD_LENGTH then length_into(dest)
+      when METHOD_PUSH   then push_into(dest, rhs, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
+    end
+
+    # R[a].length。レシーバが配列であることは検査済み
+    def length_into(dest)
+      array_slot_into_z(dest)
+      line "#{dest.value} = #{scratch32_b}"
+      line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a] << R[a+1] / R[a].push(R[a+1])
+    #
+    # Ruby はレシーバ自身を返すので、R[a] は配列のままにします。
+    def push_into(dest, rhs, heap_code)
+      array_slot_into_z(dest)
+      if_("#{scratch32_b} >= #{layout.max_array_len}") do
+        note "1 スロットの容量がいっぱい"
+        vm_error(heap_code)
+      end
+      note "末尾に足して要素数を 1 増やす"
+      line "#{scratch32} = #{scratch32_b}"
+      element = array_element_into_z
+      line "#{element.value} = #{rhs.value}"
+      line "#{element.tag} = #{rhs.tag}"
+      line "Z6 = #{scratch32_b}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_ARRAY_SLOT} = Z6 + 1"
     end
 
     # !R[a]。偽なら true、それ以外は false

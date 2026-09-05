@@ -266,14 +266,15 @@ module FaRuby
 
     # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
     def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
-                         zero_code, depth_code)
+                         zero_code, heap_code, depth_code)
       index = operand(name)
       write_slot(index, read_reg_tag(0), read_reg(0))   # regs[a] = self
 
       code, method_id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
       return dispatch_builtin(code, index, operand(argc_name), argc,
-                              unknown_code, type_code, zero_code) unless code == METHOD_NONE
+                              unknown_code, type_code, zero_code,
+                              heap_code) unless code == METHOD_NONE
 
       call_user_method(index, method_id, operand(argc_name), unknown_code, depth_code)
     end
@@ -367,11 +368,12 @@ module FaRuby
                           block_code, depth_code)
       code, _id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
-      return vm_error(unknown_code) if code < METHOD_BLOCK_MIN
+      # ブロックを取るメソッドはレシーバの型で並んでいるため連続していない
+      return vm_error(unknown_code) unless BLOCK_METHODS.include?(code)
       return vm_error(unknown_code) unless operand(argc_name) == argc
 
       index = operand(name)
-      return vm_error(type_code) unless read_reg_tag(index) == TT_INTEGER
+      return vm_error(type_code) unless receiver_type_ok?(code, read_reg_tag(index))
 
       # ブロックは引数の後ろ R[a + 引数の数 + 1] にある
       block = index + argc + 1
@@ -435,21 +437,32 @@ module FaRuby
     #
     # 呼び出しフレームは作らない。引数は R[a+1] から連続して並び、
     # 結果は R[a] に返る。生成コードと同じ規則で計算する。
-    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code)
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code, heap_code)
       code, _id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
 
       dispatch_builtin(code, operand(name), operand(argc_name), argc,
-                       unknown_code, type_code, zero_code)
+                       unknown_code, type_code, zero_code, heap_code)
     end
 
-    def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code, zero_code)
+    def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code,
+                         zero_code, heap_code)
       # ブロックを取るメソッドはブロック無しでは呼べない
       return vm_error(unknown_code) unless BUILTIN_PLAIN_METHODS.key?(code)
       return vm_error(unknown_code) unless given_argc == argc
-      return vm_error(type_code) if code >= METHOD_NUMERIC_MIN && !numeric_tag?(read_reg_tag(index))
+      return vm_error(type_code) unless receiver_type_ok?(code, read_reg_tag(index))
 
-      apply_method(code, index, type_code, zero_code)
+      apply_method(code, index, type_code, zero_code, heap_code)
+    end
+
+    # メソッド番号からレシーバに要求される型を検査する
+    #
+    # レシーバの型ごとに番号が連続しているため範囲で判定できる。
+    def receiver_type_ok?(code, tag)
+      return numeric_tag?(tag) if code.between?(METHOD_NUMERIC_MIN, METHOD_NUMERIC_MAX)
+      return tag == TT_ARRAY if code >= METHOD_ARRAY_MIN
+
+      true
     end
 
     # デバイスの値をレジスタへ読む (生成コードと同じ規則)
@@ -739,7 +752,11 @@ module FaRuby
     #
     # 値ワードには IEEE754 単精度のビット列を置く (PLC 側と同じ表現)。
 
-    def numeric_tag?(tag) = tag >= TT_INTEGER
+    # 数値は TT_INTEGER と TT_FLOAT の 2 つだけ。上限も見る
+    #
+    # 「TT_INTEGER 以上」で済ませていたころは、それより後ろのタグ (配列など)
+    # まで数値として通っていた
+    def numeric_tag?(tag) = tag.between?(TT_INTEGER, TT_FLOAT)
     def float_operand?(index) = read_reg_tag(index) == TT_FLOAT
 
     def read_float(index) = SimVm.bits_to_float(@em.read_u32(reg_addr(index)))
@@ -768,7 +785,7 @@ module FaRuby
     # 組み込みメソッドの本体
     #
     # 生成コードは実数を単精度で扱うため、実数の結果は write_float で丸める。
-    def apply_method(code, index, type_code, zero_code)
+    def apply_method(code, index, type_code, zero_code, heap_code)
       case code
       when METHOD_NE    then send_ne(index)
       when METHOD_NOT   then write_bool(index, read_reg_tag(index) <= TT_FALSY_MAX)
@@ -778,8 +795,22 @@ module FaRuby
       when METHOD_TO_F  then write_float(index, numeric_value(index).to_f)
       when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)
       when METHOD_ROUND then write_slot(index, TT_INTEGER, round_away_from_zero(numeric_value(index)))
+      when METHOD_LENGTH then write_slot(index, TT_INTEGER, array_length(read_reg(index)))
+      when METHOD_PUSH   then send_push(index, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
+    end
+
+    # R[a] << R[a+1] / R[a].push(R[a+1])
+    #
+    # Ruby はレシーバ自身を返すので R[a] は配列のままにする。
+    def send_push(index, heap_code)
+      slot = read_reg(index)
+      length = array_length(slot)
+      return vm_error(heap_code) if length >= layout.max_array_len
+
+      write_array_element(slot, length, read_reg_tag(index + 1), read_reg(index + 1))
+      set_array_length(slot, length + 1)
     end
 
     # 型が違えば等しくない (set_reg_eq の否定)

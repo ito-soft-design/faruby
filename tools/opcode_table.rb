@@ -388,7 +388,7 @@ module FaRuby
       # OP_SEND と同じ経路へ入る。
       defs << OpcodeDef.new(0x2D, "R[a] = self.symbols[b](R[a+1]..)") do |vm|
         vm.send_self_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
-                            DIVIDE_BY_ZERO_ERROR, CALL_DEPTH_ERROR)
+                            DIVIDE_BY_ZERO_ERROR, HEAP_ERROR, CALL_DEPTH_ERROR)
       end
 
       # メソッド本体の入口。引数の数を定義と突き合わせる
@@ -405,7 +405,8 @@ module FaRuby
       # 渡す印 (mruby の CALL_MAXARGS)。普通の呼び出しでは引数の数と一致
       # するためそのまま比べており、スプラットやキーワード付きは弾かれる。
       defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)") do |vm|
-        vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR, DIVIDE_BY_ZERO_ERROR)
+        vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
+                       DIVIDE_BY_ZERO_ERROR, HEAP_ERROR)
       end
 
       # メソッドの中なら呼び出し元へ戻り、トップレベルなら VM 停止。

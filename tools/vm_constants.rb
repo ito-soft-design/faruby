@@ -166,47 +166,67 @@ module FaRuby
     # メソッド名はホスト側で番号に解決してテーブルに載せます。VM は文字列を
     # 持たず、整数の分岐だけで振り分けます。
     #
-    # 【重要】並び順に意味があります。METHOD_NUMERIC_MIN 以上はレシーバが
-    # 数値でなければならず、判定を 1 比較で済ませています。並べ替えないでください。
-    METHOD_NONE  = 0   # 未対応 (実行時エラー)
-    METHOD_NE    = 1   # !=
-    METHOD_NOT   = 2   # !
-    METHOD_MOD   = 3   # %
-    METHOD_ABS   = 4
-    METHOD_TO_I  = 5
-    METHOD_TO_F  = 6
-    METHOD_FLOOR = 7
-    METHOD_ROUND = 8
-    METHOD_TIMES = 9    # ブロックを取る
-    METHOD_UPTO  = 10   # ブロックを取る
-
-    # これ以上のメソッドはレシーバが数値であること
-    METHOD_NUMERIC_MIN = METHOD_MOD
-
-    # これ以上のメソッドはブロックを取る (OP_SENDB でしか呼べない)
+    # 【重要】並び順に意味があります。**レシーバの型ごとに連続した番号**に
+    # 並べ、型検査を範囲比較で済ませています。並べ替えないでください。
     #
-    # 並びに意味があるのは真偽判定のタグ順と同じ理由です。1 比較で振り分けます。
-    METHOD_BLOCK_MIN = METHOD_TIMES
+    #   1-2    レシーバの型を問わない
+    #   3-10   レシーバが数値 (METHOD_NUMERIC_MIN 以上 METHOD_NUMERIC_MAX 以下)
+    #   11-    レシーバが配列 (METHOD_ARRAY_MIN 以上)
+    METHOD_NONE   = 0   # 未対応 (実行時エラー)
+    METHOD_NE     = 1   # !=
+    METHOD_NOT    = 2   # !
+    METHOD_MOD    = 3   # %
+    METHOD_ABS    = 4
+    METHOD_TO_I   = 5
+    METHOD_TO_F   = 6
+    METHOD_FLOOR  = 7
+    METHOD_ROUND  = 8
+    METHOD_TIMES  = 9    # ブロックを取る
+    METHOD_UPTO   = 10   # ブロックを取る
+    METHOD_LENGTH = 11
+    METHOD_PUSH   = 12   # << と push
+
+    # レシーバが数値でなければならない範囲
+    METHOD_NUMERIC_MIN = METHOD_MOD
+    METHOD_NUMERIC_MAX = METHOD_UPTO
+
+    # これ以上のメソッドはレシーバが配列であること。配列は末尾なので上限は要らない
+    METHOD_ARRAY_MIN = METHOD_LENGTH
 
     # メソッド名 => [番号, 引数の数]
     BUILTIN_METHODS = {
-      "!="    => [METHOD_NE,    1],
-      "!"     => [METHOD_NOT,   0],
-      "%"     => [METHOD_MOD,   1],
-      "abs"   => [METHOD_ABS,   0],
-      "to_i"  => [METHOD_TO_I,  0],
-      "to_f"  => [METHOD_TO_F,  0],
-      "floor" => [METHOD_FLOOR, 0],
-      "round" => [METHOD_ROUND, 0],
-      "times" => [METHOD_TIMES, 0],
-      "upto"  => [METHOD_UPTO,  1],
+      "!="     => [METHOD_NE,     1],
+      "!"      => [METHOD_NOT,    0],
+      "%"      => [METHOD_MOD,    1],
+      "abs"    => [METHOD_ABS,    0],
+      "to_i"   => [METHOD_TO_I,   0],
+      "to_f"   => [METHOD_TO_F,   0],
+      "floor"  => [METHOD_FLOOR,  0],
+      "round"  => [METHOD_ROUND,  0],
+      "times"  => [METHOD_TIMES,  0],
+      "upto"   => [METHOD_UPTO,   1],
+      "length" => [METHOD_LENGTH, 0],
+      "size"   => [METHOD_LENGTH, 0],
+      "<<"     => [METHOD_PUSH,   1],
+      "push"   => [METHOD_PUSH,   1],
     }.freeze
 
-    METHOD_NAMES = BUILTIN_METHODS.to_h { |name, (code, _argc)| [code, name] }.freeze
+    # ブロックを取るメソッド。OP_SENDB でしか呼べない
+    #
+    # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
+    # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO].freeze
+
+    # 番号 => 生成コードのコメントに使う名前
+    #
+    # size は length と、<< は push と同じ番号なので、先に現れた方が残ります。
+    METHOD_NAMES = BUILTIN_METHODS.each_with_object({}) do |(name, (code, _argc)), names|
+      names[code] ||= name
+    end.freeze
 
     # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
     BUILTIN_PLAIN_METHODS =
-      METHOD_NAMES.reject { |code, _| code >= METHOD_BLOCK_MIN }.freeze
+      METHOD_NAMES.reject { |code, _| BLOCK_METHODS.include?(code) }.freeze
 
     # --- ユーザー定義メソッド ---
     #

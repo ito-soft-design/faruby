@@ -308,6 +308,7 @@ KV スクリプトでしか起きないため、[test/ruby_programs/](test/ruby_
 - 組み込みメソッド (`!=` `!` `%` `abs` `to_i` `to_f` `floor` `round`)
 - メソッドの定義と呼び出し (`def`、引数・再帰・`return`)
 - ブロック (`times` / `upto`、入れ子・`break`)
+- 配列 (リテラル・添字・`length` / `size` / `<<` / `push`)
 - `if` / `while` による分岐と繰り返し
 - `nil` / `true` / `false` と整数の区別 (`if 0` は Ruby と同じく真)
 - 実数 (単精度)。整数と混ざると Ruby と同じく実数になる

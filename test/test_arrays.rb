@@ -290,6 +290,93 @@ class TestArrays < Minitest::Test
     assert_equal 1, array_sp, "代入で新しいスロットを取ってはいけない"
   end
 
+  # === メソッド (OP_SEND) ===
+
+  SEND = 0x2F
+
+  # シンボル表に 1 件だけメソッドを置く。引数の数を返す
+  def put_method(name)
+    code, argc = BUILTIN_METHODS.fetch(name)
+    addr = layout.device_table_base
+    @sim.fixed.write_u16(addr, code)
+    @sim.fixed.write_u16(addr + 2, argc)
+    @sim.fixed.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_METHOD)
+    argc
+  end
+
+  # R[1] に配列を作り、R[2] を引数にしてメソッドを呼ぶ
+  def call_on_array(elements, method_name, argument = nil)
+    argc = put_method(method_name)
+    setup = elements.each_with_index.flat_map { |v, i| load(2 + i, v) } +
+            [ARRAY2, 1, 2, elements.size]
+    setup += load(2, argument) if argument
+    run_bytecode(setup + [SEND, 1, 0x00, argc, STOP])
+  end
+
+  def test_length_returns_the_element_count
+    call_on_array([11, 22, 33], "length")
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_INTEGER, tag_of(1)
+    assert_equal 3, value_of(1)
+  end
+
+  def test_length_of_an_empty_array_is_zero
+    put_method("length")
+    run_bytecode([ARRAY, 1, 0] + [SEND, 1, 0x00, 0, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal 0, value_of(1)
+  end
+
+  def test_push_appends_and_returns_the_array
+    call_on_array([11], "push", 22)
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_ARRAY, tag_of(1), "push はレシーバ自身を返す"
+    assert_equal [11, 22], slot_values(0)
+    assert_equal 2, slot_length(0)
+  end
+
+  def test_push_onto_an_empty_array
+    put_method("<<")
+    run_bytecode([ARRAY, 1, 0] + load(2, 7) + [SEND, 1, 0x00, 1, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal [7], slot_values(0)
+  end
+
+  def test_push_does_not_take_another_slot
+    call_on_array([11], "push", 22)
+
+    assert_equal 1, array_sp
+  end
+
+  def test_pushing_past_the_capacity_stops_the_vm
+    call_on_array(Array.new(layout.max_array_len) { 1 }, "push", 9)
+
+    assert_equal VM_ERROR, status
+    assert_equal HEAP_ERROR, error
+  end
+
+  # レシーバの型が合わないメソッドは止まる
+  def test_an_array_method_on_a_number_stops_the_vm
+    put_method("length")
+    run_bytecode(load(1, 5) + [SEND, 1, 0x00, 0, STOP])
+
+    assert_equal VM_ERROR, status
+    assert_equal METHOD_TYPE_ERROR, error
+  end
+
+  # 数値メソッドの検査が「TT_INTEGER 以上」だったころ、
+  # それより後ろのタグ (配列は 8) が数値として通っていた
+  def test_a_numeric_method_on_an_array_stops_the_vm
+    call_on_array([1], "abs")
+
+    assert_equal VM_ERROR, status
+    assert_equal METHOD_TYPE_ERROR, error
+  end
+
   # === 生成コード ===
 
   # Z1 は配列、Z2 は添字、Z3 は書き込む値が使っている。
