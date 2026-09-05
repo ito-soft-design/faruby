@@ -634,6 +634,14 @@ module FaRuby
       @em.write_u16(layout.error_addr, code)
     end
 
+    # 累計実行命令数を 1 増やす (生成コードは INC)
+    #
+    # 32 ビットで回り込む。命令ごとに走るので長く動かせば必ず 65535 を超える
+    def count_step
+      @em.write_u32(layout.step_count_addr,
+                    (@em.read_u32(layout.step_count_addr) + 1) & 0xFFFF_FFFF)
+    end
+
     # 条件が真のときだけブロックを実行する
     # (KvsEmitter は常にブロックを実行してコードを出力する点が異なる)
     def if_(cond)

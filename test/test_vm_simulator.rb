@@ -774,4 +774,49 @@ end
     @sim.run
     assert_equal VM_ERROR, @sim.status
   end
+
+  # === 累計実行命令数 (STEP_COUNT) ===
+
+  def step_count = @sim.em.read_u32(layout.step_count_addr)
+
+  def test_step_count_counts_executed_instructions
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]
+      0x00,             # OP_NOP
+      0x69,             # OP_STOP
+    ])
+    @sim.em.write_u32(layout.step_count_addr, 0)
+    @sim.run
+
+    assert_equal 3, step_count
+  end
+
+  # 未知のオペコードも 1 命令として数える (フェッチした後に判定するため)
+  def test_step_count_includes_the_instruction_that_failed
+    load_bytecode([0xFF])
+    @sim.em.write_u32(layout.step_count_addr, 0)
+    @sim.run
+
+    assert_equal 1, step_count
+  end
+
+  # 32ビット。長く動かせば必ず 65535 を超えるので上位ワードが要る
+  def test_step_count_carries_past_16_bits
+    load_bytecode([0x00, 0x69])
+    @sim.em.write_u32(layout.step_count_addr, 65_535)
+    @sim.run
+
+    assert_equal 65_537, step_count
+    assert_equal 1, @sim.em.read_u16(layout.step_count_addr + 1), "上位ワードへ桁上がりする"
+  end
+
+  # 生成コードは命令ごとに走るため、加算式ではなく INC を使う
+  def test_generated_code_counts_with_inc
+    source = FaRuby::KvsGenerator.new.source
+    emitter = FaRuby::KvsEmitter.new(layout: layout)
+    counter = emitter.state_long(layout.step_count_addr)
+
+    assert_includes source, "INC(#{counter})"
+    refute_includes source, "#{counter} = #{counter} + 1"
+  end
 end

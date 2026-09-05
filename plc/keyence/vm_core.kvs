@@ -93,6 +93,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
             Z1 = EM0:Z9 + EM33:Z9
             EM6:Z9 = FM0:Z1
             EM0:Z9 = EM0:Z9 + 1
+            INC(EM3.L:Z9)   ' 累計実行命令数
 
             ' === DECODE & EXECUTE ===
 

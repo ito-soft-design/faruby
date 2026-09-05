@@ -1261,6 +1261,14 @@ module FaRuby
       line "#{pc} = #{pc} + #{operand(name)}"
     end
 
+    # 累計実行命令数を 1 増やす
+    #
+    # 命令ごとに走るので、費用がそのままスキャンタイムに乗ります。
+    # `EM3.L:Z9 = EM3.L:Z9 + 1` と書かず INC を使うのはこのためです。
+    def count_step
+      line "INC(#{state_long(layout.step_count_addr)})   ' 累計実行命令数"
+    end
+
     def vm_finish
       line "#{status} = #{VM_FINISHED}"
       line "BREAK"
@@ -1968,6 +1976,7 @@ module FaRuby
       e.line "Z1 = #{e.pc} + #{e.bytecode_offset}"
       e.line "#{e.opcode} = #{e.fixed_indexed_base}:Z1"
       e.line "#{e.pc} = #{e.pc} + 1"
+      e.count_step
       e.blank
     end
 

@@ -144,6 +144,7 @@ module FaRuby
     def execute_one_instruction
       opcode = @vm.fetch_byte
       @em.write_u16(layout.current_opcode_addr, opcode)
+      @vm.count_step
 
       op = OpcodeTable.lookup[opcode]
       unless op
