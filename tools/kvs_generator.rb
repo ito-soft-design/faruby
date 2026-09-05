@@ -484,33 +484,151 @@ module FaRuby
 
     # R[a] = R[a][R[a+1]]
     def load_device_index(name, error_code)
-      ref = reg_slot(name)          # デバイス参照 (結果の格納先でもある)
+      ref = reg_slot(name)          # デバイス参照または配列 (結果の格納先でもある)
       index = reg_next_slot(name)   # 添字
 
-      if_else_block("#{ref.tag} = #{TT_DEVICE}") do
-        device_ref_lookup(ref, index.value, error_code)
-        device_dispatch(:read, slot: ref, error_code: error_code)
-      end
-      note "デバイス参照以外への添字アクセスは未対応"
+      line "IF #{ref.tag} = #{TT_DEVICE} THEN"
+      indent
+      device_ref_lookup(ref, index.value, error_code)
+      device_dispatch(:read, slot: ref, error_code: error_code)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+      indent
+      load_array_index(ref, index)
+      dedent
+      line "ELSE"
+      indent
+      note "デバイス参照でも配列でもないものへの添字アクセスは未対応"
       vm_error(error_code)
       end_block
     end
 
     # R[a][R[a+1]] = R[a+2]
-    def store_device_index(name, error_code)
+    def store_device_index(name, error_code, heap_code)
       ref = reg_slot(name)
       index = reg_next_slot(name)
       value = slot_ref([:reg_value, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}",
                        reg_offset, z: Z_VALUE)
 
-      if_else_block("#{ref.tag} = #{TT_DEVICE}") do
-        device_ref_lookup(ref, index.value, error_code)
-        prepare_write_scratches(value)
-        device_dispatch(:write, slot: value, error_code: error_code)
-      end
-      note "デバイス参照以外への添字代入は未対応"
+      line "IF #{ref.tag} = #{TT_DEVICE} THEN"
+      indent
+      device_ref_lookup(ref, index.value, error_code)
+      prepare_write_scratches(value)
+      device_dispatch(:write, slot: value, error_code: error_code)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+      indent
+      store_array_index(ref, index, value, error_code, heap_code)
+      dedent
+      line "ELSE"
+      indent
+      note "デバイス参照でも配列でもないものへの添字代入は未対応"
       vm_error(error_code)
       end_block
+    end
+
+    # --- 配列の添字アクセス ---
+    #
+    # Z1 は R[a] (配列そのもの)、Z2 は R[a+1] (添字)、Z3 は OP_SETIDX の
+    # R[a+2] (書き込む値) が使っています。**Z4 以降しか使えません。**
+
+    Z_ARRAY_SLOT    = 4   # スロットの見出し
+    Z_ARRAY_ELEMENT = 5   # 要素の先頭
+
+    # スロットの見出しを Z4 に、要素数を32ビットスクラッチ B に置く
+    #
+    # ref は R[a] で結果の格納先でもあるため、**書き換える前に**呼びます。
+    def array_slot_into_z(ref)
+      note "スロットの見出し。R[a] を書き換える前に読む"
+      line "Z#{Z_ARRAY_SLOT} = #{ref.value}"
+      line "Z#{Z_ARRAY_SLOT} = Z#{Z_ARRAY_SLOT} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_ARRAY_SLOT}" \
+           "   ' 要素数"
+    end
+
+    # 負の添字を後ろからの位置に直して32ビットスクラッチに置く
+    #
+    # Ruby の a[-1] は最後の要素です。直しても負のままなら範囲外。
+    def normalize_array_index(index)
+      note "負の添字は後ろから数える (Ruby の a[-1] は最後の要素)"
+      line "#{scratch32} = #{index.value}"
+      if_("#{scratch32} < 0") { line "#{scratch32} = #{scratch32} + #{scratch32_b}" }
+    end
+
+    # 添字の位置にある要素の先頭を Z5 に置く
+    def array_element_into_z
+      line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
+      line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z#{Z_ARRAY_SLOT} + " \
+           "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+      slot_on(Z_ARRAY_ELEMENT)
+    end
+
+    # R[a] = nil (添字が範囲外のとき)
+    def set_slot_nil(slot)
+      line "#{slot.value} = #{TT_CANONICAL_VALUE.fetch(TT_NIL)}"
+      line "#{slot.tag} = #{TT_NIL}"
+    end
+
+    # R[a] = R[a][R[a+1]] (配列)
+    #
+    # 範囲外は Ruby と同じく nil。エラーにはしません。
+    def load_array_index(ref, index)
+      array_slot_into_z(ref)
+      normalize_array_index(index)
+      note "範囲外は nil (Ruby と同じ)。エラーにはしない"
+      line "IF #{scratch32} < 0 THEN"
+      indent
+      set_slot_nil(ref)
+      dedent
+      line "ELSE IF #{scratch32} >= #{scratch32_b} THEN"
+      indent
+      set_slot_nil(ref)
+      dedent
+      line "ELSE"
+      indent
+      element = array_element_into_z
+      line "#{ref.value} = #{element.value}"
+      line "#{ref.tag} = #{element.tag}"
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2] (配列)
+    #
+    # Ruby は要素数を超える添字への代入で配列を伸ばし、間を nil で埋めます。
+    # 容量は固定なので、**容量を超えたらエラー**です。
+    def store_array_index(ref, index, value, error_code, heap_code)
+      array_slot_into_z(ref)
+      normalize_array_index(index)
+      if_("#{scratch32} < 0") do
+        note "後ろから数えても先頭より前 (Ruby は IndexError)"
+        vm_error(error_code)
+      end
+      if_("#{scratch32} >= #{layout.max_array_len}") do
+        note "1 スロットの容量を超える位置"
+        vm_error(heap_code)
+      end
+      note "要素数を超える位置への代入は、間を nil で埋めて伸ばす"
+      if_("#{scratch32} > #{scratch32_b}") do
+        line "Z6 = #{scratch32_b}   ' 埋め始め (今の要素数)"
+        line "Z7 = #{scratch32}"
+        line "Z7 = Z7 - 1   ' 埋め終わり。ここは添字 > 要素数 >= 0 なので 0 未満にならない"
+        line "FOR Z8 = Z6 TO Z7"
+        indent
+        line "Z#{Z_ARRAY_ELEMENT} = Z8 * #{SLOT_WORDS} + Z#{Z_ARRAY_SLOT} + " \
+             "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+        set_slot_nil(slot_on(Z_ARRAY_ELEMENT))
+        dedent
+        line "NEXT"
+      end
+      if_("#{scratch32} >= #{scratch32_b}") do
+        line "Z6 = #{scratch32}"
+        line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_ARRAY_SLOT} = Z6 + 1" \
+             "   ' 要素数を伸ばす"
+      end
+      element = array_element_into_z
+      line "#{element.value} = #{value.value}"
+      line "#{element.tag} = #{value.tag}"
     end
 
     # --- 実行中の irep ---

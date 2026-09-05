@@ -506,6 +506,8 @@ module FaRuby
     # R[a] = R[a][R[a+1]]
     def load_device_index(name, error_code)
       index = operand(name)
+      return load_array_index(index) if read_reg_tag(index) == TT_ARRAY
+
       ref = device_ref(index)
       return vm_error(error_code) unless ref
 
@@ -519,8 +521,10 @@ module FaRuby
     end
 
     # R[a][R[a+1]] = R[a+2]
-    def store_device_index(name, error_code)
+    def store_device_index(name, error_code, heap_code)
       index = operand(name)
+      return store_array_index(index, error_code, heap_code) if read_reg_tag(index) == TT_ARRAY
+
       ref = device_ref(index)
       return vm_error(error_code) unless ref
 
@@ -531,6 +535,54 @@ module FaRuby
       return vm_error(error_code) unless dev
 
       write_device_value(dev, ref[:type], addr, ref[:access], index + 2)
+    end
+
+    # --- 配列の添字アクセス ---
+
+    # R[a] = R[a][R[a+1]]。範囲外は Ruby と同じく nil
+    def load_array_index(index)
+      slot = read_reg(index)
+      position = array_position(slot, read_reg(index + 1))
+      if position.nil? || position >= array_length(slot)
+        return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL))
+      end
+
+      addr = layout.array_element_addr(slot, position)
+      write_slot(index, @em.read_u16(addr + SLOT_TYPE_OFFSET), @em.read_s32(addr + SLOT_VALUE_OFFSET))
+    end
+
+    # R[a][R[a+1]] = R[a+2]
+    #
+    # Ruby は要素数を超える添字への代入で配列を伸ばし、間を nil で埋める。
+    # 容量は固定なので、超えたらエラー。
+    def store_array_index(index, error_code, heap_code)
+      slot = read_reg(index)
+      position = array_position(slot, read_reg(index + 1))
+      return vm_error(error_code) if position.nil?
+      return vm_error(heap_code) if position >= layout.max_array_len
+
+      length = array_length(slot)
+      (length...position).each { |i| write_array_element(slot, i, TT_NIL, 0) }
+      set_array_length(slot, position + 1) if position >= length
+      write_array_element(slot, position, read_reg_tag(index + 2), read_reg(index + 2))
+    end
+
+    # 負の添字を後ろからの位置に直す。直しても負なら nil
+    def array_position(slot, given)
+      position = given.negative? ? given + array_length(slot) : given
+      position.negative? ? nil : position
+    end
+
+    def array_length(slot) = @em.read_u16(layout.array_slot_addr(slot) + MemoryLayout::ARRAY_LENGTH)
+
+    def set_array_length(slot, length)
+      @em.write_u16(layout.array_slot_addr(slot) + MemoryLayout::ARRAY_LENGTH, length)
+    end
+
+    def write_array_element(slot, position, tag, value)
+      addr = layout.array_element_addr(slot, position)
+      @em.write_u16(addr + SLOT_TYPE_OFFSET, tag)
+      @em.write_s32(addr + SLOT_VALUE_OFFSET, value)
     end
 
     # 16ビットオペランドを符号付きとして解釈する
