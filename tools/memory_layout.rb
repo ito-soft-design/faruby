@@ -27,6 +27,7 @@
 #                         バイトコード          max_bytecode
 #                         定数プール            max_pool    × 4
 #                         シンボル表            max_symbols × 4
+#                         文字列定数            max_string_words
 #
 # バイトコード・定数プール・シンボル表は **全 irep 分をまとめた領域**です。
 # irep ごとの位置は IREP テーブルに入れ、実行時にそこから引きます。
@@ -194,6 +195,11 @@ module FaRuby
     # 次に渡す配列スロットの番号。順に渡して返さないため、これが
     # max_arrays に達したら領域が足りない (回収は行わない)
     OFFSET_ARRAY_SP        = 39
+    # ソースの文字コード (ENCODING_*)。文字数を数えるときの切れ目に使う。
+    # バイト列は変換しないため、これ以外の用途は無い
+    OFFSET_STR_ENCODING    = 40
+    # 固定長でデバイスへ書いたときの余りを埋めるバイト (FARUBY_STR_FILL)
+    OFFSET_STR_FILL        = 41
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -202,12 +208,14 @@ module FaRuby
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
       "max_arrays" => 16, "max_array_len" => 12,
+      "max_string_words" => 500,
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
                 :fixed_base, :fixed_align,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
-                :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len
+                :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len,
+                :max_string_words
 
     # faruby_default.yml だけから作った配置
     #
@@ -230,6 +238,7 @@ module FaRuby
         max_globals: c["max_globals"], max_ireps: c["max_ireps"],
         max_frames: c["max_frames"], max_methods: c["max_methods"],
         max_arrays: c["max_arrays"], max_array_len: c["max_array_len"],
+        max_string_words: c["max_string_words"],
         fixed_base: c["fixed_base"], fixed_align: c["fixed_align"]
       )
     end
@@ -238,7 +247,7 @@ module FaRuby
                    align: 1000, max_regs: 80, max_bytecode: 3000,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 64,
-                   max_arrays: 16, max_array_len: 12,
+                   max_arrays: 16, max_array_len: 12, max_string_words: 500,
                    fixed_base: 0, fixed_align: 1000)
       @device_name    = device_name
       @base           = Integer(base)
@@ -257,6 +266,7 @@ module FaRuby
       @max_methods    = Integer(max_methods)
       @max_arrays     = Integer(max_arrays)
       @max_array_len  = Integer(max_array_len)
+      @max_string_words = Integer(max_string_words)
       validate!
     end
 
@@ -270,6 +280,7 @@ module FaRuby
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
         max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
         max_arrays: max_arrays, max_array_len: max_array_len,
+        max_string_words: max_string_words,
         fixed_base: fixed_base, fixed_align: fixed_align
       )
     end
@@ -299,6 +310,25 @@ module FaRuby
     def pool_base         = bytecode_base + max_bytecode
     def device_table_base = pool_base + max_pool * SLOT_WORDS
 
+    # 文字列定数の置き場所 (FM)
+    #
+    # 値スロットは 4 ワードなので文字列そのものは入りません。バイトコードと
+    # 同じように領域を分け合い、値スロットには位置と長さだけを入れます。
+    # **1 ワードに 2 バイト、先の文字が上位バイト**です。EM 側の並びと同じに
+    # してあるので、OP_STRING はワード単位で写すだけで済みます。
+    def string_pool_base = device_table_base + max_symbols * DEVICE_TABLE_STRIDE
+
+    def string_addr(offset) = string_pool_base + offset
+
+    # 文字列 1 つの上限 (バイト)
+    #
+    # 配列プールのスロットを 1 つ使い、見出しを除いた残りに 2 バイトずつ
+    # 詰めます。またがる形は作らないので、これを超える文字列は作れません。
+    def max_string_bytes = (array_slot_words - ARRAY_HEADER_WORDS) * 2
+
+    # スロット内の i ワード目 (文字列は値スロットではなく生のワード列)
+    def string_word_addr(slot, index) = array_slot_addr(slot) + ARRAY_HEADER_WORDS + index
+
     # --- ホストから見た固定領域 ---
     #
     # スクリプトは FRSET(#{FIXED_BANK}) でバンクを選んでから FM で触りますが、
@@ -317,7 +347,8 @@ module FaRuby
     # 固定領域の合計 (パディングを含まない)
     def fixed_content_size
       max_ireps * IREP_TABLE_STRIDE + max_bytecode +
-        max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE
+        max_pool * SLOT_WORDS + max_symbols * DEVICE_TABLE_STRIDE +
+        max_string_words
     end
 
     # 1インスタンスが占有するワード数
@@ -371,6 +402,8 @@ module FaRuby
     def call_argc_addr       = vm_state_base + OFFSET_CALL_ARGC
     def irep_table_addr_addr = vm_state_base + OFFSET_IREP_TABLE
     def array_sp_addr        = vm_state_base + OFFSET_ARRAY_SP
+    def str_encoding_addr    = vm_state_base + OFFSET_STR_ENCODING
+    def str_fill_addr        = vm_state_base + OFFSET_STR_FILL
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #

@@ -97,12 +97,161 @@ end
   # OP_LOADL はタグごと複製するため、書かずに残すと不定のタグを拾う。
   # TT_EMPTY なら少なくとも偽として扱われ、挙動が決まる。
   def test_unsupported_pool_entry_is_zeroed
-    irep = build_irep(pool: [[:string, "hi"]])
+    irep = build_irep(pool: [[:bigint, { sign: 0, digits: "\x01" }]])
     em, image = load_image(irep)
 
     assert image.key?(layout.pool_type_addr(0)), "タグを書かずに残さない"
     assert_equal TT_EMPTY, em.read_u16(layout.pool_type_addr(0))
     assert_equal 0, em.read_s32(layout.pool_addr(0))
+  end
+
+  # === 文字列定数 ===
+  #
+  # 値スロットには入らないので、FM の文字列領域に置いて位置と長さだけを持つ
+
+  def codegen(irep, **opts) = FaRuby::PlcCodegen.new(irep, **opts)
+
+  def test_a_string_pool_entry_holds_its_position_and_length
+    irep = build_irep(pool: [[:string, "hi"]])
+    em, = load_image(irep)
+
+    assert_equal TT_STRING, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 0, em.read_u16(layout.pool_addr(0)), "文字列領域の先頭からの位置"
+    assert_equal 2, em.read_u16(layout.pool_addr(0) + 1), "バイト数"
+  end
+
+  # 1 ワードに 2 バイト、先の文字が上位。KV-5000 の文字列デバイスと同じ並び
+  def test_string_bytes_pack_two_to_a_word_with_the_first_byte_high
+    irep = build_irep(pool: [[:string, "ABCDE "]])
+    em, = load_image(irep)
+
+    assert_equal 0x4142, em.read_u16(layout.string_addr(0))
+    assert_equal 0x4344, em.read_u16(layout.string_addr(1))
+    assert_equal 0x4520, em.read_u16(layout.string_addr(2))
+  end
+
+  # 奇数バイトなら最後のワードの下位バイトは 0。デバイスへ書けば終端になる
+  def test_an_odd_length_string_pads_the_last_word_with_zero
+    irep = build_irep(pool: [[:string, "abc"]])
+    em, = load_image(irep)
+
+    assert_equal 0x6162, em.read_u16(layout.string_addr(0))
+    assert_equal 0x6300, em.read_u16(layout.string_addr(1))
+  end
+
+  # OP_STRING は毎回複製するので、元を共有しても Ruby の意味は変わらない
+  def test_the_same_bytes_share_one_constant
+    irep = build_irep(pool: [[:string, "hi"], [:string, "hi"]])
+    em, = load_image(irep)
+
+    assert_equal em.read_u16(layout.pool_addr(0)), em.read_u16(layout.pool_addr(1))
+    assert_equal 1, codegen(irep).string_constants.size
+  end
+
+  def test_different_strings_take_different_positions
+    irep = build_irep(pool: [[:string, "hi"], [:string, "yo"]])
+    em, = load_image(irep)
+
+    assert_equal 0, em.read_u16(layout.pool_addr(0))
+    assert_equal 1, em.read_u16(layout.pool_addr(1))
+  end
+
+  # 1 スロットに収まらない文字列は転送前に止める
+  def test_a_string_longer_than_a_slot_stops_the_build
+    long = "a" * (layout.max_string_bytes + 1)
+    irep = build_irep(pool: [[:string, long]])
+
+    assert_raises(FaRuby::CodegenError) { codegen(irep).fixed_image }
+  end
+
+  # === 文字コード ===
+  #
+  # バイト列は変換しない。種別だけを VM 状態に置き、文字数を数えるのに使う
+
+  def test_the_encoding_defaults_to_utf8
+    irep = build_irep
+    em = FaRuby::EmMemory.new
+    em.load_image(mutable_image(irep))
+
+    assert_equal ENCODING_UTF8, em.read_u16(layout.str_encoding_addr)
+  end
+
+  def test_the_encoding_is_written_to_vm_state
+    irep = build_irep
+    em = FaRuby::EmMemory.new
+    em.load_image(codegen(irep, encoding: ENCODING_SJIS).memory_image)
+
+    assert_equal ENCODING_SJIS, em.read_u16(layout.str_encoding_addr)
+  end
+
+  # mrbc はマジックコメントを見ないので、読むのは faRuby の仕事
+  def test_reading_the_magic_comment
+    detect = ->(s) { FaRuby::PlcCodegen.detect_encoding(s) }
+
+    assert_equal ENCODING_UTF8, detect.call("x = 1\n")
+    assert_equal ENCODING_UTF8, detect.call("# encoding: utf-8\nx = 1\n")
+    assert_equal ENCODING_SJIS, detect.call("# encoding: shift_jis\n")
+    assert_equal ENCODING_SJIS, detect.call("# coding: windows-31j\n")
+    assert_equal ENCODING_SJIS, detect.call("#!/usr/bin/env ruby\n# coding: cp932\n")
+    assert_equal ENCODING_ASCII, detect.call("# encoding: ascii\n")
+  end
+
+  def test_an_unsupported_encoding_stops_the_build
+    assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.detect_encoding("# encoding: euc-jp\n")
+    end
+  end
+
+  # === 設定定数 ===
+
+  def test_a_setting_constant_gets_its_own_symbol_kind
+    irep = build_irep(symbols: ["FARUBY_STR_FILL"])
+    em, = load_image(irep)
+
+    assert_equal SYMBOL_KIND_SETTING,
+                 em.read_u16(layout.device_table_addr(0) + DEVICE_TABLE_KIND_OFFSET)
+    assert_equal SETTING_STR_FILL, em.read_u16(layout.device_table_addr(0))
+  end
+
+  # 接頭辞で始まって表に無い名前は書き間違い。実行してから気づくより早く止める
+  def test_an_unknown_faruby_constant_stops_the_build
+    irep = build_irep(symbols: ["FARUBY_NOPE"])
+
+    assert_raises(FaRuby::CodegenError) { load_image(irep) }
+  end
+
+  # 接頭辞で始まらない定数は利用者のもの。メソッド名と同じ扱いで放っておく
+  def test_an_ordinary_constant_is_left_alone
+    irep = build_irep(symbols: ["MY_LIMIT"])
+    em, = load_image(irep)
+
+    assert_equal SYMBOL_KIND_METHOD,
+                 em.read_u16(layout.device_table_addr(0) + DEVICE_TABLE_KIND_OFFSET)
+  end
+
+  # === 文字列を書くデバイス ===
+
+  def test_a_plain_device_keeps_its_width
+    assert_equal ACCESS_S, FaRuby::PlcCodegen.parse_device_name("DM100")[:access_type]
+    assert_equal ACCESS_L, FaRuby::PlcCodegen.parse_device_name("DM100L")[:access_type]
+  end
+
+  # 長さは同じワードに詰める。既存の幅は 0-5 なので 6 以上なら文字列
+  def test_the_string_suffix_packs_its_length
+    assert_equal ACCESS_STR, FaRuby::PlcCodegen.parse_device_name("DM100T")[:access_type]
+    assert_equal ACCESS_STR + 6 * ACCESS_STR_LENGTH_SCALE,
+                 FaRuby::PlcCodegen.parse_device_name("DM100T6")[:access_type]
+  end
+
+  # 16進アドレスの B でも T は16進数字ではないので曖昧にならない
+  def test_the_string_suffix_on_a_hex_address
+    assert_nil FaRuby::PlcCodegen.parse_device_name("B1F")[:access_type],
+               "$B1F は 0x1F の個別ビット"
+  end
+
+  # ビットデバイスに文字列を書いても表示器から読めない
+  def test_a_string_on_a_bit_device_stops_the_build
+    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_name("MR100T6") }
   end
 
   # プール領域がデバイスマッピングテーブル (EM5000) を侵さないこと

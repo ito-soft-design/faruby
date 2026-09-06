@@ -108,6 +108,16 @@ module FaRuby
     ACCESS_D = 3
     ACCESS_F = 4
 
+    # 文字列をデバイスへ書く
+    #
+    # 幅ではなく「文字列として書く」という指定です。長さ (ASCII での文字数) は
+    # 同じワードに `ACCESS_STR + 長さ * ACCESS_STR_LENGTH_SCALE` で詰めます。
+    # 長さ 0 は終端付き、1 以上は固定長です。
+    #
+    # 既存の幅は 0-5 なので、**6 以上なら文字列**と 1 比較で分かります。
+    ACCESS_STR = 6
+    ACCESS_STR_LENGTH_SCALE = 16
+
     # 個別ビット。ビットデバイスをサフィックス無しで書いたとき
     #
     # 0 (ACCESS_S) と区別する必要があります。ビットデバイスに幅を付けると
@@ -157,9 +167,47 @@ module FaRuby
     # `$` で始まるシンボルはグローバル変数 (デバイスか汎用グローバル)、
     # それ以外はメソッド名です。同じシンボル表を OP_GETGV / OP_SETGV と
     # OP_SEND が共有するため、種別で振り分けます。
-    SYMBOL_KIND_VALUE  = 0
-    SYMBOL_KIND_FAMILY = 1
-    SYMBOL_KIND_METHOD = 2
+    SYMBOL_KIND_VALUE   = 0
+    SYMBOL_KIND_FAMILY  = 1
+    SYMBOL_KIND_METHOD  = 2
+    SYMBOL_KIND_SETTING = 3   # FARUBY_ で始まる定数 (OP_SETCONST が使う)
+
+    # --- faRuby の設定定数 ---
+    #
+    # `FARUBY_STR_FILL = 0x20` のように書くと OP_SETCONST になります。
+    # ホストが名前に番号を振り、VM は起動時に 1 回 VM 状態へ書くだけです。
+    # 走るのは起動時だけなので、使う側の経路には何も足しません。
+    #
+    # `FARUBY_` で始まって表に無い名前は転送前に止めます。実行時に気づくより
+    # 早く、書き間違いがそのまま動いてしまうこともありません。
+    SETTING_NONE     = 0
+    SETTING_STR_FILL = 1
+
+    SETTING_NAMES = {
+      "FARUBY_STR_FILL" => SETTING_STR_FILL,
+    }.freeze
+
+    # 設定定数の接頭辞。これで始まる定数だけを faRuby のものとして扱います
+    SETTING_PREFIX = "FARUBY_"
+
+    # --- ソースの文字コード ---
+    #
+    # バイト列は変換しません。覚えておくのは種別だけで、`length` と `[]` が
+    # 文字の切れ目を見つけるのに使います。
+    ENCODING_UTF8  = 0   # 既定
+    ENCODING_SJIS  = 1
+    ENCODING_ASCII = 2
+
+    # マジックコメントの綴り => ENCODING_*
+    #
+    # mrbc はマジックコメントを見ていないため、読むのは faRuby の仕事です。
+    ENCODING_NAMES = {
+      "utf-8" => ENCODING_UTF8, "utf8" => ENCODING_UTF8,
+      "shift_jis" => ENCODING_SJIS, "sjis" => ENCODING_SJIS,
+      "windows-31j" => ENCODING_SJIS, "cp932" => ENCODING_SJIS,
+      "ascii" => ENCODING_ASCII, "us-ascii" => ENCODING_ASCII,
+      "binary" => ENCODING_ASCII, "ascii-8bit" => ENCODING_ASCII,
+    }.freeze
 
     # --- 組み込みメソッド ---
     #

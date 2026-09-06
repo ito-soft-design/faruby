@@ -17,11 +17,17 @@ module FaRuby
 
     attr_reader :layout
 
-    def initialize(irep, steps_per_cycle: 50, layout: MemoryLayout.default)
+    # encoding はソースの文字コード (ENCODING_*)。バイト列の変換には使わず、
+    # `length` と `[]` が文字の切れ目を見つけるために VM へ渡すだけです。
+    def initialize(irep, steps_per_cycle: 50, layout: MemoryLayout.default,
+                   encoding: ENCODING_UTF8)
       @irep = irep
       @steps_per_cycle = steps_per_cycle
       @layout = layout
+      @encoding = encoding
     end
+
+    attr_reader :encoding
 
     # irep を並べ、それぞれの領域内の位置を決めたもの
     #
@@ -49,6 +55,7 @@ module FaRuby
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
+      check_limit("文字列定数のワード数", string_constant_words, layout.max_string_words)
       self
     end
 
@@ -69,6 +76,8 @@ module FaRuby
       lines.concat(generate_bytecode)
       lines << ""
       lines.concat(generate_pool)
+      lines << ""
+      lines.concat(generate_strings)
       lines << ""
       lines.concat(generate_device_table)
       lines << ""
@@ -96,6 +105,10 @@ module FaRuby
       image[layout.frame_sp_addr] = 0
       image[layout.array_sp_addr] = 0
       image[layout.call_argc_addr] = 0
+      # バイト列は変換しない。文字の切れ目を数えるためだけに種別を渡す
+      image[layout.str_encoding_addr] = @encoding
+      # FARUBY_STR_FILL を書かないプログラムのための既定値
+      image[layout.str_fill_addr] = 0
       image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
       image[layout.irep_table_addr_addr] = layout.irep_table_base
       image[layout.num_symbols_addr] = irep_entries.sum { |e| e[:irep].symbols.size }
@@ -150,6 +163,9 @@ module FaRuby
         end
       end
 
+      # 文字列定数 (2 バイト 1 ワード、先の文字が上位)
+      string_image.each { |addr, word| image[addr] = word }
+
       # シンボル表
       device_mappings.each do |m|
         image[m[:table_addr] + DEVICE_TABLE_KIND_OFFSET] = m[:kind]
@@ -157,6 +173,13 @@ module FaRuby
           image[m[:table_addr]]     = m[:method_code]
           image[m[:table_addr] + 1] = m[:method_id]
           image[m[:table_addr] + 2] = m[:argc]
+          next
+        end
+
+        if m[:kind] == SYMBOL_KIND_SETTING
+          image[m[:table_addr]]     = m[:setting]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = 0
           next
         end
 
@@ -225,6 +248,61 @@ module FaRuby
       end
     end
 
+    # 文字列定数のバイト列 => { offset:, length: }
+    #
+    # 中身が同じものは 1 つにまとめます。`OP_STRING` は毎回複製するので、
+    # 元を共有しても Ruby の意味は変わりません。
+    #
+    # offset は文字列領域の先頭からのワード数です。1 ワードに 2 バイト、
+    # 先の文字が上位バイトで、EM 側と同じ並びにしてあります。
+    def string_constants
+      @string_constants ||= begin
+        table = {}
+        words = 0
+        irep_entries.each do |entry|
+          entry[:irep].pool.each do |pool_entry|
+            next unless string_pool_entry?(pool_entry)
+
+            bytes = pool_entry.value.b
+            if bytes.bytesize > layout.max_string_bytes
+              raise CodegenError,
+                    "文字列が長すぎます (#{bytes.bytesize} > #{layout.max_string_bytes} バイト): " \
+                    "#{bytes.inspect}"
+            end
+            next if table.key?(bytes)
+
+            table[bytes] = { offset: words, length: bytes.bytesize }
+            words += string_word_count(bytes.bytesize)
+          end
+        end
+        table
+      end
+    end
+
+    def string_constant_words
+      string_constants.sum { |bytes, _| string_word_count(bytes.bytesize) }
+    end
+
+    # バイト数からワード数。奇数なら最後のワードの下位バイトは 0 になる
+    def string_word_count(bytes) = (bytes + 1) / 2
+
+    def string_pool_entry?(entry) = %i[string short_string].include?(entry.type)
+
+    # 文字列領域の { FM アドレス => ワード }
+    #
+    # 2 バイトを 1 ワードに詰めます。先のバイトが上位です。
+    def string_image
+      image = {}
+      string_constants.each do |bytes, info|
+        string_word_count(bytes.bytesize).times do |i|
+          hi = bytes.getbyte(i * 2) || 0
+          lo = bytes.getbyte(i * 2 + 1) || 0
+          image[layout.string_addr(info[:offset] + i)] = hi * 256 + lo
+        end
+      end
+      image
+    end
+
     # ユーザー定義メソッド名 => ID (1 から)
     # 名前 => 通し番号 (1 から)
     #
@@ -255,6 +333,17 @@ module FaRuby
           device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
           address: value_addr.to_s, z_offset: value_addr,
           access_type: ACCESS_L, bit: false }
+      elsif sym.start_with?(SETTING_PREFIX)
+        # faRuby の設定定数。OP_SETCONST が VM 状態へ書く
+        #
+        # 接頭辞で始まって表に無い名前は書き間違いなので、ここで止める。
+        # 実行してから気づくより早い
+        setting = SETTING_NAMES[sym] or
+          raise CodegenError,
+                "#{sym} は faRuby の設定ではありません " \
+                "(#{SETTING_NAMES.keys.join(', ')})"
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_SETTING, setting: setting }
       else
         code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
         # **すべての名前**に 1 から通し番号を振る。シンボル表は irep ごとに
@@ -304,9 +393,10 @@ module FaRuby
     # プールエントリの型タグを返す
     def pool_type_tag(entry)
       case entry.type
-      when :int32, :int64 then TT_INTEGER
-      when :float         then TT_FLOAT
-      else                     TT_EMPTY
+      when :int32, :int64          then TT_INTEGER
+      when :float                  then TT_FLOAT
+      when :string, :short_string  then TT_STRING
+      else                              TT_EMPTY
       end
     end
 
@@ -319,6 +409,11 @@ module FaRuby
       when :int32 then entry.value
       when :int64 then entry.value & 0xFFFFFFFF  # 下位32ビットのみ使用
       when :float then float_bits(entry.value)
+      when :string, :short_string
+        # 文字列そのものは値スロットに入らないので、位置と長さだけを入れる。
+        # 下位ワードが文字列領域の先頭からのワード数、上位ワードがバイト数
+        info = string_constants.fetch(entry.value.b)
+        info[:offset] | (info[:length] << 16)
       end
     end
 
@@ -339,6 +434,8 @@ module FaRuby
       lines << "#{layout.device(layout.num_ireps_addr)} = #{irep_entries.size}          ' NUM_IREPS"
       lines << "#{layout.device(layout.frame_sp_addr)} = 0          ' FRAME_SP = トップレベル"
       lines << "#{layout.device(layout.array_sp_addr)} = 0          ' ARRAY_SP = プールの先頭"
+      lines << "#{layout.device(layout.str_encoding_addr)} = #{@encoding}          ' STR_ENCODING"
+      lines << "#{layout.device(layout.str_fill_addr)} = 0          ' STR_FILL"
       lines << "#{layout.device(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
                "          ' REG_BASE"
       lines << ""
@@ -404,9 +501,31 @@ module FaRuby
          "#{layout.fixed_device(value_addr)} = #{bits & 0xFFFF}    ' #{label} = #{pool_entry.value} (IEEE754 下位)",
          "#{layout.fixed_device(value_addr + 1)} = #{(bits >> 16) & 0xFFFF}    " \
          "' #{label} = #{pool_entry.value} (IEEE754 上位)"]
+      when :string, :short_string
+        info = string_constants.fetch(pool_entry.value.b)
+        ["#{type_addr} = #{TT_STRING}    ' #{label} type=string",
+         "#{layout.fixed_device(value_addr)} = #{info[:offset]}    ' #{label} 文字列領域の位置",
+         "#{layout.fixed_device(value_addr + 1)} = #{info[:length]}    ' #{label} バイト数"]
       else
         ["' #{label} = #{pool_entry} (type #{pool_entry.type} - not supported)"]
       end
+    end
+
+    # 文字列定数の領域。2 バイトを 1 ワードに詰め、先の文字を上位に置く
+    def generate_strings
+      return [] if string_constants.empty?
+
+      lines = ["' --- String Constants (#{string_constants.size} 個, " \
+               "#{string_constant_words} ワード) ---"]
+      string_constants.each do |bytes, info|
+        label = bytes.inspect
+        string_word_count(bytes.bytesize).times do |i|
+          word = (bytes.getbyte(i * 2) || 0) * 256 + (bytes.getbyte(i * 2 + 1) || 0)
+          lines << "#{layout.fixed_device(layout.string_addr(info[:offset] + i))} = #{word}" \
+                   "    ' #{label} +#{i}"
+        end
+      end
+      lines
     end
 
     def generate_device_table
@@ -486,7 +605,11 @@ module FaRuby
     # 16進アドレスを持つ B では `$B1F` が「0x1F」なのか「0x1 を実数で」なのか
     # 区別できないため、区切りたいときに `$B1_F` と書けるようにしています。
     # 10進アドレスのデバイスでは元々曖昧さがなく、読みやすさのためだけです。
-    SUFFIX = "_?([SULDF]?)"
+    # T は文字列。後ろに長さ (ASCII での文字数) を付けられます。
+    #   $DM100    値が文字列なら終端付きで書く
+    #   $DM100T   同上。文字列であることを明示する
+    #   $DM100T6  6 文字ぶんの固定長
+    SUFFIX = "_?([SULDF]|T\\d*)?"
 
     # ワードデバイス: 10進アドレス + アクセス幅 (省略時は16ビット符号付き)
     #   $DM100 / $DM100L / $DM100_L
@@ -629,12 +752,62 @@ module FaRuby
       device_name = protocol_name(match[1].upcase)
       addr_str = match[2]
       device_type = DEVICE_NAME_TO_TYPE[device_name]
-      access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(match[3].to_s.upcase)
+      access_type = bit ? nil : access_from_suffix(match[3])
       check_float_support(device_name, device_type, access_type)
+      check_string_support(device_name, device_type, access_type)
 
       { device_type: device_type, address: addr_str,
         z_offset: device_z_offset(device_name, addr_str),
         device_name: device_name, bit: bit, access_type: access_type }
+    end
+
+    # 幅サフィックスを ACCESS_* に直す
+    #
+    # 文字列 (T) だけは長さを持つため、同じワードに詰めて返します。
+    # 既存の幅は 0-5 なので、6 以上なら文字列だと 1 比較で分かります。
+    def self.access_from_suffix(suffix)
+      suffix = suffix.to_s.upcase
+      return VmConstants::ACCESS_SUFFIXES.fetch(suffix) unless suffix.start_with?("T")
+
+      length = suffix[1..].to_i
+      unless length <= MAX_STRING_FIELD
+        raise CodegenError, "文字列の桁数が大きすぎます (#{length} > #{MAX_STRING_FIELD})"
+      end
+
+      VmConstants::ACCESS_STR + length * VmConstants::ACCESS_STR_LENGTH_SCALE
+    end
+
+    # access_type に詰められる桁数の上限 (16ビットに収まる範囲)
+    MAX_STRING_FIELD = 4095
+
+    # 文字列を書けるのはワードデバイスだけ
+    #
+    # ビットデバイスに文字列を書く意味は無く、書けたとしてもビット単位の
+    # 読み書きになって表示器から読めません。
+    STRING_DEVICE_TYPES = [DEVICE_TYPE_EM, DEVICE_TYPE_DM, DEVICE_TYPE_ZF].freeze
+
+    def self.check_string_support(device_name, device_type, access_type)
+      return unless access_type && access_type >= VmConstants::ACCESS_STR
+      return if STRING_DEVICE_TYPES.include?(device_type)
+
+      raise CodegenError, "#{device_name} には文字列を書けません " \
+                          "(#{STRING_DEVICE_TYPES.size} 種のワードデバイスのみ)"
+    end
+
+    # ソースの文字コードを決める (マジックコメント。無ければ UTF-8)
+    #
+    # **mrbc はマジックコメントを見ていません。** 定数プールにはソースの
+    # バイト列がそのまま入るため、読むのは faRuby の仕事です。読んでも
+    # バイト列は変換せず、種別だけを VM へ渡して `length` と `[]` に使います。
+    def self.detect_encoding(source)
+      head = source.b.each_line.first(2).join
+      m = head.match(/^#.*?\b(?:en)?coding\s*[:=]\s*([\w-]+)/i)
+      return VmConstants::ENCODING_UTF8 unless m
+
+      VmConstants::ENCODING_NAMES[m[1].downcase] or
+        raise CodegenError,
+              "対応していない文字コードです: #{m[1]} " \
+              "(#{VmConstants::ENCODING_NAMES.keys.join(', ')})"
     end
 
     # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)。
