@@ -1588,8 +1588,22 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
                         ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
                         EM16:Z9 = 0
+                        ' シンボルや配列のタグは 4 より大きいので、上限も見ないと
+                        ' 番号やスロット番号が数値として比べられてしまう
+                        Z3 = 0
                         IF EM0:Z1 >= 4 THEN
-                            IF EM0:Z2 >= 4 THEN
+                            IF EM0:Z1 <= 5 THEN
+                                Z3 = 1
+                            END IF
+                        END IF
+                        Z4 = 0
+                        IF EM0:Z2 >= 4 THEN
+                            IF EM0:Z2 <= 5 THEN
+                                Z4 = 1
+                            END IF
+                        END IF
+                        IF Z3 = 1 THEN
+                            IF Z4 = 1 THEN
                                 IF EM0:Z1 = 5 THEN
                                     IF EM0:Z2 = 5 THEN
                                         IF EM1.F:Z1 = EM1.F:Z2 THEN
@@ -1875,8 +1889,22 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
                     ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
                     EM16:Z9 = 0
+                    ' シンボルや配列のタグは 4 より大きいので、上限も見ないと
+                    ' 番号やスロット番号が数値として比べられてしまう
+                    Z3 = 0
                     IF EM0:Z1 >= 4 THEN
-                        IF EM0:Z2 >= 4 THEN
+                        IF EM0:Z1 <= 5 THEN
+                            Z3 = 1
+                        END IF
+                    END IF
+                    Z4 = 0
+                    IF EM0:Z2 >= 4 THEN
+                        IF EM0:Z2 <= 5 THEN
+                            Z4 = 1
+                        END IF
+                    END IF
+                    IF Z3 = 1 THEN
+                        IF Z4 = 1 THEN
                             IF EM0:Z1 = 5 THEN
                                 IF EM0:Z2 = 5 THEN
                                     IF EM1.F:Z1 = EM1.F:Z2 THEN
@@ -2598,8 +2626,22 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
                 ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
                 EM16:Z9 = 0
+                ' シンボルや配列のタグは 4 より大きいので、上限も見ないと
+                ' 番号やスロット番号が数値として比べられてしまう
+                Z3 = 0
                 IF EM0:Z1 >= 4 THEN
-                    IF EM0:Z2 >= 4 THEN
+                    IF EM0:Z1 <= 5 THEN
+                        Z3 = 1
+                    END IF
+                END IF
+                Z4 = 0
+                IF EM0:Z2 >= 4 THEN
+                    IF EM0:Z2 <= 5 THEN
+                        Z4 = 1
+                    END IF
+                END IF
+                IF Z3 = 1 THEN
+                    IF Z4 = 1 THEN
                         IF EM0:Z1 = 5 THEN
                             IF EM0:Z2 = 5 THEN
                                 IF EM1.F:Z1 = EM1.F:Z2 THEN

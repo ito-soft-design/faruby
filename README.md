@@ -329,6 +329,11 @@ PLC が軽度エラーを出します**。0 除算が起こりうる箇所では
 
 文字列とハッシュは未対応です。
 
+**Ruby として書いたつもりのものがどうなるかは
+[doc/mruby_differences.md](doc/mruby_differences.md) にまとめてあります。**
+止まらずに意味だけ変わるもの (大小比較が型を見ない、整数が 32 ビットで
+回り込む) が載っているので、書き始める前に一度目を通してください。
+
 ### メソッドの定義と呼び出し
 
 ```ruby
@@ -393,6 +398,7 @@ end
 | [doc/blocks.md](doc/blocks.md) | ブロックの設計と実装の記録 |
 | [doc/heap.md](doc/heap.md) | 配列の置き場所と GC の判断 |
 | [doc/hash.md](doc/hash.md) | ハッシュと Symbol の設計メモ (Symbol まで実装) |
+| [doc/mruby_differences.md](doc/mruby_differences.md) | mruby との違い。動くが意味が違うもの、使うと止まるもの |
 | [doc/ruby_and_plc.md](doc/ruby_and_plc.md) | Ruby と PLC で意味が違う箇所とその埋め方。新しい機種に対応する際の確認項目 |
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |

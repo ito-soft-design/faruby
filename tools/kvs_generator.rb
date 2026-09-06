@@ -423,9 +423,13 @@ module FaRuby
       note "数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)"
       note "結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する"
       line "#{scratch_lo} = 0"
+      note "シンボルや配列のタグは #{TT_INTEGER} より大きいので、上限も見ないと"
+      note "番号やスロット番号が数値として比べられてしまう"
+      lhs_numeric = numeric_flag_into(3, lhs.tag)
+      rhs_numeric = numeric_flag_into(4, rhs.tag)
 
-      if_else_block(numeric?(lhs.tag)) do
-        if_else_block(numeric?(rhs.tag)) do
+      if_else_block(lhs_numeric) do
+        if_else_block(rhs_numeric) do
           numeric_dispatch(lhs, rhs, rhs_tag: rhs.tag) do |_kind, l, r|
             if_(cmp(:eq, l, r)) { line "#{scratch_lo} = 1" }
           end
@@ -1418,7 +1422,18 @@ module FaRuby
     private
 
     # タグが数値 (整数か実数) かどうかの条件式
-    def numeric?(tag) = "#{tag} >= #{TT_INTEGER}"
+    # 型タグが数値かどうかを Z に 0/1 で置く
+    #
+    # 数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけです。「#{TT_INTEGER} 以上」で
+    # 済ませていたころは、その後ろのタグ (シンボル・配列など) まで数値として
+    # 通っていました。KV スクリプトに AND が無いため入れ子の IF で判定します。
+    def numeric_flag_into(z, tag)
+      line "Z#{z} = 0"
+      if_("#{tag} >= #{TT_INTEGER}") do
+        if_("#{tag} <= #{TT_FLOAT}") { line "Z#{z} = 1" }
+      end
+      "Z#{z} = 1"
+    end
 
     # 整数どうしの除算 (Ruby と同じ切り下げ、0除算はエラー停止)
     #

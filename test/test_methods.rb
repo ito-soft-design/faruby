@@ -108,6 +108,18 @@ class TestMethods < Minitest::Test
     end
   end
 
+  # 数値のタグは TT_INTEGER と TT_FLOAT の 2 つだけ。「TT_INTEGER 以上」で
+  # 済ませると、その後ろのシンボル・配列が値で比べられてしまう
+  def test_a_symbol_is_never_equal_to_a_number
+    { [[TT_SYMBOL, 1], INT.(1)]  => TT_TRUE,    # 番号が 1 でも等しくない
+      [[TT_ARRAY, 0], INT.(0)]   => TT_TRUE,    # スロット番号が 0 でも等しくない
+      [[TT_SYMBOL, 1], [TT_SYMBOL, 1]] => TT_FALSE,
+      [[TT_SYMBOL, 1], [TT_SYMBOL, 2]] => TT_TRUE }.each do |(lhs, rhs), expected|
+      call("!=", lhs, rhs)
+      assert_equal expected, tag_of(0), "#{lhs.inspect} != #{rhs.inspect}"
+    end
+  end
+
   # === ! ===
 
   # Ruby で偽なのは nil と false だけ。0 も空も真
@@ -273,6 +285,17 @@ class TestMethods < Minitest::Test
 
     assert_equal VM_ERROR, status
     assert_equal UNKNOWN_METHOD_ERROR, error
+  end
+
+  # 生成コードの数値判定に上限が無いと、シミュレータとだけ食い違って
+  # 実機で `:foo == 1` が真になる (実際に踏んだ)
+  def test_generated_code_checks_both_ends_of_the_numeric_range
+    source = FaRuby::KvsGenerator.new.source
+    emitter = FaRuby::KvsEmitter.new(layout: layout)
+    tag = emitter.reg_slot(:a).tag
+
+    assert_includes source, "IF #{tag} <= #{TT_FLOAT} THEN",
+                    "数値判定が下限だけになっている"
   end
 
   # メソッド表は ID で引くので、名前の数だけ枠が要る
