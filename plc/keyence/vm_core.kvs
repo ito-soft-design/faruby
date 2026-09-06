@@ -1177,8 +1177,42 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = EM1.L:Z5
                         EM0:Z1 = EM0:Z5
                     END IF
+                ELSE IF EM0:Z1 = 9 THEN
+                    ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                    Z4 = EM1:Z1
+                    Z4 = Z4 * 50 + 992 + Z9
+                    Z5 = EM2:Z1
+                    Z5 = Z5 * 50 + 992 + Z9
+                    EM18.L:Z9 = EM0:Z4
+                    ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
+                    EM16.L:Z9 = -1
+                    IF EM18.L:Z9 > 0 THEN
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 - 1
+                        FOR Z6 = 0 TO Z8
+                            IF EM16.L:Z9 < 0 THEN
+                                ' 最初に一致したものを採る
+                                Z7 = Z6 * 4 + Z4 + 2
+                                IF EM0:Z7 = EM0:Z2 THEN
+                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                        EM16.L:Z9 = Z6
+                                    END IF
+                                END IF
+                            END IF
+                        NEXT
+                    END IF
+                    IF EM16.L:Z9 < 0 THEN
+                        ' 無い鍵は nil (Ruby と同じ)
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 1
+                    ELSE
+                        Z7 = EM16.L:Z9
+                        Z7 = Z7 * 4 + Z5 + 2
+                        EM1.L:Z1 = EM1.L:Z7
+                        EM0:Z1 = EM0:Z7
+                    END IF
                 ELSE
-                    ' デバイス参照でも配列でもないものへの添字アクセスは未対応
+                    ' デバイス参照・配列・ハッシュ以外への添字アクセスは未対応
                     EM1:Z9 = 3
                     EM2:Z9 = 2
                     BREAK
@@ -1434,8 +1468,60 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     Z5 = Z5 * 4 + Z4 + 2
                     EM1.L:Z5 = EM1.L:Z3
                     EM0:Z5 = EM0:Z3
+                ELSE IF EM0:Z1 = 9 THEN
+                    ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                    Z4 = EM1:Z1
+                    Z4 = Z4 * 50 + 992 + Z9
+                    Z5 = EM2:Z1
+                    Z5 = Z5 * 50 + 992 + Z9
+                    EM18.L:Z9 = EM0:Z4
+                    ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
+                    EM16.L:Z9 = -1
+                    IF EM18.L:Z9 > 0 THEN
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 - 1
+                        FOR Z6 = 0 TO Z8
+                            IF EM16.L:Z9 < 0 THEN
+                                ' 最初に一致したものを採る
+                                Z7 = Z6 * 4 + Z4 + 2
+                                IF EM0:Z7 = EM0:Z2 THEN
+                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                        EM16.L:Z9 = Z6
+                                    END IF
+                                END IF
+                            END IF
+                        NEXT
+                    END IF
+                    IF EM16.L:Z9 >= 0 THEN
+                        ' 既にある鍵は値だけ差し替える
+                        Z7 = EM16.L:Z9
+                        Z7 = Z7 * 4 + Z5 + 2
+                        EM1.L:Z7 = EM1.L:Z3
+                        EM0:Z7 = EM0:Z3
+                    ELSE
+                        ' 新しい鍵は鍵と値の両方の末尾に足す
+                        IF EM18.L:Z9 >= 12 THEN
+                            ' 1 スロットの容量がいっぱい
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        EM16.L:Z9 = EM18.L:Z9
+                        Z7 = EM16.L:Z9
+                        Z7 = Z7 * 4 + Z4 + 2
+                        EM1.L:Z7 = EM1.L:Z2
+                        EM0:Z7 = EM0:Z2
+                        Z7 = EM16.L:Z9
+                        Z7 = Z7 * 4 + Z5 + 2
+                        EM1.L:Z7 = EM1.L:Z3
+                        EM0:Z7 = EM0:Z3
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 + 1   ' 組の数を 1 増やす
+                        EM0:Z4 = Z8
+                        EM0:Z5 = Z8
+                    END IF
                 ELSE
-                    ' デバイス参照でも配列でもないものへの添字代入は未対応
+                    ' デバイス参照・配列・ハッシュ以外への添字代入は未対応
                     EM1:Z9 = 3
                     EM2:Z9 = 2
                     BREAK
@@ -2941,6 +3027,53 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 EM1.L:Z1 = EM39:Z9   ' スロット番号
                 EM0:Z1 = 8
                 EM39:Z9 = EM39:Z9 + 1
+
+            ELSE IF EM6:Z9 = 83 THEN
+                ' OP_HASH (BB): R[a] = { R[a] => R[a+1], .. } (b 組)
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM0:Z9 + EM33:Z9
+                EM8:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                ' ハッシュは配列 2 本。空きスロットが 2 つ要る
+                Z2 = EM39:Z9 + 1
+                IF Z2 >= 16 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 10
+                    BREAK
+                END IF
+                IF EM8:Z9 > 12 THEN
+                    ' 1 スロットの容量を超える組の数
+                    EM1:Z9 = 3
+                    EM2:Z9 = 10
+                    BREAK
+                END IF
+                ' 鍵の配列と値の配列の見出し
+                Z2 = EM39:Z9 * 50 + 992 + Z9
+                Z3 = Z2 + 50
+                EM0:Z2 = EM8:Z9
+                EM0:Z3 = EM8:Z9
+                ' 組を写す。組の数 0 (空ハッシュ) では引き算もしない
+                IF EM8:Z9 > 0 THEN
+                    Z4 = EM8:Z9 - 1
+                    FOR Z5 = 0 TO Z4
+                        Z6 = (EM7:Z9 + Z5 * 2) * 4 + EM32:Z9 + Z9   ' 鍵
+                        Z7 = Z5 * 4 + Z2 + 2
+                        EM1.L:Z7 = EM1.L:Z6
+                        EM0:Z7 = EM0:Z6
+                        Z6 = (EM7:Z9 + Z5 * 2 + 1) * 4 + EM32:Z9 + Z9   ' 値
+                        Z7 = Z5 * 4 + Z3 + 2
+                        EM1.L:Z7 = EM1.L:Z6
+                        EM0:Z7 = EM0:Z6
+                    NEXT
+                END IF
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                EM1:Z1 = EM39:Z9   ' 鍵の配列
+                Z2 = EM39:Z9 + 1
+                EM2:Z1 = Z2   ' 値の配列
+                EM0:Z1 = 9
+                EM39:Z9 = Z2 + 1
 
             ELSE IF EM6:Z9 = 87 THEN
                 ' OP_BLOCK (BB): R[a] = 子 irep b から作ったブロック

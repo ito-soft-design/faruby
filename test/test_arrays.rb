@@ -33,6 +33,7 @@ class TestArrays < Minitest::Test
   LOADINEG = 0x04
   GETIDX   = 0x23
   SETIDX   = 0x24
+  LOADSYM  = 0x10
   STOP     = 0x69
 
   def run_bytecode(bytes, nregs: 16)
@@ -416,6 +417,101 @@ class TestArrays < Minitest::Test
 
     refute_match(/^\s+Z[123] = /, array_branch,
                  "配列の枝が Z1-Z3 を書き換えている")
+  end
+
+  # === ハッシュ ===
+  #
+  # 実体は配列 2 本。専用のプールを作らないので、確保も容量検査も
+  # 配列のものがそのまま効く
+
+  HASH = 0x53
+
+  # R[1] に鍵と値を交互に並べてから OP_HASH
+  def build_hash(pairs)
+    setup = pairs.each_with_index.flat_map do |(k, v), i|
+      load(1 + i * 2, k) + load(2 + i * 2, v)
+    end
+    setup + [HASH, 1, pairs.size]
+  end
+
+  def test_a_hash_takes_two_array_slots
+    run_bytecode(build_hash([[10, 11], [20, 22]]) + [STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_HASH, tag_of(1)
+    assert_equal 2, array_sp, "鍵の配列と値の配列で 2 スロット"
+    assert_equal [10, 20], slot_values(0), "スロット 0 が鍵"
+    assert_equal [11, 22], slot_values(1), "スロット 1 が値"
+  end
+
+  def test_an_empty_hash_still_takes_two_slots
+    run_bytecode([HASH, 1, 0, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal 2, array_sp
+    assert_equal 0, slot_length(0)
+  end
+
+  def test_reading_a_key
+    run_bytecode(build_hash([[10, 11], [20, 22]]) + load(2, 20) + [GETIDX, 1, STOP])
+
+    assert_equal TT_INTEGER, tag_of(1)
+    assert_equal 22, value_of(1)
+  end
+
+  def test_reading_a_missing_key_gives_nil
+    run_bytecode(build_hash([[10, 11]]) + load(2, 99) + [GETIDX, 1, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_NIL, tag_of(1)
+  end
+
+  def test_writing_an_existing_key_replaces_the_value
+    run_bytecode(build_hash([[10, 11]]) + load(2, 10) + load(3, 99) + [SETIDX, 1, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal 1, slot_length(0), "鍵は増えない"
+    assert_equal [99], slot_values(1)
+  end
+
+  def test_writing_a_new_key_appends_to_both_arrays
+    run_bytecode(build_hash([[10, 11]]) + load(2, 20) + load(3, 22) + [SETIDX, 1, STOP])
+
+    assert_equal [10, 20], slot_values(0)
+    assert_equal [11, 22], slot_values(1)
+  end
+
+  def test_writing_a_hash_key_does_not_take_another_slot
+    run_bytecode(build_hash([[10, 11]]) + load(2, 20) + load(3, 22) + [SETIDX, 1, STOP])
+
+    assert_equal 2, array_sp
+  end
+
+  def test_filling_a_hash_past_the_capacity_stops_the_vm
+    pairs = Array.new(layout.max_array_len) { |i| [i, i] }
+    run_bytecode(build_hash(pairs) + load(2, 99) + load(3, 0) + [SETIDX, 1, STOP])
+
+    assert_equal VM_ERROR, status
+    assert_equal HEAP_ERROR, error
+  end
+
+  # ハッシュ 1 つが 2 スロット。奇数個目でも 2 つ空いていないと作れない
+  def test_a_hash_needs_two_free_slots
+    fill = [ARRAY, 5, 0] * (layout.max_arrays - 1)
+    run_bytecode(fill + [HASH, 1, 0, STOP])
+
+    assert_equal VM_ERROR, status
+    assert_equal HEAP_ERROR, error
+  end
+
+  # 鍵は型と値の両方で照合する。Ruby の Hash も eql? で引く
+  def test_keys_match_on_type_as_well_as_value
+    put_method("length")   # シンボルを 1 件用意する
+    run_bytecode([LOADI, 1, 10] + [LOADI, 2, 11] + [HASH, 1, 1] +
+                 [LOADSYM, 2, 0x00] + [GETIDX, 1, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_NIL, tag_of(1), "整数の鍵 10 とシンボルは別物"
   end
 
   # === 配置 ===

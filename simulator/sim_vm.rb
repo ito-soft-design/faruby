@@ -227,6 +227,74 @@ module FaRuby
     # 次に渡すスロット番号
     def array_sp = @em.read_u16(layout.array_sp_addr)
 
+    # --- ハッシュ ---
+    #
+    # 実体は配列 2 本 (鍵と値)。値スロットの下位に鍵の配列、上位に値の配列の
+    # スロット番号を入れる。専用のプールは作らない。
+
+    # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
+    def new_hash(name, count_name, error_code)
+      keys = array_sp
+      count = operand(count_name)
+      return vm_error(error_code) if keys + 1 >= layout.max_arrays
+      return vm_error(error_code) if count > layout.max_array_len
+
+      values = keys + 1
+      set_array_length(keys, count)
+      set_array_length(values, count)
+      first = operand(name)
+      count.times do |i|
+        write_array_element(keys, i, read_reg_tag(first + i * 2), read_reg(first + i * 2))
+        write_array_element(values, i, read_reg_tag(first + i * 2 + 1), read_reg(first + i * 2 + 1))
+      end
+
+      @em.write_u16(reg_type_addr(operand(name)), TT_HASH)
+      @em.write_u16(reg_addr(operand(name)), keys)
+      @em.write_u16(reg_addr(operand(name)) + 1, values)
+      @em.write_u16(layout.array_sp_addr, values + 1)
+    end
+
+    # 鍵の配列と値の配列のスロット番号
+    def hash_slots(index) = [@em.read_u16(reg_addr(index)), @em.read_u16(reg_addr(index) + 1)]
+
+    # 鍵の位置。無ければ nil
+    #
+    # 一致は型と値の両方。Ruby の Hash も eql? で引くので {1 => :a}[1.0] は nil
+    def find_hash_key(keys, tag, value)
+      array_length(keys).times do |i|
+        addr = layout.array_element_addr(keys, i)
+        next unless @em.read_u16(addr + SLOT_TYPE_OFFSET) == tag
+        return i if @em.read_s32(addr + SLOT_VALUE_OFFSET) == value
+      end
+      nil
+    end
+
+    # R[a] = R[a][R[a+1]] (ハッシュ)。無い鍵は nil
+    def load_hash_index(index)
+      keys, values = hash_slots(index)
+      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL)) unless position
+
+      addr = layout.array_element_addr(values, position)
+      write_slot(index, @em.read_u16(addr + SLOT_TYPE_OFFSET), @em.read_s32(addr + SLOT_VALUE_OFFSET))
+    end
+
+    # R[a][R[a+1]] = R[a+2] (ハッシュ)
+    def store_hash_index(index, heap_code)
+      keys, values = hash_slots(index)
+      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      unless position
+        length = array_length(keys)
+        return vm_error(heap_code) if length >= layout.max_array_len
+
+        write_array_element(keys, length, read_reg_tag(index + 1), read_reg(index + 1))
+        set_array_length(keys, length + 1)
+        set_array_length(values, length + 1)
+        position = length
+      end
+      write_array_element(values, position, read_reg_tag(index + 2), read_reg(index + 2))
+    end
+
     # --- ブロックと上位の変数 ---
 
     # R[a] = 子 irep b から作ったブロック (OP_BLOCK)
@@ -549,6 +617,7 @@ module FaRuby
     def load_device_index(name, error_code)
       index = operand(name)
       return load_array_index(index) if read_reg_tag(index) == TT_ARRAY
+      return load_hash_index(index) if read_reg_tag(index) == TT_HASH
 
       ref = device_ref(index)
       return vm_error(error_code) unless ref
@@ -566,6 +635,7 @@ module FaRuby
     def store_device_index(name, error_code, heap_code)
       index = operand(name)
       return store_array_index(index, error_code, heap_code) if read_reg_tag(index) == TT_ARRAY
+      return store_hash_index(index, heap_code) if read_reg_tag(index) == TT_HASH
 
       ref = device_ref(index)
       return vm_error(error_code) unless ref

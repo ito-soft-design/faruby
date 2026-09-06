@@ -321,6 +321,14 @@ module FaRuby
         vm.new_array(:a, :b, :c, HEAP_ERROR)
       end
 
+      # --- ハッシュ ---
+      #
+      # 実体は配列 2 本 (鍵と値)。専用のプールを作らず、配列のスロットを
+      # 2 つ使う。オペランド b は **組の数**で、R[a] から鍵と値が交互に並ぶ。
+      defs << OpcodeDef.new(0x53, "R[a] = { R[a] => R[a+1], .. } (b 組)") do |vm|
+        vm.new_hash(:a, :b, HEAP_ERROR)
+      end
+
       defs << OpcodeDef.new(0x25, "PC += signed16(a)") do |vm|
         vm.normalize_signed16(:a)
         vm.jump_relative(:a)

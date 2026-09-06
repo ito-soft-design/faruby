@@ -500,9 +500,13 @@ module FaRuby
       indent
       load_array_index(ref, index)
       dedent
+      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+      indent
+      load_hash_index(ref, index)
+      dedent
       line "ELSE"
       indent
-      note "デバイス参照でも配列でもないものへの添字アクセスは未対応"
+      note "デバイス参照・配列・ハッシュ以外への添字アクセスは未対応"
       vm_error(error_code)
       end_block
     end
@@ -524,9 +528,13 @@ module FaRuby
       indent
       store_array_index(ref, index, value, error_code, heap_code)
       dedent
+      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+      indent
+      store_hash_index(ref, index, value, heap_code)
+      dedent
       line "ELSE"
       indent
-      note "デバイス参照でも配列でもないものへの添字代入は未対応"
+      note "デバイス参照・配列・ハッシュ以外への添字代入は未対応"
       vm_error(error_code)
       end_block
     end
@@ -854,6 +862,159 @@ module FaRuby
     # 自分で載せた場合に使います。
     def slot_on(z)
       Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}", z, layout.device_name)
+    end
+
+    # --- ハッシュ ---
+    #
+    # 実体は配列 2 本です。値スロットの下位に鍵の配列、上位に値の配列の
+    # スロット番号を入れます (デバイス参照やブロックと同じ手)。専用のプールを
+    # 作らないので、確保も容量検査も配列のものがそのまま使えます。
+    #
+    # 引き換えにハッシュ 1 つがプールを 2 スロット消費します。
+
+    Z_HASH_KEYS   = 4   # 鍵の配列の見出し
+    Z_HASH_VALUES = 5   # 値の配列の見出し
+
+    # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
+    #
+    # 鍵と値が交互に並んでいるので、1 組ごとに 2 レジスタ進みます。
+    def new_hash(name, count_name, error_code)
+      note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
+      line "Z2 = #{state(layout.array_sp_addr)} + 1"
+      if_("Z2 >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("#{operand(count_name)} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える組の数"
+        vm_error(error_code)
+      end
+
+      note "鍵の配列と値の配列の見出し"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "Z3 = Z2 + #{layout.array_slot_words}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z2 = #{operand(count_name)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3 = #{operand(count_name)}"
+
+      note "組を写す。組の数 0 (空ハッシュ) では引き算もしない"
+      if_("#{operand(count_name)} > 0") do
+        line "Z4 = #{operand(count_name)} - 1"
+        line "FOR Z5 = 0 TO Z4"
+        indent
+        line "Z6 = (#{operand(name)} + Z5 * 2) * #{SLOT_WORDS} + #{reg_offset}   ' 鍵"
+        line "Z7 = Z5 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: 6, to: 7)
+        line "Z6 = (#{operand(name)} + Z5 * 2 + 1) * #{SLOT_WORDS} + #{reg_offset}   ' 値"
+        line "Z7 = Z5 * #{SLOT_WORDS} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: 6, to: 7)
+        dedent
+        line "NEXT"
+      end
+
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{state(layout.array_sp_addr)}   ' 鍵の配列"
+      line "Z2 = #{state(layout.array_sp_addr)} + 1"
+      line "#{dest.word(1)} = Z2   ' 値の配列"
+      line "#{dest.tag} = #{TT_HASH}"
+      line "#{state(layout.array_sp_addr)} = Z2 + 1"
+    end
+
+    # Z に載っている値スロットどうしを写す
+    def copy_slot(from:, to:)
+      src = slot_on(from)
+      dst = slot_on(to)
+      line "#{dst.value} = #{src.value}"
+      line "#{dst.tag} = #{src.tag}"
+    end
+
+    # 鍵と値の配列の見出しを Z に置き、要素数を32ビットスクラッチ B に置く
+    def hash_slots_into_z(ref)
+      note "鍵の配列と値の配列。R[a] を書き換える前に読む"
+      line "Z#{Z_HASH_KEYS} = #{ref.word(0)}"
+      line "Z#{Z_HASH_KEYS} = Z#{Z_HASH_KEYS} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "Z#{Z_HASH_VALUES} = #{ref.word(1)}"
+      line "Z#{Z_HASH_VALUES} = Z#{Z_HASH_VALUES} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_HASH_KEYS}"
+    end
+
+    # 鍵を先頭から探し、見つかった位置を32ビットスクラッチに置く (無ければ -1)
+    #
+    # ハッシュ表は作らず順に見ます。容量が #{'%d'} 程度なら、ハッシュ値を
+    # 計算するより速いためです。
+    #
+    # **一致は型と値の両方**です。Ruby の Hash も `eql?` で引くので
+    # `{1 => :a}[1.0]` は `nil` です。ここは合っています。
+    def find_hash_key(key)
+      note "鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)"
+      line "#{scratch32} = -1"
+      if_("#{scratch32_b} > 0") do
+        line "Z8 = #{scratch32_b}"
+        line "Z8 = Z8 - 1"
+        line "FOR Z6 = 0 TO Z8"
+        indent
+        if_("#{scratch32} < 0") do
+          note "最初に一致したものを採る"
+          line "Z7 = Z6 * #{SLOT_WORDS} + Z#{Z_HASH_KEYS} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          element = slot_on(7)
+          if_("#{element.tag} = #{key.tag}") do
+            if_("#{element.value} = #{key.value}") { line "#{scratch32} = Z6" }
+          end
+        end
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # 見つかった位置の値スロットを Z7 に置く
+    def hash_value_into_z
+      line "Z7 = #{scratch32}"
+      line "Z7 = Z7 * #{SLOT_WORDS} + Z#{Z_HASH_VALUES} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      slot_on(7)
+    end
+
+    # R[a] = R[a][R[a+1]] (ハッシュ)。無い鍵は Ruby と同じく nil
+    def load_hash_index(ref, key)
+      hash_slots_into_z(ref)
+      find_hash_key(key)
+      if_else_block("#{scratch32} < 0") do
+        note "無い鍵は nil (Ruby と同じ)"
+        set_slot_nil(ref)
+      end
+      element = hash_value_into_z
+      line "#{ref.value} = #{element.value}"
+      line "#{ref.tag} = #{element.tag}"
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2] (ハッシュ)
+    def store_hash_index(ref, key, value, heap_code)
+      hash_slots_into_z(ref)
+      find_hash_key(key)
+      if_else_block("#{scratch32} >= 0") do
+        note "既にある鍵は値だけ差し替える"
+        element = hash_value_into_z
+        line "#{element.value} = #{value.value}"
+        line "#{element.tag} = #{value.tag}"
+      end
+      note "新しい鍵は鍵と値の両方の末尾に足す"
+      if_("#{scratch32_b} >= #{layout.max_array_len}") do
+        note "1 スロットの容量がいっぱい"
+        vm_error(heap_code)
+      end
+      line "#{scratch32} = #{scratch32_b}"
+      line "Z7 = #{scratch32}"
+      line "Z7 = Z7 * #{SLOT_WORDS} + Z#{Z_HASH_KEYS} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      new_key = slot_on(7)
+      line "#{new_key.value} = #{key.value}"
+      line "#{new_key.tag} = #{key.tag}"
+      element = hash_value_into_z
+      line "#{element.value} = #{value.value}"
+      line "#{element.tag} = #{value.tag}"
+      line "Z8 = #{scratch32_b}"
+      line "Z8 = Z8 + 1   ' 組の数を 1 増やす"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_HASH_KEYS} = Z8"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_HASH_VALUES} = Z8"
+      end_block
     end
 
     # --- ブロックと上位の変数 ---
