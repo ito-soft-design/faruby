@@ -223,45 +223,62 @@ module FaRuby
     # 【重要】並び順に意味があります。**レシーバの型ごとに連続した番号**に
     # 並べ、型検査を範囲比較で済ませています。並べ替えないでください。
     #
-    #   1-2    レシーバの型を問わない
-    #   3-10   レシーバが数値 (METHOD_NUMERIC_MIN 以上 METHOD_NUMERIC_MAX 以下)
-    #   11-12  レシーバが配列かハッシュ (METHOD_COLLECTION_MIN 以上 MAX 以下)
-    #   13     レシーバが配列 (METHOD_ARRAY_MIN 以上 METHOD_ARRAY_MAX 以下)
-    #   14-    レシーバがハッシュ (METHOD_HASH_MIN 以上)
-    METHOD_NONE   = 0   # 未対応 (実行時エラー)
-    METHOD_NE     = 1   # !=
-    METHOD_NOT    = 2   # !
-    METHOD_MOD    = 3   # %
-    METHOD_ABS    = 4
-    METHOD_TO_I   = 5
-    METHOD_TO_F   = 6
-    METHOD_FLOOR  = 7
-    METHOD_ROUND  = 8
-    METHOD_TIMES  = 9    # ブロックを取る
-    METHOD_UPTO   = 10   # ブロックを取る
-    METHOD_LENGTH = 11   # 配列とハッシュの両方
-    METHOD_EACH   = 12   # 配列とハッシュの両方。ブロックを取る
-    METHOD_PUSH   = 13   # << と push
-    METHOD_KEY_P  = 14   # key?
-    METHOD_KEYS   = 15
-    METHOD_VALUES = 16
+    # 受け付ける型もタグの範囲で表せます。TT_STRING (7)・TT_ARRAY (8)・
+    # TT_HASH (9) が隣り合っているため、「文字列と配列」「配列とハッシュ」の
+    # ような組も 1 つの範囲になります。並びは METHOD_RECEIVER_BANDS を参照。
+    METHOD_NONE    = 0   # 未対応 (実行時エラー)
+    METHOD_NE      = 1   # !=
+    METHOD_NOT     = 2   # !
+    METHOD_MOD     = 3   # %
+    METHOD_ABS     = 4
+    METHOD_TO_I    = 5
+    METHOD_TO_F    = 6
+    METHOD_FLOOR   = 7
+    METHOD_ROUND   = 8
+    METHOD_TIMES   = 9    # ブロックを取る
+    METHOD_UPTO    = 10   # ブロックを取る
+    METHOD_LENGTH  = 11   # length / size。文字列・配列・ハッシュ
+    METHOD_EMPTY_P = 12   # empty?。文字列・配列・ハッシュ
+    METHOD_CONCAT  = 13   # <<。文字列と配列
+    METHOD_EACH    = 14   # 配列とハッシュ。ブロックを取る
+    METHOD_PUSH    = 15   # push。配列だけ (Ruby の String に push は無い)
+    METHOD_KEY_P   = 16   # key?
+    METHOD_KEYS    = 17
+    METHOD_VALUES  = 18
 
-    # レシーバが数値でなければならない範囲
+    # レシーバが数値でなければならない範囲 (帯の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
     METHOD_NUMERIC_MAX = METHOD_UPTO
 
-    # レシーバが配列かハッシュのどちらでもよい範囲
+    # メソッド番号の帯 => 受け付けるレシーバのタグ
     #
-    # TT_ARRAY と TT_HASH は隣り合っているため、タグの検査も範囲比較で済みます。
-    METHOD_COLLECTION_MIN = METHOD_LENGTH
-    METHOD_COLLECTION_MAX = METHOD_EACH
+    # [番号の上限, タグの下限, タグの上限, 名前] を上から順に見ます。**上限 nil
+    # は末尾の帯**で、それ以上の番号がすべて入ります。生成コードもシミュレータも
+    # この表から作るので、メソッドを足すときはここだけを直します。
+    #
+    # METHOD_NUMERIC_MIN 未満 (!= と !) はどの型でも呼べるため帯がありません。
+    METHOD_RECEIVER_BANDS = [
+      [METHOD_UPTO,    TT_INTEGER, TT_FLOAT, "数値"],
+      [METHOD_EMPTY_P, TT_STRING,  TT_HASH,  "文字列・配列・ハッシュ"],
+      [METHOD_CONCAT,  TT_STRING,  TT_ARRAY, "文字列・配列"],
+      [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
+      [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
+      [nil,            TT_HASH,    TT_HASH,  "ハッシュ"],
+    ].freeze
 
-    # レシーバが配列でなければならない範囲
-    METHOD_ARRAY_MIN = METHOD_PUSH
-    METHOD_ARRAY_MAX = METHOD_PUSH
+    # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
+    #
+    # 型を問わないメソッド (!= と !) は nil。生成コード・シミュレータ・
+    # テストがこの 1 か所を見るので、帯を足しても答えがずれません。
+    def method_receiver_tags(code)
+      return nil if code < METHOD_NUMERIC_MIN
 
-    # これ以上のメソッドはレシーバがハッシュであること。末尾なので上限は要らない
-    METHOD_HASH_MIN = METHOD_KEY_P
+      METHOD_RECEIVER_BANDS.each do |max_code, tag_min, tag_max, _label|
+        return [tag_min, tag_max] if max_code.nil? || code <= max_code
+      end
+      nil
+    end
+    module_function :method_receiver_tags
 
     # メソッド名 => [番号, 引数の数]
     BUILTIN_METHODS = {
@@ -277,8 +294,9 @@ module FaRuby
       "upto"   => [METHOD_UPTO,   1],
       "length" => [METHOD_LENGTH, 0],
       "size"   => [METHOD_LENGTH, 0],
+      "empty?" => [METHOD_EMPTY_P, 0],
       "each"   => [METHOD_EACH,   0],
-      "<<"     => [METHOD_PUSH,   1],
+      "<<"     => [METHOD_CONCAT, 1],
       "push"   => [METHOD_PUSH,   1],
       "key?"   => [METHOD_KEY_P,  1],
       "keys"   => [METHOD_KEYS,   0],
@@ -293,7 +311,7 @@ module FaRuby
 
     # 番号 => 生成コードのコメントに使う名前
     #
-    # size は length と、<< は push と同じ番号なので、先に現れた方が残ります。
+    # size は length と同じ番号なので、先に現れた方が残ります。
     METHOD_NAMES = BUILTIN_METHODS.each_with_object({}) do |(name, (code, _argc)), names|
       names[code] ||= name
     end.freeze

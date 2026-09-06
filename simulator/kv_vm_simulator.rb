@@ -69,9 +69,12 @@ module FaRuby
     end
 
     # IREP から直接ロードして実行
-    def load_irep_and_run(irep, max_steps: 10000)
+    # encoding はソースの文字コード (ENCODING_*)。バイト列の変換には使わず、
+    # length が文字の切れ目を数えるときの規則になる
+    def load_irep_and_run(irep, max_steps: 10000, encoding: ENCODING_UTF8)
       @irep = irep
-      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout)
+      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout,
+                               encoding: encoding)
       load_and_run(codegen.memory_image, codegen.fixed_image, max_steps: max_steps)
     end
 

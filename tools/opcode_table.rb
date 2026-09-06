@@ -292,13 +292,15 @@ module FaRuby
         vm.store_reg_into_global(:b, :a)
       end
 
-      # 添字アクセス。デバイス族 ($DM[100 + i]) と配列 (a[0]) の両方が通る。
-      # OP_GETIDX / OP_SETIDX は専用命令なのでメソッド呼び出しは要らない。
+      # 添字アクセス。デバイス族 ($DM[100 + i])・配列 (a[0])・ハッシュ・
+      # 文字列 (s[0]) が通る。OP_GETIDX / OP_SETIDX は専用命令なので
+      # メソッド呼び出しは要らない。
       #
       # 配列の読みは範囲外でも nil で、エラーにしない (Ruby と同じ)。
       # 書きは Ruby なら配列を伸ばすが、容量が固定なので超えたら止まる。
-      defs << OpcodeDef.new(0x23, "R[a] = R[a][R[a+1]] (デバイス・配列)") do |vm|
-        vm.load_device_index(:a, DEVICE_INDEX_ERROR)
+      # 文字列の読みは 1 文字の文字列を作るので、プールを 1 スロット使う。
+      defs << OpcodeDef.new(0x23, "R[a] = R[a][R[a+1]] (デバイス・配列・文字列)") do |vm|
+        vm.load_device_index(:a, DEVICE_INDEX_ERROR, HEAP_ERROR)
       end
 
       defs << OpcodeDef.new(0x24, "R[a][R[a+1]] = R[a+2] (デバイス・配列)") do |vm|

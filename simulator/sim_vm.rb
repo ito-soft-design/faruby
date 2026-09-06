@@ -127,6 +127,12 @@ module FaRuby
     def concat_string(name, type_code, heap_code)
       index = operand(name)
       return vm_error(type_code) unless read_reg_tag(index) == TT_STRING
+
+      append_string_slots(index, type_code, heap_code)
+    end
+
+    # R[index] の後ろへ R[index+1] を継ぎ足す。R[index] が文字列なのは確認済み
+    def append_string_slots(index, type_code, heap_code)
       return vm_error(type_code) unless read_reg_tag(index + 1) == TT_STRING
 
       slot = read_reg(index)
@@ -405,6 +411,71 @@ module FaRuby
         bytes << (word >> 8).chr << (word & 0xFF).chr
       end
       bytes.byteslice(0, length)
+    end
+
+    # 文字の切れ目を先頭から数える (生成コードと同じ規則)
+    #
+    # 返すのは [文字数, 探している文字の先頭バイト, その次の文字の先頭バイト]。
+    # target が nil なら数えるだけ。見つからなければ先頭バイトはバイト数のまま。
+    #
+    # `"あ".length` は Ruby では 1。**バイト数ではなく文字数**を返すため、
+    # バイト列を 1 回なめる。Shift_JIS は自己同期しないので必ず先頭から。
+    def scan_string_characters(slot, target)
+      bytes = string_bytes(slot)
+      limit = bytes.bytesize
+      encoding = @em.read_u16(layout.str_encoding_addr)
+      count = 0
+      skip = false
+      found = limit
+      found_end = limit
+
+      limit.times do |i|
+        byte = bytes.getbyte(i)
+        start = true
+        case encoding
+        when ENCODING_UTF8
+          start = false if byte >= 0x80 && byte < 0xC0   # 継続バイト
+        when ENCODING_SJIS
+          if skip
+            start = false
+            skip = false
+          elsif (0x81..0x9F).cover?(byte) || (0xE0..0xEF).cover?(byte)
+            skip = true   # 先導バイト
+          end
+        end
+        next unless start
+
+        if target
+          found = i if count == target
+          found_end = i if count == target + 1
+        end
+        count += 1
+      end
+      [count, found, found_end]
+    end
+
+    # R[a] = R[a][R[a+1]] (文字列)。Ruby と同じく 1 文字の文字列を返す
+    #
+    # **プールを 1 スロット使う。** 範囲外は nil。
+    def load_string_index(index, heap_code)
+      slot = read_reg(index)
+      position = read_reg(index + 1)
+      position += scan_string_characters(slot, nil).first if position.negative?
+      if position.negative? || position > layout.max_string_bytes
+        return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL))
+      end
+
+      _, found, found_end = scan_string_characters(slot, position)
+      if found >= array_length(slot)
+        return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL))
+      end
+
+      new_slot = array_sp
+      return vm_error(heap_code) if new_slot >= layout.max_arrays
+
+      write_string_slot(new_slot, string_bytes(slot).byteslice(found, found_end - found))
+      write_slot(index, TT_STRING, new_slot)
+      @em.write_u16(layout.array_sp_addr, new_slot + 1)
     end
 
     # 定数への代入 (OP_SETCONST)
@@ -702,16 +773,11 @@ module FaRuby
 
     # メソッド番号からレシーバに要求される型を検査する
     #
-    # レシーバの型ごとに番号が連続しているため範囲で判定できる。
+    # 番号もタグも連続した帯に並んでいるので範囲で判定できる。
+    # 帯の並びは METHOD_RECEIVER_BANDS で、生成コードもそこから作る。
     def receiver_type_ok?(code, tag)
-      return numeric_tag?(tag) if code.between?(METHOD_NUMERIC_MIN, METHOD_NUMERIC_MAX)
-      if code.between?(METHOD_COLLECTION_MIN, METHOD_COLLECTION_MAX)
-        return [TT_ARRAY, TT_HASH].include?(tag)
-      end
-      return tag == TT_ARRAY if code.between?(METHOD_ARRAY_MIN, METHOD_ARRAY_MAX)
-      return tag == TT_HASH if code >= METHOD_HASH_MIN
-
-      true
+      range = method_receiver_tags(code)
+      range.nil? || tag.between?(*range)
     end
 
     # デバイスの値をレジスタへ読む (生成コードと同じ規則)
@@ -804,10 +870,11 @@ module FaRuby
     # $DM[100 + i] のように実行時にアドレスを決める。
 
     # R[a] = R[a][R[a+1]]
-    def load_device_index(name, error_code)
+    def load_device_index(name, error_code, heap_code)
       index = operand(name)
       return load_array_index(index) if read_reg_tag(index) == TT_ARRAY
       return load_hash_index(index) if read_reg_tag(index) == TT_HASH
+      return load_string_index(index, heap_code) if read_reg_tag(index) == TT_STRING
 
       ref = device_ref(index)
       return vm_error(error_code) unless ref
@@ -1093,6 +1160,8 @@ module FaRuby
       when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)
       when METHOD_ROUND then write_slot(index, TT_INTEGER, round_away_from_zero(numeric_value(index)))
       when METHOD_LENGTH then write_slot(index, TT_INTEGER, collection_length(index))
+      when METHOD_EMPTY_P then send_empty_p(index)
+      when METHOD_CONCAT then send_concat(index, type_code, heap_code)
       when METHOD_PUSH   then send_push(index, heap_code)
       when METHOD_KEY_P  then send_key_p(index)
       when METHOD_KEYS   then send_hash_column(index, 0, heap_code)
@@ -1101,11 +1170,34 @@ module FaRuby
       end
     end
 
-    # R[a].length / R[a].size。ハッシュの組の数は鍵の配列の見出しにある
+    # R[a].length / R[a].size
+    #
+    # ハッシュの組の数は鍵の配列の見出しにある。**文字列だけは見出しの数
+    # (バイト数) をそのまま返さない。** Ruby の length は文字数。
     def collection_length(index)
       return array_length(hash_slots(index).first) if read_reg_tag(index) == TT_HASH
+      return scan_string_characters(read_reg(index), nil).first if read_reg_tag(index) == TT_STRING
 
       array_length(read_reg(index))
+    end
+
+    # R[a].empty?
+    #
+    # 長さが 0 かどうかだけなので、文字列でも切れ目を数える必要はない。
+    def send_empty_p(index)
+      length = if read_reg_tag(index) == TT_HASH
+                 array_length(hash_slots(index).first)
+               else
+                 array_length(read_reg(index))
+               end
+      write_bool(index, length.zero?)
+    end
+
+    # R[a] << R[a+1]。文字列なら中身を継ぎ足し、配列なら末尾に足す
+    def send_concat(index, type_code, heap_code)
+      return send_push(index, heap_code) unless read_reg_tag(index) == TT_STRING
+
+      append_string_slots(index, type_code, heap_code)
     end
 
     # R[a].key?(R[a+1])

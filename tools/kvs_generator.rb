@@ -614,7 +614,7 @@ module FaRuby
     # OP_GETIDX / OP_SETIDX は専用命令なので、メソッド呼び出しは要りません。
 
     # R[a] = R[a][R[a+1]]
-    def load_device_index(name, error_code)
+    def load_device_index(name, error_code, heap_code)
       ref = reg_slot(name)          # デバイス参照または配列 (結果の格納先でもある)
       index = reg_next_slot(name)   # 添字
 
@@ -631,9 +631,13 @@ module FaRuby
       indent
       load_hash_index(ref, index)
       dedent
+      line "ELSE IF #{ref.tag} = #{TT_STRING} THEN"
+      indent
+      load_string_index(ref, index, heap_code)
+      dedent
       line "ELSE"
       indent
-      note "デバイス参照・配列・ハッシュ以外への添字アクセスは未対応"
+      note "デバイス参照・配列・ハッシュ・文字列以外への添字アクセスは未対応"
       vm_error(error_code)
       end_block
     end
@@ -707,6 +711,53 @@ module FaRuby
     def set_slot_nil(slot)
       line "#{slot.value} = #{TT_CANONICAL_VALUE.fetch(TT_NIL)}"
       line "#{slot.tag} = #{TT_NIL}"
+    end
+
+    # R[a] = R[a][R[a+1]] (文字列)
+    #
+    # Ruby と同じく**1 文字の文字列**を返します。範囲外は nil です。
+    # 負の添字は後ろから数えるので、先に文字数を数えます。
+    #
+    # **プールを 1 スロット使います。** ループの中で呼び続けると使い切ります。
+    def load_string_index(ref, index, heap_code)
+      string_header_into(4, ref.value)
+      line "#{scratch32} = #{index.value}"
+      if_("#{scratch32} < 0") do
+        note "負の添字は後ろから数える。文字数が要るので一度なめる"
+        line "#{str_target} = #{STR_NO_TARGET}"
+        scan_string_characters
+        line "#{scratch32} = #{scratch32} + #{str_count}"
+      end
+      line "IF #{scratch32} < 0 THEN"
+      indent
+      note "後ろから数えても先頭より前。範囲外は nil (Ruby と同じ)"
+      set_slot_nil(ref)
+      dedent
+      line "ELSE IF #{scratch32} > #{layout.max_string_bytes} THEN"
+      indent
+      note "1 文字 1 バイト以上なので、バイト数を超える番号は必ず範囲外"
+      set_slot_nil(ref)
+      dedent
+      line "ELSE"
+      indent
+      line "#{str_target} = #{scratch32}"
+      scan_string_characters
+      if_else_block("#{str_found} >= #{str_limit}") do
+        note "そこまで文字が無い。範囲外は nil (Ruby と同じ)"
+        set_slot_nil(ref)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      string_header_into(3, state(layout.array_sp_addr))
+      line "#{scratch32} = 0   ' 新しいスロットは空から始める"
+      line "#{scratch32_b} = #{str_found_end} - #{str_found}   ' その文字のバイト数"
+      append_string_bytes(source_offset: str_found)
+      line "#{ref.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{ref.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      end_block
+      dedent
+      line "END IF"
     end
 
     # R[a] = R[a][R[a+1]] (配列)
@@ -1050,6 +1101,96 @@ module FaRuby
     def str_temp  = state(layout.str_temp_addr)
     def str_limit = state(layout.str_limit_addr)
     def str_saved_z = state(layout.str_saved_z_addr)
+    def str_count     = state(layout.str_count_addr)
+    def str_skip      = state(layout.str_skip_addr)
+    def str_target    = state(layout.str_target_addr)
+    def str_found     = state(layout.str_found_addr)
+    def str_found_end = state(layout.str_found_end_addr)
+
+    # 探している文字が無いことを表す番号 (16ビットに収まる最大値)
+    #
+    # 文字数を数えるだけのときに置きます。文字列は max_string_bytes バイトまで
+    # なので、この番号が本物の文字番号とぶつかることはありません。
+    STR_NO_TARGET = 65535
+
+    # 位置 position のバイトを Z7 に取り出す (Z4 が文字列スロットの見出し)
+    #
+    # 1 ワード 2 バイトで**先の文字が上位**なので、偶数の位置は上位バイト、
+    # 奇数の位置は下位バイトです。Z8 を作業に使います。
+    def string_byte_into_z7(position)
+      line "Z8 = #{position} / 2"
+      line "Z7 = Z8 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      line "Z7 = #{layout.device_name}0:Z7"
+      line "Z8 = Z8 * 2"
+      if_else_block("#{position} = Z8") { line "Z7 = Z7 / 256   ' 偶数の位置は上位バイト" }
+      line "Z8 = Z7 / 256"
+      line "Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト"
+      end_block
+    end
+
+    # 文字の切れ目を先頭から数える
+    #
+    # 入力  Z4         文字列スロットの見出し
+    #       str_target 探している文字の番号 (STR_NO_TARGET なら数えるだけ)
+    # 出力  str_limit     バイト数
+    #       str_count     文字数
+    #       str_found     探している文字の先頭バイト (無ければ str_limit)
+    #       str_found_end その次の文字の先頭バイト
+    #
+    # `"あ".length` は Ruby では 1 です。**バイト数ではなく文字数**を返すため、
+    # バイト列を 1 回なめて切れ目を数えます。同じ走査で `s[i]` の位置も出ます。
+    #
+    # **Shift_JIS は自己同期しません。** 後続バイトの範囲が ASCII と重なるので、
+    # バイト 1 つを見ても先導か後続か分かりません。必ず先頭から走査します。
+    #
+    # 作業に Z6・Z7・Z8 を使います。**Z6 は FOR の上限**なので中で触れません。
+    def scan_string_characters
+      note "文字の切れ目を先頭から数える。バイト列は 1 回だけなめる"
+      line "#{str_limit} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4   ' バイト数"
+      line "#{str_count} = 0"
+      line "#{str_skip} = 0"
+      line "#{str_found} = #{str_limit}   ' 見つからなければバイト数のまま"
+      line "#{str_found_end} = #{str_limit}"
+      if_("#{str_limit} > 0") do
+        line "Z6 = #{str_limit}"
+        line "Z6 = Z6 - 1"
+        line "FOR #{str_index} = 0 TO Z6"
+        indent
+        string_byte_into_z7(str_index)
+        note "この位置が文字の先頭かどうか"
+        line "#{str_flag} = 1"
+        line "IF #{state(layout.str_encoding_addr)} = #{ENCODING_UTF8} THEN"
+        indent
+        note "継続バイト (10xxxxxx) は文字の途中"
+        if_("Z7 >= 128") { if_("Z7 < 192") { line "#{str_flag} = 0" } }
+        dedent
+        line "ELSE IF #{state(layout.str_encoding_addr)} = #{ENCODING_SJIS} THEN"
+        indent
+        if_else_block("#{str_skip} = 1") do
+          note "先導バイトの次は後続バイト"
+          line "#{str_flag} = 0"
+          line "#{str_skip} = 0"
+        end
+        note "先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続"
+        if_("Z7 >= 129") { if_("Z7 <= 159") { line "#{str_skip} = 1" } }
+        if_("Z7 >= 224") { if_("Z7 <= 239") { line "#{str_skip} = 1" } }
+        end_block
+        dedent
+        line "END IF"
+        note "ASCII はどのバイトも文字の先頭なので何も見ない"
+        if_("#{str_flag} = 1") do
+          if_("#{str_target} <= #{layout.max_string_bytes}") do
+            note "探している文字なら位置を控える。次の切れ目がその文字の終わり"
+            if_("#{str_count} = #{str_target}") { line "#{str_found} = #{str_index}" }
+            line "Z7 = #{str_target} + 1"
+            if_("#{str_count} = Z7") { line "#{str_found_end} = #{str_index}" }
+          end
+          line "#{str_count} = #{str_count} + 1"
+        end
+        dedent
+        line "NEXT"
+      end
+    end
 
     # スロット番号の式からスロットの見出しを Z3 に置く
     def string_slot_into_z3(slot_number)
@@ -1112,18 +1253,26 @@ module FaRuby
     # 継ぎ足す先の長さが奇数だとワードの途中から始まるので、**バイト単位**で
     # 書きます。偶数の位置に書くときは下位バイトを 0 にしておき、次のバイトか
     # 詰め物がそこに入ります。
-    def append_string_bytes
+    #
+    # source_offset を渡すと、継ぎ足す元の**その位置から**写します
+    # (`s[i]` が 1 文字だけを取り出すときに使います)。
+    def append_string_bytes(source_offset: nil)
       if_("#{scratch32_b} > 0") do
         line "Z6 = #{scratch32_b}"
         line "Z6 = Z6 - 1"
         line "FOR Z5 = 0 TO Z6"
         indent
         note "継ぎ足す元のバイトを 1 つ取り出す"
-        line "Z7 = Z5 / 2"
+        from = "Z5"
+        if source_offset
+          line "#{str_skip} = #{source_offset} + Z5   ' 元の位置"
+          from = str_skip
+        end
+        line "Z7 = #{from} / 2"
         line "Z8 = Z7 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
         line "Z8 = #{layout.device_name}0:Z8"
         line "Z7 = Z7 * 2"
-        if_else_block("Z5 = Z7") { line "Z8 = Z8 / 256   ' 偶数の位置は上位バイト" }
+        if_else_block("#{from} = Z7") { line "Z8 = Z8 / 256   ' 偶数の位置は上位バイト" }
         line "Z7 = Z8 / 256"
         line "Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト"
         end_block
@@ -1156,6 +1305,11 @@ module FaRuby
       dest = reg_slot(name)
       src = reg_next_slot(name)
       if_("#{dest.tag} <> #{TT_STRING}") { vm_error(type_code) }
+      append_string_slots(dest, src, type_code, heap_code)
+    end
+
+    # dest の後ろへ src を継ぎ足す。dest が文字列であることは呼ぶ側で確かめる
+    def append_string_slots(dest, src, type_code, heap_code)
       if_("#{src.tag} <> #{TT_STRING}") { vm_error(type_code) }
       string_header_into(3, dest.value)
       string_header_into(4, src.value)
@@ -1821,34 +1975,30 @@ module FaRuby
 
     # メソッド番号からレシーバに要求される型を検査する
     #
-    # レシーバの型ごとに番号を連続させてあるので、範囲比較で済みます。
-    # 最後の帯 (ハッシュ) は末尾なので上限が要りません。
+    # 番号もタグも連続した帯に並べてあるので、範囲比較だけで済みます。
+    # 帯の並びは METHOD_RECEIVER_BANDS。**最後の帯は上限が要りません。**
     def check_receiver_type(recv, type_code)
-      note "#{METHOD_NUMERIC_MIN}-#{METHOD_NUMERIC_MAX} はレシーバが数値、" \
-           "#{METHOD_COLLECTION_MIN} は配列かハッシュ、" \
-           "#{METHOD_ARRAY_MIN}-#{METHOD_ARRAY_MAX} は配列、" \
-           "#{METHOD_HASH_MIN} 以上はハッシュであること"
+      note "メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)"
+      note "#{METHOD_NUMERIC_MIN} 未満 (!= と !) はどの型でも呼べる"
       if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
-        chain_head(true, "Z5 <= #{METHOD_NUMERIC_MAX}")
-        indent
-        note "数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけ。上限も見る"
-        if_("#{recv.tag} < #{TT_INTEGER}") { vm_error(type_code) }
-        if_("#{recv.tag} > #{TT_FLOAT}") { vm_error(type_code) }
-        dedent
-        chain_head(false, "Z5 <= #{METHOD_COLLECTION_MAX}")
-        indent
-        note "配列とハッシュはタグが隣り合っているので範囲で見る"
-        if_("#{recv.tag} < #{TT_ARRAY}") { vm_error(type_code) }
-        if_("#{recv.tag} > #{TT_HASH}") { vm_error(type_code) }
-        dedent
-        chain_head(false, "Z5 <= #{METHOD_ARRAY_MAX}")
-        indent
-        if_("#{recv.tag} <> #{TT_ARRAY}") { vm_error(type_code) }
-        dedent
-        line "ELSE"
-        indent
-        if_("#{recv.tag} <> #{TT_HASH}") { vm_error(type_code) }
-        dedent
+        first = true
+        METHOD_RECEIVER_BANDS.each do |max_code, tag_min, tag_max, label|
+          if max_code
+            chain_head(first, "Z5 <= #{max_code}")
+          else
+            line "ELSE"
+          end
+          first = false
+          indent
+          note "#{label} (タグ #{tag_min}#{tag_min == tag_max ? '' : "-#{tag_max}"})"
+          if tag_min == tag_max
+            if_("#{recv.tag} <> #{tag_min}") { vm_error(type_code) }
+          else
+            if_("#{recv.tag} < #{tag_min}") { vm_error(type_code) }
+            if_("#{recv.tag} > #{tag_max}") { vm_error(type_code) }
+          end
+          dedent
+        end
         line "END IF"
       end
     end
@@ -2102,6 +2252,8 @@ module FaRuby
       when METHOD_FLOOR then floor_into(dest)
       when METHOD_ROUND then round_into(dest)
       when METHOD_LENGTH then length_into(dest)
+      when METHOD_EMPTY_P then empty_into(dest)
+      when METHOD_CONCAT then concat_into(dest, rhs, type_code, heap_code)
       when METHOD_PUSH   then push_into(dest, rhs, heap_code)
       when METHOD_KEY_P  then key_p_into(dest, rhs)
       when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
@@ -2110,16 +2262,50 @@ module FaRuby
       end
     end
 
-    # R[a].length / R[a].size。レシーバが配列かハッシュであることは検査済み
+    # R[a].length / R[a].size。レシーバの型が帯に合うことは検査済み
     #
     # ハッシュの組の数は鍵の配列の見出しにあります。値スロットの読み方が
     # 配列と違う (下位ワードだけがスロット番号) ため、型で分けます。
+    #
+    # **文字列だけは見出しの数 (バイト数) をそのまま返しません。** Ruby の
+    # `length` は文字数なので、切れ目を数えます。
     def length_into(dest)
       if_else_block("#{dest.tag} = #{TT_HASH}") { hash_keys_into_z(dest) }
       array_slot_into_z(dest)
+      if_("#{dest.tag} = #{TT_STRING}") do
+        note "文字列は文字数を返す。バイト数ではない"
+        line "#{str_target} = #{STR_NO_TARGET}   ' 数えるだけ"
+        scan_string_characters
+        line "#{scratch32_b} = #{str_count}"
+      end
       end_block
       line "#{dest.value} = #{scratch32_b}"
       line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a].empty?
+    #
+    # 長さが 0 かどうかだけなので、**文字列でも切れ目を数える必要はありません。**
+    # バイト数が 0 なら文字数も 0 です。
+    def empty_into(dest)
+      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_keys_into_z(dest) }
+      array_slot_into_z(dest)
+      end_block
+      if_else_block("#{scratch32_b} = 0") { assign_bool(dest, true) }
+      assign_bool(dest, false)
+      end_block
+    end
+
+    # R[a] << R[a+1]。文字列なら中身を継ぎ足し、配列なら末尾に足す
+    #
+    # どちらも Ruby はレシーバ自身を返すので、R[a] はそのままにします。
+    def concat_into(dest, rhs, type_code, heap_code)
+      if_else_block("#{dest.tag} = #{TT_STRING}") do
+        note "文字列は中身を継ぎ足す"
+        append_string_slots(dest, rhs, type_code, heap_code)
+      end
+      push_into(dest, rhs, heap_code)
+      end_block
     end
 
     # R[a].key?(R[a+1])。鍵があるかどうかだけを返す

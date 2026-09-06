@@ -94,15 +94,15 @@ class TestBlocks < Minitest::Test
   # doc/architecture.md の「呼び出しフレームとレジスタ窓」に載せた数値。
   # 配置を変えると図が古くなるため、ここで気づけるようにしておく。
   def test_the_frame_diagram_in_the_docs_matches_the_layout
-    assert_equal 48, layout.offset_of(layout.reg_file_base), "レジスタ領域の先頭"
-    assert_equal 368, layout.offset_of(layout.frame_stack_base), "呼び出しスタックの先頭"
+    assert_equal 56, layout.offset_of(layout.reg_file_base), "レジスタ領域の先頭"
+    assert_equal 376, layout.offset_of(layout.frame_stack_base), "呼び出しスタックの先頭"
     assert_equal 10, Layout::FRAME_WORDS
     assert_equal 16, layout.max_frames
-    assert_equal 20_368, layout.frame_addr(0)
-    assert_equal 20_378, layout.frame_addr(1)
-    assert_equal 20_518, layout.frame_addr(layout.max_frames - 1)
-    # a=1 の呼び出しで窓が +48 から +52 へ進む
-    assert_equal 52, layout.offset_of(layout.reg_file_base) + 1 * SLOT_WORDS
+    assert_equal 20_376, layout.frame_addr(0)
+    assert_equal 20_386, layout.frame_addr(1)
+    assert_equal 20_526, layout.frame_addr(layout.max_frames - 1)
+    # a=1 の呼び出しで窓が +56 から +60 へ進む
+    assert_equal 60, layout.offset_of(layout.reg_file_base) + 1 * SLOT_WORDS
   end
 
   # === OP_BLOCK ===

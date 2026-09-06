@@ -35,11 +35,11 @@
 '   EM34:Z9 = 実行中の irep の定数プール先頭
 '   EM35:Z9 = 実行中の irep のシンボル表先頭
 '   EM39:Z9 = ARRAY_SP (次に渡す配列スロット。返さないので減らない)
-'   +48~ = レジスタスタック (値スロット 4ワード/レジスタ)
-'   +368~ = 呼び出しスタック (10ワード/段)
-'   +528~ = メソッド表 (1ワード/メソッド)
-'   +592~ = 汎用グローバル変数 (値スロット 4ワード/変数)
-'   +992~ = 配列プール (50ワード/スロット: 要素数 + 予備 + 要素12個)
+'   +56~ = レジスタスタック (値スロット 4ワード/レジスタ)
+'   +376~ = 呼び出しスタック (10ワード/段)
+'   +536~ = メソッド表 (1ワード/メソッド)
+'   +600~ = 汎用グローバル変数 (値スロット 4ワード/変数)
+'   +1000~ = 配列プール (50ワード/スロット: 要素数 + 予備 + 要素12個)
 '
 ' 実行中に変わらないものは FM (ZF をバンク 3 に分けたもの) に置く。
 ' スクリプトの先頭で FRSET(3) を実行済みのため、FM のアドレスで直接指せる。
@@ -638,7 +638,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     Z7 = Z8 / 16
                     ' 文字列スロットの見出し
                     Z4 = EM1.L:Z2
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' バイト数
                     ' 書く長さと埋めるバイトを決める
                     IF Z7 = 0 THEN
@@ -924,7 +924,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' 定義元のフレームを c 段たどる
-                Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                Z3 = (EM31:Z9 - 1) * 10 + 376 + Z9
                 Z4 = EM4:Z3
                 EM16:Z9 = 0   ' 鎖が尽きた印
                 IF EM9:Z9 > 0 THEN
@@ -932,7 +932,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         IF Z4 = 65535 THEN
                             EM16:Z9 = 1
                         ELSE
-                            Z3 = Z4 * 10 + 368 + Z9
+                            Z3 = Z4 * 10 + 376 + Z9
                             Z4 = EM4:Z3
                         END IF
                     NEXT
@@ -944,9 +944,9 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' たどり着いたフレームのレジスタ窓。FRAME_NONE ならトップレベル
-                Z6 = 48
+                Z6 = 56
                 IF Z4 <> 65535 THEN
-                    Z3 = Z4 * 10 + 368 + Z9
+                    Z3 = Z4 * 10 + 376 + Z9
                     Z6 = EM3:Z3
                 END IF
                 Z3 = EM8:Z9 * 4 + Z6 + Z9
@@ -973,7 +973,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' 定義元のフレームを c 段たどる
-                Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                Z3 = (EM31:Z9 - 1) * 10 + 376 + Z9
                 Z4 = EM4:Z3
                 EM16:Z9 = 0   ' 鎖が尽きた印
                 IF EM9:Z9 > 0 THEN
@@ -981,7 +981,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         IF Z4 = 65535 THEN
                             EM16:Z9 = 1
                         ELSE
-                            Z3 = Z4 * 10 + 368 + Z9
+                            Z3 = Z4 * 10 + 376 + Z9
                             Z4 = EM4:Z3
                         END IF
                     NEXT
@@ -993,9 +993,9 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' たどり着いたフレームのレジスタ窓。FRAME_NONE ならトップレベル
-                Z6 = 48
+                Z6 = 56
                 IF Z4 <> 65535 THEN
-                    Z3 = Z4 * 10 + 368 + Z9
+                    Z3 = Z4 * 10 + 376 + Z9
                     Z6 = EM3:Z3
                 END IF
                 Z3 = EM8:Z9 * 4 + Z6 + Z9
@@ -1003,7 +1003,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 EM0:Z3 = EM0:Z1
 
             ELSE IF EM6:Z9 = 35 THEN
-                ' OP_GETIDX (B): R[a] = R[a][R[a+1]] (デバイス・配列)
+                ' OP_GETIDX (B): R[a] = R[a][R[a+1]] (デバイス・配列・文字列)
                 Z1 = EM0:Z9 + EM33:Z9
                 EM7:Z9 = FM0:Z1
                 EM0:Z9 = EM0:Z9 + 1
@@ -1253,7 +1253,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ELSE IF EM0:Z1 = 8 THEN
                     ' スロットの見出し。R[a] を書き換える前に読む
                     Z4 = EM1.L:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 要素数
                     ' 負の添字は後ろから数える (Ruby の a[-1] は最後の要素)
                     EM16.L:Z9 = EM1.L:Z2
@@ -1276,10 +1276,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ELSE IF EM0:Z1 = 9 THEN
                     ' 鍵の配列の見出し。R[a] を書き換える前に読む
                     Z4 = EM1:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 組の数
                     Z5 = EM2:Z1   ' 値の配列
-                    Z5 = Z5 * 50 + 992 + Z9
+                    Z5 = Z5 * 50 + 1000 + Z9
                     ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
                     EM16.L:Z9 = -1
                     IF EM18.L:Z9 > 0 THEN
@@ -1297,10 +1297,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                         EM46:Z9 = Z3
                                         EM43:Z9 = 0
                                         Z3 = EM1.L:Z7
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         EM44:Z9 = EM0:Z3   ' バイト数
                                         Z3 = EM1.L:Z2
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         IF EM44:Z9 = EM0:Z3 THEN
                                             ' バイト数が同じ。ここから中身を見る
                                             EM43:Z9 = 1
@@ -1310,11 +1310,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                                 EM45:Z9 = EM45:Z9 - 1
                                                 FOR EM42:Z9 = 0 TO EM45:Z9
                                                     Z3 = EM1.L:Z7
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     EM44:Z9 = EM0:Z3
                                                     Z3 = EM1.L:Z2
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     IF EM44:Z9 <> EM0:Z3 THEN
                                                         EM43:Z9 = 0
@@ -1346,8 +1346,212 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = EM1.L:Z7
                         EM0:Z1 = EM0:Z7
                     END IF
+                ELSE IF EM0:Z1 = 7 THEN
+                    Z4 = EM1.L:Z1
+                    Z4 = Z4 * 50 + 1000 + Z9
+                    EM16.L:Z9 = EM1.L:Z2
+                    IF EM16.L:Z9 < 0 THEN
+                        ' 負の添字は後ろから数える。文字数が要るので一度なめる
+                        EM49:Z9 = 65535
+                        ' 文字の切れ目を先頭から数える。バイト列は 1 回だけなめる
+                        EM45:Z9 = EM0:Z4   ' バイト数
+                        EM47:Z9 = 0
+                        EM48:Z9 = 0
+                        EM50:Z9 = EM45:Z9   ' 見つからなければバイト数のまま
+                        EM51:Z9 = EM45:Z9
+                        IF EM45:Z9 > 0 THEN
+                            Z6 = EM45:Z9
+                            Z6 = Z6 - 1
+                            FOR EM42:Z9 = 0 TO Z6
+                                Z8 = EM42:Z9 / 2
+                                Z7 = Z8 + Z4 + 2
+                                Z7 = EM0:Z7
+                                Z8 = Z8 * 2
+                                IF EM42:Z9 = Z8 THEN
+                                    Z7 = Z7 / 256   ' 偶数の位置は上位バイト
+                                ELSE
+                                    Z8 = Z7 / 256
+                                    Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト
+                                END IF
+                                ' この位置が文字の先頭かどうか
+                                EM43:Z9 = 1
+                                IF EM40:Z9 = 0 THEN
+                                    ' 継続バイト (10xxxxxx) は文字の途中
+                                    IF Z7 >= 128 THEN
+                                        IF Z7 < 192 THEN
+                                            EM43:Z9 = 0
+                                        END IF
+                                    END IF
+                                ELSE IF EM40:Z9 = 1 THEN
+                                    IF EM48:Z9 = 1 THEN
+                                        ' 先導バイトの次は後続バイト
+                                        EM43:Z9 = 0
+                                        EM48:Z9 = 0
+                                    ELSE
+                                        ' 先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続
+                                        IF Z7 >= 129 THEN
+                                            IF Z7 <= 159 THEN
+                                                EM48:Z9 = 1
+                                            END IF
+                                        END IF
+                                        IF Z7 >= 224 THEN
+                                            IF Z7 <= 239 THEN
+                                                EM48:Z9 = 1
+                                            END IF
+                                        END IF
+                                    END IF
+                                END IF
+                                ' ASCII はどのバイトも文字の先頭なので何も見ない
+                                IF EM43:Z9 = 1 THEN
+                                    IF EM49:Z9 <= 96 THEN
+                                        ' 探している文字なら位置を控える。次の切れ目がその文字の終わり
+                                        IF EM47:Z9 = EM49:Z9 THEN
+                                            EM50:Z9 = EM42:Z9
+                                        END IF
+                                        Z7 = EM49:Z9 + 1
+                                        IF EM47:Z9 = Z7 THEN
+                                            EM51:Z9 = EM42:Z9
+                                        END IF
+                                    END IF
+                                    EM47:Z9 = EM47:Z9 + 1
+                                END IF
+                            NEXT
+                        END IF
+                        EM16.L:Z9 = EM16.L:Z9 + EM47:Z9
+                    END IF
+                    IF EM16.L:Z9 < 0 THEN
+                        ' 後ろから数えても先頭より前。範囲外は nil (Ruby と同じ)
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 1
+                    ELSE IF EM16.L:Z9 > 96 THEN
+                        ' 1 文字 1 バイト以上なので、バイト数を超える番号は必ず範囲外
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 1
+                    ELSE
+                        EM49:Z9 = EM16.L:Z9
+                        ' 文字の切れ目を先頭から数える。バイト列は 1 回だけなめる
+                        EM45:Z9 = EM0:Z4   ' バイト数
+                        EM47:Z9 = 0
+                        EM48:Z9 = 0
+                        EM50:Z9 = EM45:Z9   ' 見つからなければバイト数のまま
+                        EM51:Z9 = EM45:Z9
+                        IF EM45:Z9 > 0 THEN
+                            Z6 = EM45:Z9
+                            Z6 = Z6 - 1
+                            FOR EM42:Z9 = 0 TO Z6
+                                Z8 = EM42:Z9 / 2
+                                Z7 = Z8 + Z4 + 2
+                                Z7 = EM0:Z7
+                                Z8 = Z8 * 2
+                                IF EM42:Z9 = Z8 THEN
+                                    Z7 = Z7 / 256   ' 偶数の位置は上位バイト
+                                ELSE
+                                    Z8 = Z7 / 256
+                                    Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト
+                                END IF
+                                ' この位置が文字の先頭かどうか
+                                EM43:Z9 = 1
+                                IF EM40:Z9 = 0 THEN
+                                    ' 継続バイト (10xxxxxx) は文字の途中
+                                    IF Z7 >= 128 THEN
+                                        IF Z7 < 192 THEN
+                                            EM43:Z9 = 0
+                                        END IF
+                                    END IF
+                                ELSE IF EM40:Z9 = 1 THEN
+                                    IF EM48:Z9 = 1 THEN
+                                        ' 先導バイトの次は後続バイト
+                                        EM43:Z9 = 0
+                                        EM48:Z9 = 0
+                                    ELSE
+                                        ' 先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続
+                                        IF Z7 >= 129 THEN
+                                            IF Z7 <= 159 THEN
+                                                EM48:Z9 = 1
+                                            END IF
+                                        END IF
+                                        IF Z7 >= 224 THEN
+                                            IF Z7 <= 239 THEN
+                                                EM48:Z9 = 1
+                                            END IF
+                                        END IF
+                                    END IF
+                                END IF
+                                ' ASCII はどのバイトも文字の先頭なので何も見ない
+                                IF EM43:Z9 = 1 THEN
+                                    IF EM49:Z9 <= 96 THEN
+                                        ' 探している文字なら位置を控える。次の切れ目がその文字の終わり
+                                        IF EM47:Z9 = EM49:Z9 THEN
+                                            EM50:Z9 = EM42:Z9
+                                        END IF
+                                        Z7 = EM49:Z9 + 1
+                                        IF EM47:Z9 = Z7 THEN
+                                            EM51:Z9 = EM42:Z9
+                                        END IF
+                                    END IF
+                                    EM47:Z9 = EM47:Z9 + 1
+                                END IF
+                            NEXT
+                        END IF
+                        IF EM50:Z9 >= EM45:Z9 THEN
+                            ' そこまで文字が無い。範囲外は nil (Ruby と同じ)
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 1
+                        ELSE
+                            ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                            IF EM39:Z9 >= 16 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            Z3 = EM39:Z9
+                            Z3 = Z3 * 50 + 1000 + Z9
+                            EM16.L:Z9 = 0   ' 新しいスロットは空から始める
+                            EM18.L:Z9 = EM51:Z9 - EM50:Z9   ' その文字のバイト数
+                            IF EM18.L:Z9 > 0 THEN
+                                Z6 = EM18.L:Z9
+                                Z6 = Z6 - 1
+                                FOR Z5 = 0 TO Z6
+                                    ' 継ぎ足す元のバイトを 1 つ取り出す
+                                    EM48:Z9 = EM50:Z9 + Z5   ' 元の位置
+                                    Z7 = EM48:Z9 / 2
+                                    Z8 = Z7 + Z4 + 2
+                                    Z8 = EM0:Z8
+                                    Z7 = Z7 * 2
+                                    IF EM48:Z9 = Z7 THEN
+                                        Z8 = Z8 / 256   ' 偶数の位置は上位バイト
+                                    ELSE
+                                        Z7 = Z8 / 256
+                                        Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト
+                                    END IF
+                                    ' 書き先の位置 (継ぎ足す先の長さ + 何バイト目か)
+                                    EM44:Z9 = EM16.L:Z9 + Z5
+                                    Z7 = EM44:Z9
+                                    Z7 = Z7 / 2
+                                    Z7 = Z7 + Z3 + 2
+                                    EM45:Z9 = EM44:Z9 / 2
+                                    EM45:Z9 = EM45:Z9 * 2
+                                    IF EM44:Z9 = EM45:Z9 THEN
+                                        ' 偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)
+                                        EM0:Z7 = Z8 * 256
+                                    ELSE
+                                        ' 奇数。上位バイトを残して下位に入れる
+                                        EM45:Z9 = EM0:Z7
+                                        EM45:Z9 = EM45:Z9 / 256
+                                        EM0:Z7 = EM45:Z9 * 256 + Z8
+                                    END IF
+                                NEXT
+                            END IF
+                            ' 長さを更新する
+                            EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
+                            EM0:Z3 = EM16.L:Z9
+                            EM1.L:Z1 = EM39:Z9   ' スロット番号
+                            EM0:Z1 = 7
+                            EM39:Z9 = EM39:Z9 + 1
+                        END IF
+                    END IF
                 ELSE
-                    ' デバイス参照・配列・ハッシュ以外への添字アクセスは未対応
+                    ' デバイス参照・配列・ハッシュ・文字列以外への添字アクセスは未対応
                     EM1:Z9 = 3
                     EM2:Z9 = 2
                     BREAK
@@ -1565,7 +1769,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ELSE IF EM0:Z1 = 8 THEN
                     ' スロットの見出し。R[a] を書き換える前に読む
                     Z4 = EM1.L:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 要素数
                     ' 負の添字は後ろから数える (Ruby の a[-1] は最後の要素)
                     EM16.L:Z9 = EM1.L:Z2
@@ -1606,10 +1810,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ELSE IF EM0:Z1 = 9 THEN
                     ' 鍵の配列の見出し。R[a] を書き換える前に読む
                     Z4 = EM1:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 組の数
                     Z5 = EM2:Z1   ' 値の配列
-                    Z5 = Z5 * 50 + 992 + Z9
+                    Z5 = Z5 * 50 + 1000 + Z9
                     ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
                     EM16.L:Z9 = -1
                     IF EM18.L:Z9 > 0 THEN
@@ -1627,10 +1831,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                         EM46:Z9 = Z3
                                         EM43:Z9 = 0
                                         Z3 = EM1.L:Z7
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         EM44:Z9 = EM0:Z3   ' バイト数
                                         Z3 = EM1.L:Z2
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         IF EM44:Z9 = EM0:Z3 THEN
                                             ' バイト数が同じ。ここから中身を見る
                                             EM43:Z9 = 1
@@ -1640,11 +1844,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                                 EM45:Z9 = EM45:Z9 - 1
                                                 FOR EM42:Z9 = 0 TO EM45:Z9
                                                     Z3 = EM1.L:Z7
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     EM44:Z9 = EM0:Z3
                                                     Z3 = EM1.L:Z2
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     IF EM44:Z9 <> EM0:Z3 THEN
                                                         EM43:Z9 = 0
@@ -1820,10 +2024,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                    ' 3-10 はレシーバが数値、11 は配列かハッシュ、13-13 は配列、14 以上はハッシュであること
+                    ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                    ' 3 未満 (!= と !) はどの型でも呼べる
                     IF Z5 >= 3 THEN
                         IF Z5 <= 10 THEN
-                            ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                            ' 数値 (タグ 4-5)
                             IF EM0:Z1 < 4 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
@@ -1835,8 +2040,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 BREAK
                             END IF
                         ELSE IF Z5 <= 12 THEN
-                            ' 配列とハッシュはタグが隣り合っているので範囲で見る
-                            IF EM0:Z1 < 8 THEN
+                            ' 文字列・配列・ハッシュ (タグ 7-9)
+                            IF EM0:Z1 < 7 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
                                 BREAK
@@ -1847,12 +2052,38 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 BREAK
                             END IF
                         ELSE IF Z5 <= 13 THEN
+                            ' 文字列・配列 (タグ 7-8)
+                            IF EM0:Z1 < 7 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            IF EM0:Z1 > 8 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE IF Z5 <= 14 THEN
+                            ' 配列・ハッシュ (タグ 8-9)
+                            IF EM0:Z1 < 8 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            IF EM0:Z1 > 9 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE IF Z5 <= 15 THEN
+                            ' 配列 (タグ 8)
                             IF EM0:Z1 <> 8 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
                                 BREAK
                             END IF
                         ELSE
+                            ' ハッシュ (タグ 9)
                             IF EM0:Z1 <> 9 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
@@ -1914,10 +2145,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     EM46:Z9 = Z3
                                     EM43:Z9 = 0
                                     Z3 = EM1.L:Z1
-                                    Z3 = Z3 * 50 + 992 + Z9
+                                    Z3 = Z3 * 50 + 1000 + Z9
                                     EM44:Z9 = EM0:Z3   ' バイト数
                                     Z3 = EM1.L:Z2
-                                    Z3 = Z3 * 50 + 992 + Z9
+                                    Z3 = Z3 * 50 + 1000 + Z9
                                     IF EM44:Z9 = EM0:Z3 THEN
                                         ' バイト数が同じ。ここから中身を見る
                                         EM43:Z9 = 1
@@ -1927,11 +2158,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                             EM45:Z9 = EM45:Z9 - 1
                                             FOR EM42:Z9 = 0 TO EM45:Z9
                                                 Z3 = EM1.L:Z1
-                                                Z3 = Z3 * 50 + 992 + Z9
+                                                Z3 = Z3 * 50 + 1000 + Z9
                                                 Z3 = EM42:Z9 + Z3 + 2
                                                 EM44:Z9 = EM0:Z3
                                                 Z3 = EM1.L:Z2
-                                                Z3 = Z3 * 50 + 992 + Z9
+                                                Z3 = Z3 * 50 + 1000 + Z9
                                                 Z3 = EM42:Z9 + Z3 + 2
                                                 IF EM44:Z9 <> EM0:Z3 THEN
                                                     EM43:Z9 = 0
@@ -2063,21 +2294,188 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         IF EM0:Z1 = 9 THEN
                             ' 鍵の配列の見出し。R[a] を書き換える前に読む
                             Z4 = EM1:Z1
-                            Z4 = Z4 * 50 + 992 + Z9
+                            Z4 = Z4 * 50 + 1000 + Z9
                             EM18.L:Z9 = EM0:Z4   ' 組の数
                         ELSE
                             ' スロットの見出し。R[a] を書き換える前に読む
                             Z4 = EM1.L:Z1
-                            Z4 = Z4 * 50 + 992 + Z9
+                            Z4 = Z4 * 50 + 1000 + Z9
                             EM18.L:Z9 = EM0:Z4   ' 要素数
+                            IF EM0:Z1 = 7 THEN
+                                ' 文字列は文字数を返す。バイト数ではない
+                                EM49:Z9 = 65535   ' 数えるだけ
+                                ' 文字の切れ目を先頭から数える。バイト列は 1 回だけなめる
+                                EM45:Z9 = EM0:Z4   ' バイト数
+                                EM47:Z9 = 0
+                                EM48:Z9 = 0
+                                EM50:Z9 = EM45:Z9   ' 見つからなければバイト数のまま
+                                EM51:Z9 = EM45:Z9
+                                IF EM45:Z9 > 0 THEN
+                                    Z6 = EM45:Z9
+                                    Z6 = Z6 - 1
+                                    FOR EM42:Z9 = 0 TO Z6
+                                        Z8 = EM42:Z9 / 2
+                                        Z7 = Z8 + Z4 + 2
+                                        Z7 = EM0:Z7
+                                        Z8 = Z8 * 2
+                                        IF EM42:Z9 = Z8 THEN
+                                            Z7 = Z7 / 256   ' 偶数の位置は上位バイト
+                                        ELSE
+                                            Z8 = Z7 / 256
+                                            Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト
+                                        END IF
+                                        ' この位置が文字の先頭かどうか
+                                        EM43:Z9 = 1
+                                        IF EM40:Z9 = 0 THEN
+                                            ' 継続バイト (10xxxxxx) は文字の途中
+                                            IF Z7 >= 128 THEN
+                                                IF Z7 < 192 THEN
+                                                    EM43:Z9 = 0
+                                                END IF
+                                            END IF
+                                        ELSE IF EM40:Z9 = 1 THEN
+                                            IF EM48:Z9 = 1 THEN
+                                                ' 先導バイトの次は後続バイト
+                                                EM43:Z9 = 0
+                                                EM48:Z9 = 0
+                                            ELSE
+                                                ' 先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続
+                                                IF Z7 >= 129 THEN
+                                                    IF Z7 <= 159 THEN
+                                                        EM48:Z9 = 1
+                                                    END IF
+                                                END IF
+                                                IF Z7 >= 224 THEN
+                                                    IF Z7 <= 239 THEN
+                                                        EM48:Z9 = 1
+                                                    END IF
+                                                END IF
+                                            END IF
+                                        END IF
+                                        ' ASCII はどのバイトも文字の先頭なので何も見ない
+                                        IF EM43:Z9 = 1 THEN
+                                            IF EM49:Z9 <= 96 THEN
+                                                ' 探している文字なら位置を控える。次の切れ目がその文字の終わり
+                                                IF EM47:Z9 = EM49:Z9 THEN
+                                                    EM50:Z9 = EM42:Z9
+                                                END IF
+                                                Z7 = EM49:Z9 + 1
+                                                IF EM47:Z9 = Z7 THEN
+                                                    EM51:Z9 = EM42:Z9
+                                                END IF
+                                            END IF
+                                            EM47:Z9 = EM47:Z9 + 1
+                                        END IF
+                                    NEXT
+                                END IF
+                                EM18.L:Z9 = EM47:Z9
+                            END IF
                         END IF
                         EM1.L:Z1 = EM18.L:Z9
                         EM0:Z1 = 4
+                    ELSE IF Z5 = 12 THEN
+                        ' empty?
+                        IF EM0:Z1 = 9 THEN
+                            ' 鍵の配列の見出し。R[a] を書き換える前に読む
+                            Z4 = EM1:Z1
+                            Z4 = Z4 * 50 + 1000 + Z9
+                            EM18.L:Z9 = EM0:Z4   ' 組の数
+                        ELSE
+                            ' スロットの見出し。R[a] を書き換える前に読む
+                            Z4 = EM1.L:Z1
+                            Z4 = Z4 * 50 + 1000 + Z9
+                            EM18.L:Z9 = EM0:Z4   ' 要素数
+                        END IF
+                        IF EM18.L:Z9 = 0 THEN
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        ELSE
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        END IF
                     ELSE IF Z5 = 13 THEN
                         ' <<
+                        IF EM0:Z1 = 7 THEN
+                            ' 文字列は中身を継ぎ足す
+                            IF EM0:Z2 <> 7 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            Z3 = EM1.L:Z1
+                            Z3 = Z3 * 50 + 1000 + Z9
+                            Z4 = EM1.L:Z2
+                            Z4 = Z4 * 50 + 1000 + Z9
+                            EM16.L:Z9 = EM0:Z3
+                            EM18.L:Z9 = EM0:Z4
+                            ' 1 スロットに収まること
+                            Z5 = EM16.L:Z9 + EM18.L:Z9
+                            IF Z5 > 96 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            IF EM18.L:Z9 > 0 THEN
+                                Z6 = EM18.L:Z9
+                                Z6 = Z6 - 1
+                                FOR Z5 = 0 TO Z6
+                                    ' 継ぎ足す元のバイトを 1 つ取り出す
+                                    Z7 = Z5 / 2
+                                    Z8 = Z7 + Z4 + 2
+                                    Z8 = EM0:Z8
+                                    Z7 = Z7 * 2
+                                    IF Z5 = Z7 THEN
+                                        Z8 = Z8 / 256   ' 偶数の位置は上位バイト
+                                    ELSE
+                                        Z7 = Z8 / 256
+                                        Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト
+                                    END IF
+                                    ' 書き先の位置 (継ぎ足す先の長さ + 何バイト目か)
+                                    EM44:Z9 = EM16.L:Z9 + Z5
+                                    Z7 = EM44:Z9
+                                    Z7 = Z7 / 2
+                                    Z7 = Z7 + Z3 + 2
+                                    EM45:Z9 = EM44:Z9 / 2
+                                    EM45:Z9 = EM45:Z9 * 2
+                                    IF EM44:Z9 = EM45:Z9 THEN
+                                        ' 偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)
+                                        EM0:Z7 = Z8 * 256
+                                    ELSE
+                                        ' 奇数。上位バイトを残して下位に入れる
+                                        EM45:Z9 = EM0:Z7
+                                        EM45:Z9 = EM45:Z9 / 256
+                                        EM0:Z7 = EM45:Z9 * 256 + Z8
+                                    END IF
+                                NEXT
+                            END IF
+                            ' 長さを更新する
+                            EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
+                            EM0:Z3 = EM16.L:Z9
+                        ELSE
+                            ' スロットの見出し。R[a] を書き換える前に読む
+                            Z4 = EM1.L:Z1
+                            Z4 = Z4 * 50 + 1000 + Z9
+                            EM18.L:Z9 = EM0:Z4   ' 要素数
+                            IF EM18.L:Z9 >= 12 THEN
+                                ' 1 スロットの容量がいっぱい
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            ' 末尾に足して要素数を 1 増やす
+                            EM16.L:Z9 = EM18.L:Z9
+                            Z5 = EM16.L:Z9
+                            Z5 = Z5 * 4 + Z4 + 2
+                            EM1.L:Z5 = EM1.L:Z2
+                            EM0:Z5 = EM0:Z2
+                            Z6 = EM18.L:Z9
+                            EM0:Z4 = Z6 + 1
+                        END IF
+                    ELSE IF Z5 = 15 THEN
+                        ' push
                         ' スロットの見出し。R[a] を書き換える前に読む
                         Z4 = EM1.L:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 要素数
                         IF EM18.L:Z9 >= 12 THEN
                             ' 1 スロットの容量がいっぱい
@@ -2093,11 +2491,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z5 = EM0:Z2
                         Z6 = EM18.L:Z9
                         EM0:Z4 = Z6 + 1
-                    ELSE IF Z5 = 14 THEN
+                    ELSE IF Z5 = 16 THEN
                         ' key?
                         ' 鍵の配列の見出し。R[a] を書き換える前に読む
                         Z4 = EM1:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 組の数
                         ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
                         EM16.L:Z9 = -1
@@ -2116,10 +2514,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                             EM46:Z9 = Z3
                                             EM43:Z9 = 0
                                             Z3 = EM1.L:Z7
-                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = Z3 * 50 + 1000 + Z9
                                             EM44:Z9 = EM0:Z3   ' バイト数
                                             Z3 = EM1.L:Z2
-                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = Z3 * 50 + 1000 + Z9
                                             IF EM44:Z9 = EM0:Z3 THEN
                                                 ' バイト数が同じ。ここから中身を見る
                                                 EM43:Z9 = 1
@@ -2129,11 +2527,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                                     EM45:Z9 = EM45:Z9 - 1
                                                     FOR EM42:Z9 = 0 TO EM45:Z9
                                                         Z3 = EM1.L:Z7
-                                                        Z3 = Z3 * 50 + 992 + Z9
+                                                        Z3 = Z3 * 50 + 1000 + Z9
                                                         Z3 = EM42:Z9 + Z3 + 2
                                                         EM44:Z9 = EM0:Z3
                                                         Z3 = EM1.L:Z2
-                                                        Z3 = Z3 * 50 + 992 + Z9
+                                                        Z3 = Z3 * 50 + 1000 + Z9
                                                         Z3 = EM42:Z9 + Z3 + 2
                                                         IF EM44:Z9 <> EM0:Z3 THEN
                                                             EM43:Z9 = 0
@@ -2162,7 +2560,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM1.L:Z1 = 1
                             EM0:Z1 = 3
                         END IF
-                    ELSE IF Z5 = 15 THEN
+                    ELSE IF Z5 = 17 THEN
                         ' keys
                         ' プールの空きスロットを取る。返さないので使い切ったら止まる
                         IF EM39:Z9 >= 16 THEN
@@ -2172,12 +2570,12 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                         ' 鍵の配列の見出し。R[a] を書き換える前に読む
                         Z4 = EM1:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 組の数
                         Z5 = EM2:Z1   ' 値の配列
-                        Z5 = Z5 * 50 + 992 + Z9
+                        Z5 = Z5 * 50 + 1000 + Z9
                         ' 新しいスロットの見出し。組の数がそのまま要素数になる
-                        Z2 = EM39:Z9 * 50 + 992 + Z9
+                        Z2 = EM39:Z9 * 50 + 1000 + Z9
                         EM0:Z2 = EM18.L:Z9
                         ' 写す。組の数 0 (空ハッシュ) では引き算もしない
                         IF EM18.L:Z9 > 0 THEN
@@ -2195,7 +2593,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = EM39:Z9   ' スロット番号
                         EM0:Z1 = 8
                         EM39:Z9 = EM39:Z9 + 1
-                    ELSE IF Z5 = 16 THEN
+                    ELSE IF Z5 = 18 THEN
                         ' values
                         ' プールの空きスロットを取る。返さないので使い切ったら止まる
                         IF EM39:Z9 >= 16 THEN
@@ -2205,12 +2603,12 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                         ' 鍵の配列の見出し。R[a] を書き換える前に読む
                         Z4 = EM1:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 組の数
                         Z5 = EM2:Z1   ' 値の配列
-                        Z5 = Z5 * 50 + 992 + Z9
+                        Z5 = Z5 * 50 + 1000 + Z9
                         ' 新しいスロットの見出し。組の数がそのまま要素数になる
-                        Z2 = EM39:Z9 * 50 + 992 + Z9
+                        Z2 = EM39:Z9 * 50 + 1000 + Z9
                         EM0:Z2 = EM18.L:Z9
                         ' 写す。組の数 0 (空ハッシュ) では引き算もしない
                         IF EM18.L:Z9 > 0 THEN
@@ -2241,7 +2639,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM2:Z9 = 3
                         BREAK
                     END IF
-                    Z3 = Z6 + 528 + Z9
+                    Z3 = Z6 + 536 + Z9
                     Z5 = EM0:Z3   ' 本体の irep 番号
                     IF Z5 = 0 THEN
                         ' まだ def が実行されていない
@@ -2256,7 +2654,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     ' 戻り先を積む
-                    Z3 = EM31:Z9 * 10 + 368 + Z9
+                    Z3 = EM31:Z9 * 10 + 376 + Z9
                     EM0:Z3 = EM0:Z9
                     EM1:Z3 = EM30:Z9
                     EM2:Z3 = EM32:Z9
@@ -2277,7 +2675,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM11:Z9 = FM4:Z1
                     ' レジスタ窓が領域からはみ出さないこと
                     EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
-                    IF EM16:Z9 > 368 THEN
+                    IF EM16:Z9 > 376 THEN
                         EM1:Z9 = 3
                         EM2:Z9 = 5
                         BREAK
@@ -2319,10 +2717,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                ' 3-10 はレシーバが数値、11 は配列かハッシュ、13-13 は配列、14 以上はハッシュであること
+                ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                ' 3 未満 (!= と !) はどの型でも呼べる
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN
-                        ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                        ' 数値 (タグ 4-5)
                         IF EM0:Z1 < 4 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
@@ -2334,8 +2733,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             BREAK
                         END IF
                     ELSE IF Z5 <= 12 THEN
-                        ' 配列とハッシュはタグが隣り合っているので範囲で見る
-                        IF EM0:Z1 < 8 THEN
+                        ' 文字列・配列・ハッシュ (タグ 7-9)
+                        IF EM0:Z1 < 7 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
@@ -2346,12 +2745,38 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             BREAK
                         END IF
                     ELSE IF Z5 <= 13 THEN
+                        ' 文字列・配列 (タグ 7-8)
+                        IF EM0:Z1 < 7 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 14 THEN
+                        ' 配列・ハッシュ (タグ 8-9)
+                        IF EM0:Z1 < 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 9 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 15 THEN
+                        ' 配列 (タグ 8)
                         IF EM0:Z1 <> 8 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
                         END IF
                     ELSE
+                        ' ハッシュ (タグ 9)
                         IF EM0:Z1 <> 9 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
@@ -2413,10 +2838,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM46:Z9 = Z3
                                 EM43:Z9 = 0
                                 Z3 = EM1.L:Z1
-                                Z3 = Z3 * 50 + 992 + Z9
+                                Z3 = Z3 * 50 + 1000 + Z9
                                 EM44:Z9 = EM0:Z3   ' バイト数
                                 Z3 = EM1.L:Z2
-                                Z3 = Z3 * 50 + 992 + Z9
+                                Z3 = Z3 * 50 + 1000 + Z9
                                 IF EM44:Z9 = EM0:Z3 THEN
                                     ' バイト数が同じ。ここから中身を見る
                                     EM43:Z9 = 1
@@ -2426,11 +2851,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                         EM45:Z9 = EM45:Z9 - 1
                                         FOR EM42:Z9 = 0 TO EM45:Z9
                                             Z3 = EM1.L:Z1
-                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = Z3 * 50 + 1000 + Z9
                                             Z3 = EM42:Z9 + Z3 + 2
                                             EM44:Z9 = EM0:Z3
                                             Z3 = EM1.L:Z2
-                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = Z3 * 50 + 1000 + Z9
                                             Z3 = EM42:Z9 + Z3 + 2
                                             IF EM44:Z9 <> EM0:Z3 THEN
                                                 EM43:Z9 = 0
@@ -2562,21 +2987,188 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     IF EM0:Z1 = 9 THEN
                         ' 鍵の配列の見出し。R[a] を書き換える前に読む
                         Z4 = EM1:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 組の数
                     ELSE
                         ' スロットの見出し。R[a] を書き換える前に読む
                         Z4 = EM1.L:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 要素数
+                        IF EM0:Z1 = 7 THEN
+                            ' 文字列は文字数を返す。バイト数ではない
+                            EM49:Z9 = 65535   ' 数えるだけ
+                            ' 文字の切れ目を先頭から数える。バイト列は 1 回だけなめる
+                            EM45:Z9 = EM0:Z4   ' バイト数
+                            EM47:Z9 = 0
+                            EM48:Z9 = 0
+                            EM50:Z9 = EM45:Z9   ' 見つからなければバイト数のまま
+                            EM51:Z9 = EM45:Z9
+                            IF EM45:Z9 > 0 THEN
+                                Z6 = EM45:Z9
+                                Z6 = Z6 - 1
+                                FOR EM42:Z9 = 0 TO Z6
+                                    Z8 = EM42:Z9 / 2
+                                    Z7 = Z8 + Z4 + 2
+                                    Z7 = EM0:Z7
+                                    Z8 = Z8 * 2
+                                    IF EM42:Z9 = Z8 THEN
+                                        Z7 = Z7 / 256   ' 偶数の位置は上位バイト
+                                    ELSE
+                                        Z8 = Z7 / 256
+                                        Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト
+                                    END IF
+                                    ' この位置が文字の先頭かどうか
+                                    EM43:Z9 = 1
+                                    IF EM40:Z9 = 0 THEN
+                                        ' 継続バイト (10xxxxxx) は文字の途中
+                                        IF Z7 >= 128 THEN
+                                            IF Z7 < 192 THEN
+                                                EM43:Z9 = 0
+                                            END IF
+                                        END IF
+                                    ELSE IF EM40:Z9 = 1 THEN
+                                        IF EM48:Z9 = 1 THEN
+                                            ' 先導バイトの次は後続バイト
+                                            EM43:Z9 = 0
+                                            EM48:Z9 = 0
+                                        ELSE
+                                            ' 先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続
+                                            IF Z7 >= 129 THEN
+                                                IF Z7 <= 159 THEN
+                                                    EM48:Z9 = 1
+                                                END IF
+                                            END IF
+                                            IF Z7 >= 224 THEN
+                                                IF Z7 <= 239 THEN
+                                                    EM48:Z9 = 1
+                                                END IF
+                                            END IF
+                                        END IF
+                                    END IF
+                                    ' ASCII はどのバイトも文字の先頭なので何も見ない
+                                    IF EM43:Z9 = 1 THEN
+                                        IF EM49:Z9 <= 96 THEN
+                                            ' 探している文字なら位置を控える。次の切れ目がその文字の終わり
+                                            IF EM47:Z9 = EM49:Z9 THEN
+                                                EM50:Z9 = EM42:Z9
+                                            END IF
+                                            Z7 = EM49:Z9 + 1
+                                            IF EM47:Z9 = Z7 THEN
+                                                EM51:Z9 = EM42:Z9
+                                            END IF
+                                        END IF
+                                        EM47:Z9 = EM47:Z9 + 1
+                                    END IF
+                                NEXT
+                            END IF
+                            EM18.L:Z9 = EM47:Z9
+                        END IF
                     END IF
                     EM1.L:Z1 = EM18.L:Z9
                     EM0:Z1 = 4
+                ELSE IF Z5 = 12 THEN
+                    ' empty?
+                    IF EM0:Z1 = 9 THEN
+                        ' 鍵の配列の見出し。R[a] を書き換える前に読む
+                        Z4 = EM1:Z1
+                        Z4 = Z4 * 50 + 1000 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 組の数
+                    ELSE
+                        ' スロットの見出し。R[a] を書き換える前に読む
+                        Z4 = EM1.L:Z1
+                        Z4 = Z4 * 50 + 1000 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                    END IF
+                    IF EM18.L:Z9 = 0 THEN
+                        EM1.L:Z1 = 1
+                        EM0:Z1 = 3
+                    ELSE
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 2
+                    END IF
                 ELSE IF Z5 = 13 THEN
                     ' <<
+                    IF EM0:Z1 = 7 THEN
+                        ' 文字列は中身を継ぎ足す
+                        IF EM0:Z2 <> 7 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        Z3 = EM1.L:Z1
+                        Z3 = Z3 * 50 + 1000 + Z9
+                        Z4 = EM1.L:Z2
+                        Z4 = Z4 * 50 + 1000 + Z9
+                        EM16.L:Z9 = EM0:Z3
+                        EM18.L:Z9 = EM0:Z4
+                        ' 1 スロットに収まること
+                        Z5 = EM16.L:Z9 + EM18.L:Z9
+                        IF Z5 > 96 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        IF EM18.L:Z9 > 0 THEN
+                            Z6 = EM18.L:Z9
+                            Z6 = Z6 - 1
+                            FOR Z5 = 0 TO Z6
+                                ' 継ぎ足す元のバイトを 1 つ取り出す
+                                Z7 = Z5 / 2
+                                Z8 = Z7 + Z4 + 2
+                                Z8 = EM0:Z8
+                                Z7 = Z7 * 2
+                                IF Z5 = Z7 THEN
+                                    Z8 = Z8 / 256   ' 偶数の位置は上位バイト
+                                ELSE
+                                    Z7 = Z8 / 256
+                                    Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト
+                                END IF
+                                ' 書き先の位置 (継ぎ足す先の長さ + 何バイト目か)
+                                EM44:Z9 = EM16.L:Z9 + Z5
+                                Z7 = EM44:Z9
+                                Z7 = Z7 / 2
+                                Z7 = Z7 + Z3 + 2
+                                EM45:Z9 = EM44:Z9 / 2
+                                EM45:Z9 = EM45:Z9 * 2
+                                IF EM44:Z9 = EM45:Z9 THEN
+                                    ' 偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)
+                                    EM0:Z7 = Z8 * 256
+                                ELSE
+                                    ' 奇数。上位バイトを残して下位に入れる
+                                    EM45:Z9 = EM0:Z7
+                                    EM45:Z9 = EM45:Z9 / 256
+                                    EM0:Z7 = EM45:Z9 * 256 + Z8
+                                END IF
+                            NEXT
+                        END IF
+                        ' 長さを更新する
+                        EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
+                        EM0:Z3 = EM16.L:Z9
+                    ELSE
+                        ' スロットの見出し。R[a] を書き換える前に読む
+                        Z4 = EM1.L:Z1
+                        Z4 = Z4 * 50 + 1000 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                        IF EM18.L:Z9 >= 12 THEN
+                            ' 1 スロットの容量がいっぱい
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        ' 末尾に足して要素数を 1 増やす
+                        EM16.L:Z9 = EM18.L:Z9
+                        Z5 = EM16.L:Z9
+                        Z5 = Z5 * 4 + Z4 + 2
+                        EM1.L:Z5 = EM1.L:Z2
+                        EM0:Z5 = EM0:Z2
+                        Z6 = EM18.L:Z9
+                        EM0:Z4 = Z6 + 1
+                    END IF
+                ELSE IF Z5 = 15 THEN
+                    ' push
                     ' スロットの見出し。R[a] を書き換える前に読む
                     Z4 = EM1.L:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 要素数
                     IF EM18.L:Z9 >= 12 THEN
                         ' 1 スロットの容量がいっぱい
@@ -2592,11 +3184,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM0:Z5 = EM0:Z2
                     Z6 = EM18.L:Z9
                     EM0:Z4 = Z6 + 1
-                ELSE IF Z5 = 14 THEN
+                ELSE IF Z5 = 16 THEN
                     ' key?
                     ' 鍵の配列の見出し。R[a] を書き換える前に読む
                     Z4 = EM1:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 組の数
                     ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
                     EM16.L:Z9 = -1
@@ -2615,10 +3207,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                         EM46:Z9 = Z3
                                         EM43:Z9 = 0
                                         Z3 = EM1.L:Z7
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         EM44:Z9 = EM0:Z3   ' バイト数
                                         Z3 = EM1.L:Z2
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         IF EM44:Z9 = EM0:Z3 THEN
                                             ' バイト数が同じ。ここから中身を見る
                                             EM43:Z9 = 1
@@ -2628,11 +3220,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                                 EM45:Z9 = EM45:Z9 - 1
                                                 FOR EM42:Z9 = 0 TO EM45:Z9
                                                     Z3 = EM1.L:Z7
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     EM44:Z9 = EM0:Z3
                                                     Z3 = EM1.L:Z2
-                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = Z3 * 50 + 1000 + Z9
                                                     Z3 = EM42:Z9 + Z3 + 2
                                                     IF EM44:Z9 <> EM0:Z3 THEN
                                                         EM43:Z9 = 0
@@ -2661,7 +3253,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = 1
                         EM0:Z1 = 3
                     END IF
-                ELSE IF Z5 = 15 THEN
+                ELSE IF Z5 = 17 THEN
                     ' keys
                     ' プールの空きスロットを取る。返さないので使い切ったら止まる
                     IF EM39:Z9 >= 16 THEN
@@ -2671,12 +3263,12 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     END IF
                     ' 鍵の配列の見出し。R[a] を書き換える前に読む
                     Z4 = EM1:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 組の数
                     Z5 = EM2:Z1   ' 値の配列
-                    Z5 = Z5 * 50 + 992 + Z9
+                    Z5 = Z5 * 50 + 1000 + Z9
                     ' 新しいスロットの見出し。組の数がそのまま要素数になる
-                    Z2 = EM39:Z9 * 50 + 992 + Z9
+                    Z2 = EM39:Z9 * 50 + 1000 + Z9
                     EM0:Z2 = EM18.L:Z9
                     ' 写す。組の数 0 (空ハッシュ) では引き算もしない
                     IF EM18.L:Z9 > 0 THEN
@@ -2694,7 +3286,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM1.L:Z1 = EM39:Z9   ' スロット番号
                     EM0:Z1 = 8
                     EM39:Z9 = EM39:Z9 + 1
-                ELSE IF Z5 = 16 THEN
+                ELSE IF Z5 = 18 THEN
                     ' values
                     ' プールの空きスロットを取る。返さないので使い切ったら止まる
                     IF EM39:Z9 >= 16 THEN
@@ -2704,12 +3296,12 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     END IF
                     ' 鍵の配列の見出し。R[a] を書き換える前に読む
                     Z4 = EM1:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
+                    Z4 = Z4 * 50 + 1000 + Z9
                     EM18.L:Z9 = EM0:Z4   ' 組の数
                     Z5 = EM2:Z1   ' 値の配列
-                    Z5 = Z5 * 50 + 992 + Z9
+                    Z5 = Z5 * 50 + 1000 + Z9
                     ' 新しいスロットの見出し。組の数がそのまま要素数になる
-                    Z2 = EM39:Z9 * 50 + 992 + Z9
+                    Z2 = EM39:Z9 * 50 + 1000 + Z9
                     EM0:Z2 = EM18.L:Z9
                     ' 写す。組の数 0 (空ハッシュ) では引き算もしない
                     IF EM18.L:Z9 > 0 THEN
@@ -2765,7 +3357,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 IF Z5 = 10 THEN
                     Z6 = 1
                 END IF
-                IF Z5 = 12 THEN
+                IF Z5 = 14 THEN
                     Z6 = 1
                 END IF
                 IF Z6 = 0 THEN
@@ -2780,10 +3372,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                ' 3-10 はレシーバが数値、11 は配列かハッシュ、13-13 は配列、14 以上はハッシュであること
+                ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                ' 3 未満 (!= と !) はどの型でも呼べる
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN
-                        ' 数値は 4 と 5 の 2 つだけ。上限も見る
+                        ' 数値 (タグ 4-5)
                         IF EM0:Z1 < 4 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
@@ -2795,8 +3388,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             BREAK
                         END IF
                     ELSE IF Z5 <= 12 THEN
-                        ' 配列とハッシュはタグが隣り合っているので範囲で見る
-                        IF EM0:Z1 < 8 THEN
+                        ' 文字列・配列・ハッシュ (タグ 7-9)
+                        IF EM0:Z1 < 7 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
@@ -2807,12 +3400,38 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             BREAK
                         END IF
                     ELSE IF Z5 <= 13 THEN
+                        ' 文字列・配列 (タグ 7-8)
+                        IF EM0:Z1 < 7 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 14 THEN
+                        ' 配列・ハッシュ (タグ 8-9)
+                        IF EM0:Z1 < 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 9 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 15 THEN
+                        ' 配列 (タグ 8)
                         IF EM0:Z1 <> 8 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
                         END IF
                     ELSE
+                        ' ハッシュ (タグ 9)
                         IF EM0:Z1 <> 9 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
@@ -2831,18 +3450,18 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     ' n.times は 0 から n-1 まで
                     EM16.L:Z9 = 0
                     EM18.L:Z9 = EM1.L:Z1 - 1
-                ELSE IF Z5 = 12 THEN
+                ELSE IF Z5 = 14 THEN
                     ' a.each / h.each は 0 から要素数-1 まで
                     ' ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む
                     IF EM0:Z1 = 9 THEN
                         ' 鍵の配列の見出し。R[a] を書き換える前に読む
                         Z4 = EM1:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 組の数
                     ELSE
                         ' スロットの見出し。R[a] を書き換える前に読む
                         Z4 = EM1.L:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
+                        Z4 = Z4 * 50 + 1000 + Z9
                         EM18.L:Z9 = EM0:Z4   ' 要素数
                     END IF
                     EM16.L:Z9 = 0
@@ -2866,7 +3485,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     ' 戻り先を積む
-                    Z3 = EM31:Z9 * 10 + 368 + Z9
+                    Z3 = EM31:Z9 * 10 + 376 + Z9
                     EM0:Z3 = EM0:Z9
                     EM1:Z3 = EM30:Z9
                     EM2:Z3 = EM32:Z9
@@ -2876,7 +3495,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
                     EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
                     EM31:Z9 = EM31:Z9 + 1
-                    IF Z5 = 12 THEN
+                    IF Z5 = 14 THEN
                         ' each はブロックに添字ではなく要素を渡す
                         ' ハッシュは鍵と値の 2 つを渡すので種別を分ける
                         Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
@@ -2900,14 +3519,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         ' h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
                         Z4 = 0 + EM32:Z9 + Z9
                         Z7 = EM1:Z4   ' スロット番号
-                        Z7 = Z7 * 50 + 992 + Z9
+                        Z7 = Z7 * 50 + 1000 + Z9
                         Z5 = EM16.L:Z9
                         Z5 = Z5 * 4 + Z7 + 2
                         EM1.L:Z2 = EM1.L:Z5
                         EM0:Z2 = EM0:Z5
                         Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
                         Z7 = EM2:Z4   ' スロット番号
-                        Z7 = Z7 * 50 + 992 + Z9
+                        Z7 = Z7 * 50 + 1000 + Z9
                         Z5 = EM16.L:Z9
                         Z5 = Z5 * 4 + Z7 + 2
                         EM1.L:Z2 = EM1.L:Z5
@@ -2917,7 +3536,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         ' a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
                         Z4 = 0 + EM32:Z9 + Z9
                         Z7 = EM1.L:Z4   ' スロット番号
-                        Z7 = Z7 * 50 + 992 + Z9
+                        Z7 = Z7 * 50 + 1000 + Z9
                         Z5 = EM16.L:Z9
                         Z5 = Z5 * 4 + Z7 + 2
                         EM1.L:Z2 = EM1.L:Z5
@@ -2939,7 +3558,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM11:Z9 = FM4:Z1
                     ' レジスタ窓が領域からはみ出さないこと
                     EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
-                    IF EM16:Z9 > 368 THEN
+                    IF EM16:Z9 > 376 THEN
                         EM1:Z9 = 3
                         EM2:Z9 = 5
                         BREAK
@@ -2978,7 +3597,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 ' (引数を書かないブロックでも times は 1 個渡す)
                 Z4 = 0
                 IF EM31:Z9 > 0 THEN
-                    Z5 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                    Z5 = (EM31:Z9 - 1) * 10 + 376 + Z9
                     IF EM5:Z5 >= 1 THEN
                         Z4 = 1
                     END IF
@@ -3014,7 +3633,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM1:Z9 = 2
                     BREAK
                 ELSE
-                    Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                    Z3 = (EM31:Z9 - 1) * 10 + 376 + Z9
                     IF EM5:Z3 >= 1 THEN
                         EM16.L:Z9 = EM6.L:Z3 + 1
                         IF EM16.L:Z9 <= EM8.L:Z3 THEN
@@ -3026,14 +3645,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
                                 Z4 = 0 + EM32:Z9 + Z9
                                 Z7 = EM1:Z4   ' スロット番号
-                                Z7 = Z7 * 50 + 992 + Z9
+                                Z7 = Z7 * 50 + 1000 + Z9
                                 Z5 = EM16.L:Z9
                                 Z5 = Z5 * 4 + Z7 + 2
                                 EM1.L:Z2 = EM1.L:Z5
                                 EM0:Z2 = EM0:Z5
                                 Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
                                 Z7 = EM2:Z4   ' スロット番号
-                                Z7 = Z7 * 50 + 992 + Z9
+                                Z7 = Z7 * 50 + 1000 + Z9
                                 Z5 = EM16.L:Z9
                                 Z5 = Z5 * 4 + Z7 + 2
                                 EM1.L:Z2 = EM1.L:Z5
@@ -3043,7 +3662,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
                                 Z4 = 0 + EM32:Z9 + Z9
                                 Z7 = EM1.L:Z4   ' スロット番号
-                                Z7 = Z7 * 50 + 992 + Z9
+                                Z7 = Z7 * 50 + 1000 + Z9
                                 Z5 = EM16.L:Z9
                                 Z5 = Z5 * 4 + Z7 + 2
                                 EM1.L:Z2 = EM1.L:Z5
@@ -3060,7 +3679,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             ' 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
                             EM31:Z9 = EM31:Z9 - 1
                             ' 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない
-                            Z3 = EM31:Z9 * 10 + 368 + Z9
+                            Z3 = EM31:Z9 * 10 + 376 + Z9
                             EM0:Z9 = EM0:Z3
                             Z5 = EM1:Z3
                             EM32:Z9 = EM2:Z3
@@ -3082,7 +3701,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z2 = EM0:Z1
                         EM31:Z9 = EM31:Z9 - 1
                         ' 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない
-                        Z3 = EM31:Z9 * 10 + 368 + Z9
+                        Z3 = EM31:Z9 * 10 + 376 + Z9
                         EM0:Z9 = EM0:Z3
                         Z5 = EM1:Z3
                         EM32:Z9 = EM2:Z3
@@ -3108,7 +3727,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM2:Z9 = 9
                     BREAK
                 END IF
-                Z3 = (EM31:Z9 - 1) * 10 + 368 + Z9
+                Z3 = (EM31:Z9 - 1) * 10 + 376 + Z9
                 IF EM5:Z3 < 1 THEN
                     EM1:Z9 = 3
                     EM2:Z9 = 9
@@ -3121,7 +3740,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 EM0:Z2 = EM0:Z1
                 EM31:Z9 = EM31:Z9 - 1
                 ' 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない
-                Z3 = EM31:Z9 * 10 + 368 + Z9
+                Z3 = EM31:Z9 * 10 + 376 + Z9
                 EM0:Z9 = EM0:Z3
                 Z5 = EM1:Z3
                 EM32:Z9 = EM2:Z3
@@ -3162,10 +3781,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 BREAK
                             END IF
                             Z4 = EM1.L:Z1
-                            Z4 = Z4 * 50 + 992 + Z9
+                            Z4 = Z4 * 50 + 1000 + Z9
                             EM16.L:Z9 = EM0:Z4
                             Z5 = EM1.L:Z2
-                            Z5 = Z5 * 50 + 992 + Z9
+                            Z5 = Z5 * 50 + 1000 + Z9
                             EM18.L:Z9 = EM0:Z5
                             ' 1 スロットに収まること
                             Z6 = EM16.L:Z9 + EM18.L:Z9
@@ -3175,7 +3794,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 BREAK
                             END IF
                             ' 新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま
-                            Z3 = EM39:Z9 * 50 + 992 + Z9
+                            Z3 = EM39:Z9 * 50 + 1000 + Z9
                             EM0:Z3 = EM16.L:Z9
                             EM45:Z9 = EM16.L:Z9 + 1
                             EM45:Z9 = EM45:Z9 / 2
@@ -3475,10 +4094,10 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM46:Z9 = Z3
                             EM43:Z9 = 0
                             Z3 = EM1.L:Z1
-                            Z3 = Z3 * 50 + 992 + Z9
+                            Z3 = Z3 * 50 + 1000 + Z9
                             EM44:Z9 = EM0:Z3   ' バイト数
                             Z3 = EM1.L:Z2
-                            Z3 = Z3 * 50 + 992 + Z9
+                            Z3 = Z3 * 50 + 1000 + Z9
                             IF EM44:Z9 = EM0:Z3 THEN
                                 ' バイト数が同じ。ここから中身を見る
                                 EM43:Z9 = 1
@@ -3488,11 +4107,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     EM45:Z9 = EM45:Z9 - 1
                                     FOR EM42:Z9 = 0 TO EM45:Z9
                                         Z3 = EM1.L:Z1
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         Z3 = EM42:Z9 + Z3 + 2
                                         EM44:Z9 = EM0:Z3
                                         Z3 = EM1.L:Z2
-                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = Z3 * 50 + 1000 + Z9
                                         Z3 = EM42:Z9 + Z3 + 2
                                         IF EM44:Z9 <> EM0:Z3 THEN
                                             EM43:Z9 = 0
@@ -3721,7 +4340,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' スロットの見出し
-                Z2 = EM39:Z9 * 50 + 992 + Z9
+                Z2 = EM39:Z9 * 50 + 1000 + Z9
                 EM0:Z2 = EM8:Z9
                 ' 要素を写す。要素数 0 (空配列) では引き算もしない
                 ' EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
@@ -3763,7 +4382,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' スロットの見出し
-                Z2 = EM39:Z9 * 50 + 992 + Z9
+                Z2 = EM39:Z9 * 50 + 1000 + Z9
                 EM0:Z2 = EM9:Z9
                 ' 要素を写す。要素数 0 (空配列) では引き算もしない
                 ' EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
@@ -3806,7 +4425,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' スロットの見出しはバイト数
-                Z5 = EM39:Z9 * 50 + 992 + Z9
+                Z5 = EM39:Z9 * 50 + 1000 + Z9
                 EM0:Z5 = Z4
                 ' ワード単位で写す。並びが同じなので詰め替えは要らない
                 ' 奇数バイトのときは最後のワードの下位バイトが 0 になる
@@ -3842,9 +4461,9 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z3 = EM1.L:Z1
-                Z3 = Z3 * 50 + 992 + Z9
+                Z3 = Z3 * 50 + 1000 + Z9
                 Z4 = EM1.L:Z2
-                Z4 = Z4 * 50 + 992 + Z9
+                Z4 = Z4 * 50 + 1000 + Z9
                 EM16.L:Z9 = EM0:Z3
                 EM18.L:Z9 = EM0:Z4
                 ' 1 スロットに収まること
@@ -3913,7 +4532,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' 鍵の配列と値の配列の見出し
-                Z2 = EM39:Z9 * 50 + 992 + Z9
+                Z2 = EM39:Z9 * 50 + 1000 + Z9
                 Z3 = Z2 + 50
                 EM0:Z2 = EM8:Z9
                 EM0:Z3 = EM8:Z9
@@ -4023,7 +4642,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 ' メソッド表 (ID => 本体の irep 番号)
-                Z3 = Z5 + 528 + Z9
+                Z3 = Z5 + 536 + Z9
                 EM0:Z3 = EM1:Z2
                 ' OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9

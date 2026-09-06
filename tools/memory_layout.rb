@@ -57,7 +57,7 @@ module FaRuby
     include VmConstants
 
     # VM 状態領域のワード数 (将来の追加に備えて余裕を持たせている)
-    VM_STATE_WORDS = 48
+    VM_STATE_WORDS = 56
 
     # --- 固定領域 (FM) ---
     #
@@ -212,6 +212,16 @@ module FaRuby
     OFFSET_STR_LIMIT       = 45
     # 借りた Z3 の退避先。OP_SETIDX は Z3 に書き込む値を載せている
     OFFSET_STR_SAVED_Z     = 46
+    # 文字の切れ目を数えるときの作業用 5 ワード
+    #
+    # `length` は**文字数**を返します (`"あ".length` は Ruby では 1)。
+    # バイト列を先頭から 1 回なめて切れ目を数えます。同じ走査で `s[i]` の
+    # バイト位置も求まるので、両方をこの 5 ワードで済ませています。
+    OFFSET_STR_COUNT       = 47   # 数えた文字数
+    OFFSET_STR_SKIP        = 48   # Shift_JIS の後続バイトの印
+    OFFSET_STR_TARGET      = 49   # 探している文字の番号 (-1 なら数えるだけ)
+    OFFSET_STR_FOUND       = 50   # 見つけた文字の先頭バイト
+    OFFSET_STR_FOUND_END   = 51   # その次の文字の先頭バイト
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -427,6 +437,11 @@ module FaRuby
     def str_temp_addr        = vm_state_base + OFFSET_STR_TEMP
     def str_limit_addr       = vm_state_base + OFFSET_STR_LIMIT
     def str_saved_z_addr     = vm_state_base + OFFSET_STR_SAVED_Z
+    def str_count_addr       = vm_state_base + OFFSET_STR_COUNT
+    def str_skip_addr        = vm_state_base + OFFSET_STR_SKIP
+    def str_target_addr      = vm_state_base + OFFSET_STR_TARGET
+    def str_found_addr       = vm_state_base + OFFSET_STR_FOUND
+    def str_found_end_addr   = vm_state_base + OFFSET_STR_FOUND_END
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #

@@ -399,8 +399,8 @@ class TestArrays < Minitest::Test
     code, argc = BUILTIN_METHODS.fetch("each")
 
     assert_includes BLOCK_METHODS, code, "each はブロックを取る"
-    assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX), code,
-                    "each のレシーバは配列かハッシュ"
+    assert_equal [TT_ARRAY, TT_HASH], method_receiver_tags(code),
+                 "each のレシーバは配列かハッシュ"
     assert_equal 0, argc
   end
 
@@ -649,11 +649,11 @@ class TestArrays < Minitest::Test
     assert_equal METHOD_TYPE_ERROR, error
   end
 
-  # length と size だけは配列とハッシュの両方を受ける
-  def test_length_accepts_an_array_and_a_hash
+  # length と size は文字列・配列・ハッシュを受ける
+  def test_length_accepts_a_string_an_array_and_a_hash
     code = BUILTIN_METHODS.fetch("length").first
 
-    assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX), code
+    assert_equal [TT_STRING, TT_HASH], method_receiver_tags(code)
     assert_equal code, BUILTIN_METHODS.fetch("size").first
   end
 

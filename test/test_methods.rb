@@ -78,25 +78,36 @@ class TestMethods < Minitest::Test
 
   # レシーバの型ごとに番号を連続させてあるため、生成コードは範囲比較で
   # 判定できる。並べ替えるとレシーバの型検査が壊れる。
+  RECEIVER_TAGS = {
+    "!" => nil, "!=" => nil,
+    "%" => [TT_INTEGER, TT_FLOAT], "abs" => [TT_INTEGER, TT_FLOAT],
+    "to_i" => [TT_INTEGER, TT_FLOAT], "to_f" => [TT_INTEGER, TT_FLOAT],
+    "floor" => [TT_INTEGER, TT_FLOAT], "round" => [TT_INTEGER, TT_FLOAT],
+    "times" => [TT_INTEGER, TT_FLOAT], "upto" => [TT_INTEGER, TT_FLOAT],
+    "length" => [TT_STRING, TT_HASH], "size" => [TT_STRING, TT_HASH],
+    "empty?" => [TT_STRING, TT_HASH],
+    "<<" => [TT_STRING, TT_ARRAY],
+    "each" => [TT_ARRAY, TT_HASH],
+    "push" => [TT_ARRAY, TT_ARRAY],
+    "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
+    "values" => [TT_HASH, TT_HASH],
+  }.freeze
+
   def test_methods_sort_by_receiver_type
-    %w[! !=].each do |name|
-      assert_operator BUILTIN_METHODS.fetch(name).first, :<, METHOD_NUMERIC_MIN, name
+    RECEIVER_TAGS.each do |name, tags|
+      code = BUILTIN_METHODS.fetch(name).first
+
+      if tags.nil?
+        assert_nil method_receiver_tags(code), name
+      else
+        assert_equal tags, method_receiver_tags(code), name
+      end
     end
-    %w[% abs to_i to_f floor round times upto].each do |name|
-      assert_includes (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX),
-                      BUILTIN_METHODS.fetch(name).first, name
-    end
-    %w[length size each].each do |name|
-      assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX),
-                      BUILTIN_METHODS.fetch(name).first, name
-    end
-    %w[<< push].each do |name|
-      assert_includes (METHOD_ARRAY_MIN..METHOD_ARRAY_MAX),
-                      BUILTIN_METHODS.fetch(name).first, name
-    end
-    %w[key? keys values].each do |name|
-      assert_operator BUILTIN_METHODS.fetch(name).first, :>=, METHOD_HASH_MIN, name
-    end
+  end
+
+  # 表に載せ忘れたメソッドがあると、上のテストが素通りしてしまう
+  def test_every_builtin_method_is_in_the_receiver_table
+    assert_equal BUILTIN_METHODS.keys.sort, RECEIVER_TAGS.keys.sort
   end
 
   # 未対応を表す 0 は本体を持たない
@@ -340,16 +351,20 @@ class TestMethods < Minitest::Test
 
   # レシーバの型ごとに番号が連続していないと、型検査が範囲比較で済まなくなる
   def test_methods_are_grouped_by_receiver_type
-    numeric    = (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX).to_a
-    collection = (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX).to_a
-    array      = (METHOD_ARRAY_MIN..METHOD_ARRAY_MAX).to_a
-    hash       = (METHOD_HASH_MIN..METHOD_NAMES.keys.max).to_a
+    edges = METHOD_RECEIVER_BANDS.map(&:first)
 
-    assert_equal numeric.max + 1, collection.min, "数値と集合の範囲が隣り合っていない"
-    assert_equal collection.max + 1, array.min, "集合と配列の範囲が隣り合っていない"
-    assert_equal array.max + 1, hash.min, "配列とハッシュの範囲が隣り合っていない"
-    assert_empty METHOD_NAMES.keys -
-                 ([METHOD_NE, METHOD_NOT] + numeric + collection + array + hash),
-                 "どの型の範囲にも属さないメソッドがある"
+    assert_nil edges.last, "最後の帯は上限を持たない"
+    assert_equal edges[0..-2].sort, edges[0..-2], "帯は番号の順に並んでいること"
+    assert_equal METHOD_NUMERIC_MAX, edges.first, "最初の帯は数値で終わる"
+    assert_equal [METHOD_NE, METHOD_NOT],
+                 METHOD_NAMES.keys.select { |code| method_receiver_tags(code).nil? }.sort,
+                 "型を問わないのは != と ! だけ"
+  end
+
+  # タグも連続した帯に並んでいないと、型検査が範囲比較で済まなくなる
+  def test_receiver_tags_are_contiguous
+    METHOD_RECEIVER_BANDS.each do |_max_code, tag_min, tag_max, label|
+      assert_operator tag_min, :<=, tag_max, label
+    end
   end
 end
