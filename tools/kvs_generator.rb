@@ -488,13 +488,97 @@ module FaRuby
       end
     end
 
-    def load_global_into_reg(dest, sym_operand)
+    def load_global_into_reg(dest, sym_operand, heap_code)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(dest)
-      if_else_block("Z1 = #{SYMBOL_KIND_FAMILY}") { assign_device_ref(slot) }
+      chain_head(true, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      indent
+      assign_device_ref(slot)
+      dedent
+      chain_head(false, "Z8 >= #{ACCESS_STR}")
+      indent
+      load_string_from_device(slot, 0x15, heap_code)
+      dedent
+      line "ELSE"
+      indent
       device_dispatch(:read, slot: slot, error_code: 0x15)
-      end_block
+      dedent
+      line "END IF"
+    end
+
+    # デバイスから文字列を読む
+    #
+    # **桁数がそのままバイト数**です。桁が空白や 0 で埋まっていれば、それも
+    # 中身に入ります。**何も落としません。** 落とす規則を持つと、末尾の空白が
+    # 意味を持つデータを扱えなくなるためです。
+    #
+    # 桁の無い `T` (桁数 0) は読めません。書くときは終端付きの意味ですが、
+    # 読むときは長さが決まらないためです。
+    #
+    # 並びが同じ (1 ワード 2 バイト、先の文字が上位) なので、ワード単位で
+    # そのまま写せます。**プールを 1 スロット使います。**
+    def load_string_from_device(slot, error_code, heap_code)
+      note "文字列を読めるのは #{WORD_DEVICES.map(&:last).join(' / ')} だけ"
+      note "**この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      if_("Z5 > #{DEVICE_TYPE_ZF}") { vm_error(error_code) }
+      line "#{str_temp} = Z8 / #{ACCESS_STR_LENGTH_SCALE}   ' 桁数 = バイト数"
+      if_("#{str_temp} = 0") do
+        note "桁の無い T は読めない。長さが決まらない"
+        vm_error(error_code)
+      end
+      if_("#{str_temp} > #{layout.max_string_bytes}") do
+        note "1 スロットに収まらない桁数"
+        vm_error(heap_code)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+
+      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3 = #{str_temp}"
+      note "ワード単位で写す。並びが同じなので詰め替えは要らない"
+      line "#{str_limit} = #{str_temp} + 1"
+      line "#{str_limit} = #{str_limit} / 2   ' ワード数"
+      if_("#{str_limit} > 0") do
+        line "#{str_limit} = #{str_limit} - 1"
+        line "FOR #{str_index} = 0 TO #{str_limit}"
+        indent
+        line "Z4 = #{str_index} + Z6   ' デバイスの位置"
+        note "ワードデバイスから 1 ワード。種別は FOR に入る前に検査済み"
+        first = true
+        last = WORD_DEVICES.last
+        WORD_DEVICES.each do |type, name|
+          if [type, name] == last
+            line "ELSE"
+          else
+            chain_head(first, "Z5 = #{type}")
+            first = false
+          end
+          indent
+          line "Z7 = #{name}0.U:Z4"
+          dedent
+        end
+        line "END IF"
+        line "Z4 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{layout.device_name}0:Z4 = Z7"
+        dedent
+        line "NEXT"
+      end
+      note "桁が奇数なら最後のワードの下位バイトは桁の外。0 にして中身に混ぜない"
+      note "残すと同じ中身どうしの == がワード単位の比較で外れる"
+      line "#{str_limit} = #{str_temp} / 2"
+      line "#{str_flag} = #{str_limit} * 2"
+      if_("#{str_temp} <> #{str_flag}") do
+        line "Z4 = #{str_limit} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z7 = #{layout.device_name}0:Z4"
+        line "Z7 = Z7 / 256"
+        line "#{layout.device_name}0:Z4 = Z7 * 256"
+      end
+      line "#{slot.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{slot.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
     end
 
     def store_reg_into_global(sym_operand, src)
@@ -621,7 +705,9 @@ module FaRuby
       line "IF #{ref.tag} = #{TT_DEVICE} THEN"
       indent
       device_ref_lookup(ref, index.value, error_code)
+      if_else_block("Z8 >= #{ACCESS_STR}") { load_string_from_device(ref, error_code, heap_code) }
       device_dispatch(:read, slot: ref, error_code: error_code)
+      end_block
       dedent
       line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
       indent
@@ -652,8 +738,21 @@ module FaRuby
       line "IF #{ref.tag} = #{TT_DEVICE} THEN"
       indent
       device_ref_lookup(ref, index.value, error_code)
+      chain_head(true, "#{value.tag} = #{TT_STRING}")
+      indent
+      store_string_into_device(value, error_code)
+      dedent
+      chain_head(false, "Z8 >= #{ACCESS_STR}")
+      indent
+      note "文字列の桁 (T) に文字列以外を書こうとした"
+      vm_error(error_code)
+      dedent
+      line "ELSE"
+      indent
       prepare_write_scratches(value)
       device_dispatch(:write, slot: value, error_code: error_code)
+      dedent
+      line "END IF"
       dedent
       line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
       indent

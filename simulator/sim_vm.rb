@@ -242,13 +242,41 @@ module FaRuby
       write_slot(index, TT_INTEGER, binop(:div, lhs, rhs))
     end
 
-    def load_global_into_reg(dest, sym_operand)
+    def load_global_into_reg(dest, sym_operand, heap_code)
       type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x15) unless dev
       return write_device_ref(operand(dest), type, addr, access) if kind == SYMBOL_KIND_FAMILY
 
+      if access && access >= ACCESS_STR
+        return load_string_from_device(dev, type, addr, access, operand(dest), 0x15, heap_code)
+      end
+
       read_device_into(dev, addr, access, operand(dest), bit_device: bit_device?(type))
+    end
+
+    # デバイスから文字列を読む (生成コードと同じ規則)
+    #
+    # **桁数がそのままバイト数。何も落とさない。** 桁が空白で埋まっていれば
+    # その空白も中身に入る。桁の無い T (桁数 0) は長さが決まらないので読めない。
+    def load_string_from_device(dev, type, addr, access, index, error_code, heap_code)
+      return vm_error(error_code) unless STRING_DEVICE_TYPES.include?(type)
+
+      width = access / ACCESS_STR_LENGTH_SCALE
+      return vm_error(error_code) if width.zero?
+      return vm_error(heap_code) if width > layout.max_string_bytes
+
+      slot = array_sp
+      return vm_error(heap_code) if slot >= layout.max_arrays
+
+      bytes = +""
+      ((width + 1) / 2).times do |i|
+        word = dev.read_u16(addr + i)
+        bytes << (word >> 8).chr << (word & 0xFF).chr
+      end
+      write_string_slot(slot, bytes.byteslice(0, width))
+      write_slot(index, TT_STRING, slot)
+      @em.write_u16(layout.array_sp_addr, slot + 1)
     end
 
     # --- メソッドの定義と呼び出し ---
@@ -885,6 +913,11 @@ module FaRuby
       dev = device_memory(ref[:type])
       return vm_error(error_code) unless dev
 
+      if ref[:access] && ref[:access] >= ACCESS_STR
+        return load_string_from_device(dev, ref[:type], addr, ref[:access], index,
+                                       error_code, heap_code)
+      end
+
       read_device_into(dev, addr, ref[:access], index, bit_device: bit_device?(ref[:type]))
     end
 
@@ -902,6 +935,13 @@ module FaRuby
 
       dev = device_memory(ref[:type])
       return vm_error(error_code) unless dev
+
+      if read_reg_tag(index + 2) == TT_STRING
+        return store_string_into_device(dev, ref[:type], addr, ref[:access], index + 2,
+                                        error_code)
+      end
+      # 文字列の桁 (T) に文字列以外を書こうとした
+      return vm_error(error_code) if ref[:access] && ref[:access] >= ACCESS_STR
 
       write_device_value(dev, ref[:type], addr, ref[:access], index + 2)
     end

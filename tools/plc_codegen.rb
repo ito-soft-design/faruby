@@ -712,7 +712,7 @@ module FaRuby
         device_name = protocol_name(m[1].upcase)
         return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
                  z_offset: 0, device_name: device_name, family: true,
-                 access_type: VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase), bit: false }
+                 access_type: access_from_suffix(m[2]), bit: false }
       end
 
       return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
@@ -720,8 +720,9 @@ module FaRuby
       device_name = protocol_name(m[1].upcase)
       device_type = DEVICE_NAME_TO_TYPE[device_name]
       bit = m[2].to_s.empty?
-      access_type = bit ? nil : VmConstants::ACCESS_SUFFIXES.fetch(m[2].to_s.upcase)
+      access_type = bit ? nil : access_from_suffix(m[2])
       check_float_support(device_name, device_type, access_type)
+      check_string_support(device_name, device_type, access_type)
 
       { device_type: device_type, address: "0", z_offset: 0,
         device_name: device_name, family: true, bit: bit, access_type: access_type }

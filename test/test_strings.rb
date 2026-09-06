@@ -590,6 +590,137 @@ class TestStrings < Minitest::Test
     refute_match(/^\s+Z6 = /, inside, "FOR の上限を書き換えている")
   end
 
+  # === デバイスから読む ===
+  #
+  # 桁数がそのままバイト数。**何も落とさない**
+
+  def test_a_fixed_width_read_gives_the_bytes_back
+    assert_result 1, <<~RUBY
+      $DM800T6 = "ABCDEF"
+      $DM0 = 0
+      if $DM800T6 == "ABCDEF"
+        $DM0 = 1
+      end
+    RUBY
+  end
+
+  def test_a_read_counts_the_field_as_bytes
+    assert_result 6, <<~RUBY
+      $DM800T6 = "ABCDEF"
+      $DM0 = $DM800T6.length
+    RUBY
+  end
+
+  # 桁が埋め物で埋まっていれば、その埋め物も中身に入る
+  def test_a_read_keeps_the_padding
+    assert_result 6, <<~RUBY
+      FARUBY_STR_FILL = 0x20
+      $DM800T6 = "AB"
+      $DM0 = $DM800T6.length
+    RUBY
+  end
+
+  def test_a_short_string_read_back_is_not_equal_to_itself
+    assert_result 0, <<~RUBY
+      FARUBY_STR_FILL = 0x20
+      $DM800T6 = "AB"
+      $DM0 = 0
+      if $DM800T6 == "AB"
+        $DM0 = 1
+      end
+    RUBY
+  end
+
+  # 奇数の桁は最後のワードの下位バイトが桁の外。混ぜると == が外れる
+  def test_an_odd_width_read_drops_the_byte_outside_the_field
+    sim = run_source(<<~RUBY)
+      $DM800T3 = "xyz"
+      $DM810 = 0
+      $DM811 = 0
+      $DM0 = 0
+      if $DM800T3 == "xyz"
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_finished sim
+    assert_equal 1, sim.devices[DEVICE_TYPE_DM].read_u16(0)
+  end
+
+  # UTF-8 は 1 文字 3 バイト。桁はバイト数で数える
+  def test_a_read_of_multibyte_content
+    assert_result 2, <<~RUBY
+      $DM800T6 = "あい"
+      $DM0 = $DM800T6.length
+    RUBY
+  end
+
+  # 桁の無い T は書くときは終端付きだが、読むときは長さが決まらない
+  def test_a_read_without_a_width_stops_the_vm
+    sim = run_source(%($DM0 = $DM800T\n))
+
+    assert_equal VM_ERROR, status(sim)
+    assert_equal 0x15, error(sim)
+  end
+
+  # 1 スロットに収まらない桁数
+  def test_a_read_past_the_capacity_stops_the_vm
+    sim = run_source("$DM0 = $DM800T#{layout.max_string_bytes + 2}\n")
+
+    assert_equal VM_ERROR, status(sim)
+    assert_equal FaRuby::OpcodeTable::HEAP_ERROR, error(sim)
+  end
+
+  # 読むたびにスロットを取るので、ループの中では使い切る
+  def test_a_read_takes_a_pool_slot
+    sim = run_source(<<~RUBY)
+      i = 0
+      while i < 20
+        s = $DM800T4
+        i = i + 1
+      end
+    RUBY
+
+    assert_equal VM_ERROR, status(sim)
+    assert_equal FaRuby::OpcodeTable::HEAP_ERROR, error(sim)
+  end
+
+  # 添字を付けた形。桁は名前側に付ける
+  def test_an_indexed_read
+    assert_result 1, <<~RUBY
+      $DM800T6 = "ABCDEF"
+      i = 0
+      $DM0 = 0
+      if $DMT6[800 + i] == "ABCDEF"
+        $DM0 = 1
+      end
+    RUBY
+  end
+
+  def test_an_indexed_write
+    sim = run_source(<<~RUBY)
+      i = 0
+      $DMT4[800 + i] = "abcd"
+    RUBY
+
+    assert_equal [0x6162, 0x6364], words(sim, 800, 2)
+  end
+
+  # 文字列の桁 (T) に文字列以外を書こうとした
+  def test_an_indexed_write_of_a_number_stops_the_vm
+    sim = run_source(<<~RUBY)
+      i = 0
+      $DMT4[800 + i] = 5
+    RUBY
+
+    assert_equal VM_ERROR, status(sim)
+  end
+
+  # ビットデバイスには文字列を置けない。族の形も転送前に止める
+  def test_a_string_field_on_a_bit_device_family_stops_the_build
+    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_family("$MRT6") }
+  end
+
   # === 弾くもの ===
 
   # 文字列の桁 (T) に文字列以外を書こうとした

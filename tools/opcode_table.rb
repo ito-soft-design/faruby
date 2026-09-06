@@ -285,7 +285,7 @@ module FaRuby
       end
 
       defs << OpcodeDef.new(0x15, "R[a] = global[symbols[b]]") do |vm|
-        vm.load_global_into_reg(:a, :b)
+        vm.load_global_into_reg(:a, :b, HEAP_ERROR)
       end
 
       defs << OpcodeDef.new(0x16, "global[symbols[b]] = R[a]") do |vm|
