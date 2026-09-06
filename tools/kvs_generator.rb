@@ -925,16 +925,25 @@ module FaRuby
       line "#{dst.tag} = #{src.tag}"
     end
 
-    # 鍵と値の配列の見出しを Z に置き、要素数を32ビットスクラッチ B に置く
-    def hash_slots_into_z(ref)
-      note "鍵の配列と値の配列。R[a] を書き換える前に読む"
+    # 鍵の配列の見出しを Z4 に、組の数を32ビットスクラッチ B に置く
+    #
+    # 値の配列が要らないときはこちらを使います。**Z5 を書かない**ので、
+    # メソッド番号を持ったままでも呼べます。
+    def hash_keys_into_z(ref)
+      note "鍵の配列の見出し。R[a] を書き換える前に読む"
       line "Z#{Z_HASH_KEYS} = #{ref.word(0)}"
       line "Z#{Z_HASH_KEYS} = Z#{Z_HASH_KEYS} * #{layout.array_slot_words} + " \
            "#{block_offset(layout.array_pool_base)}"
-      line "Z#{Z_HASH_VALUES} = #{ref.word(1)}"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_HASH_KEYS}" \
+           "   ' 組の数"
+    end
+
+    # 鍵と値の配列の見出しを Z に置き、組の数を32ビットスクラッチ B に置く
+    def hash_slots_into_z(ref)
+      hash_keys_into_z(ref)
+      line "Z#{Z_HASH_VALUES} = #{ref.word(1)}   ' 値の配列"
       line "Z#{Z_HASH_VALUES} = Z#{Z_HASH_VALUES} * #{layout.array_slot_words} + " \
            "#{block_offset(layout.array_pool_base)}"
-      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_HASH_KEYS}"
     end
 
     # 鍵を先頭から探し、見つかった位置を32ビットスクラッチに置く (無ければ -1)
@@ -1200,32 +1209,65 @@ module FaRuby
       end_block
     end
 
-    # ブロックの引数 (R[1]) を置く
+    # ブロックに渡す値と引数の数を書く
     #
-    # 何を渡すかはフレームの種別で決まります。times / upto は添字、each は
-    # その位置の要素です。Z3 は呼ぶ側がフレームを指したままにしています。
+    # 何を渡すかはフレームの種別で決まります。times / upto は添字、a.each は
+    # その位置の要素、h.each は鍵と値です。レシーバは R[0] に残っています。
+    # Z3 は呼ぶ側がフレームを指したままにしています。
     #
     # **Z6 は使えません。** enter_iteration が移り先の irep を載せています。
+    #
+    # **引数の数もここで書きます。** 反復の途中でユーザー定義メソッドを呼ぶと
+    # call_argc がその引数の数で上書きされ、次の回の OP_ENTER が引数の後ろだと
+    # 思った位置からレジスタを消してブロックの引数を壊すためです。
+    # 再突入 (OP_RETURN) からも呼ばれるので、ここで書けば毎回正しくなります。
     def set_block_argument
       line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
       argument = slot_on(2)
-      if_else_block("#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
-                    "#{MemoryLayout::FRAME_KIND_EACH}") do
-        note "each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
-        line "Z4 = 0 + #{reg_offset}"
-        line "Z7 = #{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z4   ' スロット番号"
-        line "Z7 = Z7 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
-        line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
-        line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z7 + " \
-             "#{MemoryLayout::ARRAY_HEADER_WORDS}"
-        element = slot_on(Z_ARRAY_ELEMENT)
-        line "#{argument.value} = #{element.value}"
-        line "#{argument.tag} = #{element.tag}"
-      end
+      element = slot_on(Z_ARRAY_ELEMENT)
+      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      indent
+      note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
+      line "Z4 = 0 + #{reg_offset}"
+      receiver = slot_on(4)
+      pool_element_into_z(receiver.word(0))
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "Z2 = 2 * #{SLOT_WORDS} + #{reg_offset}   ' R[2] に値"
+      pool_element_into_z(receiver.word(1))
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "#{state(layout.call_argc_addr)} = 2"
+      dedent
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}")
+      indent
+      note "a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
+      line "Z4 = 0 + #{reg_offset}"
+      pool_element_into_z("#{layout.device_name}#{SLOT_VALUE_OFFSET}.L:Z4")
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "#{state(layout.call_argc_addr)} = 1"
+      dedent
+      line "ELSE"
+      indent
       note "times / upto は添字を渡す"
       line "#{argument.value} = #{scratch32}"
       line "#{argument.tag} = #{TT_INTEGER}"
-      end_block
+      line "#{state(layout.call_argc_addr)} = 1"
+      dedent
+      line "END IF"
+    end
+
+    # 実行中のフレームの種別 (Z3 がそのフレームを指していること)
+    def frame_kind = "#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3"
+
+    # スロット番号の式から、今の反復位置にある要素の先頭を Z5 に置く
+    def pool_element_into_z(slot_number)
+      line "Z7 = #{slot_number}   ' スロット番号"
+      line "Z7 = Z7 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
+      line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z7 + " \
+           "#{MemoryLayout::ARRAY_HEADER_WORDS}"
     end
 
     # 積んであるフレームから PC・irep・レジスタ窓を復元する
@@ -1296,8 +1338,11 @@ module FaRuby
       dedent
       line "ELSE IF Z5 = #{METHOD_EACH} THEN"
       indent
-      note "a.each は 0 から要素数-1 まで"
+      note "a.each / h.each は 0 から要素数-1 まで"
+      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
+      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
       array_slot_into_z(recv)
+      end_block
       line "#{scratch32} = 0"
       line "#{scratch32_b} = #{scratch32_b} - 1"
       dedent
@@ -1318,8 +1363,13 @@ module FaRuby
                  kind: MemoryLayout::FRAME_KIND_ITERATE)
       if_("Z5 = #{METHOD_EACH}") do
         note "each はブロックに添字ではなく要素を渡す"
-        line "#{layout.device_name}#{MemoryLayout::FRAME_KIND}:Z3 = " \
-             "#{MemoryLayout::FRAME_KIND_EACH}"
+        note "ハッシュは鍵と値の 2 つを渡すので種別を分ける"
+        line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
+        if_else_block("#{slot_on(4).tag} = #{TT_HASH}") do
+          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}"
+        end
+        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
+        end_block
       end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
@@ -1329,9 +1379,8 @@ module FaRuby
       line "#{layout.device_name}#{MemoryLayout::FRAME_OUTER}:Z3 = Z7"
       line "#{layout.device_name}#{MemoryLayout::FRAME_INDEX}.L:Z3 = #{scratch32}"
       line "#{layout.device_name}#{MemoryLayout::FRAME_LIMIT}.L:Z3 = #{scratch32_b}"
+      note "渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く"
       set_block_argument
-      note "ブロックの引数は常に 1 個。引数を書かないブロックでも渡す"
-      line "#{state(layout.call_argc_addr)} = 1"
       switch_to_irep("Z6", depth_code)
       line "#{pc} = 0"
     end
@@ -1700,7 +1749,7 @@ module FaRuby
     # ハッシュの組の数は鍵の配列の見出しにあります。値スロットの読み方が
     # 配列と違う (下位ワードだけがスロット番号) ため、型で分けます。
     def length_into(dest)
-      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_slots_into_z(dest) }
+      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_keys_into_z(dest) }
       array_slot_into_z(dest)
       end_block
       line "#{dest.value} = #{scratch32_b}"
@@ -1709,7 +1758,7 @@ module FaRuby
 
     # R[a].key?(R[a+1])。鍵があるかどうかだけを返す
     def key_p_into(dest, rhs)
-      hash_slots_into_z(dest)
+      hash_keys_into_z(dest)
       find_hash_key(rhs)
       if_else_block("#{scratch32} < 0") { assign_bool(dest, false) }
       assign_bool(dest, true)

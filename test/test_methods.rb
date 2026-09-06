@@ -86,11 +86,11 @@ class TestMethods < Minitest::Test
       assert_includes (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX),
                       BUILTIN_METHODS.fetch(name).first, name
     end
-    %w[length size].each do |name|
+    %w[length size each].each do |name|
       assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX),
                       BUILTIN_METHODS.fetch(name).first, name
     end
-    %w[<< push each].each do |name|
+    %w[<< push].each do |name|
       assert_includes (METHOD_ARRAY_MIN..METHOD_ARRAY_MAX),
                       BUILTIN_METHODS.fetch(name).first, name
     end

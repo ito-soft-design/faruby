@@ -433,17 +433,35 @@ module FaRuby
       @em.write_u16(layout.pc_addr, 0)
     end
 
-    # ブロックの引数 (R[1]) を置く
+    # ブロックに渡す値と引数の数を書く
     #
-    # 何を渡すかはフレームの種別で決まる。times / upto は添字、each は
-    # その位置の要素。each のレシーバ (配列) は R[0] に残っている。
+    # 何を渡すかはフレームの種別で決まる。times / upto は添字、a.each は
+    # その位置の要素、h.each は鍵と値。レシーバは R[0] に残っている。
+    #
+    # 引数の数もここで書く。反復の途中でユーザー定義メソッドを呼ぶと
+    # call_argc が上書きされ、次の回の OP_ENTER がブロックの引数を消すため。
+    # 再突入 (OP_RETURN) からも呼ばれるので、ここで書けば毎回正しくなる。
     def set_block_argument(addr, index)
-      unless @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_EACH
-        return write_slot(1, TT_INTEGER, index)
+      case @em.read_u16(addr + MemoryLayout::FRAME_KIND)
+      when MemoryLayout::FRAME_KIND_HASH_EACH
+        # h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
+        keys, values = hash_slots(0)
+        copy_element_into_reg(keys, index, 1)
+        copy_element_into_reg(values, index, 2)
+        @em.write_u16(layout.call_argc_addr, 2)
+      when MemoryLayout::FRAME_KIND_EACH
+        copy_element_into_reg(read_reg(0), index, 1)
+        @em.write_u16(layout.call_argc_addr, 1)
+      else
+        write_slot(1, TT_INTEGER, index)
+        @em.write_u16(layout.call_argc_addr, 1)
       end
+    end
 
-      element = layout.array_element_addr(read_reg(0), index)
-      write_slot(1, @em.read_u16(element + SLOT_TYPE_OFFSET),
+    # プールのスロットの要素をレジスタへ写す
+    def copy_element_into_reg(slot, position, index)
+      element = layout.array_element_addr(slot, position)
+      write_slot(index, @em.read_u16(element + SLOT_TYPE_OFFSET),
                  @em.read_s32(element + SLOT_VALUE_OFFSET))
     end
 
@@ -485,7 +503,7 @@ module FaRuby
     # 反復の範囲 [開始, 上限]。扱えない型なら nil
     def iteration_range(code, index, _argc)
       return [0, read_reg(index) - 1] if code == METHOD_TIMES
-      return [0, array_length(read_reg(index)) - 1] if code == METHOD_EACH
+      return [0, collection_length(index) - 1] if code == METHOD_EACH
 
       limit = index + 1
       return nil unless read_reg_tag(limit) == TT_INTEGER
@@ -499,21 +517,27 @@ module FaRuby
 
       irep  = @em.read_u16(reg_addr(block))
       outer = @em.read_u16(reg_addr(block) + 1)
-      kind = code == METHOD_EACH ? MemoryLayout::FRAME_KIND_EACH
-                                 : MemoryLayout::FRAME_KIND_ITERATE
+      kind = iteration_frame_kind(code, read_reg_tag(index))
 
       push_frame(index * SLOT_WORDS, outer: outer, kind: kind)
       addr = layout.frame_addr(current_frame)
       @em.write_s32(addr + MemoryLayout::FRAME_INDEX, from)
       @em.write_s32(addr + MemoryLayout::FRAME_LIMIT, limit)
 
-      # ブロックの引数は常に 1 個。引数を書かないブロックでも渡す
+      # 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く
       set_block_argument(addr, from)
-      @em.write_u16(layout.call_argc_addr, 1)
       switch_to_irep(irep)
       return vm_error(depth_code) unless register_window_fits?
 
       @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # 反復フレームの種別。ブロックに何を渡すかが決まる
+    def iteration_frame_kind(code, tag)
+      return MemoryLayout::FRAME_KIND_ITERATE unless code == METHOD_EACH
+      return MemoryLayout::FRAME_KIND_HASH_EACH if tag == TT_HASH
+
+      MemoryLayout::FRAME_KIND_EACH
     end
 
     # 反復を打ち切って R[a] を返す (OP_BREAK)

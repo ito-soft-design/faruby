@@ -367,6 +367,119 @@ class TestBlocks < Minitest::Test
     assert_equal UNKNOWN_METHOD_ERROR, sim.em.read_u16(layout.error_addr)
   end
 
+  # === ハッシュの each ===
+  #
+  # ブロックに引数を 2 つ渡す唯一の経路。反復フレームの種別で分ける
+
+  def test_hash_each_passes_the_key_and_the_value
+    assert_result 33, <<~RUBY
+      h = { 1 => 10, 2 => 20 }
+      sum = 0
+      h.each do |k, v|
+        sum = sum + k + v
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  # Ruby は [鍵, 値] の配列を渡すが、faRuby は鍵だけを渡す。
+  # 配列を毎回作るとプールを食い潰すための意図的な差
+  def test_a_hash_each_block_with_one_parameter_gets_the_key
+    assert_result 3, <<~RUBY
+      h = { 1 => 10, 2 => 20 }
+      sum = 0
+      h.each do |k|
+        sum = sum + k
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  def test_a_hash_each_block_without_parameters
+    assert_result 2, <<~RUBY
+      h = { 1 => 10, 2 => 20 }
+      n = 0
+      h.each do
+        n = n + 1
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  # 1 回も回らないときはレシーバがそのまま呼び出しの値になる
+  def test_an_empty_hash_never_enters_the_block
+    assert_result 7, <<~RUBY
+      h = {}
+      n = 7
+      h.each do |k, v|
+        n = 0
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  def test_break_out_of_a_hash_each
+    assert_result 1, <<~RUBY
+      h = { 1 => 10, 2 => 20 }
+      sum = 0
+      h.each do |k, v|
+        sum = sum + k
+        break
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  # 反復の途中でユーザー定義メソッドを呼ぶと call_argc がその引数の数で
+  # 上書きされ、次の回の OP_ENTER がブロックの引数を消していた。
+  # 引数の数は渡す値と一緒に毎回書き直す
+  def test_calling_a_method_inside_a_block_keeps_the_block_argument
+    assert_result 6, <<~RUBY
+      def zero
+        0
+      end
+
+      a = [1, 2, 3]
+      sum = 0
+      a.each do |v|
+        zero
+        sum = sum + v
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  def test_calling_a_method_inside_a_hash_each_keeps_both_arguments
+    assert_result 33, <<~RUBY
+      def zero
+        0
+      end
+
+      h = { 1 => 10, 2 => 20 }
+      sum = 0
+      h.each do |k, v|
+        zero
+        sum = sum + k + v
+      end
+      $DM0 = sum
+    RUBY
+  end
+
+  def test_calling_a_method_inside_times_keeps_the_index
+    assert_result 3, <<~RUBY
+      def one(x)
+        x
+      end
+
+      sum = 0
+      3.times do |i|
+        one(9)
+        sum = sum + i
+      end
+      $DM0 = sum
+    RUBY
+  end
+
   # === 生成コード ===
 
   # FOR の中で BREAK すると FOR を抜けるだけで命令ループから出られない。

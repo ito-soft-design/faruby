@@ -388,11 +388,19 @@ class TestArrays < Minitest::Test
     assert_operator Layout::FRAME_KIND_CALL, :<, Layout::FRAME_KIND_ITERATE
   end
 
-  def test_each_takes_a_block_and_an_array_receiver
+  # h.each は鍵と値の 2 つを渡すので、a.each とも種別が違う
+  def test_hash_each_has_its_own_frame_kind
+    refute_equal Layout::FRAME_KIND_EACH, Layout::FRAME_KIND_HASH_EACH
+    assert_operator Layout::FRAME_KIND_HASH_EACH, :>, Layout::FRAME_KIND_ITERATE,
+                    "「反復中か」を 1 比較で判定するため ITERATE 以上に置く"
+  end
+
+  def test_each_takes_a_block_and_a_collection_receiver
     code, argc = BUILTIN_METHODS.fetch("each")
 
     assert_includes BLOCK_METHODS, code, "each はブロックを取る"
-    assert_operator code, :>=, METHOD_ARRAY_MIN, "each のレシーバは配列"
+    assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX), code,
+                    "each のレシーバは配列かハッシュ"
     assert_equal 0, argc
   end
 

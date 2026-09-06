@@ -112,7 +112,8 @@ module FaRuby
     # 判定を 1 比較で済ませています。並べ替えないでください。
     FRAME_KIND_CALL     = 0   # 通常のメソッド呼び出し
     FRAME_KIND_ITERATE  = 1   # 反復。ブロックに渡すのは添字 (times / upto)
-    FRAME_KIND_EACH     = 2   # 反復。ブロックに渡すのは要素 (each)
+    FRAME_KIND_EACH     = 2   # 反復。ブロックに渡すのは要素 (a.each)
+    FRAME_KIND_HASH_EACH = 3  # 反復。ブロックに渡すのは鍵と値 (h.each)
 
     # 配列プール 1 スロットの見出し
     #
