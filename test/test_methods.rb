@@ -86,8 +86,16 @@ class TestMethods < Minitest::Test
       assert_includes (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX),
                       BUILTIN_METHODS.fetch(name).first, name
     end
-    %w[length size << push].each do |name|
-      assert_operator BUILTIN_METHODS.fetch(name).first, :>=, METHOD_ARRAY_MIN, name
+    %w[length size].each do |name|
+      assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX),
+                      BUILTIN_METHODS.fetch(name).first, name
+    end
+    %w[<< push each].each do |name|
+      assert_includes (METHOD_ARRAY_MIN..METHOD_ARRAY_MAX),
+                      BUILTIN_METHODS.fetch(name).first, name
+    end
+    %w[key? keys values].each do |name|
+      assert_operator BUILTIN_METHODS.fetch(name).first, :>=, METHOD_HASH_MIN, name
     end
   end
 
@@ -332,11 +340,16 @@ class TestMethods < Minitest::Test
 
   # レシーバの型ごとに番号が連続していないと、型検査が範囲比較で済まなくなる
   def test_methods_are_grouped_by_receiver_type
-    numeric = (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX).to_a
-    array = (METHOD_ARRAY_MIN..METHOD_NAMES.keys.max).to_a
+    numeric    = (METHOD_NUMERIC_MIN..METHOD_NUMERIC_MAX).to_a
+    collection = (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX).to_a
+    array      = (METHOD_ARRAY_MIN..METHOD_ARRAY_MAX).to_a
+    hash       = (METHOD_HASH_MIN..METHOD_NAMES.keys.max).to_a
 
-    assert_equal numeric.max + 1, array.min, "数値と配列の範囲が隣り合っていない"
-    assert_empty METHOD_NAMES.keys - ([METHOD_NE, METHOD_NOT] + numeric + array),
+    assert_equal numeric.max + 1, collection.min, "数値と集合の範囲が隣り合っていない"
+    assert_equal collection.max + 1, array.min, "集合と配列の範囲が隣り合っていない"
+    assert_equal array.max + 1, hash.min, "配列とハッシュの範囲が隣り合っていない"
+    assert_empty METHOD_NAMES.keys -
+                 ([METHOD_NE, METHOD_NOT] + numeric + collection + array + hash),
                  "どの型の範囲にも属さないメソッドがある"
   end
 end

@@ -514,6 +514,132 @@ class TestArrays < Minitest::Test
     assert_equal TT_NIL, tag_of(1), "整数の鍵 10 とシンボルは別物"
   end
 
+  # === ハッシュのメソッド ===
+
+  # R[1] にハッシュを作り、R[2] を引数にしてメソッドを呼ぶ
+  def call_on_hash(pairs, method_name, argument = nil)
+    argc = put_method(method_name)
+    setup = build_hash(pairs)
+    setup += load(2, argument) if argument
+    run_bytecode(setup + [SEND, 1, 0x00, argc, STOP])
+  end
+
+  def test_size_of_a_hash_is_the_pair_count
+    call_on_hash([[10, 11], [20, 22]], "size")
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_INTEGER, tag_of(1)
+    assert_equal 2, value_of(1)
+  end
+
+  def test_size_of_an_empty_hash_is_zero
+    call_on_hash([], "length")
+
+    assert_equal VM_FINISHED, status
+    assert_equal 0, value_of(1)
+  end
+
+  # ハッシュの値スロットは下位ワードだけが鍵の配列の番号。配列と同じ
+  # 32 ビット読みをすると値の配列の番号が上位に混ざり、別の場所を見る
+  def test_length_reads_only_the_lower_word_of_a_hash
+    call_on_hash([[10, 11]], "size")
+
+    assert_equal 1, value_of(1)
+  end
+
+  def test_key_p_finds_an_existing_key
+    call_on_hash([[10, 11], [20, 22]], "key?", 20)
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_TRUE, tag_of(1)
+  end
+
+  def test_key_p_is_false_for_a_missing_key
+    call_on_hash([[10, 11]], "key?", 99)
+
+    assert_equal TT_FALSE, tag_of(1)
+  end
+
+  def test_key_p_on_an_empty_hash_is_false
+    call_on_hash([], "key?", 1)
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_FALSE, tag_of(1)
+  end
+
+  def test_keys_returns_a_new_array
+    call_on_hash([[10, 11], [20, 22]], "keys")
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_ARRAY, tag_of(1)
+    assert_equal 3, array_sp, "鍵と値の 2 つに加えて新しい 1 つ"
+    assert_equal [10, 20], slot_values(2)
+  end
+
+  def test_values_returns_a_new_array
+    call_on_hash([[10, 11], [20, 22]], "values")
+
+    assert_equal TT_ARRAY, tag_of(1)
+    assert_equal [11, 22], slot_values(2)
+  end
+
+  # レシーバはハッシュから配列に変わる。値ワードを 32 ビットで書くので
+  # 上位に残っていた値の配列の番号も消える
+  def test_keys_leaves_the_receiver_pointing_at_the_new_array
+    call_on_hash([[10, 11]], "keys")
+
+    assert_equal 2, value_of(1)
+  end
+
+  def test_keys_of_an_empty_hash_is_an_empty_array
+    call_on_hash([], "keys")
+
+    assert_equal VM_FINISHED, status
+    assert_equal 0, slot_length(2)
+  end
+
+  # 返さないスロットを 1 つ取るため、プールが尽きていると作れない
+  def test_keys_with_a_full_pool_stops_the_vm
+    argc = put_method("keys")
+    fill = [ARRAY, 5, 0] * (layout.max_arrays - 2)
+    run_bytecode(build_hash([[10, 11]]) + fill + [SEND, 1, 0x00, argc, STOP])
+
+    assert_equal VM_ERROR, status
+    assert_equal HEAP_ERROR, error
+  end
+
+  # レシーバの型で番号を並べているので、範囲比較だけで弾ける
+  def test_a_hash_method_on_an_array_stops_the_vm
+    call_on_array([1, 2], "keys")
+
+    assert_equal VM_ERROR, status
+    assert_equal METHOD_TYPE_ERROR, error
+  end
+
+  def test_an_array_method_on_a_hash_stops_the_vm
+    call_on_hash([[10, 11]], "push", 1)
+
+    assert_equal VM_ERROR, status
+    assert_equal METHOD_TYPE_ERROR, error
+  end
+
+  # length と size だけは配列とハッシュの両方を受ける
+  def test_length_accepts_an_array_and_a_hash
+    code = BUILTIN_METHODS.fetch("length").first
+
+    assert_includes (METHOD_COLLECTION_MIN..METHOD_COLLECTION_MAX), code
+    assert_equal code, BUILTIN_METHODS.fetch("size").first
+  end
+
+  # Z1 はレシーバで、写し終えてから配列に書き換える。
+  # 途中で使うと元のハッシュを見失う
+  def test_the_hash_column_branch_does_not_clobber_the_receiver_register
+    source = FaRuby::KvsGenerator.new.source
+    branch = source[/' keys\n(.*?)ELSE IF Z5 = /m, 1]
+
+    refute_match(/^\s+Z1 = /, branch, "keys の枝が Z1 を書き換えている")
+  end
+
   # === 配置 ===
 
   def test_the_pool_sits_after_the_globals_and_inside_the_block

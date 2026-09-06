@@ -171,7 +171,9 @@ module FaRuby
     #
     #   1-2    レシーバの型を問わない
     #   3-10   レシーバが数値 (METHOD_NUMERIC_MIN 以上 METHOD_NUMERIC_MAX 以下)
-    #   11-    レシーバが配列 (METHOD_ARRAY_MIN 以上)
+    #   11     レシーバが配列かハッシュ (METHOD_COLLECTION_MIN 以上 MAX 以下)
+    #   12-13  レシーバが配列 (METHOD_ARRAY_MIN 以上 METHOD_ARRAY_MAX 以下)
+    #   14-    レシーバがハッシュ (METHOD_HASH_MIN 以上)
     METHOD_NONE   = 0   # 未対応 (実行時エラー)
     METHOD_NE     = 1   # !=
     METHOD_NOT    = 2   # !
@@ -183,16 +185,29 @@ module FaRuby
     METHOD_ROUND  = 8
     METHOD_TIMES  = 9    # ブロックを取る
     METHOD_UPTO   = 10   # ブロックを取る
-    METHOD_LENGTH = 11
+    METHOD_LENGTH = 11   # 配列とハッシュの両方
     METHOD_PUSH   = 12   # << と push
     METHOD_EACH   = 13   # ブロックを取る
+    METHOD_KEY_P  = 14   # key?
+    METHOD_KEYS   = 15
+    METHOD_VALUES = 16
 
     # レシーバが数値でなければならない範囲
     METHOD_NUMERIC_MIN = METHOD_MOD
     METHOD_NUMERIC_MAX = METHOD_UPTO
 
-    # これ以上のメソッドはレシーバが配列であること。配列は末尾なので上限は要らない
-    METHOD_ARRAY_MIN = METHOD_LENGTH
+    # レシーバが配列かハッシュのどちらでもよい範囲
+    #
+    # TT_ARRAY と TT_HASH は隣り合っているため、タグの検査も範囲比較で済みます。
+    METHOD_COLLECTION_MIN = METHOD_LENGTH
+    METHOD_COLLECTION_MAX = METHOD_LENGTH
+
+    # レシーバが配列でなければならない範囲
+    METHOD_ARRAY_MIN = METHOD_PUSH
+    METHOD_ARRAY_MAX = METHOD_EACH
+
+    # これ以上のメソッドはレシーバがハッシュであること。末尾なので上限は要らない
+    METHOD_HASH_MIN = METHOD_KEY_P
 
     # メソッド名 => [番号, 引数の数]
     BUILTIN_METHODS = {
@@ -211,6 +226,9 @@ module FaRuby
       "<<"     => [METHOD_PUSH,   1],
       "push"   => [METHOD_PUSH,   1],
       "each"   => [METHOD_EACH,   0],
+      "key?"   => [METHOD_KEY_P,  1],
+      "keys"   => [METHOD_KEYS,   0],
+      "values" => [METHOD_VALUES, 0],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない

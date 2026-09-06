@@ -1407,18 +1407,34 @@ module FaRuby
     # メソッド番号からレシーバに要求される型を検査する
     #
     # レシーバの型ごとに番号を連続させてあるので、範囲比較で済みます。
-    # 配列は末尾なので上限が要らず、1 比較で決まります。
+    # 最後の帯 (ハッシュ) は末尾なので上限が要りません。
     def check_receiver_type(recv, type_code)
       note "#{METHOD_NUMERIC_MIN}-#{METHOD_NUMERIC_MAX} はレシーバが数値、" \
-           "#{METHOD_ARRAY_MIN} 以上は配列であること"
+           "#{METHOD_COLLECTION_MIN} は配列かハッシュ、" \
+           "#{METHOD_ARRAY_MIN}-#{METHOD_ARRAY_MAX} は配列、" \
+           "#{METHOD_HASH_MIN} 以上はハッシュであること"
       if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
-        if_else_block("Z5 <= #{METHOD_NUMERIC_MAX}") do
-          note "数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけ。上限も見る"
-          if_("#{recv.tag} < #{TT_INTEGER}") { vm_error(type_code) }
-          if_("#{recv.tag} > #{TT_FLOAT}") { vm_error(type_code) }
-        end
+        chain_head(true, "Z5 <= #{METHOD_NUMERIC_MAX}")
+        indent
+        note "数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけ。上限も見る"
+        if_("#{recv.tag} < #{TT_INTEGER}") { vm_error(type_code) }
+        if_("#{recv.tag} > #{TT_FLOAT}") { vm_error(type_code) }
+        dedent
+        chain_head(false, "Z5 <= #{METHOD_COLLECTION_MAX}")
+        indent
+        note "配列とハッシュはタグが隣り合っているので範囲で見る"
+        if_("#{recv.tag} < #{TT_ARRAY}") { vm_error(type_code) }
+        if_("#{recv.tag} > #{TT_HASH}") { vm_error(type_code) }
+        dedent
+        chain_head(false, "Z5 <= #{METHOD_ARRAY_MAX}")
+        indent
         if_("#{recv.tag} <> #{TT_ARRAY}") { vm_error(type_code) }
-        end_block
+        dedent
+        line "ELSE"
+        indent
+        if_("#{recv.tag} <> #{TT_HASH}") { vm_error(type_code) }
+        dedent
+        line "END IF"
       end
     end
 
@@ -1672,15 +1688,65 @@ module FaRuby
       when METHOD_ROUND then round_into(dest)
       when METHOD_LENGTH then length_into(dest)
       when METHOD_PUSH   then push_into(dest, rhs, heap_code)
+      when METHOD_KEY_P  then key_p_into(dest, rhs)
+      when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
+      when METHOD_VALUES then hash_column_into(dest, Z_HASH_VALUES, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
 
-    # R[a].length。レシーバが配列であることは検査済み
+    # R[a].length / R[a].size。レシーバが配列かハッシュであることは検査済み
+    #
+    # ハッシュの組の数は鍵の配列の見出しにあります。値スロットの読み方が
+    # 配列と違う (下位ワードだけがスロット番号) ため、型で分けます。
     def length_into(dest)
+      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_slots_into_z(dest) }
       array_slot_into_z(dest)
+      end_block
       line "#{dest.value} = #{scratch32_b}"
       line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a].key?(R[a+1])。鍵があるかどうかだけを返す
+    def key_p_into(dest, rhs)
+      hash_slots_into_z(dest)
+      find_hash_key(rhs)
+      if_else_block("#{scratch32} < 0") { assign_bool(dest, false) }
+      assign_bool(dest, true)
+      end_block
+    end
+
+    # R[a].keys / R[a].values
+    #
+    # Ruby と同じく新しい配列を返します。**プールを 1 スロット使う**ので、
+    # ループの中で呼び続けると使い切ります。配列リテラルと同じ制約です。
+    #
+    # source_z は写す元の見出しが載っている Z (鍵か値のどちらか)。
+    def hash_column_into(dest, source_z, heap_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      hash_slots_into_z(dest)
+      note "新しいスロットの見出し。組の数がそのまま要素数になる"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z2 = #{scratch32_b}"
+      note "写す。組の数 0 (空ハッシュ) では引き算もしない"
+      if_("#{scratch32_b} > 0") do
+        line "Z8 = #{scratch32_b}"
+        line "Z8 = Z8 - 1"
+        line "FOR Z6 = 0 TO Z8"
+        indent
+        line "Z7 = Z6 * #{SLOT_WORDS} + Z#{source_z} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z3 = Z6 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: 7, to: 3)
+        dedent
+        line "NEXT"
+      end
+      note "R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので"
+      note "上位に入っていた値の配列のスロット番号も消える"
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
     end
 
     # R[a] << R[a+1] / R[a].push(R[a+1])

@@ -557,7 +557,11 @@ module FaRuby
     # レシーバの型ごとに番号が連続しているため範囲で判定できる。
     def receiver_type_ok?(code, tag)
       return numeric_tag?(tag) if code.between?(METHOD_NUMERIC_MIN, METHOD_NUMERIC_MAX)
-      return tag == TT_ARRAY if code >= METHOD_ARRAY_MIN
+      if code.between?(METHOD_COLLECTION_MIN, METHOD_COLLECTION_MAX)
+        return [TT_ARRAY, TT_HASH].include?(tag)
+      end
+      return tag == TT_ARRAY if code.between?(METHOD_ARRAY_MIN, METHOD_ARRAY_MAX)
+      return tag == TT_HASH if code >= METHOD_HASH_MIN
 
       true
     end
@@ -902,10 +906,46 @@ module FaRuby
       when METHOD_TO_F  then write_float(index, numeric_value(index).to_f)
       when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)
       when METHOD_ROUND then write_slot(index, TT_INTEGER, round_away_from_zero(numeric_value(index)))
-      when METHOD_LENGTH then write_slot(index, TT_INTEGER, array_length(read_reg(index)))
+      when METHOD_LENGTH then write_slot(index, TT_INTEGER, collection_length(index))
       when METHOD_PUSH   then send_push(index, heap_code)
+      when METHOD_KEY_P  then send_key_p(index)
+      when METHOD_KEYS   then send_hash_column(index, 0, heap_code)
+      when METHOD_VALUES then send_hash_column(index, 1, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
+    end
+
+    # R[a].length / R[a].size。ハッシュの組の数は鍵の配列の見出しにある
+    def collection_length(index)
+      return array_length(hash_slots(index).first) if read_reg_tag(index) == TT_HASH
+
+      array_length(read_reg(index))
+    end
+
+    # R[a].key?(R[a+1])
+    def send_key_p(index)
+      keys, = hash_slots(index)
+      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      write_bool(index, !position.nil?)
+    end
+
+    # R[a].keys / R[a].values。新しい配列を 1 スロット取る
+    #
+    # which は 0 が鍵、1 が値。プールを使い切ったら止まる。
+    def send_hash_column(index, which, heap_code)
+      slot = array_sp
+      return vm_error(heap_code) if slot >= layout.max_arrays
+
+      source = hash_slots(index)[which]
+      length = array_length(source)
+      set_array_length(slot, length)
+      length.times do |i|
+        addr = layout.array_element_addr(source, i)
+        write_array_element(slot, i, @em.read_u16(addr + SLOT_TYPE_OFFSET),
+                            @em.read_s32(addr + SLOT_VALUE_OFFSET))
+      end
+      write_slot(index, TT_ARRAY, slot)
+      @em.write_u16(layout.array_sp_addr, slot + 1)
     end
 
     # R[a] << R[a+1] / R[a].push(R[a+1])

@@ -1646,7 +1646,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                    ' 3-10 はレシーバが数値、11 以上は配列であること
+                    ' 3-10 はレシーバが数値、11 は配列かハッシュ、12-13 は配列、14 以上はハッシュであること
                     IF Z5 >= 3 THEN
                         IF Z5 <= 10 THEN
                             ' 数値は 4 と 5 の 2 つだけ。上限も見る
@@ -1660,8 +1660,26 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM2:Z9 = 4
                                 BREAK
                             END IF
-                        ELSE
+                        ELSE IF Z5 <= 11 THEN
+                            ' 配列とハッシュはタグが隣り合っているので範囲で見る
+                            IF EM0:Z1 < 8 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            IF EM0:Z1 > 9 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE IF Z5 <= 13 THEN
                             IF EM0:Z1 <> 8 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE
+                            IF EM0:Z1 <> 9 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
                                 BREAK
@@ -1830,10 +1848,19 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                     ELSE IF Z5 = 11 THEN
                         ' length
-                        ' スロットの見出し。R[a] を書き換える前に読む
-                        Z4 = EM1.L:Z1
-                        Z4 = Z4 * 50 + 992 + Z9
-                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                        IF EM0:Z1 = 9 THEN
+                            ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                            Z4 = EM1:Z1
+                            Z4 = Z4 * 50 + 992 + Z9
+                            Z5 = EM2:Z1
+                            Z5 = Z5 * 50 + 992 + Z9
+                            EM18.L:Z9 = EM0:Z4
+                        ELSE
+                            ' スロットの見出し。R[a] を書き換える前に読む
+                            Z4 = EM1.L:Z1
+                            Z4 = Z4 * 50 + 992 + Z9
+                            EM18.L:Z9 = EM0:Z4   ' 要素数
+                        END IF
                         EM1.L:Z1 = EM18.L:Z9
                         EM0:Z1 = 4
                     ELSE IF Z5 = 12 THEN
@@ -1856,6 +1883,104 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z5 = EM0:Z2
                         Z6 = EM18.L:Z9
                         EM0:Z4 = Z6 + 1
+                    ELSE IF Z5 = 14 THEN
+                        ' key?
+                        ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                        Z4 = EM1:Z1
+                        Z4 = Z4 * 50 + 992 + Z9
+                        Z5 = EM2:Z1
+                        Z5 = Z5 * 50 + 992 + Z9
+                        EM18.L:Z9 = EM0:Z4
+                        ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
+                        EM16.L:Z9 = -1
+                        IF EM18.L:Z9 > 0 THEN
+                            Z8 = EM18.L:Z9
+                            Z8 = Z8 - 1
+                            FOR Z6 = 0 TO Z8
+                                IF EM16.L:Z9 < 0 THEN
+                                    ' 最初に一致したものを採る
+                                    Z7 = Z6 * 4 + Z4 + 2
+                                    IF EM0:Z7 = EM0:Z2 THEN
+                                        IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
+                                    END IF
+                                END IF
+                            NEXT
+                        END IF
+                        IF EM16.L:Z9 < 0 THEN
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 2
+                        ELSE
+                            EM1.L:Z1 = 1
+                            EM0:Z1 = 3
+                        END IF
+                    ELSE IF Z5 = 15 THEN
+                        ' keys
+                        ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                        IF EM39:Z9 >= 16 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                        Z4 = EM1:Z1
+                        Z4 = Z4 * 50 + 992 + Z9
+                        Z5 = EM2:Z1
+                        Z5 = Z5 * 50 + 992 + Z9
+                        EM18.L:Z9 = EM0:Z4
+                        ' 新しいスロットの見出し。組の数がそのまま要素数になる
+                        Z2 = EM39:Z9 * 50 + 992 + Z9
+                        EM0:Z2 = EM18.L:Z9
+                        ' 写す。組の数 0 (空ハッシュ) では引き算もしない
+                        IF EM18.L:Z9 > 0 THEN
+                            Z8 = EM18.L:Z9
+                            Z8 = Z8 - 1
+                            FOR Z6 = 0 TO Z8
+                                Z7 = Z6 * 4 + Z4 + 2
+                                Z3 = Z6 * 4 + Z2 + 2
+                                EM1.L:Z3 = EM1.L:Z7
+                                EM0:Z3 = EM0:Z7
+                            NEXT
+                        END IF
+                        ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
+                        ' 上位に入っていた値の配列のスロット番号も消える
+                        EM1.L:Z1 = EM39:Z9   ' スロット番号
+                        EM0:Z1 = 8
+                        EM39:Z9 = EM39:Z9 + 1
+                    ELSE IF Z5 = 16 THEN
+                        ' values
+                        ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                        IF EM39:Z9 >= 16 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 10
+                            BREAK
+                        END IF
+                        ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                        Z4 = EM1:Z1
+                        Z4 = Z4 * 50 + 992 + Z9
+                        Z5 = EM2:Z1
+                        Z5 = Z5 * 50 + 992 + Z9
+                        EM18.L:Z9 = EM0:Z4
+                        ' 新しいスロットの見出し。組の数がそのまま要素数になる
+                        Z2 = EM39:Z9 * 50 + 992 + Z9
+                        EM0:Z2 = EM18.L:Z9
+                        ' 写す。組の数 0 (空ハッシュ) では引き算もしない
+                        IF EM18.L:Z9 > 0 THEN
+                            Z8 = EM18.L:Z9
+                            Z8 = Z8 - 1
+                            FOR Z6 = 0 TO Z8
+                                Z7 = Z6 * 4 + Z5 + 2
+                                Z3 = Z6 * 4 + Z2 + 2
+                                EM1.L:Z3 = EM1.L:Z7
+                                EM0:Z3 = EM0:Z7
+                            NEXT
+                        END IF
+                        ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
+                        ' 上位に入っていた値の配列のスロット番号も消える
+                        EM1.L:Z1 = EM39:Z9   ' スロット番号
+                        EM0:Z1 = 8
+                        EM39:Z9 = EM39:Z9 + 1
                     ELSE
                         ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                         EM1:Z9 = 3
@@ -1947,7 +2072,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                ' 3-10 はレシーバが数値、11 以上は配列であること
+                ' 3-10 はレシーバが数値、11 は配列かハッシュ、12-13 は配列、14 以上はハッシュであること
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN
                         ' 数値は 4 と 5 の 2 つだけ。上限も見る
@@ -1961,8 +2086,26 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM2:Z9 = 4
                             BREAK
                         END IF
-                    ELSE
+                    ELSE IF Z5 <= 11 THEN
+                        ' 配列とハッシュはタグが隣り合っているので範囲で見る
+                        IF EM0:Z1 < 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 9 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 13 THEN
                         IF EM0:Z1 <> 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE
+                        IF EM0:Z1 <> 9 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
@@ -2131,10 +2274,19 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     END IF
                 ELSE IF Z5 = 11 THEN
                     ' length
-                    ' スロットの見出し。R[a] を書き換える前に読む
-                    Z4 = EM1.L:Z1
-                    Z4 = Z4 * 50 + 992 + Z9
-                    EM18.L:Z9 = EM0:Z4   ' 要素数
+                    IF EM0:Z1 = 9 THEN
+                        ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                        Z4 = EM1:Z1
+                        Z4 = Z4 * 50 + 992 + Z9
+                        Z5 = EM2:Z1
+                        Z5 = Z5 * 50 + 992 + Z9
+                        EM18.L:Z9 = EM0:Z4
+                    ELSE
+                        ' スロットの見出し。R[a] を書き換える前に読む
+                        Z4 = EM1.L:Z1
+                        Z4 = Z4 * 50 + 992 + Z9
+                        EM18.L:Z9 = EM0:Z4   ' 要素数
+                    END IF
                     EM1.L:Z1 = EM18.L:Z9
                     EM0:Z1 = 4
                 ELSE IF Z5 = 12 THEN
@@ -2157,6 +2309,104 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM0:Z5 = EM0:Z2
                     Z6 = EM18.L:Z9
                     EM0:Z4 = Z6 + 1
+                ELSE IF Z5 = 14 THEN
+                    ' key?
+                    ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                    Z4 = EM1:Z1
+                    Z4 = Z4 * 50 + 992 + Z9
+                    Z5 = EM2:Z1
+                    Z5 = Z5 * 50 + 992 + Z9
+                    EM18.L:Z9 = EM0:Z4
+                    ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
+                    EM16.L:Z9 = -1
+                    IF EM18.L:Z9 > 0 THEN
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 - 1
+                        FOR Z6 = 0 TO Z8
+                            IF EM16.L:Z9 < 0 THEN
+                                ' 最初に一致したものを採る
+                                Z7 = Z6 * 4 + Z4 + 2
+                                IF EM0:Z7 = EM0:Z2 THEN
+                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                        EM16.L:Z9 = Z6
+                                    END IF
+                                END IF
+                            END IF
+                        NEXT
+                    END IF
+                    IF EM16.L:Z9 < 0 THEN
+                        EM1.L:Z1 = 0
+                        EM0:Z1 = 2
+                    ELSE
+                        EM1.L:Z1 = 1
+                        EM0:Z1 = 3
+                    END IF
+                ELSE IF Z5 = 15 THEN
+                    ' keys
+                    ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                    IF EM39:Z9 >= 16 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 10
+                        BREAK
+                    END IF
+                    ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                    Z4 = EM1:Z1
+                    Z4 = Z4 * 50 + 992 + Z9
+                    Z5 = EM2:Z1
+                    Z5 = Z5 * 50 + 992 + Z9
+                    EM18.L:Z9 = EM0:Z4
+                    ' 新しいスロットの見出し。組の数がそのまま要素数になる
+                    Z2 = EM39:Z9 * 50 + 992 + Z9
+                    EM0:Z2 = EM18.L:Z9
+                    ' 写す。組の数 0 (空ハッシュ) では引き算もしない
+                    IF EM18.L:Z9 > 0 THEN
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 - 1
+                        FOR Z6 = 0 TO Z8
+                            Z7 = Z6 * 4 + Z4 + 2
+                            Z3 = Z6 * 4 + Z2 + 2
+                            EM1.L:Z3 = EM1.L:Z7
+                            EM0:Z3 = EM0:Z7
+                        NEXT
+                    END IF
+                    ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
+                    ' 上位に入っていた値の配列のスロット番号も消える
+                    EM1.L:Z1 = EM39:Z9   ' スロット番号
+                    EM0:Z1 = 8
+                    EM39:Z9 = EM39:Z9 + 1
+                ELSE IF Z5 = 16 THEN
+                    ' values
+                    ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                    IF EM39:Z9 >= 16 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 10
+                        BREAK
+                    END IF
+                    ' 鍵の配列と値の配列。R[a] を書き換える前に読む
+                    Z4 = EM1:Z1
+                    Z4 = Z4 * 50 + 992 + Z9
+                    Z5 = EM2:Z1
+                    Z5 = Z5 * 50 + 992 + Z9
+                    EM18.L:Z9 = EM0:Z4
+                    ' 新しいスロットの見出し。組の数がそのまま要素数になる
+                    Z2 = EM39:Z9 * 50 + 992 + Z9
+                    EM0:Z2 = EM18.L:Z9
+                    ' 写す。組の数 0 (空ハッシュ) では引き算もしない
+                    IF EM18.L:Z9 > 0 THEN
+                        Z8 = EM18.L:Z9
+                        Z8 = Z8 - 1
+                        FOR Z6 = 0 TO Z8
+                            Z7 = Z6 * 4 + Z5 + 2
+                            Z3 = Z6 * 4 + Z2 + 2
+                            EM1.L:Z3 = EM1.L:Z7
+                            EM0:Z3 = EM0:Z7
+                        NEXT
+                    END IF
+                    ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
+                    ' 上位に入っていた値の配列のスロット番号も消える
+                    EM1.L:Z1 = EM39:Z9   ' スロット番号
+                    EM0:Z1 = 8
+                    EM39:Z9 = EM39:Z9 + 1
                 ELSE
                     ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                     EM1:Z9 = 3
@@ -2210,7 +2460,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                ' 3-10 はレシーバが数値、11 以上は配列であること
+                ' 3-10 はレシーバが数値、11 は配列かハッシュ、12-13 は配列、14 以上はハッシュであること
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN
                         ' 数値は 4 と 5 の 2 つだけ。上限も見る
@@ -2224,8 +2474,26 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM2:Z9 = 4
                             BREAK
                         END IF
-                    ELSE
+                    ELSE IF Z5 <= 11 THEN
+                        ' 配列とハッシュはタグが隣り合っているので範囲で見る
+                        IF EM0:Z1 < 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z1 > 9 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE IF Z5 <= 13 THEN
                         IF EM0:Z1 <> 8 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                    ELSE
+                        IF EM0:Z1 <> 9 THEN
                             EM1:Z9 = 3
                             EM2:Z9 = 4
                             BREAK
