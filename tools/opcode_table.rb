@@ -275,6 +275,15 @@ module FaRuby
         vm.set_reg_special(:a, VmConstants::TT_FALSE)
       end
 
+      # R[a] = :name
+      #
+      # 値はホストが名前ごとに振った通し番号。シンボル表は irep ごとに別なので、
+      # オペランドの索引をそのまま値にすると別の irep の同じ名前と等しくならない。
+      # 番号を挟むことで OP_EQ の「タグと値の一致」がそのまま使える。
+      defs << OpcodeDef.new(0x10, "R[a] = symbols[b] (シンボル)") do |vm|
+        vm.load_symbol(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
       defs << OpcodeDef.new(0x15, "R[a] = global[symbols[b]]") do |vm|
         vm.load_global_into_reg(:a, :b)
       end

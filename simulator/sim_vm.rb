@@ -189,6 +189,17 @@ module FaRuby
       write_proc(operand(name), index, MemoryLayout::FRAME_NONE)
     end
 
+    # R[a] = :name (OP_LOADSYM)
+    #
+    # 値はホストが名前ごとに振った通し番号。索引をそのまま使うと irep を
+    # またいで同じ名前が別物になる。
+    def load_symbol(name, sym_name, error_code)
+      _code, id, _argc, kind = device_entry(operand(sym_name))
+      return vm_error(error_code) unless kind == SYMBOL_KIND_METHOD
+
+      write_slot(operand(name), TT_SYMBOL, id)
+    end
+
     # --- 配列 ---
 
     # R[dest] = [R[first] .. R[first+count-1]] (OP_ARRAY / OP_ARRAY2)

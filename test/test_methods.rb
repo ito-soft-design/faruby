@@ -239,6 +239,52 @@ class TestMethods < Minitest::Test
     refute mappings[1][:general], "メソッド名は汎用グローバルを消費しない"
   end
 
+  # === シンボル (OP_LOADSYM) ===
+
+  LOADSYM = 0x10
+
+  # 通し番号は名前ごと。シンボル表は irep ごとに別なので、索引をそのまま
+  # 値にすると別の irep の同じ名前と等しくならない
+  def test_every_name_gets_a_number
+    irep = Struct.new(:symbols, :pool, :instructions, :ilen, :nregs, :nlocals, :children)
+                 .new(["$DM100", "abs", "foo", "each"], [], "", 0, 8, 0, [])
+    mappings = FaRuby::PlcCodegen.new(irep).device_mappings
+
+    ids = mappings.select { |m| m[:kind] == SYMBOL_KIND_METHOD }.map { |m| m[:method_id] }
+
+    refute_includes ids, METHOD_ID_NONE, "組み込みも含めて全ての名前に番号が要る"
+    assert_equal ids.uniq, ids, "番号が重なっている"
+  end
+
+  def test_loadsym_puts_the_number_in_the_register
+    set_reg(0, TT_INTEGER, 0)
+    put_method("abs")
+    run_bytecode([LOADSYM, 0x00, 0x00, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal TT_SYMBOL, tag_of(0)
+  end
+
+  # メソッド名でないシンボル ($DM100 など) はシンボルにできない
+  def test_loadsym_on_a_variable_symbol_stops_the_vm
+    addr = layout.device_table_base
+    @sim.fixed.write_u16(addr + DEVICE_TABLE_KIND_OFFSET, SYMBOL_KIND_VALUE)
+    run_bytecode([LOADSYM, 0x00, 0x00, STOP])
+
+    assert_equal VM_ERROR, status
+    assert_equal UNKNOWN_METHOD_ERROR, error
+  end
+
+  # メソッド表は ID で引くので、名前の数だけ枠が要る
+  def test_too_many_names_is_refused_before_transfer
+    names = Array.new(FaRuby::MemoryLayout.default.max_methods + 1) { |i| "m#{i}" }
+    irep = Struct.new(:symbols, :pool, :instructions, :ilen, :nregs, :nlocals, :children)
+                 .new(names, [], "", 0, 8, 0, [])
+
+    error = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).validate! }
+    assert_match(/名前の数/, error.message)
+  end
+
   # === 生成コード ===
 
   def test_generated_code_dispatches_on_the_method_number

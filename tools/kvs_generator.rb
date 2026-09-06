@@ -786,6 +786,23 @@ module FaRuby
       line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} + 1"
     end
 
+    # R[a] = :name (OP_LOADSYM)
+    #
+    # 値はシンボル表の 2 ワード目 (ホストが名前ごとに振った通し番号) です。
+    # 索引をそのまま使うと irep をまたいで同じ名前が別物になります。
+    def load_symbol(name, sym_name, error_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
+        note "デバイス名や変数名はシンボルとして扱えない"
+        vm_error(error_code)
+      end
+      line "Z3 = Z3 + 1"
+      line "Z6 = #{fixed_indexed_base}:Z3   ' シンボルの通し番号"
+      dest = reg_slot(name)
+      line "#{dest.value} = Z6"
+      line "#{dest.tag} = #{TT_SYMBOL}"
+    end
+
     # --- 配列 ---
 
     # R[dest] = [R[first] .. R[first+count-1]] (OP_ARRAY / OP_ARRAY2)

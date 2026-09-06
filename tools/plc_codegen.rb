@@ -46,6 +46,9 @@ module FaRuby
       check_limit("バイトコード長", list.sum(&:ilen), layout.max_bytecode)
       check_limit("定数プールのエントリ数", list.sum { |i| i.pool.size }, layout.max_pool)
       check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
+      # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
+      # 読み書きしてしまうので、転送する前にここで止める
+      check_limit("名前の数", method_ids.size, layout.max_methods)
       self
     end
 
@@ -223,9 +226,12 @@ module FaRuby
     end
 
     # ユーザー定義メソッド名 => ID (1 から)
+    # 名前 => 通し番号 (1 から)
+    #
+    # メソッド表の索引であると同時に、シンボル (:foo) の値でもある。
     def method_ids
       device_mappings
-        .select { |m| m[:kind] == SYMBOL_KIND_METHOD && m[:method_id] != METHOD_ID_NONE }
+        .select { |m| m[:kind] == SYMBOL_KIND_METHOD }
         .to_h { |m| [m[:symbol], m[:method_id]] }
     end
 
@@ -251,9 +257,14 @@ module FaRuby
           access_type: ACCESS_L, bit: false }
       else
         code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
-        # 組み込みに無い名前には 1 から通し番号を振る。シンボル表は irep ごとに
-        # 別なので、番号を挟まないと同じメソッドに行き着かない
-        id = code == METHOD_NONE ? (method_ids[sym] ||= method_ids.size + 1) : METHOD_ID_NONE
+        # **すべての名前**に 1 から通し番号を振る。シンボル表は irep ごとに
+        # 別なので、番号を挟まないと同じ名前が同じものに行き着かない。
+        #
+        # 用途が 2 つある。メソッド表の索引と、シンボルの値 (:foo) である。
+        # 組み込みメソッド名を飛ばすと :each のようなシンボルが 0 になって
+        # しまうため、組み込みかどうかに関わらず振る。VM が組み込みを見分ける
+        # のはメソッド番号 (1 ワード目) で、ID (2 ワード目) ではない
+        id = (method_ids[sym] ||= method_ids.size + 1)
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: SYMBOL_KIND_METHOD, method_code: code, argc: argc, method_id: id }
       end

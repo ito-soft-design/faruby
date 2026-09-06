@@ -391,7 +391,8 @@ end
 | [doc/roadmap.md](doc/roadmap.md) | 何を作るかと、なぜその順序なのか |
 | [doc/method_calls.md](doc/method_calls.md) | メソッド定義・呼び出しの設計と実装の記録 |
 | [doc/blocks.md](doc/blocks.md) | ブロックの設計と実装の記録 |
-| [doc/heap.md](doc/heap.md) | Array / String / Hash の置き場所の設計メモ (未実装) |
+| [doc/heap.md](doc/heap.md) | 配列の置き場所と GC の判断 |
+| [doc/hash.md](doc/hash.md) | ハッシュと Symbol の設計メモ (Symbol まで実装) |
 | [doc/ruby_and_plc.md](doc/ruby_and_plc.md) | Ruby と PLC で意味が違う箇所とその埋め方。新しい機種に対応する際の確認項目 |
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
