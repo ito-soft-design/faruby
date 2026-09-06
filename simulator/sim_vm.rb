@@ -295,6 +295,56 @@ module FaRuby
       write_array_element(values, position, read_reg_tag(index + 2), read_reg(index + 2))
     end
 
+    # --- 文字列 ---
+    #
+    # 実体は配列プールのスロット。見出しの後ろに 1 ワード 2 バイトで詰める。
+    # 先の文字が上位バイトで、KV の文字列デバイスと同じ並び。
+
+    # R[a] = pool[b] の複製 (OP_STRING)
+    #
+    # 毎回複製する。Ruby の文字列は変更できるので、同じリテラルを 2 回書けば
+    # 別のものになる。
+    def new_string(name, pool_name, error_code)
+      slot = pool_base + operand(pool_name) * SLOT_WORDS + SLOT_VALUE_OFFSET
+      offset = @fixed.read_u16(slot)
+      length = @fixed.read_u16(slot + 1)
+
+      index = array_sp
+      return vm_error(error_code) if index >= layout.max_arrays
+      return vm_error(error_code) if length > layout.max_string_bytes
+
+      set_array_length(index, length)
+      ((length + 1) / 2).times do |i|
+        @em.write_u16(layout.string_word_addr(index, i),
+                      @fixed.read_u16(layout.string_addr(offset + i)))
+      end
+      write_slot(operand(name), TT_STRING, index)
+      @em.write_u16(layout.array_sp_addr, index + 1)
+    end
+
+    # 文字列スロットのバイト列を取り出す (シミュレータの検査用)
+    def string_bytes(slot)
+      length = array_length(slot)
+      bytes = +""
+      ((length + 1) / 2).times do |i|
+        word = @em.read_u16(layout.string_word_addr(slot, i))
+        bytes << (word >> 8).chr << (word & 0xFF).chr
+      end
+      bytes.byteslice(0, length)
+    end
+
+    # 定数への代入 (OP_SETCONST)
+    #
+    # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書く。
+    # それ以外の定数は利用者のものなので何もしない。
+    def set_constant(name, sym_name)
+      setting, _, _, kind = device_entry(operand(sym_name))
+      return unless kind == SYMBOL_KIND_SETTING
+      return unless setting == SETTING_STR_FILL
+
+      @em.write_u16(layout.str_fill_addr, read_reg(operand(name)) & 0xFFFF)
+    end
+
     # --- ブロックと上位の変数 ---
 
     # R[a] = 子 irep b から作ったブロック (OP_BLOCK)
@@ -634,7 +684,45 @@ module FaRuby
       return vm_error(0x16) unless dev
       return vm_error(0x16) if kind == SYMBOL_KIND_FAMILY # $DM = 1 は意味を持たない
 
+      # 値が文字列なら文字列として書く。実数と整数を型で分けているのと同じ
+      if read_reg_tag(operand(src)) == TT_STRING
+        return store_string_into_device(dev, type, addr, access, operand(src), 0x16)
+      end
+      # 文字列の桁 (T) に文字列以外を書こうとした
+      return vm_error(0x16) if access && access >= ACCESS_STR
+
       write_device_value(dev, type, addr, access, operand(src))
+    end
+
+    # 文字列をデバイスへ書く (生成コードと同じ規則)
+    #
+    #   桁数 0  終端付き。バイト列の後ろに 0 を 1 つ足す
+    #   桁数 n  固定長。足りなければ FARUBY_STR_FILL で埋め、はみ出す分は
+    #           切り詰める。ちょうどなら終端は書かない
+    def store_string_into_device(dev, type, addr, access, index, error_code)
+      return vm_error(error_code) unless STRING_DEVICE_TYPES.include?(type)
+
+      width = (access || 0) / ACCESS_STR_LENGTH_SCALE
+      slot = read_reg(index)
+      bytes = array_length(slot)
+      total = width.zero? ? bytes + 1 : width
+      fill  = width.zero? ? 0 : @em.read_u16(layout.str_fill_addr)
+      content = [bytes, total].min
+
+      ((total + 1) / 2).times do |i|
+        hi = string_device_byte(slot, i * 2, content, total, fill)
+        lo = string_device_byte(slot, i * 2 + 1, content, total, fill)
+        dev.write_u16(addr + i, hi * 256 + lo)
+      end
+    end
+
+    # 書き込む 1 バイト。中身を過ぎたら埋めるバイト、桁も過ぎたら 0
+    def string_device_byte(slot, position, content, total, fill)
+      return fill if position >= content && position < total
+      return 0 if position >= total
+
+      word = @em.read_u16(layout.string_word_addr(slot, position / 2))
+      position.even? ? (word >> 8) : (word & 0xFF)
     end
 
     # --- 添字によるデバイスアクセス ---

@@ -320,6 +320,12 @@ module FaRuby
 
     def string_addr(offset) = string_pool_base + offset
 
+    # 固定ブロック先頭からのオフセット
+    #
+    # 固定領域はインスタンスごとに位置が違い、生成コードは Z9 から求められない
+    # ため、先頭を VM 状態 (IREP_TABLE) から引いてこれを足します。
+    def fixed_offset_of(addr) = addr - fixed_origin
+
     # 文字列 1 つの上限 (バイト)
     #
     # 配列プールのスロットを 1 つ使い、見出しを除いた残りに 2 バイトずつ

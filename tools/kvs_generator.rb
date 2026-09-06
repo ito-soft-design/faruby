@@ -120,6 +120,9 @@ module FaRuby
     def symbols_offset   = state(layout.cur_symbols_addr)
     def irep_table_offset = state(layout.irep_table_addr_addr)
 
+    # 固定領域の位置。インスタンスごとに違うため先頭からの相対で組み立てる
+    def fixed_offset(base) = "#{irep_table_offset} + #{layout.fixed_offset_of(base)}"
+
     def reg_offset = "#{state(layout.reg_base_addr)} + Z#{Z_INSTANCE}"
 
     # --- インスタンスループ ---
@@ -472,13 +475,106 @@ module FaRuby
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(src)
-      if_else_block("Z1 = #{SYMBOL_KIND_FAMILY}") do
-        note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
+      chain_head(true, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      indent
+      note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
+      vm_error(0x16)
+      dedent
+      chain_head(false, "#{slot.tag} = #{TT_STRING}")
+      indent
+      store_string_into_device(slot, 0x16)
+      dedent
+      line "ELSE"
+      indent
+      if_("Z8 >= #{ACCESS_STR}") do
+        note "文字列の桁 (T) に文字列以外を書こうとした"
         vm_error(0x16)
       end
       prepare_write_scratches(slot)
       device_dispatch(:write, slot: slot, error_code: 0x16)
+      dedent
+      line "END IF"
+    end
+
+    # 文字列をデバイスへ書く
+    #
+    # 2 つの形があります。桁数はシンボル表の幅ワードに
+    # `#{'ACCESS_STR'} + 桁数 * #{'ACCESS_STR_LENGTH_SCALE'}` で詰めてあります。
+    #
+    #   桁数 0  終端付き。バイト列の後ろに 0 を 1 つ足す
+    #   桁数 n  固定長。足りなければ FARUBY_STR_FILL で埋め、
+    #           はみ出す分は切り詰める。ちょうどなら終端は書かない
+    #
+    # 並びが同じ (1 ワード 2 バイト、先の文字が上位) なので、中身が 2 バイトとも
+    # 揃っているワードはそのまま写します。半端になるのは末尾の 1 ワードだけです。
+    def store_string_into_device(slot, error_code)
+      note "桁数。0 なら終端付き"
+      line "Z7 = Z8 / #{ACCESS_STR_LENGTH_SCALE}"
+      note "文字列スロットの見出し"
+      line "Z4 = #{slot.value}"
+      line "Z4 = Z4 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4   ' バイト数"
+
+      note "書く長さと埋めるバイトを決める"
+      if_else_block("Z7 = 0") do
+        note "終端付き。バイト列 + 0"
+        line "#{scratch32} = #{scratch32_b} + 1"
+        line "Z8 = 0"
+      end
+      note "固定長。余りは FARUBY_STR_FILL"
+      line "#{scratch32} = Z7"
+      line "Z8 = #{state(layout.str_fill_addr)}"
       end_block
+
+      note "中身の長さ。桁からはみ出す分は切り詰める"
+      if_("#{scratch32_b} > #{scratch32}") { line "#{scratch32_b} = #{scratch32}" }
+
+      note "ワード数。奇数バイトなら最後のワードの下位バイトは埋めるバイト"
+      line "Z2 = #{scratch32} + 1"
+      line "Z2 = Z2 / 2"
+      if_("Z2 > 0") do
+        line "Z2 = Z2 - 1"
+        line "FOR Z3 = 0 TO Z2"
+        indent
+        line "Z1 = Z3 * 2   ' 先頭バイトの位置"
+        line "Z7 = Z1 + 1"
+        if_else_block("Z7 < #{scratch32_b}") do
+          note "2 バイトとも中身。並びが同じなのでそのまま写す"
+          line "Z7 = Z3 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "Z7 = #{layout.device_name}0:Z7"
+        end
+        note "末尾の半端なワード。バイトごとに決める"
+        line "Z7 = 0"
+        if_else_block("Z1 < #{scratch32_b}") do
+          line "Z7 = Z3 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "Z7 = #{layout.device_name}0:Z7"
+          line "Z7 = Z7 / 256   ' 上位バイトだけ中身"
+        end
+        if_("Z1 < #{scratch32}") { line "Z7 = Z8" }
+        end_block
+        line "Z7 = Z7 * 256"
+        line "Z1 = Z1 + 1"
+        if_("Z1 < #{scratch32}") { line "Z7 = Z7 + Z8" }
+        end_block
+
+        note "ワードデバイスへ 1 ワード。文字列は EM / DM / ZF だけ"
+        line "Z1 = Z3 + Z6"
+        first = true
+        WORD_DEVICES.each do |type, name|
+          chain_head(first, "Z5 = #{type}")
+          first = false
+          indent
+          line "#{name}0.U:Z1 = Z7"
+          dedent
+        end
+        line "ELSE"
+        indent
+        vm_error(error_code)
+        dedent
+        line "END IF"
+        dedent
+        line "NEXT"
+      end
     end
 
     # --- 添字によるデバイスアクセス ---
@@ -862,6 +958,71 @@ module FaRuby
     # 自分で載せた場合に使います。
     def slot_on(z)
       Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}", z, layout.device_name)
+    end
+
+    # --- 文字列 ---
+    #
+    # 実体は配列プールのスロットです。見出しの後ろに **1 ワード 2 バイト、
+    # 先の文字が上位バイト**で詰めます。KV の文字列デバイスと同じ並びなので、
+    # デバイスとの行き来がワード単位の写しで済みます。
+    #
+    # バイト列は変換しません。ソースの文字コードがそのままデバイスへ出ます。
+
+    # R[a] = pool[b] の複製 (OP_STRING)
+    #
+    # **毎回複製します。** Ruby の文字列は変更できるので、同じリテラルを 2 回
+    # 書けば別のものです。リテラルを書くたびにスロットを 1 つ使います。
+    def new_string(name, pool_name, error_code)
+      src = pool_slot(pool_name)
+      note "文字列は値スロットに入らない。位置とバイト数だけが入っている"
+      line "Z3 = #{src.word(0)}   ' 文字列領域の位置 (ワード)"
+      line "Z4 = #{src.word(1)}   ' バイト数"
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("Z4 > #{layout.max_string_bytes}") do
+        note "1 スロットに収まらない (ホストでも見ているが念のため)"
+        vm_error(error_code)
+      end
+      note "スロットの見出しはバイト数"
+      line "Z5 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z5 = Z4"
+      note "ワード単位で写す。並びが同じなので詰め替えは要らない"
+      note "奇数バイトのときは最後のワードの下位バイトが 0 になる"
+      line "Z6 = (Z4 + 1) / 2   ' ワード数"
+      if_("Z6 > 0") do
+        line "Z6 = Z6 - 1"
+        line "FOR Z7 = 0 TO Z6"
+        indent
+        line "Z8 = Z7 + Z3 + #{fixed_offset(layout.string_pool_base)}"
+        line "Z2 = Z7 + Z5 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{layout.device_name}0:Z2 = #{layout.fixed_device_name}0:Z8"
+        dedent
+        line "NEXT"
+      end
+      dest = reg_slot(name)
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # 定数への代入 (OP_SETCONST)
+    #
+    # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書きます。
+    # それ以外の定数は利用者のものなので放っておきます。読む手段
+    # (OP_GETCONST) が無いため、使おうとすれば未知のオペコードで止まります。
+    def set_constant(name, sym_name)
+      line "Z3 = #{operand(sym_name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
+      line "Z4 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z5 = #{layout.fixed_device_name}0:Z4   ' シンボル種別"
+      if_("Z5 = #{SYMBOL_KIND_SETTING}") do
+        line "Z6 = #{layout.fixed_device_name}0:Z3   ' 設定番号"
+        src = reg_slot(name)
+        if_("Z6 = #{SETTING_STR_FILL}") do
+          note "固定長でデバイスへ書いたときの余りを埋めるバイト"
+          line "#{state(layout.str_fill_addr)} = #{src.value}"
+        end
+      end
     end
 
     # --- ハッシュ ---

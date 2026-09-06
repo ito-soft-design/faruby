@@ -784,14 +784,12 @@ module FaRuby
     #
     # ビットデバイスに文字列を書く意味は無く、書けたとしてもビット単位の
     # 読み書きになって表示器から読めません。
-    STRING_DEVICE_TYPES = [DEVICE_TYPE_EM, DEVICE_TYPE_DM, DEVICE_TYPE_ZF].freeze
-
     def self.check_string_support(device_name, device_type, access_type)
       return unless access_type && access_type >= VmConstants::ACCESS_STR
-      return if STRING_DEVICE_TYPES.include?(device_type)
+      return if VmConstants::STRING_DEVICE_TYPES.include?(device_type)
 
       raise CodegenError, "#{device_name} には文字列を書けません " \
-                          "(#{STRING_DEVICE_TYPES.size} 種のワードデバイスのみ)"
+                          "(EM / DM / ZF のみ)"
     end
 
     # ソースの文字コードを決める (マジックコメント。無ければ UTF-8)

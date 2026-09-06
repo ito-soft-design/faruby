@@ -321,6 +321,20 @@ module FaRuby
         vm.new_array(:a, :b, :c, HEAP_ERROR)
       end
 
+      # --- 文字列 ---
+      #
+      # OP_STRING は毎回複製する。Ruby の文字列は変更できるので、同じリテラルを
+      # 2 回書けば別のものになる。
+      defs << OpcodeDef.new(0x51, "R[a] = pool[b] の複製 (文字列)") do |vm|
+        vm.new_string(:a, :b, HEAP_ERROR)
+      end
+
+      # faRuby の設定 (FARUBY_ で始まる定数) だけを見る。
+      # それ以外の定数は利用者のものなので何もしない。
+      defs << OpcodeDef.new(0x1E, "FARUBY_ の設定なら VM 状態へ書く") do |vm|
+        vm.set_constant(:a, :b)
+      end
+
       # --- ハッシュ ---
       #
       # 実体は配列 2 本 (鍵と値)。専用のプールを作らず、配列のスロットを

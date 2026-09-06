@@ -95,6 +95,12 @@ module FaRuby
     DEVICE_TYPE_T  = 8
     DEVICE_TYPE_C  = 9
 
+    # 文字列を書けるデバイス
+    #
+    # ビットデバイスに文字列を書く意味は無く、書けたとしてもビット単位の
+    # 読み書きになって表示器から読めません。
+    STRING_DEVICE_TYPES = [DEVICE_TYPE_EM, DEVICE_TYPE_DM, DEVICE_TYPE_ZF].freeze
+
     # --- ワードデバイスのアクセス幅 ---
     #
     #   $DM100   → ACCESS_S  (.S)  16ビット符号付き ※既定
