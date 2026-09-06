@@ -374,6 +374,27 @@ module FaRuby
       end_block
     end
 
+    # R[a] = R[a] + R[a+1]
+    #
+    # 文字列どうしなら連結します。**判定は整数どうしの枝の中**に置きます。
+    # 足し算は最も多く通る経路なので、手前に比較を足すと全体が遅くなります。
+    def set_reg_add(name, heap_code)
+      dest = reg_slot(name)
+      rhs = reg_next_slot(name)
+
+      numeric_dispatch(dest, rhs, rhs_tag: rhs.tag) do |kind, l, r|
+        if kind == :float
+          line "#{dest.float} = #{binop(:add, l, r)}"
+          line "#{dest.tag} = #{TT_FLOAT}"
+        else
+          if_else_block("#{dest.tag} = #{TT_STRING}") { add_strings(dest, rhs, heap_code) }
+          line "#{dest.value} = #{binop(:add, l, r)}"
+          line "#{dest.tag} = #{TT_INTEGER}"
+          end_block
+        end
+      end
+    end
+
     # R[a] = R[a] <op> R[a+1] / R[a] <op> 即値
     def set_reg_arith(name, op, immediate: nil)
       dest = reg_slot(name)
@@ -441,7 +462,12 @@ module FaRuby
         end_block
       end
       if_(cmp(:eq, lhs.tag, rhs.tag)) do
+        if_else_block(cmp(:eq, lhs.tag, const(TT_STRING))) do
+          compare_string_content(lhs.value, rhs.value)
+          if_("#{str_flag} = 1") { line "#{scratch_lo} = 1" }
+        end
         if_(cmp(:eq, lhs.value, rhs.value)) { line "#{scratch_lo} = 1" }
+        end_block
       end
       end_block
 
@@ -1011,6 +1037,174 @@ module FaRuby
       line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
     end
 
+    # --- 文字列の中身を比べる ---
+    #
+    # スロット番号だけを比べると、同じ内容が別のスロットにあるときに
+    # 等しくなりません。**Ruby の文字列は中身で比べます。**
+    #
+    # 並びが揃っている (1 ワード 2 バイト、奇数バイトの余りは 0) ので、
+    # バイト数が同じならワード単位で比べられます。回数はバイト数の半分です。
+
+    def str_index = state(layout.str_index_addr)
+    def str_flag  = state(layout.str_flag_addr)
+    def str_temp  = state(layout.str_temp_addr)
+    def str_limit = state(layout.str_limit_addr)
+    def str_saved_z = state(layout.str_saved_z_addr)
+
+    # スロット番号の式からスロットの見出しを Z3 に置く
+    def string_slot_into_z3(slot_number)
+      line "Z3 = #{slot_number}"
+      line "Z3 = Z3 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+    end
+
+    # 2 つの文字列の中身が同じなら str_flag に 1、違えば 0 を置く
+    #
+    # **Z3 を借りて返します。** 住所の計算にインデックスレジスタが要りますが、
+    # `OP_SETIDX` は Z3 に書き込む値を載せているため、勝手に潰せません。
+    # 借りるのは 1 本だけで、残りの作業は VM 状態の空きワードで行います。
+    # FOR のループ変数もデバイスにできるので、これで足ります。
+    def compare_string_content(x_value, y_value)
+      note "文字列は中身で比べる。スロット番号ではない"
+      note "Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため"
+      line "#{str_saved_z} = Z3"
+      line "#{str_flag} = 0"
+      string_slot_into_z3(x_value)
+      line "#{str_temp} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3   ' バイト数"
+      string_slot_into_z3(y_value)
+      if_("#{str_temp} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3") do
+        note "バイト数が同じ。ここから中身を見る"
+        line "#{str_flag} = 1"
+        line "#{str_limit} = #{str_temp} + 1"
+        line "#{str_limit} = #{str_limit} / 2   ' ワード数"
+        if_("#{str_limit} > 0") do
+          line "#{str_limit} = #{str_limit} - 1"
+          line "FOR #{str_index} = 0 TO #{str_limit}"
+          indent
+          string_slot_into_z3(x_value)
+          line "Z3 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "#{str_temp} = #{layout.device_name}0:Z3"
+          string_slot_into_z3(y_value)
+          line "Z3 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          if_("#{str_temp} <> #{layout.device_name}0:Z3") { line "#{str_flag} = 0" }
+          dedent
+          line "NEXT"
+        end
+      end
+      note "借りた Z3 を返す"
+      line "Z3 = #{str_saved_z}"
+    end
+
+    # --- 文字列の継ぎ足し ---
+
+    # 文字列スロットの見出しを Z に置く
+    def string_header_into(z, slot_number)
+      line "Z#{z} = #{slot_number}"
+      line "Z#{z} = Z#{z} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+    end
+
+    # Z3 の文字列の後ろへ Z4 の文字列を継ぎ足す
+    #
+    # 長さは scratch32 (継ぎ足す先) と scratch32_b (継ぎ足す元) に置いてから
+    # 呼びます。**Z1・Z2 は使いません。** 呼ぶ側がレジスタを載せたままのため、
+    # 作業には Z5-Z8 と VM 状態の空きワードを使います。
+    #
+    # 継ぎ足す先の長さが奇数だとワードの途中から始まるので、**バイト単位**で
+    # 書きます。偶数の位置に書くときは下位バイトを 0 にしておき、次のバイトか
+    # 詰め物がそこに入ります。
+    def append_string_bytes
+      if_("#{scratch32_b} > 0") do
+        line "Z6 = #{scratch32_b}"
+        line "Z6 = Z6 - 1"
+        line "FOR Z5 = 0 TO Z6"
+        indent
+        note "継ぎ足す元のバイトを 1 つ取り出す"
+        line "Z7 = Z5 / 2"
+        line "Z8 = Z7 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z8 = #{layout.device_name}0:Z8"
+        line "Z7 = Z7 * 2"
+        if_else_block("Z5 = Z7") { line "Z8 = Z8 / 256   ' 偶数の位置は上位バイト" }
+        line "Z7 = Z8 / 256"
+        line "Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト"
+        end_block
+        note "書き先の位置 (継ぎ足す先の長さ + 何バイト目か)"
+        line "#{str_temp} = #{scratch32} + Z5"
+        line "Z7 = #{str_temp}"
+        line "Z7 = Z7 / 2"
+        line "Z7 = Z7 + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{str_limit} = #{str_temp} / 2"
+        line "#{str_limit} = #{str_limit} * 2"
+        if_else_block("#{str_temp} = #{str_limit}") do
+          note "偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)"
+          line "#{layout.device_name}0:Z7 = Z8 * 256"
+        end
+        note "奇数。上位バイトを残して下位に入れる"
+        line "#{str_limit} = #{layout.device_name}0:Z7"
+        line "#{str_limit} = #{str_limit} / 256"
+        line "#{layout.device_name}0:Z7 = #{str_limit} * 256 + Z8"
+        end_block
+        dedent
+        line "NEXT"
+      end
+      note "長さを更新する"
+      line "#{scratch32} = #{scratch32} + #{scratch32_b}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3 = #{scratch32}"
+    end
+
+    # R[a] = R[a] + R[a+1] (OP_STRCAT)。**継ぎ足す先をそのまま伸ばす**
+    def concat_string(name, type_code, heap_code)
+      dest = reg_slot(name)
+      src = reg_next_slot(name)
+      if_("#{dest.tag} <> #{TT_STRING}") { vm_error(type_code) }
+      if_("#{src.tag} <> #{TT_STRING}") { vm_error(type_code) }
+      string_header_into(3, dest.value)
+      string_header_into(4, src.value)
+      line "#{scratch32} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4"
+      note "1 スロットに収まること"
+      line "Z5 = #{scratch32} + #{scratch32_b}"
+      if_("Z5 > #{layout.max_string_bytes}") { vm_error(heap_code) }
+      append_string_bytes
+    end
+
+    # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
+    def add_strings(dest, rhs, heap_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      string_header_into(4, dest.value)
+      line "#{scratch32} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4"
+      string_header_into(5, rhs.value)
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z5"
+      note "1 スロットに収まること"
+      line "Z6 = #{scratch32} + #{scratch32_b}"
+      if_("Z6 > #{layout.max_string_bytes}") { vm_error(heap_code) }
+
+      note "新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま"
+      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z3 = #{scratch32}"
+      line "#{str_limit} = #{scratch32} + 1"
+      line "#{str_limit} = #{str_limit} / 2"
+      if_("#{str_limit} > 0") do
+        line "#{str_limit} = #{str_limit} - 1"
+        line "FOR #{str_index} = 0 TO #{str_limit}"
+        indent
+        line "Z7 = #{str_index} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z8 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{layout.device_name}0:Z8 = #{layout.device_name}0:Z7"
+        dedent
+        line "NEXT"
+      end
+
+      note "右側を継ぎ足す。Z4 を継ぎ足す元にする"
+      line "Z4 = Z5"
+      append_string_bytes
+
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
     # 定数への代入 (OP_SETCONST)
     #
     # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書きます。
@@ -1132,7 +1326,13 @@ module FaRuby
           line "Z7 = Z6 * #{SLOT_WORDS} + Z#{Z_HASH_KEYS} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
           element = slot_on(7)
           if_("#{element.tag} = #{key.tag}") do
+            if_else_block("#{key.tag} = #{TT_STRING}") do
+              note "文字列の鍵は中身で照合する。スロットが違っても同じ鍵"
+              compare_string_content(element.value, key.value)
+              if_("#{str_flag} = 1") { line "#{scratch32} = Z6" }
+            end
             if_("#{element.value} = #{key.value}") { line "#{scratch32} = Z6" }
+            end_block
           end
         end
         dedent

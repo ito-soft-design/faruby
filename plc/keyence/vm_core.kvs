@@ -1290,8 +1290,47 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' 最初に一致したものを採る
                                 Z7 = Z6 * 4 + Z4 + 2
                                 IF EM0:Z7 = EM0:Z2 THEN
-                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
-                                        EM16.L:Z9 = Z6
+                                    IF EM0:Z2 = 7 THEN
+                                        ' 文字列の鍵は中身で照合する。スロットが違っても同じ鍵
+                                        ' 文字列は中身で比べる。スロット番号ではない
+                                        ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                        EM46:Z9 = Z3
+                                        EM43:Z9 = 0
+                                        Z3 = EM1.L:Z7
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        EM44:Z9 = EM0:Z3   ' バイト数
+                                        Z3 = EM1.L:Z2
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        IF EM44:Z9 = EM0:Z3 THEN
+                                            ' バイト数が同じ。ここから中身を見る
+                                            EM43:Z9 = 1
+                                            EM45:Z9 = EM44:Z9 + 1
+                                            EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                            IF EM45:Z9 > 0 THEN
+                                                EM45:Z9 = EM45:Z9 - 1
+                                                FOR EM42:Z9 = 0 TO EM45:Z9
+                                                    Z3 = EM1.L:Z7
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    EM44:Z9 = EM0:Z3
+                                                    Z3 = EM1.L:Z2
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    IF EM44:Z9 <> EM0:Z3 THEN
+                                                        EM43:Z9 = 0
+                                                    END IF
+                                                NEXT
+                                            END IF
+                                        END IF
+                                        ' 借りた Z3 を返す
+                                        Z3 = EM46:Z9
+                                        IF EM43:Z9 = 1 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
+                                    ELSE
+                                        IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
                                     END IF
                                 END IF
                             END IF
@@ -1581,8 +1620,47 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' 最初に一致したものを採る
                                 Z7 = Z6 * 4 + Z4 + 2
                                 IF EM0:Z7 = EM0:Z2 THEN
-                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
-                                        EM16.L:Z9 = Z6
+                                    IF EM0:Z2 = 7 THEN
+                                        ' 文字列の鍵は中身で照合する。スロットが違っても同じ鍵
+                                        ' 文字列は中身で比べる。スロット番号ではない
+                                        ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                        EM46:Z9 = Z3
+                                        EM43:Z9 = 0
+                                        Z3 = EM1.L:Z7
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        EM44:Z9 = EM0:Z3   ' バイト数
+                                        Z3 = EM1.L:Z2
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        IF EM44:Z9 = EM0:Z3 THEN
+                                            ' バイト数が同じ。ここから中身を見る
+                                            EM43:Z9 = 1
+                                            EM45:Z9 = EM44:Z9 + 1
+                                            EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                            IF EM45:Z9 > 0 THEN
+                                                EM45:Z9 = EM45:Z9 - 1
+                                                FOR EM42:Z9 = 0 TO EM45:Z9
+                                                    Z3 = EM1.L:Z7
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    EM44:Z9 = EM0:Z3
+                                                    Z3 = EM1.L:Z2
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    IF EM44:Z9 <> EM0:Z3 THEN
+                                                        EM43:Z9 = 0
+                                                    END IF
+                                                NEXT
+                                            END IF
+                                        END IF
+                                        ' 借りた Z3 を返す
+                                        Z3 = EM46:Z9
+                                        IF EM43:Z9 = 1 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
+                                    ELSE
+                                        IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
                                     END IF
                                 END IF
                             END IF
@@ -1830,8 +1908,46 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             END IF
                         ELSE
                             IF EM0:Z1 = EM0:Z2 THEN
-                                IF EM1.L:Z1 = EM1.L:Z2 THEN
-                                    EM16:Z9 = 1
+                                IF EM0:Z1 = 7 THEN
+                                    ' 文字列は中身で比べる。スロット番号ではない
+                                    ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                    EM46:Z9 = Z3
+                                    EM43:Z9 = 0
+                                    Z3 = EM1.L:Z1
+                                    Z3 = Z3 * 50 + 992 + Z9
+                                    EM44:Z9 = EM0:Z3   ' バイト数
+                                    Z3 = EM1.L:Z2
+                                    Z3 = Z3 * 50 + 992 + Z9
+                                    IF EM44:Z9 = EM0:Z3 THEN
+                                        ' バイト数が同じ。ここから中身を見る
+                                        EM43:Z9 = 1
+                                        EM45:Z9 = EM44:Z9 + 1
+                                        EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                        IF EM45:Z9 > 0 THEN
+                                            EM45:Z9 = EM45:Z9 - 1
+                                            FOR EM42:Z9 = 0 TO EM45:Z9
+                                                Z3 = EM1.L:Z1
+                                                Z3 = Z3 * 50 + 992 + Z9
+                                                Z3 = EM42:Z9 + Z3 + 2
+                                                EM44:Z9 = EM0:Z3
+                                                Z3 = EM1.L:Z2
+                                                Z3 = Z3 * 50 + 992 + Z9
+                                                Z3 = EM42:Z9 + Z3 + 2
+                                                IF EM44:Z9 <> EM0:Z3 THEN
+                                                    EM43:Z9 = 0
+                                                END IF
+                                            NEXT
+                                        END IF
+                                    END IF
+                                    ' 借りた Z3 を返す
+                                    Z3 = EM46:Z9
+                                    IF EM43:Z9 = 1 THEN
+                                        EM16:Z9 = 1
+                                    END IF
+                                ELSE
+                                    IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                        EM16:Z9 = 1
+                                    END IF
                                 END IF
                             END IF
                         END IF
@@ -1993,8 +2109,47 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     ' 最初に一致したものを採る
                                     Z7 = Z6 * 4 + Z4 + 2
                                     IF EM0:Z7 = EM0:Z2 THEN
-                                        IF EM1.L:Z7 = EM1.L:Z2 THEN
-                                            EM16.L:Z9 = Z6
+                                        IF EM0:Z2 = 7 THEN
+                                            ' 文字列の鍵は中身で照合する。スロットが違っても同じ鍵
+                                            ' 文字列は中身で比べる。スロット番号ではない
+                                            ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                            EM46:Z9 = Z3
+                                            EM43:Z9 = 0
+                                            Z3 = EM1.L:Z7
+                                            Z3 = Z3 * 50 + 992 + Z9
+                                            EM44:Z9 = EM0:Z3   ' バイト数
+                                            Z3 = EM1.L:Z2
+                                            Z3 = Z3 * 50 + 992 + Z9
+                                            IF EM44:Z9 = EM0:Z3 THEN
+                                                ' バイト数が同じ。ここから中身を見る
+                                                EM43:Z9 = 1
+                                                EM45:Z9 = EM44:Z9 + 1
+                                                EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                                IF EM45:Z9 > 0 THEN
+                                                    EM45:Z9 = EM45:Z9 - 1
+                                                    FOR EM42:Z9 = 0 TO EM45:Z9
+                                                        Z3 = EM1.L:Z7
+                                                        Z3 = Z3 * 50 + 992 + Z9
+                                                        Z3 = EM42:Z9 + Z3 + 2
+                                                        EM44:Z9 = EM0:Z3
+                                                        Z3 = EM1.L:Z2
+                                                        Z3 = Z3 * 50 + 992 + Z9
+                                                        Z3 = EM42:Z9 + Z3 + 2
+                                                        IF EM44:Z9 <> EM0:Z3 THEN
+                                                            EM43:Z9 = 0
+                                                        END IF
+                                                    NEXT
+                                                END IF
+                                            END IF
+                                            ' 借りた Z3 を返す
+                                            Z3 = EM46:Z9
+                                            IF EM43:Z9 = 1 THEN
+                                                EM16.L:Z9 = Z6
+                                            END IF
+                                        ELSE
+                                            IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                                EM16.L:Z9 = Z6
+                                            END IF
                                         END IF
                                     END IF
                                 END IF
@@ -2252,8 +2407,46 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                     ELSE
                         IF EM0:Z1 = EM0:Z2 THEN
-                            IF EM1.L:Z1 = EM1.L:Z2 THEN
-                                EM16:Z9 = 1
+                            IF EM0:Z1 = 7 THEN
+                                ' 文字列は中身で比べる。スロット番号ではない
+                                ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                EM46:Z9 = Z3
+                                EM43:Z9 = 0
+                                Z3 = EM1.L:Z1
+                                Z3 = Z3 * 50 + 992 + Z9
+                                EM44:Z9 = EM0:Z3   ' バイト数
+                                Z3 = EM1.L:Z2
+                                Z3 = Z3 * 50 + 992 + Z9
+                                IF EM44:Z9 = EM0:Z3 THEN
+                                    ' バイト数が同じ。ここから中身を見る
+                                    EM43:Z9 = 1
+                                    EM45:Z9 = EM44:Z9 + 1
+                                    EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                    IF EM45:Z9 > 0 THEN
+                                        EM45:Z9 = EM45:Z9 - 1
+                                        FOR EM42:Z9 = 0 TO EM45:Z9
+                                            Z3 = EM1.L:Z1
+                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = EM42:Z9 + Z3 + 2
+                                            EM44:Z9 = EM0:Z3
+                                            Z3 = EM1.L:Z2
+                                            Z3 = Z3 * 50 + 992 + Z9
+                                            Z3 = EM42:Z9 + Z3 + 2
+                                            IF EM44:Z9 <> EM0:Z3 THEN
+                                                EM43:Z9 = 0
+                                            END IF
+                                        NEXT
+                                    END IF
+                                END IF
+                                ' 借りた Z3 を返す
+                                Z3 = EM46:Z9
+                                IF EM43:Z9 = 1 THEN
+                                    EM16:Z9 = 1
+                                END IF
+                            ELSE
+                                IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                    EM16:Z9 = 1
+                                END IF
                             END IF
                         END IF
                     END IF
@@ -2415,8 +2608,47 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' 最初に一致したものを採る
                                 Z7 = Z6 * 4 + Z4 + 2
                                 IF EM0:Z7 = EM0:Z2 THEN
-                                    IF EM1.L:Z7 = EM1.L:Z2 THEN
-                                        EM16.L:Z9 = Z6
+                                    IF EM0:Z2 = 7 THEN
+                                        ' 文字列の鍵は中身で照合する。スロットが違っても同じ鍵
+                                        ' 文字列は中身で比べる。スロット番号ではない
+                                        ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                                        EM46:Z9 = Z3
+                                        EM43:Z9 = 0
+                                        Z3 = EM1.L:Z7
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        EM44:Z9 = EM0:Z3   ' バイト数
+                                        Z3 = EM1.L:Z2
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        IF EM44:Z9 = EM0:Z3 THEN
+                                            ' バイト数が同じ。ここから中身を見る
+                                            EM43:Z9 = 1
+                                            EM45:Z9 = EM44:Z9 + 1
+                                            EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                            IF EM45:Z9 > 0 THEN
+                                                EM45:Z9 = EM45:Z9 - 1
+                                                FOR EM42:Z9 = 0 TO EM45:Z9
+                                                    Z3 = EM1.L:Z7
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    EM44:Z9 = EM0:Z3
+                                                    Z3 = EM1.L:Z2
+                                                    Z3 = Z3 * 50 + 992 + Z9
+                                                    Z3 = EM42:Z9 + Z3 + 2
+                                                    IF EM44:Z9 <> EM0:Z3 THEN
+                                                        EM43:Z9 = 0
+                                                    END IF
+                                                NEXT
+                                            END IF
+                                        END IF
+                                        ' 借りた Z3 を返す
+                                        Z3 = EM46:Z9
+                                        IF EM43:Z9 = 1 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
+                                    ELSE
+                                        IF EM1.L:Z7 = EM1.L:Z2 THEN
+                                            EM16.L:Z9 = Z6
+                                        END IF
                                     END IF
                                 END IF
                             END IF
@@ -2922,8 +3154,84 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.F:Z1 = EM1.L:Z1 + EM1.F:Z2
                         EM0:Z1 = 5
                     ELSE
-                        EM1.L:Z1 = EM1.L:Z1 + EM1.L:Z2
-                        EM0:Z1 = 4
+                        IF EM0:Z1 = 7 THEN
+                            ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                            IF EM39:Z9 >= 16 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            Z4 = EM1.L:Z1
+                            Z4 = Z4 * 50 + 992 + Z9
+                            EM16.L:Z9 = EM0:Z4
+                            Z5 = EM1.L:Z2
+                            Z5 = Z5 * 50 + 992 + Z9
+                            EM18.L:Z9 = EM0:Z5
+                            ' 1 スロットに収まること
+                            Z6 = EM16.L:Z9 + EM18.L:Z9
+                            IF Z6 > 96 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            ' 新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま
+                            Z3 = EM39:Z9 * 50 + 992 + Z9
+                            EM0:Z3 = EM16.L:Z9
+                            EM45:Z9 = EM16.L:Z9 + 1
+                            EM45:Z9 = EM45:Z9 / 2
+                            IF EM45:Z9 > 0 THEN
+                                EM45:Z9 = EM45:Z9 - 1
+                                FOR EM42:Z9 = 0 TO EM45:Z9
+                                    Z7 = EM42:Z9 + Z4 + 2
+                                    Z8 = EM42:Z9 + Z3 + 2
+                                    EM0:Z8 = EM0:Z7
+                                NEXT
+                            END IF
+                            ' 右側を継ぎ足す。Z4 を継ぎ足す元にする
+                            Z4 = Z5
+                            IF EM18.L:Z9 > 0 THEN
+                                Z6 = EM18.L:Z9
+                                Z6 = Z6 - 1
+                                FOR Z5 = 0 TO Z6
+                                    ' 継ぎ足す元のバイトを 1 つ取り出す
+                                    Z7 = Z5 / 2
+                                    Z8 = Z7 + Z4 + 2
+                                    Z8 = EM0:Z8
+                                    Z7 = Z7 * 2
+                                    IF Z5 = Z7 THEN
+                                        Z8 = Z8 / 256   ' 偶数の位置は上位バイト
+                                    ELSE
+                                        Z7 = Z8 / 256
+                                        Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト
+                                    END IF
+                                    ' 書き先の位置 (継ぎ足す先の長さ + 何バイト目か)
+                                    EM44:Z9 = EM16.L:Z9 + Z5
+                                    Z7 = EM44:Z9
+                                    Z7 = Z7 / 2
+                                    Z7 = Z7 + Z3 + 2
+                                    EM45:Z9 = EM44:Z9 / 2
+                                    EM45:Z9 = EM45:Z9 * 2
+                                    IF EM44:Z9 = EM45:Z9 THEN
+                                        ' 偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)
+                                        EM0:Z7 = Z8 * 256
+                                    ELSE
+                                        ' 奇数。上位バイトを残して下位に入れる
+                                        EM45:Z9 = EM0:Z7
+                                        EM45:Z9 = EM45:Z9 / 256
+                                        EM0:Z7 = EM45:Z9 * 256 + Z8
+                                    END IF
+                                NEXT
+                            END IF
+                            ' 長さを更新する
+                            EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
+                            EM0:Z3 = EM16.L:Z9
+                            EM1.L:Z1 = EM39:Z9   ' スロット番号
+                            EM0:Z1 = 7
+                            EM39:Z9 = EM39:Z9 + 1
+                        ELSE
+                            EM1.L:Z1 = EM1.L:Z1 + EM1.L:Z2
+                            EM0:Z1 = 4
+                        END IF
                     END IF
                 END IF
 
@@ -3161,8 +3469,46 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     END IF
                 ELSE
                     IF EM0:Z1 = EM0:Z2 THEN
-                        IF EM1.L:Z1 = EM1.L:Z2 THEN
-                            EM16:Z9 = 1
+                        IF EM0:Z1 = 7 THEN
+                            ' 文字列は中身で比べる。スロット番号ではない
+                            ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+                            EM46:Z9 = Z3
+                            EM43:Z9 = 0
+                            Z3 = EM1.L:Z1
+                            Z3 = Z3 * 50 + 992 + Z9
+                            EM44:Z9 = EM0:Z3   ' バイト数
+                            Z3 = EM1.L:Z2
+                            Z3 = Z3 * 50 + 992 + Z9
+                            IF EM44:Z9 = EM0:Z3 THEN
+                                ' バイト数が同じ。ここから中身を見る
+                                EM43:Z9 = 1
+                                EM45:Z9 = EM44:Z9 + 1
+                                EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                                IF EM45:Z9 > 0 THEN
+                                    EM45:Z9 = EM45:Z9 - 1
+                                    FOR EM42:Z9 = 0 TO EM45:Z9
+                                        Z3 = EM1.L:Z1
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = EM42:Z9 + Z3 + 2
+                                        EM44:Z9 = EM0:Z3
+                                        Z3 = EM1.L:Z2
+                                        Z3 = Z3 * 50 + 992 + Z9
+                                        Z3 = EM42:Z9 + Z3 + 2
+                                        IF EM44:Z9 <> EM0:Z3 THEN
+                                            EM43:Z9 = 0
+                                        END IF
+                                    NEXT
+                                END IF
+                            END IF
+                            ' 借りた Z3 を返す
+                            Z3 = EM46:Z9
+                            IF EM43:Z9 = 1 THEN
+                                EM16:Z9 = 1
+                            END IF
+                        ELSE
+                            IF EM1.L:Z1 = EM1.L:Z2 THEN
+                                EM16:Z9 = 1
+                            END IF
                         END IF
                     END IF
                 END IF
@@ -3477,6 +3823,73 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 EM1.L:Z1 = EM39:Z9   ' スロット番号
                 EM0:Z1 = 7
                 EM39:Z9 = EM39:Z9 + 1
+
+            ELSE IF EM6:Z9 = 82 THEN
+                ' OP_STRCAT (B): R[a] = R[a] + R[a+1] (文字列を継ぎ足す)
+                Z1 = EM0:Z9 + EM33:Z9
+                EM7:Z9 = FM0:Z1
+                EM0:Z9 = EM0:Z9 + 1
+                Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+                Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+                IF EM0:Z1 <> 7 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 4
+                    BREAK
+                END IF
+                IF EM0:Z2 <> 7 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 4
+                    BREAK
+                END IF
+                Z3 = EM1.L:Z1
+                Z3 = Z3 * 50 + 992 + Z9
+                Z4 = EM1.L:Z2
+                Z4 = Z4 * 50 + 992 + Z9
+                EM16.L:Z9 = EM0:Z3
+                EM18.L:Z9 = EM0:Z4
+                ' 1 スロットに収まること
+                Z5 = EM16.L:Z9 + EM18.L:Z9
+                IF Z5 > 96 THEN
+                    EM1:Z9 = 3
+                    EM2:Z9 = 10
+                    BREAK
+                END IF
+                IF EM18.L:Z9 > 0 THEN
+                    Z6 = EM18.L:Z9
+                    Z6 = Z6 - 1
+                    FOR Z5 = 0 TO Z6
+                        ' 継ぎ足す元のバイトを 1 つ取り出す
+                        Z7 = Z5 / 2
+                        Z8 = Z7 + Z4 + 2
+                        Z8 = EM0:Z8
+                        Z7 = Z7 * 2
+                        IF Z5 = Z7 THEN
+                            Z8 = Z8 / 256   ' 偶数の位置は上位バイト
+                        ELSE
+                            Z7 = Z8 / 256
+                            Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト
+                        END IF
+                        ' 書き先の位置 (継ぎ足す先の長さ + 何バイト目か)
+                        EM44:Z9 = EM16.L:Z9 + Z5
+                        Z7 = EM44:Z9
+                        Z7 = Z7 / 2
+                        Z7 = Z7 + Z3 + 2
+                        EM45:Z9 = EM44:Z9 / 2
+                        EM45:Z9 = EM45:Z9 * 2
+                        IF EM44:Z9 = EM45:Z9 THEN
+                            ' 偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)
+                            EM0:Z7 = Z8 * 256
+                        ELSE
+                            ' 奇数。上位バイトを残して下位に入れる
+                            EM45:Z9 = EM0:Z7
+                            EM45:Z9 = EM45:Z9 / 256
+                            EM0:Z7 = EM45:Z9 * 256 + Z8
+                        END IF
+                    NEXT
+                END IF
+                ' 長さを更新する
+                EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
+                EM0:Z3 = EM16.L:Z9
 
             ELSE IF EM6:Z9 = 83 THEN
                 ' OP_HASH (BB): R[a] = { R[a] => R[a+1], .. } (b 組)

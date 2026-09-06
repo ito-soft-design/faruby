@@ -59,6 +59,15 @@ class TestStrings < Minitest::Test
     (0...count).map { |i| dm.read_u16(base + i) }
   end
 
+  # $DM0 を 16 ビット符号付きで読んで突き合わせる
+  def assert_result(expected, source)
+    sim = run_source(source)
+    assert_finished sim
+    value = sim.devices[DEVICE_TYPE_DM].read_u16(0)
+    value -= 65_536 if value > 32_767
+    assert_equal expected, value
+  end
+
   def assert_finished(sim)
     assert_equal VM_FINISHED, status(sim), "実行が完了しなかった (error=#{error(sim)})"
   end
@@ -218,7 +227,160 @@ class TestStrings < Minitest::Test
     assert_equal [0x6162, 0x6300, 0x0000], words(sim, 800, 3)
   end
 
-  # === 弾くもの ===
+# === 中身で比べる ===
+#
+# スロット番号だけを比べると、同じ内容が別のスロットにあるときに等しくならない
+
+def test_the_same_content_in_two_slots_is_equal
+  assert_result 1, <<~RUBY
+    s = "hello"
+    t = "hello"
+    $DM0 = 0
+    if s == t
+      $DM0 = 1
+    end
+  RUBY
+end
+
+def test_different_content_of_the_same_length_is_not_equal
+  assert_result 0, <<~RUBY
+    $DM0 = 0
+    if "hello" == "hellp"
+      $DM0 = 1
+    end
+  RUBY
+end
+
+def test_a_different_length_is_not_equal
+  assert_result 0, <<~RUBY
+    $DM0 = 0
+    if "hello" == "hell"
+      $DM0 = 1
+    end
+  RUBY
+end
+
+def test_not_equal_is_the_negation
+  assert_result 1, <<~RUBY
+    $DM0 = 0
+    if "a" != "b"
+      $DM0 = 1
+    end
+  RUBY
+end
+
+# 型が違えば中身を見るまでもない
+def test_a_string_is_not_equal_to_a_number
+  assert_result 0, <<~RUBY
+    $DM0 = 0
+    if "5" == 5
+      $DM0 = 1
+    end
+  RUBY
+end
+
+# 日本語も同じ。バイト列をそのまま比べる
+def test_multibyte_content
+  assert_result 1, <<~RUBY
+    $DM0 = 0
+    if "あい" == "あい"
+      $DM0 = 1
+    end
+  RUBY
+end
+
+# === 文字列の鍵 ===
+
+def test_a_string_key_is_found_by_content
+  assert_result 8, %($DM0 = { "x" => 7, "y" => 8 }["y"]\n)
+end
+
+def test_key_p_with_a_string
+  assert_result 1, <<~RUBY
+    h = { "x" => 7 }
+    $DM0 = 0
+    if h.key?("x")
+      $DM0 = 1
+    end
+  RUBY
+end
+
+def test_writing_an_existing_string_key_replaces_the_value
+  assert_result 11, <<~RUBY
+    h = { "x" => 7 }
+    h["x"] = 11
+    $DM0 = h["x"]
+  RUBY
+end
+
+def test_a_new_string_key_is_appended
+  assert_result 9, <<~RUBY
+    h = { "x" => 7 }
+    h["z"] = 9
+    $DM0 = h["z"]
+  RUBY
+end
+
+# === 連結 ===
+
+def test_plus_makes_a_new_string
+  sim = run_source(%($DM800 = "ab" + "cd"\n))
+
+  assert_finished sim
+  assert_equal [0x6162, 0x6364], words(sim, 800, 2)
+end
+
+# 継ぎ足す先の長さが奇数だとワードの途中から始まる
+def test_plus_across_a_word_boundary
+  sim = run_source(%($DM800 = "abc" + "de"\n))
+
+  assert_equal [0x6162, 0x6364, 0x6500], words(sim, 800, 3)
+end
+
+# + は左側を変えない。新しいスロットを取る
+def test_plus_leaves_the_left_side_alone
+  sim = run_source(<<~RUBY)
+    a = "ab"
+    b = a + "cd"
+    $DM800 = a
+  RUBY
+
+  assert_equal [0x6162, 0x0000], words(sim, 800, 2)
+end
+
+# 式展開は OP_STRING と OP_STRCAT になる
+def test_interpolation
+  sim = run_source(<<~'RUBY')
+    s = "x"
+    $DM800 = "p#{s}q"
+  RUBY
+
+  assert_equal [0x7078, 0x7100], words(sim, 800, 2)
+end
+
+# 日本語をまたいで継ぎ足す。3 バイト目が次のワードの下位に入る
+def test_concatenating_multibyte_strings
+  sim = run_source(%($DM800 = "あ" + "い"\n))
+
+  assert_equal [0xE381, 0x82E3, 0x8184], words(sim, 800, 3)
+end
+
+def test_concatenating_onto_an_empty_string
+  sim = run_source(%($DM800 = "" + "z"\n))
+
+  assert_equal [0x7A00], words(sim, 800, 1)
+end
+
+# 1 スロットに収まらない連結は止まる
+def test_a_concatenation_past_the_capacity_stops_the_vm
+  half = "a" * (layout.max_string_bytes / 2 + 1)
+  sim = run_source(%($DM800 = "#{half}" + "#{half}"\n))
+
+  assert_equal VM_ERROR, status(sim)
+  assert_equal 10, error(sim)
+end
+
+# === 弾くもの ===
 
   # 文字列の桁 (T) に文字列以外を書こうとした
   def test_a_number_to_a_string_field_stops_the_vm

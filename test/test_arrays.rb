@@ -419,12 +419,30 @@ class TestArrays < Minitest::Test
   # Z1 は配列、Z2 は添字、Z3 は書き込む値が使っている。
   # スロットの見出しをこれらに置くと、値を書く前に壊れる
   def test_the_array_branch_does_not_clobber_the_value_register
+    branch = setidx_branch(TT_ARRAY)
+
+    refute_match(/^\s+Z[123] = /, branch,
+                 "配列の枝が Z1-Z3 を書き換えている")
+  end
+
+  # 文字列の鍵は中身で照合するため、住所の計算に Z3 が要る。
+  # 書き込む値が載っているので、借りたら返さないと代入先が壊れる
+  def test_the_hash_branch_gives_the_value_register_back
+    branch = setidx_branch(TT_HASH)
+    saved = FaRuby::KvsEmitter.new(layout: layout).send(:str_saved_z)
+    writes = branch.scan(/^\s+Z3 = (.+)$/).flatten
+
+    refute_empty writes, "文字列の照合で Z3 を借りているはず"
+    assert_equal saved, writes.last, "最後に Z3 を返していない"
+  end
+
+  # OP_SETIDX の枝を 1 つ取り出す
+  def setidx_branch(tag)
     source = FaRuby::KvsGenerator.new.source
     setidx = source[/' OP_SETIDX .*?\n(.*?)\n            ELSE IF/m, 1]
-    array_branch = setidx[/ELSE IF EM0:Z1 = #{TT_ARRAY} THEN\n(.*)/m, 1]
-
-    refute_match(/^\s+Z[123] = /, array_branch,
-                 "配列の枝が Z1-Z3 を書き換えている")
+    body = setidx[/ELSE IF EM0:Z1 = #{tag} THEN\n(.*)/m, 1]
+    # 次の枝の手前まで
+    body[/\A(.*?)\n                ELSE(?: IF)?\n?/m, 1] || body
   end
 
   # === ハッシュ ===

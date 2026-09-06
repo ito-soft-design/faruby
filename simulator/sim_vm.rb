@@ -97,6 +97,55 @@ module FaRuby
     # 生成コード側はタグを見て .F と .L のどちらの書き方を出すかを選ぶ。
     # ここでは Ruby の値として素直に計算し、実数なら単精度へ丸める。
 
+    # R[a] = R[a] + R[a+1]
+    #
+    # 文字列の判定は生成コードと同じく整数どうしの枝の中で行う。
+    # 実数が絡めば数値の足し算になる (Ruby なら TypeError)
+    def set_reg_add(name, heap_code)
+      index = operand(name)
+      unless float_operand?(index) || float_operand?(index + 1)
+        return concat_new_string(index, heap_code) if read_reg_tag(index) == TT_STRING
+      end
+
+      set_reg_arith(name, :add)
+    end
+
+    # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
+    def concat_new_string(index, heap_code)
+      slot = array_sp
+      return vm_error(heap_code) if slot >= layout.max_arrays
+
+      bytes = string_bytes(read_reg(index)) + string_bytes(read_reg(index + 1))
+      return vm_error(heap_code) if bytes.bytesize > layout.max_string_bytes
+
+      write_string_slot(slot, bytes)
+      write_slot(index, TT_STRING, slot)
+      @em.write_u16(layout.array_sp_addr, slot + 1)
+    end
+
+    # R[a] = R[a] + R[a+1] (OP_STRCAT)。継ぎ足す先をそのまま伸ばす
+    def concat_string(name, type_code, heap_code)
+      index = operand(name)
+      return vm_error(type_code) unless read_reg_tag(index) == TT_STRING
+      return vm_error(type_code) unless read_reg_tag(index + 1) == TT_STRING
+
+      slot = read_reg(index)
+      bytes = string_bytes(slot) + string_bytes(read_reg(index + 1))
+      return vm_error(heap_code) if bytes.bytesize > layout.max_string_bytes
+
+      write_string_slot(slot, bytes)
+    end
+
+    # スロットにバイト列を書く (1 ワード 2 バイト、先の文字が上位、余りは 0)
+    def write_string_slot(slot, bytes)
+      set_array_length(slot, bytes.bytesize)
+      ((bytes.bytesize + 1) / 2).times do |i|
+        hi = bytes.getbyte(i * 2) || 0
+        lo = bytes.getbyte(i * 2 + 1) || 0
+        @em.write_u16(layout.string_word_addr(slot, i), hi * 256 + lo)
+      end
+    end
+
     def set_reg_arith(name, op, immediate: nil)
       index = operand(name)
       lhs = numeric_value(index)
@@ -138,14 +187,34 @@ module FaRuby
     # 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
     def set_reg_eq(name)
       index = operand(name)
-      same =
-        if numeric_tag?(read_reg_tag(index)) && numeric_tag?(read_reg_tag(index + 1))
-          numeric_value(index) == numeric_value(index + 1)
-        else
-          read_reg_tag(index) == read_reg_tag(index + 1) &&
-            read_reg(index) == read_reg(index + 1)
-        end
-      write_bool(index, same)
+      write_bool(index, values_equal?(index, index + 1))
+    end
+
+    # 2 つのレジスタが等しいか (生成コードと同じ規則)
+    #
+    # 数値は型が違っても値で比べる (1 == 1.0 は真)。文字列は中身で比べる。
+    # それ以外は型と値の両方が一致したときだけ (nil == false は偽)。
+    def values_equal?(a, b)
+      return numeric_value(a) == numeric_value(b) if numeric_tag?(read_reg_tag(a)) &&
+                                                     numeric_tag?(read_reg_tag(b))
+      return false unless read_reg_tag(a) == read_reg_tag(b)
+      return string_slots_equal?(read_reg(a), read_reg(b)) if read_reg_tag(a) == TT_STRING
+
+      read_reg(a) == read_reg(b)
+    end
+
+    # 文字列の中身が同じか
+    #
+    # スロット番号だけを比べると、同じ内容が別のスロットにあるときに
+    # 等しくならない。並びが揃っているのでワード単位で比べられる。
+    def string_slots_equal?(x, y)
+      length = array_length(x)
+      return false unless length == array_length(y)
+
+      (0...((length + 1) / 2)).all? do |i|
+        @em.read_u16(layout.string_word_addr(x, i)) ==
+          @em.read_u16(layout.string_word_addr(y, i))
+      end
     end
 
     # R[a] = R[a] / R[a+1]
@@ -260,11 +329,16 @@ module FaRuby
     # 鍵の位置。無ければ nil
     #
     # 一致は型と値の両方。Ruby の Hash も eql? で引くので {1 => :a}[1.0] は nil
-    def find_hash_key(keys, tag, value)
+    def find_hash_key(keys, index)
+      tag = read_reg_tag(index)
+      value = read_reg(index)
       array_length(keys).times do |i|
         addr = layout.array_element_addr(keys, i)
         next unless @em.read_u16(addr + SLOT_TYPE_OFFSET) == tag
-        return i if @em.read_s32(addr + SLOT_VALUE_OFFSET) == value
+
+        other = @em.read_s32(addr + SLOT_VALUE_OFFSET)
+        # 文字列の鍵は中身で照合する。スロットが違っても同じ鍵
+        return i if tag == TT_STRING ? string_slots_equal?(other, value) : other == value
       end
       nil
     end
@@ -272,7 +346,7 @@ module FaRuby
     # R[a] = R[a][R[a+1]] (ハッシュ)。無い鍵は nil
     def load_hash_index(index)
       keys, values = hash_slots(index)
-      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      position = find_hash_key(keys, index + 1)
       return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL)) unless position
 
       addr = layout.array_element_addr(values, position)
@@ -282,7 +356,7 @@ module FaRuby
     # R[a][R[a+1]] = R[a+2] (ハッシュ)
     def store_hash_index(index, heap_code)
       keys, values = hash_slots(index)
-      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      position = find_hash_key(keys, index + 1)
       unless position
         length = array_length(keys)
         return vm_error(heap_code) if length >= layout.max_array_len
@@ -1037,7 +1111,7 @@ module FaRuby
     # R[a].key?(R[a+1])
     def send_key_p(index)
       keys, = hash_slots(index)
-      position = find_hash_key(keys, read_reg_tag(index + 1), read_reg(index + 1))
+      position = find_hash_key(keys, index + 1)
       write_bool(index, !position.nil?)
     end
 
@@ -1074,14 +1148,7 @@ module FaRuby
 
     # 型が違えば等しくない (set_reg_eq の否定)
     def send_ne(index)
-      same =
-        if numeric_tag?(read_reg_tag(index)) && numeric_tag?(read_reg_tag(index + 1))
-          numeric_value(index) == numeric_value(index + 1)
-        else
-          read_reg_tag(index) == read_reg_tag(index + 1) &&
-            read_reg(index) == read_reg(index + 1)
-        end
-      write_bool(index, !same)
+      write_bool(index, !values_equal?(index, index + 1))
     end
 
     # 整数どうしのみ。Ruby の % は商を切り下げた余りで、符号は除数に合う

@@ -451,7 +451,17 @@ module FaRuby
       #
       # 両オペランドの型で振り分ける。実数が絡めば実数演算になり、
       # 整数どうしなら整数演算のまま (32ビット整数は単精度に収まらないため)。
-      { 0x3C => :add, 0x3E => :sub, 0x40 => :mul }.each do |code, op|
+      # 足し算だけは文字列の連結も見る。判定は整数どうしの枝の中に置く
+      defs << OpcodeDef.new(0x3C, "R[a] = R[a] + R[a+1]") do |vm|
+        vm.set_reg_add(:a, HEAP_ERROR)
+      end
+
+      # 式展開 ("x#{s}y") が出す。継ぎ足す先をそのまま伸ばす
+      defs << OpcodeDef.new(0x52, "R[a] = R[a] + R[a+1] (文字列を継ぎ足す)") do |vm|
+        vm.concat_string(:a, METHOD_TYPE_ERROR, HEAP_ERROR)
+      end
+
+      { 0x3E => :sub, 0x40 => :mul }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} R[a+1]") do |vm|
           vm.set_reg_arith(:a, op)
         end

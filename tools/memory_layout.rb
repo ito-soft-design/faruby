@@ -200,6 +200,18 @@ module FaRuby
     OFFSET_STR_ENCODING    = 40
     # 固定長でデバイスへ書いたときの余りを埋めるバイト (FARUBY_STR_FILL)
     OFFSET_STR_FILL        = 41
+    # 文字列の作業用 4 ワード
+    #
+    # 中身を比べたり継ぎ足したりするときの作業場所です。**インデックス
+    # レジスタではなくここを使う**のは、呼ぶ側 (OP_EQ・!=・ハッシュの鍵) で
+    # Z の空きが違い、共通の手順にできないためです。FOR のループ変数は
+    # デバイスでもよいので、Z は住所の計算 1 本だけで足ります。
+    OFFSET_STR_INDEX       = 42
+    OFFSET_STR_FLAG        = 43
+    OFFSET_STR_TEMP        = 44
+    OFFSET_STR_LIMIT       = 45
+    # 借りた Z3 の退避先。OP_SETIDX は Z3 に書き込む値を載せている
+    OFFSET_STR_SAVED_Z     = 46
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -410,6 +422,11 @@ module FaRuby
     def array_sp_addr        = vm_state_base + OFFSET_ARRAY_SP
     def str_encoding_addr    = vm_state_base + OFFSET_STR_ENCODING
     def str_fill_addr        = vm_state_base + OFFSET_STR_FILL
+    def str_index_addr       = vm_state_base + OFFSET_STR_INDEX
+    def str_flag_addr        = vm_state_base + OFFSET_STR_FLAG
+    def str_temp_addr        = vm_state_base + OFFSET_STR_TEMP
+    def str_limit_addr       = vm_state_base + OFFSET_STR_LIMIT
+    def str_saved_z_addr     = vm_state_base + OFFSET_STR_SAVED_Z
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
