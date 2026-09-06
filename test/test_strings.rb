@@ -243,6 +243,19 @@ class TestStrings < Minitest::Test
     refute_match(/^\s+Z6 = /, branch, "ベースアドレスを書き換えている")
   end
 
+  # FOR の中で BREAK すると FOR を抜けるだけで命令ループから出られない。
+  # エラーを書いてもそのまま走り続け、最後に STOP が status を上書きする。
+  # デバイス種別の検査は写しの FOR に入る前に済ませる
+  def test_the_string_write_does_not_break_inside_the_loop
+    source = FaRuby::KvsGenerator.new.source
+    branch = source[/ELSE IF EM0:Z2 = #{TT_STRING} THEN\n(.*?)\n                ELSE\n/m, 1]
+    refute_nil branch, "文字列の書き込みが見つからない"
+
+    inside = branch[/FOR Z\d+ = 0 TO.*?\n\s*NEXT/m]
+    refute_nil inside, "写しの FOR が見つからない"
+    refute_includes inside, "BREAK", "FOR の中で BREAK すると FOR を抜けるだけになる"
+  end
+
   def test_string_opcodes_are_implemented
     codes = FaRuby::OpcodeTable.codes
 

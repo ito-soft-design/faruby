@@ -508,6 +508,10 @@ module FaRuby
     # 並びが同じ (1 ワード 2 バイト、先の文字が上位) なので、中身が 2 バイトとも
     # 揃っているワードはそのまま写します。半端になるのは末尾の 1 ワードだけです。
     def store_string_into_device(slot, error_code)
+      note "文字列を書けるのは #{WORD_DEVICES.map(&:last).join(' / ')} だけ"
+      note "**この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      if_("Z5 > #{DEVICE_TYPE_ZF}") { vm_error(error_code) }
       note "桁数。0 なら終端付き"
       line "Z7 = Z8 / #{ACCESS_STR_LENGTH_SCALE}"
       note "文字列スロットの見出し"
@@ -557,20 +561,21 @@ module FaRuby
         if_("Z1 < #{scratch32}") { line "Z7 = Z7 + Z8" }
         end_block
 
-        note "ワードデバイスへ 1 ワード。文字列は EM / DM / ZF だけ"
+        note "ワードデバイスへ 1 ワード。種別は FOR に入る前に検査済み"
         line "Z1 = Z3 + Z6"
         first = true
+        last = WORD_DEVICES.last
         WORD_DEVICES.each do |type, name|
-          chain_head(first, "Z5 = #{type}")
-          first = false
+          if [type, name] == last
+            line "ELSE"
+          else
+            chain_head(first, "Z5 = #{type}")
+            first = false
+          end
           indent
           line "#{name}0.U:Z1 = Z7"
           dedent
         end
-        line "ELSE"
-        indent
-        vm_error(error_code)
-        dedent
         line "END IF"
         dedent
         line "NEXT"

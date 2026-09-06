@@ -626,6 +626,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM2:Z9 = 22
                     BREAK
                 ELSE IF EM0:Z2 = 7 THEN
+                    ' 文字列を書けるのは EM / DM / ZF だけ
+                    ' **この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで
+                    ' 命令ループから出られず、エラーを書いてもそのまま走り続ける
+                    IF Z5 > 2 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 22
+                        BREAK
+                    END IF
                     ' 桁数。0 なら終端付き
                     Z7 = Z8 / 16
                     ' 文字列スロットの見出し
@@ -676,18 +684,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     Z7 = Z7 + Z8
                                 END IF
                             END IF
-                            ' ワードデバイスへ 1 ワード。文字列は EM / DM / ZF だけ
+                            ' ワードデバイスへ 1 ワード。種別は FOR に入る前に検査済み
                             Z1 = Z3 + Z6
                             IF Z5 = 0 THEN
                                 EM0.U:Z1 = Z7
                             ELSE IF Z5 = 1 THEN
                                 DM0.U:Z1 = Z7
-                            ELSE IF Z5 = 2 THEN
-                                ZF0.U:Z1 = Z7
                             ELSE
-                                EM1:Z9 = 3
-                                EM2:Z9 = 22
-                                BREAK
+                                ZF0.U:Z1 = Z7
                             END IF
                         NEXT
                     END IF
