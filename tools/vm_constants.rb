@@ -225,7 +225,7 @@ module FaRuby
     #
     # 受け付ける型もタグの範囲で表せます。TT_STRING (7)・TT_ARRAY (8)・
     # TT_HASH (9) が隣り合っているため、「文字列と配列」「配列とハッシュ」の
-    # ような組も 1 つの範囲になります。並びは METHOD_RECEIVER_BANDS を参照。
+    # ような組も 1 つの範囲になります。並びは METHOD_RECEIVER_GROUPS を参照。
     METHOD_NONE    = 0   # 未対応 (実行時エラー)
     METHOD_NE      = 1   # !=
     METHOD_NOT     = 2   # !
@@ -246,18 +246,18 @@ module FaRuby
     METHOD_KEYS    = 17
     METHOD_VALUES  = 18
 
-    # レシーバが数値でなければならない範囲 (帯の先頭)
+    # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
     METHOD_NUMERIC_MAX = METHOD_UPTO
 
-    # メソッド番号の帯 => 受け付けるレシーバのタグ
+    # メソッド番号の区分 => 受け付けるレシーバのタグ
     #
     # [番号の上限, タグの下限, タグの上限, 名前] を上から順に見ます。**上限 nil
-    # は末尾の帯**で、それ以上の番号がすべて入ります。生成コードもシミュレータも
+    # は末尾の区分**で、それ以上の番号がすべて入ります。生成コードもシミュレータも
     # この表から作るので、メソッドを足すときはここだけを直します。
     #
-    # METHOD_NUMERIC_MIN 未満 (!= と !) はどの型でも呼べるため帯がありません。
-    METHOD_RECEIVER_BANDS = [
+    # METHOD_NUMERIC_MIN 未満 (!= と !) はどの型でも呼べるため区分がありません。
+    METHOD_RECEIVER_GROUPS = [
       [METHOD_UPTO,    TT_INTEGER, TT_FLOAT, "数値"],
       [METHOD_EMPTY_P, TT_STRING,  TT_HASH,  "文字列・配列・ハッシュ"],
       [METHOD_CONCAT,  TT_STRING,  TT_ARRAY, "文字列・配列"],
@@ -269,11 +269,11 @@ module FaRuby
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
     #
     # 型を問わないメソッド (!= と !) は nil。生成コード・シミュレータ・
-    # テストがこの 1 か所を見るので、帯を足しても答えがずれません。
+    # テストがこの 1 か所を見るので、区分を足しても答えがずれません。
     def method_receiver_tags(code)
       return nil if code < METHOD_NUMERIC_MIN
 
-      METHOD_RECEIVER_BANDS.each do |max_code, tag_min, tag_max, _label|
+      METHOD_RECEIVER_GROUPS.each do |max_code, tag_min, tag_max, _label|
         return [tag_min, tag_max] if max_code.nil? || code <= max_code
       end
       nil

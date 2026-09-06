@@ -773,8 +773,8 @@ module FaRuby
 
     # メソッド番号からレシーバに要求される型を検査する
     #
-    # 番号もタグも連続した帯に並んでいるので範囲で判定できる。
-    # 帯の並びは METHOD_RECEIVER_BANDS で、生成コードもそこから作る。
+    # 番号もタグも連続した区分に並んでいるので範囲で判定できる。
+    # 区分の並びは METHOD_RECEIVER_GROUPS で、生成コードもそこから作る。
     def receiver_type_ok?(code, tag)
       range = method_receiver_tags(code)
       range.nil? || tag.between?(*range)

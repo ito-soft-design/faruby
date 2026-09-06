@@ -1975,14 +1975,14 @@ module FaRuby
 
     # メソッド番号からレシーバに要求される型を検査する
     #
-    # 番号もタグも連続した帯に並べてあるので、範囲比較だけで済みます。
-    # 帯の並びは METHOD_RECEIVER_BANDS。**最後の帯は上限が要りません。**
+    # 番号もタグも連続した区分に並べてあるので、範囲比較だけで済みます。
+    # 区分の並びは METHOD_RECEIVER_GROUPS。**最後の区分は上限が要りません。**
     def check_receiver_type(recv, type_code)
-      note "メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)"
+      note "メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)"
       note "#{METHOD_NUMERIC_MIN} 未満 (!= と !) はどの型でも呼べる"
       if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
         first = true
-        METHOD_RECEIVER_BANDS.each do |max_code, tag_min, tag_max, label|
+        METHOD_RECEIVER_GROUPS.each do |max_code, tag_min, tag_max, label|
           if max_code
             chain_head(first, "Z5 <= #{max_code}")
           else
@@ -2262,7 +2262,7 @@ module FaRuby
       end
     end
 
-    # R[a].length / R[a].size。レシーバの型が帯に合うことは検査済み
+    # R[a].length / R[a].size。レシーバの型が区分に合うことは検査済み
     #
     # ハッシュの組の数は鍵の配列の見出しにあります。値スロットの読み方が
     # 配列と違う (下位ワードだけがスロット番号) ため、型で分けます。

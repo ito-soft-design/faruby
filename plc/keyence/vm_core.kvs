@@ -2024,7 +2024,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         BREAK
                     END IF
                     Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                    ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                    ' メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)
                     ' 3 未満 (!= と !) はどの型でも呼べる
                     IF Z5 >= 3 THEN
                         IF Z5 <= 10 THEN
@@ -2717,7 +2717,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
                 Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-                ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                ' メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)
                 ' 3 未満 (!= と !) はどの型でも呼べる
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN
@@ -3372,7 +3372,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     BREAK
                 END IF
                 Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                ' メソッド番号の帯ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_BANDS)
+                ' メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)
                 ' 3 未満 (!= と !) はどの型でも呼べる
                 IF Z5 >= 3 THEN
                     IF Z5 <= 10 THEN

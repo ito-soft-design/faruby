@@ -351,19 +351,19 @@ class TestMethods < Minitest::Test
 
   # レシーバの型ごとに番号が連続していないと、型検査が範囲比較で済まなくなる
   def test_methods_are_grouped_by_receiver_type
-    edges = METHOD_RECEIVER_BANDS.map(&:first)
+    edges = METHOD_RECEIVER_GROUPS.map(&:first)
 
-    assert_nil edges.last, "最後の帯は上限を持たない"
-    assert_equal edges[0..-2].sort, edges[0..-2], "帯は番号の順に並んでいること"
-    assert_equal METHOD_NUMERIC_MAX, edges.first, "最初の帯は数値で終わる"
+    assert_nil edges.last, "最後の区分は上限を持たない"
+    assert_equal edges[0..-2].sort, edges[0..-2], "区分は番号の順に並んでいること"
+    assert_equal METHOD_NUMERIC_MAX, edges.first, "最初の区分は数値で終わる"
     assert_equal [METHOD_NE, METHOD_NOT],
                  METHOD_NAMES.keys.select { |code| method_receiver_tags(code).nil? }.sort,
                  "型を問わないのは != と ! だけ"
   end
 
-  # タグも連続した帯に並んでいないと、型検査が範囲比較で済まなくなる
+  # タグも連続した区分に並んでいないと、型検査が範囲比較で済まなくなる
   def test_receiver_tags_are_contiguous
-    METHOD_RECEIVER_BANDS.each do |_max_code, tag_min, tag_max, label|
+    METHOD_RECEIVER_GROUPS.each do |_max_code, tag_min, tag_max, label|
       assert_operator tag_min, :<=, tag_max, label
     end
   end
