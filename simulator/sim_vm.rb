@@ -242,13 +242,16 @@ module FaRuby
       write_slot(index, TT_INTEGER, binop(:div, lhs, rhs))
     end
 
+    # R[a] = global[symbols[b]]
+    #
+    # 生成コードと同じく**種別だけで 3 つに分ける**。桁付きかどうかは
+    # 転送前に分かるので、実行時に幅を見る必要は無い。
     def load_global_into_reg(dest, sym_operand, heap_code)
       type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x15) unless dev
       return write_device_ref(operand(dest), type, addr, access) if kind == SYMBOL_KIND_FAMILY
-
-      if access && access >= ACCESS_STR
+      if kind == SYMBOL_KIND_STR_DEVICE
         return load_string_from_device(dev, type, addr, access, operand(dest), 0x15, heap_code)
       end
 

@@ -177,6 +177,13 @@ module FaRuby
     SYMBOL_KIND_FAMILY  = 1
     SYMBOL_KIND_METHOD  = 2
     SYMBOL_KIND_SETTING = 3   # FARUBY_ で始まる定数 (OP_SETCONST が使う)
+    # 桁付きのデバイス ($DM100T6)。**読むときに文字列になる**
+    #
+    # 幅ワードを見れば分かりますが、種別に持たせると `OP_GETGV` が種別を
+    # 1 回見るだけで 3 つに分けられます。普通の読み取りが 1 比較で済むように
+    # するための区別で、**命令の本体に置いた比較はその命令が走るたびに効く**
+    # ためです。詳細は [文字列の計画](../doc/string.md)。
+    SYMBOL_KIND_STR_DEVICE = 4
 
     # --- faRuby の設定定数 ---
     #

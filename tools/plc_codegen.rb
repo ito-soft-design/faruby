@@ -313,6 +313,20 @@ module FaRuby
         .to_h { |m| [m[:symbol], m[:method_id]] }
     end
 
+    # デバイスのシンボル種別
+    #
+    # 桁付き ($DM100T6) を分けておくと、`OP_GETGV` が種別を 1 回見るだけで
+    # 済みます。デバイス族は添字でアドレスを決めるので、桁が付いていても
+    # 族のままです (幅は参照値に詰めて渡す)。
+    def device_symbol_kind(parsed)
+      return SYMBOL_KIND_FAMILY if parsed[:family]
+
+      access = parsed[:access_type]
+      return SYMBOL_KIND_STR_DEVICE if access && access >= VmConstants::ACCESS_STR
+
+      SYMBOL_KIND_VALUE
+    end
+
     # シンボル 1 つ分の割り当て
     #   slots      汎用グローバルの名前 => アドレス
     #   method_ids ユーザー定義メソッド名 => ID
@@ -320,7 +334,7 @@ module FaRuby
       parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
       if parsed
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
-          kind: parsed[:family] ? SYMBOL_KIND_FAMILY : SYMBOL_KIND_VALUE,
+          kind: device_symbol_kind(parsed),
           device_type: parsed[:device_type], device_name: parsed[:device_name],
           address: parsed[:address], z_offset: parsed[:z_offset],
           access_type: parsed[:access_type], bit: parsed[:bit],

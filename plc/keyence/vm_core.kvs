@@ -371,74 +371,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                 Z1 = FM0:Z7   ' シンボル種別
                 ' レジスタアドレス
                 Z2 = EM7:Z9 * 4 + EM32:Z9 + Z9
-                IF Z1 = 1 THEN
-                    ' デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分)
-                    EM1:Z2 = Z6   ' ベースアドレス
-                    EM2:Z2 = Z5 + Z8 * 16   ' 種別 + 幅
-                    EM0:Z2 = 11
-                ELSE IF Z8 >= 6 THEN
-                    ' 文字列を読めるのは EM / DM / ZF だけ
-                    ' **この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで
-                    ' 命令ループから出られず、エラーを書いてもそのまま走り続ける
-                    IF Z5 > 2 THEN
-                        EM1:Z9 = 3
-                        EM2:Z9 = 21
-                        BREAK
-                    END IF
-                    EM44:Z9 = Z8 / 16   ' 桁数 = バイト数
-                    IF EM44:Z9 = 0 THEN
-                        ' 桁の無い T は読めない。長さが決まらない
-                        EM1:Z9 = 3
-                        EM2:Z9 = 21
-                        BREAK
-                    END IF
-                    IF EM44:Z9 > 96 THEN
-                        ' 1 スロットに収まらない桁数
-                        EM1:Z9 = 3
-                        EM2:Z9 = 10
-                        BREAK
-                    END IF
-                    ' プールの空きスロットを取る。返さないので使い切ったら止まる
-                    IF EM39:Z9 >= 16 THEN
-                        EM1:Z9 = 3
-                        EM2:Z9 = 10
-                        BREAK
-                    END IF
-                    Z3 = EM39:Z9 * 50 + 1000 + Z9
-                    EM0:Z3 = EM44:Z9
-                    ' ワード単位で写す。並びが同じなので詰め替えは要らない
-                    EM45:Z9 = EM44:Z9 + 1
-                    EM45:Z9 = EM45:Z9 / 2   ' ワード数
-                    IF EM45:Z9 > 0 THEN
-                        EM45:Z9 = EM45:Z9 - 1
-                        FOR EM42:Z9 = 0 TO EM45:Z9
-                            Z4 = EM42:Z9 + Z6   ' デバイスの位置
-                            ' ワードデバイスから 1 ワード。種別は FOR に入る前に検査済み
-                            IF Z5 = 0 THEN
-                                Z7 = EM0.U:Z4
-                            ELSE IF Z5 = 1 THEN
-                                Z7 = DM0.U:Z4
-                            ELSE
-                                Z7 = ZF0.U:Z4
-                            END IF
-                            Z4 = EM42:Z9 + Z3 + 2
-                            EM0:Z4 = Z7
-                        NEXT
-                    END IF
-                    ' 桁が奇数なら最後のワードの下位バイトは桁の外。0 にして中身に混ぜない
-                    ' 残すと同じ中身どうしの == がワード単位の比較で外れる
-                    EM45:Z9 = EM44:Z9 / 2
-                    EM43:Z9 = EM45:Z9 * 2
-                    IF EM44:Z9 <> EM43:Z9 THEN
-                        Z4 = EM45:Z9 + Z3 + 2
-                        Z7 = EM0:Z4
-                        Z7 = Z7 / 256
-                        EM0:Z4 = Z7 * 256
-                    END IF
-                    EM1.L:Z2 = EM39:Z9   ' スロット番号
-                    EM0:Z2 = 7
-                    EM39:Z9 = EM39:Z9 + 1
-                ELSE
+                ' 種別で 3 つに分ける。普通のデバイスと汎用グローバルはここで決まる
+                IF Z1 = 0 THEN
                     ' デバイスタイプ別読み取り
                     ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
                     '   2=.L(32bit符号付き)
@@ -661,6 +595,73 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM2:Z9 = 21
                         BREAK
                     END IF
+                ELSE IF Z1 = 1 THEN
+                    ' デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分)
+                    EM1:Z2 = Z6   ' ベースアドレス
+                    EM2:Z2 = Z5 + Z8 * 16   ' 種別 + 幅
+                    EM0:Z2 = 11
+                ELSE
+                    ' 文字列を読めるのは EM / DM / ZF だけ
+                    ' **この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで
+                    ' 命令ループから出られず、エラーを書いてもそのまま走り続ける
+                    IF Z5 > 2 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 21
+                        BREAK
+                    END IF
+                    EM44:Z9 = Z8 / 16   ' 桁数 = バイト数
+                    IF EM44:Z9 = 0 THEN
+                        ' 桁の無い T は読めない。長さが決まらない
+                        EM1:Z9 = 3
+                        EM2:Z9 = 21
+                        BREAK
+                    END IF
+                    IF EM44:Z9 > 96 THEN
+                        ' 1 スロットに収まらない桁数
+                        EM1:Z9 = 3
+                        EM2:Z9 = 10
+                        BREAK
+                    END IF
+                    ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                    IF EM39:Z9 >= 16 THEN
+                        EM1:Z9 = 3
+                        EM2:Z9 = 10
+                        BREAK
+                    END IF
+                    Z3 = EM39:Z9 * 50 + 1000 + Z9
+                    EM0:Z3 = EM44:Z9
+                    ' ワード単位で写す。並びが同じなので詰め替えは要らない
+                    EM45:Z9 = EM44:Z9 + 1
+                    EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                    IF EM45:Z9 > 0 THEN
+                        EM45:Z9 = EM45:Z9 - 1
+                        FOR EM42:Z9 = 0 TO EM45:Z9
+                            Z4 = EM42:Z9 + Z6   ' デバイスの位置
+                            ' ワードデバイスから 1 ワード。種別は FOR に入る前に検査済み
+                            IF Z5 = 0 THEN
+                                Z7 = EM0.U:Z4
+                            ELSE IF Z5 = 1 THEN
+                                Z7 = DM0.U:Z4
+                            ELSE
+                                Z7 = ZF0.U:Z4
+                            END IF
+                            Z4 = EM42:Z9 + Z3 + 2
+                            EM0:Z4 = Z7
+                        NEXT
+                    END IF
+                    ' 桁が奇数なら最後のワードの下位バイトは桁の外。0 にして中身に混ぜない
+                    ' 残すと同じ中身どうしの == がワード単位の比較で外れる
+                    EM45:Z9 = EM44:Z9 / 2
+                    EM43:Z9 = EM45:Z9 * 2
+                    IF EM44:Z9 <> EM43:Z9 THEN
+                        Z4 = EM45:Z9 + Z3 + 2
+                        Z7 = EM0:Z4
+                        Z7 = Z7 / 256
+                        EM0:Z4 = Z7 * 256
+                    END IF
+                    EM1.L:Z2 = EM39:Z9   ' スロット番号
+                    EM0:Z2 = 7
+                    EM39:Z9 = EM39:Z9 + 1
                 END IF
 
             ELSE IF EM6:Z9 = 22 THEN

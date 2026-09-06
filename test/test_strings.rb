@@ -51,6 +51,17 @@ class TestStrings < Minitest::Test
     [src, mrb].each { |f| File.delete(f) if f && File.exist?(f) }
   end
 
+  # シンボルだけを持つ irep (デバイステーブルの検査用)
+  def irep_with(symbols)
+    irep = FaRuby::Irep.new
+    irep.nregs = 8
+    irep.nlocals = 2
+    irep.instructions = "i" # OP_STOP
+    irep.ilen = irep.instructions.bytesize
+    symbols.each { |s| irep.add_symbol(s) }
+    irep
+  end
+
   def status(sim) = sim.em.read_u16(layout.status_addr)
   def error(sim)  = sim.em.read_u16(layout.error_addr)
 
@@ -719,6 +730,31 @@ class TestStrings < Minitest::Test
   # ビットデバイスには文字列を置けない。族の形も転送前に止める
   def test_a_string_field_on_a_bit_device_family_stops_the_build
     assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_family("$MRT6") }
+  end
+
+  # === 桁付きはシンボル種別で分ける ===
+  #
+  # 桁が付いているかは転送前に分かる。種別に持たせておくと OP_GETGV が
+  # **種別を 1 回見るだけ**で済み、普通の読み取りが 1 比較で通る。
+  # 命令の本体に置いた比較はその命令が走るたびに効くため
+
+  def test_a_string_field_gets_its_own_symbol_kind
+    mappings = FaRuby::PlcCodegen.new(irep_with(%w[$DM100T6 $DM100 $DMT6])).device_mappings
+
+    assert_equal SYMBOL_KIND_STR_DEVICE, mappings[0][:kind], "$DM100T6"
+    assert_equal SYMBOL_KIND_VALUE, mappings[1][:kind], "$DM100"
+    assert_equal SYMBOL_KIND_FAMILY, mappings[2][:kind], "$DMT6 は族のまま"
+  end
+
+  # 普通の読み取りが先頭に来ていること。後ろへ回すと 1 比較ぶん遅くなる
+  def test_the_common_read_comes_first
+    source = FaRuby::KvsGenerator.new.source
+    body = source[/' OP_GETGV .*?\n(.*?)\n\s+ELSE IF EM6:Z9 = /m, 1]
+    refute_nil body, "OP_GETGV が見つからない"
+
+    first = body[/^\s+IF Z1 = (\d+) THEN/, 1]
+
+    assert_equal SYMBOL_KIND_VALUE.to_s, first, "普通のデバイスを先に見ること"
   end
 
   # === 弾くもの ===

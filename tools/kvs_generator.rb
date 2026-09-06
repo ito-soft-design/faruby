@@ -488,21 +488,27 @@ module FaRuby
       end
     end
 
+    # R[a] = global[symbols[b]]
+    #
+    # **普通の読み取りを先に置きます。** 種別を 1 回見るだけで済むので、
+    # 桁付きやデバイス族のための比較を通りません。命令の本体に置いた比較は
+    # その命令が走るたびに効くため、いちばん多く通る枝を先頭にします。
     def load_global_into_reg(dest, sym_operand, heap_code)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(dest)
-      chain_head(true, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      note "種別で 3 つに分ける。普通のデバイスと汎用グローバルはここで決まる"
+      chain_head(true, "Z1 = #{SYMBOL_KIND_VALUE}")
+      indent
+      device_dispatch(:read, slot: slot, error_code: 0x15)
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
       assign_device_ref(slot)
       dedent
-      chain_head(false, "Z8 >= #{ACCESS_STR}")
-      indent
-      load_string_from_device(slot, 0x15, heap_code)
-      dedent
       line "ELSE"
       indent
-      device_dispatch(:read, slot: slot, error_code: 0x15)
+      load_string_from_device(slot, 0x15, heap_code)
       dedent
       line "END IF"
     end
