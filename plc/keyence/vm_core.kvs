@@ -2585,8 +2585,15 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     EM1.L:Z1 = 0
                                 END IF
                             ELSE
-                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                EM1.L:Z1 = EM16.L:Z9
+                                IF EM1.L:Z1 < 0 THEN
+                                    ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
+                                    EM16.L:Z9 = NOT EM1.L:Z1
+                                    SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
+                                    EM1.L:Z1 = NOT EM1.L:Z1
+                                ELSE
+                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                    EM1.L:Z1 = EM16.L:Z9
+                                END IF
                             END IF
                         END IF
                         EM0:Z1 = 4
@@ -2719,8 +2726,15 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                         EM1.L:Z1 = 0
                                     END IF
                                 ELSE
-                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                    EM1.L:Z1 = EM16.L:Z9
+                                    IF EM1.L:Z1 < 0 THEN
+                                        ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
+                                        EM16.L:Z9 = NOT EM1.L:Z1
+                                        SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
+                                        EM1.L:Z1 = NOT EM1.L:Z1
+                                    ELSE
+                                        SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                        EM1.L:Z1 = EM16.L:Z9
+                                    END IF
                                 END IF
                             ELSE
                                 IF EM18.L:Z9 >= 32 THEN
@@ -3406,8 +3420,15 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM1.L:Z1 = 0
                             END IF
                         ELSE
-                            SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                            EM1.L:Z1 = EM16.L:Z9
+                            IF EM1.L:Z1 < 0 THEN
+                                ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
+                                EM16.L:Z9 = NOT EM1.L:Z1
+                                SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
+                                EM1.L:Z1 = NOT EM1.L:Z1
+                            ELSE
+                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                EM1.L:Z1 = EM16.L:Z9
+                            END IF
                         END IF
                     END IF
                     EM0:Z1 = 4
@@ -3540,8 +3561,15 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     EM1.L:Z1 = 0
                                 END IF
                             ELSE
-                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                EM1.L:Z1 = EM16.L:Z9
+                                IF EM1.L:Z1 < 0 THEN
+                                    ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
+                                    EM16.L:Z9 = NOT EM1.L:Z1
+                                    SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
+                                    EM1.L:Z1 = NOT EM1.L:Z1
+                                ELSE
+                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                    EM1.L:Z1 = EM16.L:Z9
+                                END IF
                             END IF
                         ELSE
                             IF EM18.L:Z9 >= 32 THEN

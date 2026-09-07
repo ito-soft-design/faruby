@@ -2546,6 +2546,14 @@ module FaRuby
     end
 
     # 桁数は scratch32_b。**SLA / SRA は文**なのでスクラッチへ出してから写す
+    #
+    # 右シフトは**負の値を NOT で挟みます**。Ruby の `>>` は符号を保ちますが、
+    # KV のシフトが論理シフトだと 0 で埋まって大きな正の数になります。
+    # `~((~v) >> n)` は**論理でも算術でも同じ答え**になるので、どちらか
+    # 分からないうちはこの形にしておきます (正の値では両者が一致するため、
+    # NOT で正にしてからずらせばよい)。
+    #
+    # 左シフトは論理と算術で結果が同じなのでそのままです。
     def emit_shift(dest, left)
       if_else_block("#{scratch32_b} >= 32") do
         note "全部ずれる。左は 0、右は符号で埋まる"
@@ -2557,8 +2565,20 @@ module FaRuby
           end_block
         end
       end
-      line "#{left ? 'SLA' : 'SRA'}(#{dest.value}, #{scratch32_b}, #{scratch32})"
-      line "#{dest.value} = #{scratch32}"
+      if left
+        line "SLA(#{dest.value}, #{scratch32_b}, #{scratch32})"
+        line "#{dest.value} = #{scratch32}"
+      else
+        if_else_block("#{dest.value} < 0") do
+          note "負は NOT で正にしてからずらし、戻す。符号が保たれる"
+          line "#{scratch32} = NOT #{dest.value}"
+          line "SRA(#{scratch32}, #{scratch32_b}, #{dest.value})"
+          line "#{dest.value} = NOT #{dest.value}"
+        end
+        line "SRA(#{dest.value}, #{scratch32_b}, #{scratch32})"
+        line "#{dest.value} = #{scratch32}"
+        end_block
+      end
       end_block
     end
 
