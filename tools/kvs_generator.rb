@@ -611,6 +611,15 @@ module FaRuby
       indent
       store_string_into_device(slot, 0x16)
       dedent
+      chain_head(false, "#{slot.tag} = #{TT_ARRAY}")
+      indent
+      store_array_into_device(slot, 0x16)
+      dedent
+      chain_head(false, "#{slot.tag} = #{TT_HASH}")
+      indent
+      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
+      vm_error(0x16)
+      dedent
       line "ELSE"
       indent
       if_("Z8 >= #{ACCESS_STR}") do
@@ -758,6 +767,15 @@ module FaRuby
       chain_head(true, "#{value.tag} = #{TT_STRING}")
       indent
       store_string_into_device(value, error_code)
+      dedent
+      chain_head(false, "#{value.tag} = #{TT_ARRAY}")
+      indent
+      store_array_into_device(value, error_code)
+      dedent
+      chain_head(false, "#{value.tag} = #{TT_HASH}")
+      indent
+      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
+      vm_error(error_code)
       dedent
       chain_head(false, "Z8 >= #{ACCESS_STR}")
       indent
@@ -1473,6 +1491,76 @@ module FaRuby
       line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
       line "#{dest.tag} = #{TT_STRING}"
       line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # 配列をデバイスへ写す
+    #
+    # `$DM10 = [1, 2, 3]` は DM10・DM11・DM12 へ書きます。**刻みは幅で決まり**、
+    # `.L` なら 2 ワードずつ進みます。ビットデバイスは 1 ワードが 16 ビットに
+    # あたるので、`$MRL[64] = a` は 64・96・128 ビット目へ書きます。
+    #
+    # **個別ビット (幅なし) には書けません。** 刻みが決まらないためです。
+    #
+    # 要素は数値だけです。中に配列や文字列があるとエラーになります。
+    # 入れ子を書き出す形は決めていません。
+    def store_array_into_device(slot, error_code)
+      note "**検査はすべて FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      note "個別ビットには書けない。1 要素が何ビットか決まらない"
+      if_("Z8 = #{ACCESS_BIT}") { vm_error(error_code) }
+      check_known_device(error_code)
+
+      note "刻み。幅のワード数、ビットデバイスならその 16 倍"
+      line "#{str_limit} = 1"
+      ACCESS_WORDS.select { |_, words| words > 1 }.each_key do |access|
+        if_("Z8 = #{access}") { line "#{str_limit} = #{ACCESS_WORDS.fetch(access)}" }
+      end
+      if_("Z5 > #{DEVICE_TYPE_ZF}") { line "#{str_limit} = #{str_limit} * 16" }
+
+      note "スロットの見出しと書き先の先頭。どちらもループの中で動かさない"
+      line "Z4 = #{slot.value}"
+      line "Z4 = Z4 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "#{str_temp} = Z6   ' 書き先の先頭"
+      line "#{scratch32_b} = #{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4   ' 要素数"
+
+      note "数値でない要素があった印。FOR を出てから判定する"
+      line "#{str_flag} = 0"
+      if_("#{scratch32_b} > 0") do
+        line "Z7 = #{scratch32_b}"
+        line "Z7 = Z7 - 1"
+        line "FOR #{str_index} = 0 TO Z7"
+        indent
+        line "Z3 = #{str_index} * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        element = slot_on(3)
+        line "#{str_count} = 0"
+        if_("#{element.tag} >= #{TT_INTEGER}") do
+          if_("#{element.tag} <= #{TT_FLOAT}") { line "#{str_count} = 1" }
+        end
+        if_else_block("#{str_count} = 0") { line "#{str_flag} = 1" }
+        line "Z6 = #{str_index} * #{str_limit} + #{str_temp}"
+        prepare_write_scratches(element)
+        device_dispatch(:write, slot: element, error_code: error_code, checked: true)
+        end_block
+        dedent
+        line "NEXT"
+      end
+      if_("#{str_flag} = 1") do
+        note "数値でない要素があった。入れ子の書き出し方は決めていない"
+        vm_error(error_code)
+      end
+    end
+
+    # 生成コードが知っているデバイス種別かどうかを FOR に入る前に確かめる
+    #
+    # `device_dispatch` は知らない種別で `BREAK` を出しますが、それが `FOR` の
+    # 中にあると命令ループから出られません。ここで弾いておけば通りません。
+    def check_known_device(error_code)
+      note "生成コードが知っている種別か。知らない種別は FOR に入る前に弾く"
+      line "#{str_count} = 0"
+      (WORD_DEVICES + BIT_DEVICES).each do |type, _name, _set_res|
+        if_("Z5 = #{type}") { line "#{str_count} = 1" }
+      end
+      if_("#{str_count} = 0") { vm_error(error_code) }
     end
 
     # 定数への代入 (OP_SETCONST)
@@ -2235,7 +2323,10 @@ module FaRuby
     end
 
     # デバイス種別 × アクセス幅の分岐を生成する
-    def device_dispatch(mode, slot:, error_code:)
+    # checked を true にすると、知らない種別の ELSE で `BREAK` を出しません。
+    # **`FOR` の中から呼ぶときに使います。** 中の `BREAK` は `FOR` を抜ける
+    # だけで命令ループから出られないためです。呼ぶ側が先に種別を確かめます。
+    def device_dispatch(mode, slot:, error_code:, checked: false)
       note "デバイスタイプ別#{mode == :read ? '読み取り' : '書き込み'}"
       note "ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ"
       ACCESS_BRANCHES.each { |value, sfx| note "  #{value}=.#{sfx}(#{ACCESS_NAMES.fetch(value)})" }
@@ -2272,7 +2363,11 @@ module FaRuby
 
       line "ELSE"
       indent
-      vm_error(error_code)
+      if checked
+        note "呼ぶ側が種別を確かめている。ここへは来ない"
+      else
+        vm_error(error_code)
+      end
       dedent
       line "END IF"
     end

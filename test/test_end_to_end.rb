@@ -520,6 +520,124 @@ end
     assert_equal 3, sim.devices[1].read_u16(0)
   end
 
+  # === 配列をデバイスへ写す ===
+  #
+  # 刻みは幅で決まる。ビットデバイスは 1 ワードが 16 ビットにあたる。
+  # 個別ビット (幅なし) には書けない
+
+  # 止まることを確かめる用。compile_and_run は完走を前提にしている
+  def run_until_it_stops(source)
+    rb_file = Tempfile.new(["stop", ".rb"], "C:/tmp")
+    rb_file.write(source)
+    rb_file.close
+    mrb_path = rb_file.path.sub(/.rb$/, ".mrb")
+    assert system(@mrbc, "-o", mrb_path, rb_file.path), "mrbc に失敗"
+
+    parser = FaRuby::MrbParser.new(File.binread(mrb_path)).parse
+    sim = FaRuby::KvVmSimulator.new
+    sim.load_irep_and_run(parser.irep)
+    sim
+  ensure
+    [rb_file&.path, mrb_path].each { |f| File.delete(f) if f && File.exist?(f) }
+  end
+
+  def test_an_array_writes_consecutive_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [11, 22, 33]
+      $DM100 = a
+    RUBY
+
+    assert_equal [11, 22, 33], (0..2).map { |i| sim.devices[1].read_u16(100 + i) }
+  end
+
+  # .L は 2 ワードずつ進む
+  def test_a_wide_array_steps_by_two_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1, 2, 3]
+      $DM100L = a
+    RUBY
+
+    assert_equal [1, 2, 3], (0..2).map { |i| sim.devices[1].read_s32(100 + i * 2) }
+  end
+
+  def test_an_array_of_floats
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1.5, 2.5]
+      $DM100F = a
+    RUBY
+
+    bits = (0..1).map { |i| sim.devices[1].read_u32(100 + i * 2) }
+
+    assert_equal [1.5, 2.5], bits.map { |b| [b].pack("L").unpack1("f") }
+  end
+
+  # 添字を付けた形も同じ
+  def test_an_indexed_array_write
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [7, 8]
+      i = 0
+      $DML[100 + i] = a
+    RUBY
+
+    assert_equal [7, 8], (0..1).map { |i| sim.devices[1].read_s32(100 + i * 2) }
+  end
+
+  # ビットデバイスは 1 ワードが 16 ビット。$MRL なら 32 ビットずつ進む。
+  # 書いたものを faRuby 自身で読み戻して確かめる
+  def test_an_array_to_a_bit_device_with_a_width
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [5, 6]
+      i = 0
+      $MRL[64 + i] = a
+      $DM100L = $MRL[64]
+      $DM102L = $MRL[96]
+    RUBY
+
+    assert_equal [5, 6], [sim.devices[1].read_s32(100), sim.devices[1].read_s32(102)]
+  end
+
+  # 個別ビットには書けない。1 要素が何ビットか決まらない
+  def test_an_array_to_a_plain_bit_device_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      a = [1, 0]
+      i = 0
+      $MR[64 + i] = a
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 数値でない要素があると止まる。入れ子の書き出し方は決めていない
+  def test_an_array_with_a_string_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      a = [1, "x"]
+      $DM100 = a
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # ハッシュは鍵の並べ方が決まらない
+  def test_a_hash_to_a_device_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      h = { 1 => 2 }
+      $DM100 = h
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 空の配列は何も書かない
+  def test_an_empty_array_writes_nothing
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100 = 99
+      a = []
+      $DM100 = a
+    RUBY
+
+    assert_equal 99, sim.devices[1].read_u16(100)
+  end
+
   # === 添字によるデバイスアクセス ===
   #
   # $DM100 はコンパイル時にアドレスが確定するため、実行時に計算した

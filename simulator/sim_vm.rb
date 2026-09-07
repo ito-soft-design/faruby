@@ -873,9 +873,14 @@ module FaRuby
       return copy_reg_into_slot(operand(src), addr) if kind == SYMBOL_KIND_GLOBAL
       return vm_error(0x16) if kind == SYMBOL_KIND_FAMILY # $DM = 1 は意味を持たない
 
-      # 値が文字列なら文字列として書く。実数と整数を型で分けているのと同じ
-      if read_reg_tag(operand(src)) == TT_STRING
+      # 値が文字列や配列なら並べて書く。実数と整数を型で分けているのと同じ
+      case read_reg_tag(operand(src))
+      when TT_STRING
         return store_string_into_device(dev, type, addr, access, operand(src), 0x16)
+      when TT_ARRAY
+        return store_array_into_device(dev, type, addr, access, operand(src), 0x16)
+      when TT_HASH
+        return vm_error(0x16) # 鍵の並べ方が決まらない
       end
       # 文字列の桁 (T) に文字列以外を書こうとした
       return vm_error(0x16) if access && access >= ACCESS_STR
@@ -902,6 +907,47 @@ module FaRuby
         hi = string_device_byte(slot, i * 2, content, total, fill)
         lo = string_device_byte(slot, i * 2 + 1, content, total, fill)
         dev.write_u16(addr + i, hi * 256 + lo)
+      end
+    end
+
+    # 配列をデバイスへ写す (生成コードと同じ規則)
+    #
+    # 刻みは幅で決まる。ビットデバイスは 1 ワードが 16 ビットにあたる。
+    # **個別ビット (幅なし) には書けない。** 1 要素が何ビットか決まらない
+    def store_array_into_device(dev, type, addr, access, index, error_code)
+      return vm_error(error_code) if access.nil? || access == ACCESS_BIT
+
+      step = ACCESS_WORDS.fetch(access, 1)
+      step *= 16 unless STRING_DEVICE_TYPES.include?(type)
+      slot = read_reg(index)
+
+      array_length(slot).times do |i|
+        element = layout.array_element_addr(slot, i)
+        tag = @em.read_u16(element + SLOT_TYPE_OFFSET)
+        return vm_error(error_code) unless numeric_tag?(tag)
+
+        write_device_slot(dev, type, addr + i * step, access, element, tag)
+      end
+    end
+
+    # 値スロット 1 つをデバイスへ書く (プール上の要素を書くために切り出した)
+    #
+    # レジスタではなくプールの要素を書くので `write_device_value` は使えない。
+    # 幅ごとの選び方は同じにしてある。
+    def write_device_slot(dev, type, addr, access, element, tag)
+      float = tag == TT_FLOAT
+      value = if float
+                SimVm.bits_to_float(@em.read_u32(element + SLOT_VALUE_OFFSET))
+              else
+                @em.read_s32(element + SLOT_VALUE_OFFSET)
+              end
+
+      if bit_device?(type)
+        write_bit_field(dev, addr, access, float ? value.to_i : value)
+      elsif access == ACCESS_F
+        dev.write_u32(addr, SimVm.float_bits(value.to_f))
+      else
+        write_word_device(dev, addr, access, float ? value.to_i : value)
       end
     end
 
@@ -957,9 +1003,15 @@ module FaRuby
       dev = device_memory(ref[:type])
       return vm_error(error_code) unless dev
 
-      if read_reg_tag(index + 2) == TT_STRING
+      case read_reg_tag(index + 2)
+      when TT_STRING
         return store_string_into_device(dev, ref[:type], addr, ref[:access], index + 2,
                                         error_code)
+      when TT_ARRAY
+        return store_array_into_device(dev, ref[:type], addr, ref[:access], index + 2,
+                                       error_code)
+      when TT_HASH
+        return vm_error(error_code) # 鍵の並べ方が決まらない
       end
       # 文字列の桁 (T) に文字列以外を書こうとした
       return vm_error(error_code) if ref[:access] && ref[:access] >= ACCESS_STR

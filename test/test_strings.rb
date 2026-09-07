@@ -776,11 +776,12 @@ class TestStrings < Minitest::Test
   # 生成コードから OP_SETGV の文字列の枝を切り出す
   #
   # **字下げの深さは見ません。** 振り分けの組み方を変えると深さが動くためです。
+  # 枝の頭と同じ深さで次の ELSE / ELSE IF が来たら、そこが終わりです。
   def string_write_branch
     source = FaRuby::KvsGenerator.new.source
     head = source[/^(\s+)ELSE IF EM0:Z2 = #{TT_STRING} THEN$/, 1]
     body = source[/^\s+ELSE IF EM0:Z2 = #{TT_STRING} THEN\n(.*)/m, 1]
-    body&.[](/\A(.*?)\n#{head}ELSE\n/m, 1)
+    body&.[](/\A(.*?)\n#{head}ELSE(?: IF)?\b/m, 1)
   end
 
   # Z6 はデバイスのベースアドレス。写している途中で壊すと書き先がずれる
