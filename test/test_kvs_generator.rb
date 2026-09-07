@@ -395,12 +395,17 @@ class TestKvsGenerator < Minitest::Test
     end
   end
 
-  def test_setgv_uses_set_res_for_timer_and_counter
+  # ビットデバイスへの書き込みは種類によらず TRUE / FALSE の代入
+  #
+  # 以前はタイマ・カウンタの接点だけ `SET` / `RES` を使っていましたが、
+  # 代入でも書けるため分けていません。ST も同じ形で書けます。
+  def test_writing_a_bit_device_assigns_true_or_false
     body = opcode_body(0x16) # OP_SETGV
-    assert_includes body, "SET(T0:Z6)"
-    assert_includes body, "RES(T0:Z6)"
-    assert_includes body, "SET(C0:Z6)"
-    assert_includes body, "RES(C0:Z6)"
+    %w[R MR B LR T C].each do |dev|
+      assert_includes body, "#{dev}0:Z6 = TRUE", "#{dev} を ON にする代入"
+      assert_includes body, "#{dev}0:Z6 = FALSE", "#{dev} を OFF にする代入"
+    end
+    refute_includes body, "SET(", "SET / RES は使わない"
   end
 
   # ビットデバイスは幅の有無で経路が分かれる。

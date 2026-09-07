@@ -19,6 +19,13 @@ module FaRuby
 
     # ファイルレジスタのバンクを選ぶ。nil を返すと行そのものを出さない
     def select_bank(bank) = "FRSET(#{bank})"
+
+    # ビットデバイスに真偽を書く
+    #
+    # **KV スクリプトでも ST でも `TRUE` / `FALSE` の代入で書けます。**
+    # 以前はタイマ・カウンタの接点だけ `SET` / `RES` を使い、他は 1 / 0 を
+    # 代入していましたが、種類による違いは要りませんでした。
+    def write_bit(device, on) = "#{device} = #{on ? 'TRUE' : 'FALSE'}"
   end
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの

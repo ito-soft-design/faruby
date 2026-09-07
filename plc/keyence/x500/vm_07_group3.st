@@ -643,9 +643,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 3 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    R0:Z6 := 1;
+                    R0:Z6 := TRUE;
                   ELSE
-                    R0:Z6 := 0;
+                    R0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -663,9 +663,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 4 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    MR0:Z6 := 1;
+                    MR0:Z6 := TRUE;
                   ELSE
-                    MR0:Z6 := 0;
+                    MR0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -683,9 +683,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 5 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    B0:Z6 := 1;
+                    B0:Z6 := TRUE;
                   ELSE
-                    B0:Z6 := 0;
+                    B0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -703,9 +703,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 6 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    LR0:Z6 := 1;
+                    LR0:Z6 := TRUE;
                   ELSE
-                    LR0:Z6 := 0;
+                    LR0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -723,9 +723,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 8 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    SET(T0:Z6);
+                    T0:Z6 := TRUE;
                   ELSE
-                    RES(T0:Z6);
+                    T0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -741,9 +741,9 @@ IF EM54:Z9 <= 30 THEN
               ELSIF Z5 = 9 THEN
                 IF Z8 = 5 THEN
                   IF EM16.L:Z9 <> 0 THEN
-                    SET(C0:Z6);
+                    C0:Z6 := TRUE;
                   ELSE
-                    RES(C0:Z6);
+                    C0:Z6 := FALSE;
                   END_IF;
                 ELSE
                   IF Z8 = 2 THEN
@@ -844,9 +844,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 3 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              R0:Z6 := 1;
+              R0:Z6 := TRUE;
             ELSE
-              R0:Z6 := 0;
+              R0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN
@@ -864,9 +864,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 4 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              MR0:Z6 := 1;
+              MR0:Z6 := TRUE;
             ELSE
-              MR0:Z6 := 0;
+              MR0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN
@@ -884,9 +884,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 5 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              B0:Z6 := 1;
+              B0:Z6 := TRUE;
             ELSE
-              B0:Z6 := 0;
+              B0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN
@@ -904,9 +904,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 6 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              LR0:Z6 := 1;
+              LR0:Z6 := TRUE;
             ELSE
-              LR0:Z6 := 0;
+              LR0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN
@@ -924,9 +924,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 8 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              SET(T0:Z6);
+              T0:Z6 := TRUE;
             ELSE
-              RES(T0:Z6);
+              T0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN
@@ -942,9 +942,9 @@ IF EM54:Z9 <= 30 THEN
         ELSIF Z5 = 9 THEN
           IF Z8 = 5 THEN
             IF EM16.L:Z9 <> 0 THEN
-              SET(C0:Z6);
+              C0:Z6 := TRUE;
             ELSE
-              RES(C0:Z6);
+              C0:Z6 := FALSE;
             END_IF;
           ELSE
             IF Z8 = 2 THEN

@@ -55,11 +55,11 @@ module FaRuby
     # ワードデバイス (アクセス幅の選択が必要)
     WORD_DEVICES = [[DEVICE_TYPE_EM, "EM"], [DEVICE_TYPE_DM, "DM"], [DEVICE_TYPE_ZF, "ZF"]].freeze
 
-    # ビットデバイス。set_res が true のものは代入ではなく SET/RES を使う
+    # ビットデバイス (幅サフィックス無しなら個別ビット)
     BIT_DEVICES = [
-      [DEVICE_TYPE_R,  "R",  false], [DEVICE_TYPE_MR, "MR", false],
-      [DEVICE_TYPE_B,  "B",  false], [DEVICE_TYPE_L,  "LR", false],
-      [DEVICE_TYPE_T,  "T",  true],  [DEVICE_TYPE_C,  "C",  true],
+      [DEVICE_TYPE_R,  "R"],  [DEVICE_TYPE_MR, "MR"],
+      [DEVICE_TYPE_B,  "B"],  [DEVICE_TYPE_L,  "LR"],
+      [DEVICE_TYPE_T,  "T"],  [DEVICE_TYPE_C,  "C"],
     ].freeze
 
     # アクセス幅の分岐順。最後 (.S) が ELSE になる
@@ -179,13 +179,13 @@ module FaRuby
     def select_fixed_bank
       note "固定領域 (#{layout.fixed_device_name}) のバンクを選ぶ"
       note "現在のバンクを読む命令が無いため、抜けるときは 0 に戻す"
-      bank = dialect.select_bank(MemoryLayout::FIXED_BANK)
+      bank = dialect.select_bank(MemoryLayout::FIXED_BANK)
       line bank if bank
     end
 
     def restore_fixed_bank
       note "ファイルレジスタのバンクを 0 に戻す"
-      bank = dialect.select_bank(0)
+      bank = dialect.select_bank(0)
       line bank if bank
     end
 
@@ -1576,7 +1576,7 @@ module FaRuby
     def check_known_device(error_code)
       note "生成コードが知っている種別か。知らない種別は FOR に入る前に弾く"
       line "#{str_count} = 0"
-      (WORD_DEVICES + BIT_DEVICES).each do |type, _name, _set_res|
+      (WORD_DEVICES + BIT_DEVICES).each do |type, _name|
         if_("Z5 = #{type}") { line "#{str_count} = 1" }
       end
       if_("#{str_count} = 0") { vm_error(error_code) }
@@ -2370,11 +2370,11 @@ module FaRuby
 
       # ビットデバイスは幅サフィックスの有無で意味が変わる。
       # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T/C は現在値)。
-      BIT_DEVICES.each do |type, name, set_res|
+      BIT_DEVICES.each do |type, name|
         chain_head(first, "Z5 = #{type}")
         first = false
         indent
-        if_else_block("Z8 = #{ACCESS_BIT}") { bit_device_body(mode, name, slot, set_res) }
+        if_else_block("Z8 = #{ACCESS_BIT}") { bit_device_body(mode, name, slot) }
         word_device_body(mode, name, slot, type)
         end_block
         dedent
@@ -2999,19 +2999,15 @@ module FaRuby
       end_block
     end
 
-    def bit_device_body(mode, name, slot, set_res)
+    def bit_device_body(mode, name, slot)
       bit = "#{name}0:Z6"
       if mode == :read
         if_else_block(bit) { assign_bool(slot, true) }
         assign_bool(slot, false)
         end_block
-      elsif set_res
-        if_else_block("#{scratch32} <> 0") { line "SET(#{bit})" }
-        line "RES(#{bit})"
-        end_block
       else
-        if_else_block("#{scratch32} <> 0") { line "#{bit} = 1" }
-        line "#{bit} = 0"
+        if_else_block("#{scratch32} <> 0") { line dialect.write_bit(bit, true) }
+        line dialect.write_bit(bit, false)
         end_block
       end
     end
@@ -3051,8 +3047,8 @@ module FaRuby
     # `init` はリセットハンドラで、Z の退避もバンクの選択も自分で行う
     # 独立したスクリプトです。**本体より先に置きます。**後ろだと、要求の
     # あったスキャンで古い状態のまま命令が進んでしまいます。
-    def self.file_name(index, stem, extension = "kvs")
-      format("vm_%02d_%s.%s", index + 1, stem, extension)
+    def self.file_name(index, stem, extension = "kvs")
+      format("vm_%02d_%s.%s", index + 1, stem, extension)
     end
 
     # どの群の範囲にも入らない番号
@@ -3136,7 +3132,7 @@ module FaRuby
         File.binwrite(path, content)
         name
       end
-      pattern = File.join(dir, "vm_*.#{dialect.extension}")
+      pattern = File.join(dir, "vm_*.#{dialect.extension}")
       removed = Dir[pattern].reject { |p| files.key?(File.basename(p)) }
       removed.each { |path| File.delete(path) }
       written + removed.map { |path| "#{File.basename(path)} (削除)" }
@@ -3406,10 +3402,15 @@ module FaRuby
       e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
              "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
       e.note ""
+      bank = e.dialect.select_bank(MemoryLayout::FIXED_BANK)
       e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
              "(#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの) に置く。"
-      e.note "スクリプトの先頭で FRSET(#{MemoryLayout::FIXED_BANK}) を実行済みのため、" \
-             "#{layout.fixed_device_name} のアドレスで直接指せる。"
+      if bank
+        e.note "スクリプトの先頭で #{bank} を実行済みのため、" \
+               "#{layout.fixed_device_name} のアドレスで直接指せる。"
+      else
+        e.note "**バンクを選ぶ手立てが無く常に 0 です。** 置き場所は見直しが要ります。"
+      end
       e.note "インスタンス#{layout.instance_index}のブロックは " \
              "#{layout.fixed_device(layout.fixed_origin)}-" \
              "#{layout.fixed_device(layout.fixed_origin + layout.fixed_instance_size - 1)}:"
