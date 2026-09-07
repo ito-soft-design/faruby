@@ -425,7 +425,7 @@ class TestArrays < Minitest::Test
                  "配列の枝が Z1-Z3 を書き換えている")
   end
 
-  # 文字列の鍵は中身で照合するため、住所の計算に Z3 が要る。
+  # 文字列の鍵は中身で照合するため、アドレスの計算に Z3 が要る。
   # 書き込む値が載っているので、借りたら返さないと代入先が壊れる
   def test_the_hash_branch_gives_the_value_register_back
     branch = setidx_branch(TT_HASH)
