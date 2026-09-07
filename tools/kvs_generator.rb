@@ -2522,9 +2522,18 @@ module FaRuby
     end
 
     # R[a] = ~R[a]
+    #
+    # **KV にワードの `NOT` はありません。** 2 の補数から作ります。
+    # `~x` は `-x - 1` なので、`NEG` で符号を反転してから 1 引きます。
     def bit_not_into(dest, type_code)
       if_("#{dest.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
-      line "#{dest.value} = NOT #{dest.value}"
+      emit_bit_not(dest.value, dest.value)
+    end
+
+    # target = ~source (`~x` = `-x - 1`)
+    def emit_bit_not(target, source)
+      line "#{target} = NEG(#{source})"
+      line "#{target} = #{target} - 1   ' ~x = -x - 1"
     end
 
     # R[a] = R[a] << R[a+1] / R[a] >> R[a+1]
@@ -2545,13 +2554,13 @@ module FaRuby
       end
     end
 
-    # 桁数は scratch32_b。**SLA / SRA は文**なのでスクラッチへ出してから写す
+    # 桁数は scratch32_b。`SLA` / `SRA` は `結果 = SLA(元, 桁数)` の形
     #
-    # 右シフトは**負の値を NOT で挟みます**。Ruby の `>>` は符号を保ちますが、
-    # KV のシフトが論理シフトだと 0 で埋まって大きな正の数になります。
+    # 右シフトは**負の値をビット反転で挟みます**。Ruby の `>>` は符号を保ち
+    # ますが、KV のシフトが論理シフトだと 0 で埋まって大きな正の数になります。
     # `~((~v) >> n)` は**論理でも算術でも同じ答え**になるので、どちらか
     # 分からないうちはこの形にしておきます (正の値では両者が一致するため、
-    # NOT で正にしてからずらせばよい)。
+    # 反転して正にしてからずらせばよい)。
     #
     # 左シフトは論理と算術で結果が同じなのでそのままです。
     def emit_shift(dest, left)
@@ -2566,17 +2575,15 @@ module FaRuby
         end
       end
       if left
-        line "SLA(#{dest.value}, #{scratch32_b}, #{scratch32})"
-        line "#{dest.value} = #{scratch32}"
+        line "#{dest.value} = SLA(#{dest.value}, #{scratch32_b})"
       else
         if_else_block("#{dest.value} < 0") do
-          note "負は NOT で正にしてからずらし、戻す。符号が保たれる"
-          line "#{scratch32} = NOT #{dest.value}"
-          line "SRA(#{scratch32}, #{scratch32_b}, #{dest.value})"
-          line "#{dest.value} = NOT #{dest.value}"
+          note "負は反転して正にしてからずらし、戻す。符号が保たれる"
+          emit_bit_not(scratch32, dest.value)
+          line "#{scratch32} = SRA(#{scratch32}, #{scratch32_b})"
+          emit_bit_not(dest.value, scratch32)
         end
-        line "SRA(#{dest.value}, #{scratch32_b}, #{scratch32})"
-        line "#{dest.value} = #{scratch32}"
+        line "#{dest.value} = SRA(#{dest.value}, #{scratch32_b})"
         end_block
       end
       end_block

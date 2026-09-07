@@ -2552,7 +2552,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM2:Z9 = 4
                             BREAK
                         END IF
-                        EM1.L:Z1 = NOT EM1.L:Z1
+                        EM1.L:Z1 = NEG(EM1.L:Z1)
+                        EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                     ELSE IF Z5 = 15 THEN
                         ' >>
                         IF EM0:Z1 <> 4 THEN
@@ -2573,8 +2574,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' 全部ずれる。左は 0、右は符号で埋まる
                                 EM1.L:Z1 = 0
                             ELSE
-                                SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                EM1.L:Z1 = EM16.L:Z9
+                                EM1.L:Z1 = SLA(EM1.L:Z1, EM18.L:Z9)
                             END IF
                         ELSE
                             IF EM18.L:Z9 >= 32 THEN
@@ -2586,13 +2586,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 END IF
                             ELSE
                                 IF EM1.L:Z1 < 0 THEN
-                                    ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
-                                    EM16.L:Z9 = NOT EM1.L:Z1
-                                    SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
-                                    EM1.L:Z1 = NOT EM1.L:Z1
+                                    ' 負は反転して正にしてからずらし、戻す。符号が保たれる
+                                    EM16.L:Z9 = NEG(EM1.L:Z1)
+                                    EM16.L:Z9 = EM16.L:Z9 - 1   ' ~x = -x - 1
+                                    EM16.L:Z9 = SRA(EM16.L:Z9, EM18.L:Z9)
+                                    EM1.L:Z1 = NEG(EM16.L:Z9)
+                                    EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                                 ELSE
-                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                    EM1.L:Z1 = EM16.L:Z9
+                                    EM1.L:Z1 = SRA(EM1.L:Z1, EM18.L:Z9)
                                 END IF
                             END IF
                         END IF
@@ -2727,13 +2728,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     END IF
                                 ELSE
                                     IF EM1.L:Z1 < 0 THEN
-                                        ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
-                                        EM16.L:Z9 = NOT EM1.L:Z1
-                                        SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
-                                        EM1.L:Z1 = NOT EM1.L:Z1
+                                        ' 負は反転して正にしてからずらし、戻す。符号が保たれる
+                                        EM16.L:Z9 = NEG(EM1.L:Z1)
+                                        EM16.L:Z9 = EM16.L:Z9 - 1   ' ~x = -x - 1
+                                        EM16.L:Z9 = SRA(EM16.L:Z9, EM18.L:Z9)
+                                        EM1.L:Z1 = NEG(EM16.L:Z9)
+                                        EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                                     ELSE
-                                        SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                        EM1.L:Z1 = EM16.L:Z9
+                                        EM1.L:Z1 = SRA(EM1.L:Z1, EM18.L:Z9)
                                     END IF
                                 END IF
                             ELSE
@@ -2741,8 +2743,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     ' 全部ずれる。左は 0、右は符号で埋まる
                                     EM1.L:Z1 = 0
                                 ELSE
-                                    SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                    EM1.L:Z1 = EM16.L:Z9
+                                    EM1.L:Z1 = SLA(EM1.L:Z1, EM18.L:Z9)
                                 END IF
                             END IF
                             EM0:Z1 = 4
@@ -3387,7 +3388,8 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM2:Z9 = 4
                         BREAK
                     END IF
-                    EM1.L:Z1 = NOT EM1.L:Z1
+                    EM1.L:Z1 = NEG(EM1.L:Z1)
+                    EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                 ELSE IF Z5 = 15 THEN
                     ' >>
                     IF EM0:Z1 <> 4 THEN
@@ -3408,8 +3410,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             ' 全部ずれる。左は 0、右は符号で埋まる
                             EM1.L:Z1 = 0
                         ELSE
-                            SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                            EM1.L:Z1 = EM16.L:Z9
+                            EM1.L:Z1 = SLA(EM1.L:Z1, EM18.L:Z9)
                         END IF
                     ELSE
                         IF EM18.L:Z9 >= 32 THEN
@@ -3421,13 +3422,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             END IF
                         ELSE
                             IF EM1.L:Z1 < 0 THEN
-                                ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
-                                EM16.L:Z9 = NOT EM1.L:Z1
-                                SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
-                                EM1.L:Z1 = NOT EM1.L:Z1
+                                ' 負は反転して正にしてからずらし、戻す。符号が保たれる
+                                EM16.L:Z9 = NEG(EM1.L:Z1)
+                                EM16.L:Z9 = EM16.L:Z9 - 1   ' ~x = -x - 1
+                                EM16.L:Z9 = SRA(EM16.L:Z9, EM18.L:Z9)
+                                EM1.L:Z1 = NEG(EM16.L:Z9)
+                                EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                             ELSE
-                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                EM1.L:Z1 = EM16.L:Z9
+                                EM1.L:Z1 = SRA(EM1.L:Z1, EM18.L:Z9)
                             END IF
                         END IF
                     END IF
@@ -3562,13 +3564,14 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 END IF
                             ELSE
                                 IF EM1.L:Z1 < 0 THEN
-                                    ' 負は NOT で正にしてからずらし、戻す。符号が保たれる
-                                    EM16.L:Z9 = NOT EM1.L:Z1
-                                    SRA(EM16.L:Z9, EM18.L:Z9, EM1.L:Z1)
-                                    EM1.L:Z1 = NOT EM1.L:Z1
+                                    ' 負は反転して正にしてからずらし、戻す。符号が保たれる
+                                    EM16.L:Z9 = NEG(EM1.L:Z1)
+                                    EM16.L:Z9 = EM16.L:Z9 - 1   ' ~x = -x - 1
+                                    EM16.L:Z9 = SRA(EM16.L:Z9, EM18.L:Z9)
+                                    EM1.L:Z1 = NEG(EM16.L:Z9)
+                                    EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
                                 ELSE
-                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                    EM1.L:Z1 = EM16.L:Z9
+                                    EM1.L:Z1 = SRA(EM1.L:Z1, EM18.L:Z9)
                                 END IF
                             END IF
                         ELSE
@@ -3576,8 +3579,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 ' 全部ずれる。左は 0、右は符号で埋まる
                                 EM1.L:Z1 = 0
                             ELSE
-                                SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
-                                EM1.L:Z1 = EM16.L:Z9
+                                EM1.L:Z1 = SLA(EM1.L:Z1, EM18.L:Z9)
                             END IF
                         END IF
                         EM0:Z1 = 4
