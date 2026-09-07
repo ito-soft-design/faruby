@@ -1,0 +1,145 @@
+// =======================================
+// faRuby VM - オペコード 0x08 - 0x0F
+// =======================================
+// 【自動生成】このファイルを直接編集しないでください。
+//   定義: tools/opcode_table.rb
+//   生成: tools/kvs_generator.rb  (rake vm_core)
+//   編集した場合 test_kvs_generator.rb が失敗します。
+//
+// ラダーでの置き場所: 内側 FOR の中 (2 番目の群)
+// 並び順と役割は vm_02_prologue.st の先頭にあります。
+
+// 担当外の番号はここで素通りする。**判定はループの外に置く。**
+// 見るのは上限だけ。8 未満は手前の群が実行して
+// 65535 で潰しているので、ここには届かない
+IF EM54:Z9 <= 15 THEN
+
+  // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
+  // 本体は途中で BREAK することがあり、後ろに置くと通らない
+  EM54:Z9 := 65535;
+
+  // BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
+  FOR EM20:Z9 := 1 TO 1 DO
+
+    IF EM6:Z9 = 8 THEN
+      // OP_LOADI_2 (B): R[a] = 2
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 2;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 9 THEN
+      // OP_LOADI_3 (B): R[a] = 3
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 3;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 10 THEN
+      // OP_LOADI_4 (B): R[a] = 4
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 4;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 11 THEN
+      // OP_LOADI_5 (B): R[a] = 5
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 5;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 12 THEN
+      // OP_LOADI_6 (B): R[a] = 6
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 6;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 13 THEN
+      // OP_LOADI_7 (B): R[a] = 7
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := 7;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 14 THEN
+      // OP_LOADI16 (BS): R[a] = signed16(b)
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // 16bit big-endian: hi byte, lo byte
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z3 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z4 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      EM8:Z9 := Z3 * 256 + Z4;
+      // 16ビット値を符号拡張して32ビットスクラッチに置く
+      EM16:Z9 := EM8:Z9;
+      EM17:Z9 := 0;
+      IF EM8:Z9 >= 32768 THEN
+        EM17:Z9 := 65535;
+      END_IF;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := EM16.L:Z9;
+      EM0:Z1 := 4;
+
+    ELSIF EM6:Z9 = 15 THEN
+      // OP_LOADI32 (BSS): R[a] = (b<<16)+c
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // 16bit big-endian: hi byte, lo byte
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z3 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z4 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      EM8:Z9 := Z3 * 256 + Z4;
+      // 16bit big-endian: hi byte, lo byte
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z3 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z4 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      EM9:Z9 := Z3 * 256 + Z4;
+      // 上位 * 65536 は16ビット演算になり桁上がりが落ちるため、
+      // 下位/上位ワードを並べて32ビットとして読む
+      EM16:Z9 := EM9:Z9;
+      EM17:Z9 := EM8:Z9;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := EM16.L:Z9;
+      EM0:Z1 := 4;
+
+    ELSE
+      // 未知のオペコード: エラー
+      EM1:Z9 := 3;
+      EM2:Z9 := EM6:Z9;
+      EXIT;
+
+    END_IF;
+
+    // バイトコード範囲チェック
+    IF EM0:Z9 >= EM10:Z9 THEN
+      EM1:Z9 := 2;
+      EXIT;
+    END_IF;
+
+  END_FOR;
+END_IF;

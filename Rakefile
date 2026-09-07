@@ -32,6 +32,28 @@ task :vm_core do
   end
 end
 
+desc "Regenerate plc/keyence/x500/vm_*.st (KV-X500 の ST) from tools/opcode_table.rb"
+task :vm_st do
+  require_relative "tools/kvs_generator"
+  require_relative "tools/config"
+
+  dir = File.expand_path("plc/keyence/x500", __dir__)
+  require "fileutils"
+  FileUtils.mkdir_p(dir)
+
+  layout = FaRuby::Config.new.layout
+  puts "配置: #{layout}"
+  generator = FaRuby::KvsGenerator.new(layout: layout, dialect: FaRuby::StDialect.new)
+  changed = generator.write!(dir)
+  if changed.empty?
+    puts "変更なし (生成結果は既存ファイルと同一)"
+  else
+    changed.each { |name| puts "生成: plc/keyence/x500/#{name}" }
+    puts ""
+    puts "**未確認です。** KV-X500 で変換が通るかを確かめてください。"
+  end
+end
+
 desc "Compare the scripts in KV Studio with the generated ones"
 task :transfer do
   require_relative "tools/transfer_check"

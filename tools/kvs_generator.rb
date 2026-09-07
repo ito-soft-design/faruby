@@ -14,6 +14,7 @@
 # ここだけで守れば全命令に反映されます。
 
 require_relative "vm_constants"
+require_relative "dialect"
 require_relative "memory_layout"
 require_relative "opcode_table"
 
@@ -75,10 +76,13 @@ module FaRuby
 
     attr_reader :lines, :layout
 
-    def initialize(level: 0, layout: MemoryLayout.default)
+    attr_reader :dialect
+
+    def initialize(level: 0, layout: MemoryLayout.default, dialect: KvsDialect.new)
       @lines = []
       @level = level
       @layout = layout
+      @dialect = dialect
       @slot_cache = {}
     end
 
@@ -175,18 +179,24 @@ module FaRuby
     def select_fixed_bank
       note "固定領域 (#{layout.fixed_device_name}) のバンクを選ぶ"
       note "現在のバンクを読む命令が無いため、抜けるときは 0 に戻す"
-      line "FRSET(#{MemoryLayout::FIXED_BANK})"
+      bank = dialect.select_bank(MemoryLayout::FIXED_BANK)
+      line bank if bank
     end
 
     def restore_fixed_bank
       note "ファイルレジスタのバンクを 0 に戻す"
-      line "FRSET(0)"
+      bank = dialect.select_bank(0)
+      line bank if bank
     end
 
     # --- 行の組み立て ---
 
+    # 1 文を出す。**綴り方は dialect が決める** (KV 向けは素通し)
     def line(text)
-      @lines << (INDENT * @level + text)
+      rendered = dialect.statement(text)
+      return if rendered.empty?
+
+      @lines << (INDENT * @level + rendered)
     end
 
     def blank
@@ -194,7 +204,7 @@ module FaRuby
     end
 
     def note(text)
-      line(text.empty? ? "'" : "' #{text}")
+      @lines << (INDENT * @level + dialect.comment(text))
     end
     alias comment note
 
@@ -3041,7 +3051,9 @@ module FaRuby
     # `init` はリセットハンドラで、Z の退避もバンクの選択も自分で行う
     # 独立したスクリプトです。**本体より先に置きます。**後ろだと、要求の
     # あったスキャンで古い状態のまま命令が進んでしまいます。
-    def self.file_name(index, stem) = format("vm_%02d_%s.kvs", index + 1, stem)
+    def self.file_name(index, stem, extension = "kvs")
+      format("vm_%02d_%s.%s", index + 1, stem, extension)
+    end
 
     # どの群の範囲にも入らない番号
     #
@@ -3052,9 +3064,13 @@ module FaRuby
 
     attr_reader :layout
 
-    def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default)
+    attr_reader :dialect
+
+    def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default,
+                   dialect: KvsDialect.new)
       @opcodes = opcodes
       @layout = layout
+      @dialect = dialect
     end
 
     # デコード対象のオペコードを保持するデバイス
@@ -3064,7 +3080,7 @@ module FaRuby
     def dispatch_var = query.state(layout.dispatch_addr)
 
     # 行を出さずにデバイス式だけを尋ねるための emitter
-    def query = @query ||= KvsEmitter.new(layout: layout)
+    def query = @query ||= KvsEmitter.new(layout: layout, dialect: dialect)
 
     # ラダーに置く順のファイル名 (番号付き)
     #
@@ -3077,7 +3093,7 @@ module FaRuby
     end
 
     # 役割からファイル名を引く
-    def file_name(stem) = self.class.file_name(stems.index(stem), stem)
+    def file_name(stem) = self.class.file_name(stems.index(stem), stem, dialect.extension)
 
     def generate
       builders = { "prologue" => -> { build_prologue_source },
@@ -3120,7 +3136,8 @@ module FaRuby
         File.binwrite(path, content)
         name
       end
-      removed = Dir[File.join(dir, "vm_*.kvs")].reject { |p| files.key?(File.basename(p)) }
+      pattern = File.join(dir, "vm_*.#{dialect.extension}")
+      removed = Dir[pattern].reject { |p| files.key?(File.basename(p)) }
       removed.each { |path| File.delete(path) }
       written + removed.map { |path| "#{File.basename(path)} (削除)" }
     end
@@ -3129,7 +3146,7 @@ module FaRuby
 
     # リセットハンドラ (毎スキャン実行、RESET_REQ = 1 のインスタンスだけ動く)
     def build_init_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       z = KvsEmitter::Z_PRIMARY
 
       e.note "======================================="
@@ -3184,7 +3201,7 @@ module FaRuby
 
     # [前口上] ラダーの外側 FOR の前に 1 回だけ動く
     def build_prologue_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_header(e)
       e.blank
       e.save_z_registers
@@ -3200,7 +3217,7 @@ module FaRuby
 
     # [頭出し] 外側 FOR の中、内側 FOR の前
     def build_instance_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_box_header(e, "インスタンスの頭出し", "外側 FOR の中、内側 FOR の前")
       e.blank
       e.note "次のインスタンスのブロック先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
@@ -3224,7 +3241,7 @@ module FaRuby
 
     # [取り込み] 内側 FOR の中、群のスクリプトの前
     def build_fetch_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_box_header(e, "命令の取り込み", "内側 FOR の中、群のスクリプトの前")
       e.blank
       e.note "**止まっていたら、どの群の範囲にも入らない番号を置く。**"
@@ -3244,7 +3261,7 @@ module FaRuby
 
     # [群 n] 内側 FOR の中。自分の担当番号だけ実行する
     def build_group_source(group, index)
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       range = group_range(index)
       emit_box_header(e, format("オペコード 0x%02X - 0x%02X", range.first, range.last),
                       "内側 FOR の中 (#{index + 1} 番目の群)")
@@ -3271,7 +3288,7 @@ module FaRuby
 
     # [後始末] ラダーの外側 FOR の後に 1 回だけ動く
     def build_epilogue_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_box_header(e, "後始末", "外側 FOR の後")
       e.blank
       e.restore_fixed_bank
