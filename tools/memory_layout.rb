@@ -83,7 +83,7 @@ module FaRuby
     IREP_POOL          = 2
     IREP_SYMBOLS       = 3
     IREP_NREGS         = 4
-    # 最初の子 irep の番号。irep は幅優先に並べてあり同じ親の子が連続するため、
+    # 最初の子 irep の番号。irep は階層ごとに並べてあり同じ親の子が連続するため、
     # OP_METHOD のオペランド (親から見た子の番号) を足せば通し番号になる
     IREP_FIRST_CHILD   = 5
 

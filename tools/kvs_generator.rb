@@ -962,7 +962,7 @@ module FaRuby
 
     # R[a] = 子 irep b への参照 (OP_METHOD)
     #
-    # irep は幅優先に並べてあり同じ親の子が連続するため、実行中の irep の
+    # irep は階層ごとに並べてあり同じ親の子が連続するため、実行中の irep の
     # 「最初の子の番号」に b を足せば通し番号になります。
     def load_child_irep(name, child_name, error_code)
       child_irep_into(scratch_lo, child_name, error_code)

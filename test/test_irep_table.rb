@@ -34,7 +34,7 @@ class TestIrepTable < Minitest::Test
 
   # === 並び順 ===
 
-  # 幅優先に並べると同じ親の子が連続する。OP_METHOD のオペランドは親から見た
+  # 階層ごとに並べると同じ親の子が連続する。OP_METHOD のオペランドは親から見た
   # 子の番号なので、親の first_child を足すだけで通し番号になる。
   # 深さ優先では子が離れてしまい、この足し算ができない。
   def test_children_of_the_same_parent_are_numbered_consecutively
