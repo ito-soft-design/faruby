@@ -349,6 +349,39 @@ class TestMethods < Minitest::Test
     end
   end
 
+  # === README の一覧 ===
+  #
+  # 利用者が最初に見るのは README。メソッドを足したときに書き忘れると、
+  # **動くのに存在しないことになる**
+
+  def readme = File.read(File.expand_path("../README.md", __dir__), encoding: "utf-8")
+
+  def test_the_readme_lists_every_builtin_method
+    table = readme[/### 組み込みメソッド\n(.*?)\n\n[^|]/m, 1]
+    refute_nil table, "README に組み込みメソッドの一覧が無い"
+
+    missing = BUILTIN_METHODS.keys.reject { |name| table.include?("`#{name}`") }
+
+    assert_empty missing, "README の一覧に無いメソッド"
+  end
+
+  # 数を書いてあるので、増やしたら直す
+  def test_the_readme_counts_the_builtin_methods
+    assert_includes readme, "次の #{BUILTIN_METHODS.size} 個です"
+  end
+
+  # レシーバの型検査は README の表がそのまま説明になっている
+  def test_the_readme_shows_the_receiver_of_each_method
+    table = readme[/### 組み込みメソッド\n(.*?)\n\n[^|]/m, 1]
+
+    BUILTIN_METHODS.each_key do |name|
+      row = table.lines.find { |l| l.include?("`#{name}`") }
+
+      refute_nil row, name
+      refute_empty row.split("|")[3].to_s.strip, "#{name} のレシーバが空"
+    end
+  end
+
   # レシーバの型ごとに番号が連続していないと、型検査が範囲比較で済まなくなる
   def test_methods_are_grouped_by_receiver_type
     edges = METHOD_RECEIVER_GROUPS.map(&:first)
