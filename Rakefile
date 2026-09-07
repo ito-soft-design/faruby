@@ -32,4 +32,37 @@ task :vm_core do
   end
 end
 
+desc "Compare the scripts in KV Studio with the generated ones"
+task :transfer do
+  require_relative "tools/transfer_check"
+  require_relative "tools/config"
+
+  path = ENV["MNM"] || FaRuby::TransferCheck.find_mnemonic
+  unless path
+    puts "ニーモニックが見つかりません。"
+    puts "KV Studio で書き出してから実行してください (既定の場所: plc/keyence/*/tmp/*.mnm)"
+    exit 1
+  end
+
+  puts "照合: #{path}"
+  puts ""
+  layout = FaRuby::Config.new.layout
+  generator = FaRuby::KvsGenerator.new(layout: layout)
+  results = FaRuby::TransferCheck.new(path, generator: generator).results
+  results.each do |r|
+    mark = r.state == :same ? "一致" : "違い"
+    puts format("  %-22s %s  %s", r.name, mark, r.detail)
+  end
+
+  stale = results.select(&:stale?)
+  puts ""
+  if stale.empty?
+    puts "すべて一致しています。"
+  else
+    puts "KV Studio に取り込み直してください:"
+    stale.each { |r| puts "  plc/keyence/#{r.name}" }
+    exit 1
+  end
+end
+
 task default: :test

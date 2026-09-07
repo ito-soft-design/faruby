@@ -1118,8 +1118,8 @@ END IF
 | [tools/opcode_table.rb](../tools/opcode_table.rb) | 命令定義 (唯一の情報源) |
 | [tools/kvs_generator.rb](../tools/kvs_generator.rb) | KV スクリプトを組み立てるバックエンド |
 | [simulator/sim_vm.rb](../simulator/sim_vm.rb) | EM メモリ上で実行するバックエンド |
-| `plc/keyence/vm_*.kvs` | 生成物 (コミット対象) |
-| `plc/keyence/vm_01_init.kvs` | 生成物 (コミット対象) — リセット処理 |
+| [tools/transfer_check.rb](../tools/transfer_check.rb) | 取り込み済みスクリプトとの照合 |
+| `plc/keyence/vm_*.kvs` | 生成物 (コミット対象)。番号がラダーに置く順 |
 
 **`plc/keyence/*.kvs` は生成物です。直接編集しないでください。**
 命令を追加・変更する場合は `opcode_table.rb` を直してから `rake vm_core` で再生成します。
@@ -1314,6 +1314,16 @@ NEXT
 各群の下限を前の群の続きにして塞いであります (`group_range`)。実際に
 31-32・41-44・89-94 が落ちる形になっていました。最大の番号より上は
 取り込みが見ます。
+
+#### 取り込み直すファイルを PLC 側から決める
+
+スクリプトが 13 本あるので、**どれを入れ替えたか覚えておくのは当てに
+なりません。**コミットの差分も、取り込み忘れがあると合いません。
+
+KV Studio でニーモニックを書き出して `rake transfer` で照合します。
+書き出しにはスクリプトの元のソースがコメントとして入っているので、
+生成物と 1 行ずつ比べられます。実際にこれで、名前だけ変えて中身を
+入れ直していないスクリプトが 1 本見つかりました。
 
 #### 分けた結果
 
