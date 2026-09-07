@@ -43,8 +43,7 @@ module FaRuby
     # test_kvs_generator.rb が検証する。
     #
     # Z11 / Z12 は特別な用途があり使用できない (実機で確認済み)。
-    # 使えるのは Z1-Z10 で、faRuby が Z1-Z9 を使うため
-    # ラダー側に残るのは Z10 の1本。
+    # 使えるのは Z1-Z10 で、faRuby は Z1-Z9 を使う。Z10 は未使用。
     USED_Z = (1..9).to_a.freeze
 
     # ワードデバイス (アクセス幅の選択が必要)
@@ -2934,7 +2933,7 @@ module FaRuby
              "から引く。**"
       e.note ""
       e.note "Z#{KvsEmitter::USED_Z.first}-Z#{KvsEmitter::USED_Z.last} を使用 " \
-             "(Z11/Z12 は特別な用途があり使用不可、Z10 はラダー用に残す)"
+             "(Z11/Z12 は特別な用途があり使用不可、Z10 は未使用)"
       e.note "  Z はラダーと共有する資源のため、スクリプトの先頭で退避し末尾で復元する。"
       e.note "  faRuby の実行前後で Z の内容は変わらない。"
       e.note "  退避先 #{layout.device(layout.z_save_addr(KvsEmitter::USED_Z.first))}-" \
