@@ -56,10 +56,13 @@ module FaRuby
     WORD_DEVICES = [[DEVICE_TYPE_EM, "EM"], [DEVICE_TYPE_DM, "DM"], [DEVICE_TYPE_ZF, "ZF"]].freeze
 
     # ビットデバイス (幅サフィックス無しなら個別ビット)
+    #
+    # **タイマ・カウンタの接点は書けません。** タイムアップ・カウントアップで
+    # 決まるものなので、代入しようとすると変換が通りません。読み取りはできます。
     BIT_DEVICES = [
-      [DEVICE_TYPE_R,  "R"],  [DEVICE_TYPE_MR, "MR"],
-      [DEVICE_TYPE_B,  "B"],  [DEVICE_TYPE_L,  "LR"],
-      [DEVICE_TYPE_T,  "T"],  [DEVICE_TYPE_C,  "C"],
+      [DEVICE_TYPE_R,  "R",  true],  [DEVICE_TYPE_MR, "MR", true],
+      [DEVICE_TYPE_B,  "B",  true],  [DEVICE_TYPE_L,  "LR", true],
+      [DEVICE_TYPE_T,  "T",  false], [DEVICE_TYPE_C,  "C",  false],
     ].freeze
 
     # アクセス幅の分岐順。最後 (.S) が ELSE になる
@@ -1576,7 +1579,7 @@ module FaRuby
     def check_known_device(error_code)
       note "生成コードが知っている種別か。知らない種別は FOR に入る前に弾く"
       line "#{str_count} = 0"
-      (WORD_DEVICES + BIT_DEVICES).each do |type, _name|
+      (WORD_DEVICES + BIT_DEVICES).each do |type, _name, _writable|
         if_("Z5 = #{type}") { line "#{str_count} = 1" }
       end
       if_("#{str_count} = 0") { vm_error(error_code) }
@@ -2370,11 +2373,14 @@ module FaRuby
 
       # ビットデバイスは幅サフィックスの有無で意味が変わる。
       # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T/C は現在値)。
-      BIT_DEVICES.each do |type, name|
+      BIT_DEVICES.each do |type, name, writable|
         chain_head(first, "Z5 = #{type}")
         first = false
         indent
-        if_else_block("Z8 = #{ACCESS_BIT}") { bit_device_body(mode, name, slot) }
+        if_else_block("Z8 = #{ACCESS_BIT}") do
+          bit_device_body(mode, name, slot, writable: writable, error_code: error_code,
+                                            checked: checked)
+        end
         word_device_body(mode, name, slot, type)
         end_block
         dedent
@@ -2999,16 +3005,21 @@ module FaRuby
       end_block
     end
 
-    def bit_device_body(mode, name, slot)
+    def bit_device_body(mode, name, slot, writable:, error_code:, checked: false)
       bit = "#{name}0:Z6"
       if mode == :read
         if_else_block(bit) { assign_bool(slot, true) }
         assign_bool(slot, false)
         end_block
-      else
+      elsif writable
         if_else_block("#{scratch32} <> 0") { line dialect.write_bit(bit, true) }
         line dialect.write_bit(bit, false)
         end_block
+      elsif checked
+        note "接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない"
+      else
+        note "接点は書けない。タイムアップ・カウントアップで決まる"
+        vm_error(error_code)
       end
     end
   end

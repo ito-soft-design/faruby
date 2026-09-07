@@ -722,11 +722,7 @@ IF EM54:Z9 <= 30 THEN
                 END_IF;
               ELSIF Z5 = 8 THEN
                 IF Z8 = 5 THEN
-                  IF EM16.L:Z9 <> 0 THEN
-                    T0:Z6 := TRUE;
-                  ELSE
-                    T0:Z6 := FALSE;
-                  END_IF;
+                  // 接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない
                 ELSE
                   IF Z8 = 2 THEN
                     T0.L:Z6 := EM16.L:Z9;
@@ -740,11 +736,7 @@ IF EM54:Z9 <= 30 THEN
                 END_IF;
               ELSIF Z5 = 9 THEN
                 IF Z8 = 5 THEN
-                  IF EM16.L:Z9 <> 0 THEN
-                    C0:Z6 := TRUE;
-                  ELSE
-                    C0:Z6 := FALSE;
-                  END_IF;
+                  // 接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない
                 ELSE
                   IF Z8 = 2 THEN
                     C0.L:Z6 := EM16.L:Z9;
@@ -923,11 +915,10 @@ IF EM54:Z9 <= 30 THEN
           END_IF;
         ELSIF Z5 = 8 THEN
           IF Z8 = 5 THEN
-            IF EM16.L:Z9 <> 0 THEN
-              T0:Z6 := TRUE;
-            ELSE
-              T0:Z6 := FALSE;
-            END_IF;
+            // 接点は書けない。タイムアップ・カウントアップで決まる
+            EM1:Z9 := 3;
+            EM2:Z9 := 22;
+            EXIT;
           ELSE
             IF Z8 = 2 THEN
               T0.L:Z6 := EM16.L:Z9;
@@ -941,11 +932,10 @@ IF EM54:Z9 <= 30 THEN
           END_IF;
         ELSIF Z5 = 9 THEN
           IF Z8 = 5 THEN
-            IF EM16.L:Z9 <> 0 THEN
-              C0:Z6 := TRUE;
-            ELSE
-              C0:Z6 := FALSE;
-            END_IF;
+            // 接点は書けない。タイムアップ・カウントアップで決まる
+            EM1:Z9 := 3;
+            EM2:Z9 := 22;
+            EXIT;
           ELSE
             IF Z8 = 2 THEN
               C0.L:Z6 := EM16.L:Z9;

@@ -213,6 +213,31 @@ class TestKvsGenerator < Minitest::Test
     assert_includes @source, "#{emitter.status} = #{VM_ERROR}"
   end
 
+  # 命令を打ち切る BREAK が、本体の中の FOR に捕まっていないこと
+  #
+  # **中の BREAK はその FOR を抜けるだけで、命令を打ち切れません。**
+  # エラーを書いてもそのまま走り続けます。これまでに 2 度踏んでいます
+  # (文字列のデバイス書き込みと、配列のデバイス書き込み)。
+  #
+  # 群のスクリプトは本体全体を `FOR ... TO 1` で包んでいるので、打ち切りの
+  # BREAK は深さ 1 に現れます。深さ 2 以上は本体の中のループに捕まっています。
+  def test_no_break_is_trapped_inside_a_loop
+    offenders = FaRuby::KvsGenerator.new.generate.flat_map do |name, content|
+      next [] unless name.include?("group")
+
+      depth = 0
+      content.split("\n").each_with_index.filter_map do |line, i|
+        text = line.strip
+        depth += 1 if text.start_with?("FOR ")
+        depth -= 1 if text == "NEXT"
+        "#{name}:#{i + 1} (深さ #{depth})" if text == "BREAK" && depth > 1
+      end
+    end
+    assert_empty offenders.first(5),
+                 "本体の中の FOR に捕まった BREAK があります。検査を FOR の外に出すか、" \
+                 "呼ぶ側が確かめていることにして BREAK を出さないでください"
+  end
+
   # BREAK はスクリプトの中で FOR と対になっていなければならない。
   # ステップのループはラダーにあるので、命令を打ち切る BREAK は
   # 1 回だけ回るループで受ける。
@@ -395,17 +420,30 @@ class TestKvsGenerator < Minitest::Test
     end
   end
 
-  # ビットデバイスへの書き込みは種類によらず TRUE / FALSE の代入
+  # ビットデバイスへの書き込みは TRUE / FALSE の代入
   #
-  # 以前はタイマ・カウンタの接点だけ `SET` / `RES` を使っていましたが、
-  # 代入でも書けるため分けていません。ST も同じ形で書けます。
+  # 以前は `SET` / `RES` と 1 / 0 に分かれていましたが、代入に揃えました。
+  # ST も同じ形で書けます。
   def test_writing_a_bit_device_assigns_true_or_false
     body = opcode_body(0x16) # OP_SETGV
-    %w[R MR B LR T C].each do |dev|
+    %w[R MR B LR].each do |dev|
       assert_includes body, "#{dev}0:Z6 = TRUE", "#{dev} を ON にする代入"
       assert_includes body, "#{dev}0:Z6 = FALSE", "#{dev} を OFF にする代入"
     end
     refute_includes body, "SET(", "SET / RES は使わない"
+  end
+
+  # **タイマ・カウンタの接点は書けません。** タイムアップ・カウントアップで
+  # 決まるものなので、代入しようとすると KV Studio の変換が通りません。
+  # 読み取りはできます。
+  def test_a_timer_or_counter_contact_cannot_be_written
+    write = opcode_body(0x16) # OP_SETGV
+    read = opcode_body(0x15)  # OP_GETGV
+    %w[T C].each do |dev|
+      refute_includes write, "#{dev}0:Z6 = ", "#{dev} の接点に書こうとしている"
+      assert_includes read, "IF #{dev}0:Z6 THEN", "#{dev} の接点は読める"
+    end
+    assert_includes write, "接点は書けない"
   end
 
   # ビットデバイスは幅の有無で経路が分かれる。
