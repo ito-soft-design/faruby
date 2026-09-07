@@ -5,6 +5,7 @@ require "minitest/autorun"
 require_relative "../tools/vm_constants"
 require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
+require_relative "../tools/kvs_generator"
 
 # ドキュメントが実装とずれていないか
 #
@@ -70,6 +71,28 @@ class TestDocs < Minitest::Test
     end
 
     assert_empty missing, "型タグの表に無いもの"
+  end
+
+  # === インデックスレジスタ ===
+
+  # 使う本数を増やしたら doc も直す。ラダーに残す本数が変わる話なので
+  def test_the_z_range_matches
+    used = FaRuby::KvsEmitter::USED_Z
+
+    assert_includes doc("doc/architecture.md"),
+                    "faRuby が使うのは Z#{used.first}-Z#{used.last} です"
+  end
+
+  # 配分の表は使う Z を全部挙げていること
+  def test_every_z_is_in_the_table
+    table = doc("doc/architecture.md")[/^\| レジスタ \|.*\n\|[-| ]+\|\n((?:\| Z.*\n)+)/, 1]
+    refute_nil table, "配分の表が見つからない"
+
+    covered = table.scan(/^\| Z(\d+)(?:-Z(\d+))?/).flat_map do |first, last|
+      (first.to_i..(last || first).to_i).to_a
+    end
+
+    assert_empty FaRuby::KvsEmitter::USED_Z - covered, "表に無い Z"
   end
 
   # === ロードマップ ===
