@@ -2367,6 +2367,11 @@ module FaRuby
       when METHOD_TO_F  then to_f_into(dest)
       when METHOD_FLOOR then floor_into(dest)
       when METHOD_ROUND then round_into(dest)
+      when METHOD_BIT_AND then bit_op_into(dest, rhs, "AND", type_code)
+      when METHOD_BIT_OR  then bit_op_into(dest, rhs, "OR", type_code)
+      when METHOD_BIT_XOR then bit_op_into(dest, rhs, "XOR", type_code)
+      when METHOD_BIT_NOT then bit_not_into(dest, type_code)
+      when METHOD_SHIFT_R then shift_into(dest, rhs, "SRA", type_code)
       when METHOD_LENGTH then length_into(dest)
       when METHOD_EMPTY_P then empty_into(dest)
       when METHOD_CONCAT then concat_into(dest, rhs, type_code, heap_code)
@@ -2412,15 +2417,31 @@ module FaRuby
       end_block
     end
 
-    # R[a] << R[a+1]。文字列なら中身を継ぎ足し、配列なら末尾に足す
+    # R[a] << R[a+1]
     #
-    # どちらも Ruby はレシーバ自身を返すので、R[a] はそのままにします。
+    # **整数なら左シフト、文字列なら中身を継ぎ足し、配列なら末尾に足します。**
+    # Ruby と同じです。文字列と配列はレシーバ自身を返すので R[a] はそのまま。
+    #
+    # 区分の検査はタグ #{'%d'} から #{'%d'} までしか見ていません (整数と配列が
+    # 離れているため)。実数とシンボルはここで弾きます。
     def concat_into(dest, rhs, type_code, heap_code)
-      if_else_block("#{dest.tag} = #{TT_STRING}") do
-        note "文字列は中身を継ぎ足す"
-        append_string_slots(dest, rhs, type_code, heap_code)
-      end
+      line "IF #{dest.tag} = #{TT_INTEGER} THEN"
+      indent
+      shift_into(dest, rhs, "SLA", type_code)
+      dedent
+      line "ELSE IF #{dest.tag} = #{TT_STRING} THEN"
+      indent
+      note "文字列は中身を継ぎ足す"
+      append_string_slots(dest, rhs, type_code, heap_code)
+      dedent
+      line "ELSE IF #{dest.tag} = #{TT_ARRAY} THEN"
+      indent
       push_into(dest, rhs, heap_code)
+      dedent
+      line "ELSE"
+      indent
+      note "実数とシンボルは区分の範囲に入ってしまうのでここで弾く"
+      vm_error(type_code)
       end_block
     end
 
@@ -2482,6 +2503,47 @@ module FaRuby
       line "#{element.tag} = #{rhs.tag}"
       line "Z6 = #{scratch32_b}"
       line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z#{Z_ARRAY_SLOT} = Z6 + 1"
+    end
+
+    # --- ビット演算 ---
+    #
+    # KV スクリプトは `AND` / `OR` / `XOR` / `NOT` をワードの演算子として書けます。
+    # **条件式の連結には使えません** (そちらは入れ子の IF にしています)。
+    # シフトは `SLA(元, 桁数, 先)` / `SRA(元, 桁数, 先)` の文です。
+    #
+    # 整数だけです。実数を渡すと止まります。ビット列に意味を持たせるのは
+    # 整数のときだけで、実数のビット列を触っても使い道がありません。
+
+    # R[a] = R[a] <演算> R[a+1] (& | ^)
+    def bit_op_into(dest, rhs, operator, type_code)
+      both_integers(dest, rhs, type_code) do
+        line "#{dest.value} = #{dest.value} #{operator} #{rhs.value}"
+      end
+    end
+
+    # R[a] = ~R[a]
+    def bit_not_into(dest, type_code)
+      if_("#{dest.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      line "#{dest.value} = NOT #{dest.value}"
+    end
+
+    # R[a] = R[a] << R[a+1] / R[a] >> R[a+1]
+    #
+    # SLA / SRA は文なので、いったんスクラッチへ出してから写します。
+    # 元と先を同じにできるかが分からないためです。
+    def shift_into(dest, rhs, operator, type_code)
+      both_integers(dest, rhs, type_code) do
+        line "#{operator}(#{dest.value}, #{rhs.value}, #{scratch32})"
+        line "#{dest.value} = #{scratch32}"
+      end
+    end
+
+    # 両方が整数のときだけ本体を出す。片方でも違えば止まる
+    def both_integers(dest, rhs, type_code)
+      if_("#{dest.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      if_("#{rhs.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      yield
+      line "#{dest.tag} = #{TT_INTEGER}"
     end
 
     # !R[a]。偽なら true、それ以外は false

@@ -249,18 +249,25 @@ module FaRuby
     METHOD_ROUND   = 8
     METHOD_TIMES   = 9    # ブロックを取る
     METHOD_UPTO    = 10   # ブロックを取る
-    METHOD_LENGTH  = 11   # length / size。文字列・配列・ハッシュ
-    METHOD_EMPTY_P = 12   # empty?。文字列・配列・ハッシュ
-    METHOD_CONCAT  = 13   # <<。文字列と配列
-    METHOD_EACH    = 14   # 配列とハッシュ。ブロックを取る
-    METHOD_PUSH    = 15   # push。配列だけ (Ruby の String に push は無い)
-    METHOD_KEY_P   = 16   # key?
-    METHOD_KEYS    = 17
-    METHOD_VALUES  = 18
+    # ビット演算。整数だけ。実数を渡すと止まる
+    METHOD_BIT_AND = 11   # &
+    METHOD_BIT_OR  = 12   # |
+    METHOD_BIT_XOR = 13   # ^
+    METHOD_BIT_NOT = 14   # ~
+    METHOD_SHIFT_R = 15   # >>
+    METHOD_LENGTH  = 16   # length / size。文字列・配列・ハッシュ
+    METHOD_EMPTY_P = 17   # empty?。文字列・配列・ハッシュ
+    # << は整数なら左シフト、文字列と配列なら継ぎ足し。Ruby と同じ
+    METHOD_CONCAT  = 18
+    METHOD_EACH    = 19   # 配列とハッシュ。ブロックを取る
+    METHOD_PUSH    = 20   # push。配列だけ (Ruby の String に push は無い)
+    METHOD_KEY_P   = 21   # key?
+    METHOD_KEYS    = 22
+    METHOD_VALUES  = 23
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
-    METHOD_NUMERIC_MAX = METHOD_UPTO
+    METHOD_NUMERIC_MAX = METHOD_SHIFT_R
 
     # メソッド番号の区分 => 受け付けるレシーバのタグ
     #
@@ -270,9 +277,11 @@ module FaRuby
     #
     # METHOD_NUMERIC_MIN 未満 (!= と !) はどの型でも呼べるため区分がありません。
     METHOD_RECEIVER_GROUPS = [
-      [METHOD_UPTO,    TT_INTEGER, TT_FLOAT, "数値"],
+      [METHOD_SHIFT_R, TT_INTEGER, TT_FLOAT, "数値"],
       [METHOD_EMPTY_P, TT_STRING,  TT_HASH,  "文字列・配列・ハッシュ"],
-      [METHOD_CONCAT,  TT_STRING,  TT_ARRAY, "文字列・配列"],
+      # << だけはタグが飛ぶ (整数 4、文字列 7、配列 8)。範囲では実数と
+      # シンボルも通ってしまうため、**本体で型ごとに分けて弾きます**
+      [METHOD_CONCAT,  TT_INTEGER, TT_ARRAY, "整数・文字列・配列"],
       [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
       [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
       [nil,            TT_HASH,    TT_HASH,  "ハッシュ"],
@@ -302,6 +311,11 @@ module FaRuby
       "to_f"   => [METHOD_TO_F,   0],
       "floor"  => [METHOD_FLOOR,  0],
       "round"  => [METHOD_ROUND,  0],
+      "&"      => [METHOD_BIT_AND, 1],
+      "|"      => [METHOD_BIT_OR,  1],
+      "^"      => [METHOD_BIT_XOR, 1],
+      "~"      => [METHOD_BIT_NOT, 0],
+      ">>"     => [METHOD_SHIFT_R, 1],
       "times"  => [METHOD_TIMES,  0],
       "upto"   => [METHOD_UPTO,   1],
       "length" => [METHOD_LENGTH, 0],

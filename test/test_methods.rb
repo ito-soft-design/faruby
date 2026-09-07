@@ -84,9 +84,12 @@ class TestMethods < Minitest::Test
     "to_i" => [TT_INTEGER, TT_FLOAT], "to_f" => [TT_INTEGER, TT_FLOAT],
     "floor" => [TT_INTEGER, TT_FLOAT], "round" => [TT_INTEGER, TT_FLOAT],
     "times" => [TT_INTEGER, TT_FLOAT], "upto" => [TT_INTEGER, TT_FLOAT],
+    "&" => [TT_INTEGER, TT_FLOAT], "|" => [TT_INTEGER, TT_FLOAT],
+    "^" => [TT_INTEGER, TT_FLOAT], "~" => [TT_INTEGER, TT_FLOAT],
+    ">>" => [TT_INTEGER, TT_FLOAT],
     "length" => [TT_STRING, TT_HASH], "size" => [TT_STRING, TT_HASH],
     "empty?" => [TT_STRING, TT_HASH],
-    "<<" => [TT_STRING, TT_ARRAY],
+    "<<" => [TT_INTEGER, TT_ARRAY],
     "each" => [TT_ARRAY, TT_HASH],
     "push" => [TT_ARRAY, TT_ARRAY],
     "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
@@ -354,10 +357,14 @@ class TestMethods < Minitest::Test
   # 利用者が最初に見るのは README。メソッドを足したときに書き忘れると、
   # **動くのに存在しないことになる**
 
+  # README の「組み込みメソッド」の表
+  MENU_PATTERN = /### 組み込みメソッド\n(.*?)\n\n[^|]/m
+
   def readme = File.read(File.expand_path("../README.md", __dir__), encoding: "utf-8")
 
   def test_the_readme_lists_every_builtin_method
-    table = readme[/### 組み込みメソッド\n(.*?)\n\n[^|]/m, 1]
+    # 表のセルの中の | は \| と書く決まりなので、突き合わせる前に外す
+    table = readme[MENU_PATTERN, 1]&.delete("\\")
     refute_nil table, "README に組み込みメソッドの一覧が無い"
 
     missing = BUILTIN_METHODS.keys.reject { |name| table.include?("`#{name}`") }
@@ -372,7 +379,10 @@ class TestMethods < Minitest::Test
 
   # レシーバの型検査は README の表がそのまま説明になっている
   def test_the_readme_shows_the_receiver_of_each_method
-    table = readme[/### 組み込みメソッド\n(.*?)\n\n[^|]/m, 1]
+    table = readme[/### 組み込みメソッド
+(.*?)
+
+[^|]/m, 1]&.delete("\\\\")
 
     BUILTIN_METHODS.each_key do |name|
       row = table.lines.find { |l| l.include?("`#{name}`") }

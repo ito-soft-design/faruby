@@ -1220,6 +1220,11 @@ module FaRuby
       when METHOD_TO_F  then write_float(index, numeric_value(index).to_f)
       when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)
       when METHOD_ROUND then write_slot(index, TT_INTEGER, round_away_from_zero(numeric_value(index)))
+      when METHOD_BIT_AND then send_bit_op(index, type_code) { |a, b| a & b }
+      when METHOD_BIT_OR  then send_bit_op(index, type_code) { |a, b| a | b }
+      when METHOD_BIT_XOR then send_bit_op(index, type_code) { |a, b| a ^ b }
+      when METHOD_BIT_NOT then send_bit_not(index, type_code)
+      when METHOD_SHIFT_R then send_bit_op(index, type_code) { |a, b| a >> b }
       when METHOD_LENGTH then write_slot(index, TT_INTEGER, collection_length(index))
       when METHOD_EMPTY_P then send_empty_p(index)
       when METHOD_CONCAT then send_concat(index, type_code, heap_code)
@@ -1254,11 +1259,41 @@ module FaRuby
       write_bool(index, length.zero?)
     end
 
-    # R[a] << R[a+1]。文字列なら中身を継ぎ足し、配列なら末尾に足す
+    # R[a] << R[a+1]
+    #
+    # 整数なら左シフト、文字列なら中身を継ぎ足し、配列なら末尾に足す。
+    # 区分の検査はタグの範囲でしか見ていないので、実数とシンボルはここで弾く
     def send_concat(index, type_code, heap_code)
-      return send_push(index, heap_code) unless read_reg_tag(index) == TT_STRING
+      case read_reg_tag(index)
+      when TT_INTEGER then send_bit_op(index, type_code) { |a, b| a << b }
+      when TT_STRING  then append_string_slots(index, type_code, heap_code)
+      when TT_ARRAY   then send_push(index, heap_code)
+      else vm_error(type_code)
+      end
+    end
 
-      append_string_slots(index, type_code, heap_code)
+    # --- ビット演算 ---
+    #
+    # 整数だけ。実数のビット列を触っても使い道が無いので弾く。
+    # 生成コードは 32 ビットで計算するため、結果もそこに収める
+
+    def send_bit_op(index, type_code)
+      return vm_error(type_code) unless read_reg_tag(index) == TT_INTEGER
+      return vm_error(type_code) unless read_reg_tag(index + 1) == TT_INTEGER
+
+      write_slot(index, TT_INTEGER, to_s32(yield(read_reg(index), read_reg(index + 1))))
+    end
+
+    def send_bit_not(index, type_code)
+      return vm_error(type_code) unless read_reg_tag(index) == TT_INTEGER
+
+      write_slot(index, TT_INTEGER, to_s32(~read_reg(index)))
+    end
+
+    # 32 ビット符号付きに丸める (左シフトは桁があふれる)
+    def to_s32(value)
+      value &= 0xFFFF_FFFF
+      value >= 0x8000_0000 ? value - 0x1_0000_0000 : value
     end
 
     # R[a].key?(R[a+1])
