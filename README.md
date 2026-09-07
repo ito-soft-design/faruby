@@ -324,7 +324,7 @@ rake vm_core
 
 生成された `plc/keyence/vm_*.kvs` を KV Studio に取り込み、PLC へ転送します。
 **スクリプトは複数に分かれ、ラダーが決まった順に呼びます。**
-並べ方は [doc/architecture.md](doc/architecture.md#スクリプトの分割とラダー) にあります。
+並べ方は [doc/architecture.md](doc/architecture.md#スクリプトの分割とラダー-実機で確認済み) にあります。
 命令を追加・変更した場合や、メモリ配置を変えた場合はこの手順が必要です。
 
 取り込んだ後、KV Studio でニーモニックを書き出して照合できます。
