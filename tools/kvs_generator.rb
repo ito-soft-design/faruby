@@ -3030,14 +3030,18 @@ module FaRuby
   class KvsGenerator
     include VmConstants
 
-    PROLOGUE_NAME = "vm_prologue.kvs"
-    INSTANCE_NAME = "vm_instance.kvs"
-    FETCH_NAME    = "vm_fetch.kvs"
-    EPILOGUE_NAME = "vm_epilogue.kvs"
-    INIT_NAME     = "vm_init.kvs"
-    OUTPUT_DIR    = File.expand_path("../plc/keyence", __dir__)
+    OUTPUT_DIR = File.expand_path("../plc/keyence", __dir__)
 
-    def self.group_name(index) = format("vm_group%d.kvs", index + 1)
+    # ファイル名の通し番号
+    #
+    # **ラダーに置く順に並びます。**取り込むときに順番を間違えないよう、
+    # 名前で並べ替えれば置く順になるようにしてあります。群の数を変えると
+    # 番号がずれますが、生成しなくなった名前は `write!` が消します。
+    #
+    # `init` はリセットハンドラで、Z の退避もバンクの選択も自分で行う
+    # 独立したスクリプトです。**本体より先に置きます。**後ろだと、要求の
+    # あったスキャンで古い状態のまま命令が進んでしまいます。
+    def self.file_name(index, stem) = format("vm_%02d_%s.kvs", index + 1, stem)
 
     # どの群の範囲にも入らない番号
     #
@@ -3059,20 +3063,33 @@ module FaRuby
     # 行を出さずにデバイス式だけを尋ねるための emitter
     def query = @query ||= KvsEmitter.new(layout: layout)
 
-    def generate
-      files = { PROLOGUE_NAME => build_prologue_source,
-                INSTANCE_NAME => build_instance_source,
-                FETCH_NAME => build_fetch_source }
-      dispatch_groups.each_with_index do |group, i|
-        files[self.class.group_name(i)] = build_group_source(group, i)
-      end
-      files[EPILOGUE_NAME] = build_epilogue_source
-      files[INIT_NAME] = build_init_source
-      files
+    # ラダーに置く順のファイル名 (番号付き)
+    #
+    # **リセットハンドラが先頭です。**本体より後ろに置くと、要求のあった
+    # スキャンで古い状態のまま STEPS_PER_CYCLE 命令だけ進んでしまいます。
+    def stems
+      %w[init prologue instance fetch] +
+        Array.new(dispatch_groups.size) { |i| "group#{i + 1}" } +
+        %w[epilogue]
     end
 
-    # ラダーに並べる順のスクリプト名
-    def script_names = generate.keys - [INIT_NAME]
+    # 役割からファイル名を引く
+    def file_name(stem) = self.class.file_name(stems.index(stem), stem)
+
+    def generate
+      builders = { "prologue" => -> { build_prologue_source },
+                   "instance" => -> { build_instance_source },
+                   "fetch" => -> { build_fetch_source },
+                   "epilogue" => -> { build_epilogue_source },
+                   "init" => -> { build_init_source } }
+      dispatch_groups.each_with_index do |group, i|
+        builders["group#{i + 1}"] = -> { build_group_source(group, i) }
+      end
+      stems.to_h { |stem| [file_name(stem), builders.fetch(stem).call] }
+    end
+
+    # ラダーに並べる順のスクリプト名 (リセットハンドラを除く)
+    def script_names = stems.reject { |stem| stem == "init" }.map { |stem| file_name(stem) }
 
     # 実行に関わるスクリプトを並び順につないだもの
     #
@@ -3084,7 +3101,7 @@ module FaRuby
     end
 
     def init_source
-      generate.fetch(INIT_NAME)
+      generate.fetch(file_name("init"))
     end
 
     # 生成結果をファイルに書き出す。書き換わったファイル名を返す
@@ -3298,7 +3315,7 @@ module FaRuby
       e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
       e.note ""
       e.note "ラダーでの置き場所: #{place}"
-      e.note "並び順と役割は #{PROLOGUE_NAME} の先頭にあります。"
+      e.note "並び順と役割は #{file_name('prologue')} の先頭にあります。"
     end
 
     def emit_header(e)
@@ -3310,18 +3327,19 @@ module FaRuby
       e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
       e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
       e.note ""
-      e.note "【ラダーに並べる順】"
-      e.note "  #{PROLOGUE_NAME}    ← このファイル"
+      e.note "【ラダーに並べる順】ファイル名の番号が置く順です"
+      e.note "  #{file_name('init')}       リセットハンドラ (本体より先)"
+      e.note "  #{file_name('prologue')}   ← このファイル"
       e.note "  FOR #{layout.device(layout.ladder_instances_addr)} 回          " \
              "(外側 / インスタンス)"
-      e.note "    #{INSTANCE_NAME}"
+      e.note "    #{file_name('instance')}"
       e.note "    FOR #{layout.device(layout.ladder_steps_addr)} 回        " \
              "(内側 / ステップ)"
-      e.note "      #{FETCH_NAME}"
-      dispatch_groups.each_index { |i| e.note "      #{self.class.group_name(i)}" }
+      e.note "      #{file_name('fetch')}"
+      dispatch_groups.each_index { |i| e.note "      #{file_name("group#{i + 1}")}" }
       e.note "    NEXT"
       e.note "  NEXT"
-      e.note "  #{EPILOGUE_NAME}"
+      e.note "  #{file_name('epilogue')}"
       e.note ""
       e.note "**ラダーの FOR は回数しか指定できず、途中で抜けられません。**"
       e.note "回数はスクリプトが決めて上の 2 つのデバイスに置きます。"

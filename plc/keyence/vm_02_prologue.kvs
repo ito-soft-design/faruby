@@ -6,23 +6,24 @@
 '   生成: tools/kvs_generator.rb  (rake vm_core)
 '   編集した場合 test_kvs_generator.rb が失敗します。
 '
-' 【ラダーに並べる順】
-'   vm_prologue.kvs    ← このファイル
+' 【ラダーに並べる順】ファイル名の番号が置く順です
+'   vm_01_init.kvs       リセットハンドラ (本体より先)
+'   vm_02_prologue.kvs   ← このファイル
 '   FOR EM20052 回          (外側 / インスタンス)
-'     vm_instance.kvs
+'     vm_03_instance.kvs
 '     FOR EM20053 回        (内側 / ステップ)
-'       vm_fetch.kvs
-'       vm_group1.kvs
-'       vm_group2.kvs
-'       vm_group3.kvs
-'       vm_group4.kvs
-'       vm_group5.kvs
-'       vm_group6.kvs
-'       vm_group7.kvs
-'       vm_group8.kvs
+'       vm_04_fetch.kvs
+'       vm_05_group1.kvs
+'       vm_06_group2.kvs
+'       vm_07_group3.kvs
+'       vm_08_group4.kvs
+'       vm_09_group5.kvs
+'       vm_10_group6.kvs
+'       vm_11_group7.kvs
+'       vm_12_group8.kvs
 '     NEXT
 '   NEXT
-'   vm_epilogue.kvs
+'   vm_13_epilogue.kvs
 '
 ' **ラダーの FOR は回数しか指定できず、途中で抜けられません。**
 ' 回数はスクリプトが決めて上の 2 つのデバイスに置きます。

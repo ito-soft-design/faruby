@@ -28,8 +28,7 @@ class TestKvsGenerator < Minitest::Test
     body.scan(/#{Regexp.escape("#{pc} = #{pc} + 1")}/).size
   end
 
-  PLC_DIR      = File.expand_path("../plc/keyence", __dir__)
-  VM_INIT_PATH = File.join(PLC_DIR, "vm_init.kvs")
+  PLC_DIR = File.expand_path("../plc/keyence", __dir__)
 
   def setup
     @source = FaRuby::KvsGenerator.new.source
@@ -65,20 +64,26 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # ラダーに並べる順。**前口上と後始末はループの外、取り込みと群は内側**
+  #
+  # 名前で並べ替えれば置く順になること。取り込むときの取り違えを避けるため。
   def test_generate_returns_the_scripts_in_ladder_order
     files = FaRuby::KvsGenerator.new.generate
-    groups = (1..FaRuby::KvsGenerator::DISPATCH_GROUPS).map { |i| "vm_group#{i}.kvs" }
-    expected = ["vm_prologue.kvs", "vm_instance.kvs", "vm_fetch.kvs", *groups,
-                "vm_epilogue.kvs", "vm_init.kvs"]
+    groups = (1..FaRuby::KvsGenerator::DISPATCH_GROUPS).map { |i| "group#{i}" }
+    # リセットハンドラが先頭。後ろだと要求のあったスキャンで命令が先に進む
+    stems = ["init", "prologue", "instance", "fetch", *groups, "epilogue"]
+    expected = stems.each_with_index.map { |stem, i| format("vm_%02d_%s.kvs", i + 1, stem) }
+
     assert_equal expected, files.keys
+    assert_equal expected, files.keys.sort, "名前の順とラダーに置く順が食い違っている"
     files.each_value { |content| refute_empty content }
   end
 
   # リセットハンドラも生成物。配置に追従しないまま取り残されると
   # 無関係な領域をクリアしてしまう。
   def test_committed_init_matches_generated_output
-    assert_equal init_source.b, File.binread(VM_INIT_PATH),
-                 "plc/keyence/vm_init.kvs が生成結果と一致しません。`rake vm_core` を実行してください。"
+    name = FaRuby::KvsGenerator.new.file_name("init")
+    assert_equal init_source.b, File.binread(File.join(PLC_DIR, name)),
+                 "plc/keyence/#{name} が生成結果と一致しません。`rake vm_core` を実行してください。"
   end
 
   def test_init_clears_the_register_file_of_the_current_layout

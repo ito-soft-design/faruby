@@ -7,7 +7,7 @@
 '   編集した場合 test_kvs_generator.rb が失敗します。
 '
 ' ラダーでの置き場所: 外側 FOR の後
-' 並び順と役割は vm_prologue.kvs の先頭にあります。
+' 並び順と役割は vm_02_prologue.kvs の先頭にあります。
 
 ' ファイルレジスタのバンクを 0 に戻す
 FRSET(0)
