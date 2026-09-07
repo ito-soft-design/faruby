@@ -2,7 +2,9 @@
 
 # KV スクリプト生成器
 #
-# tools/opcode_table.rb の定義から plc/keyence/vm_*.kvs を生成します。
+# tools/opcode_table.rb の定義から機種ごとのスクリプトを生成します。
+#   plc/keyence/KV-5000/vm_*.kvs   KV スクリプト
+#   plc/keyence/KV-X500/vm_*.st    ST
 # 再生成は `rake vm_core`。
 #
 # KvsEmitter は「記号バックエンド」です。命令定義の body を実行すると、
@@ -3047,7 +3049,8 @@ module FaRuby
   class KvsGenerator
     include VmConstants
 
-    OUTPUT_DIR = File.expand_path("../plc/keyence", __dir__)
+    # 機種ごとのフォルダの親。書き出し先は dialect.directory で決まる
+    PLC_DIR = File.expand_path("../plc/keyence", __dir__)
 
     # ファイル名の通し番号
     #
@@ -3134,7 +3137,10 @@ module FaRuby
     #
     # **生成しなくなったファイルは消します。**群の数を変えると余りが出ますが、
     # 残っていると KV Studio に古い中身を取り込むことになります。
-    def write!(dir = OUTPUT_DIR)
+    # 既定の書き出し先 (KV Studio のプロジェクトと同じ場所)
+    def output_dir = File.join(PLC_DIR, dialect.directory)
+
+    def write!(dir = output_dir)
       files = generate
       written = files.filter_map do |name, content|
         path = File.join(dir, name)

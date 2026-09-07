@@ -1144,9 +1144,10 @@ END IF
 | [simulator/sim_vm.rb](../simulator/sim_vm.rb) | EM メモリ上で実行するバックエンド |
 | [tools/dialect.rb](../tools/dialect.rb) | 生成コードの綴り方 (KV スクリプト / ST) |
 | [tools/transfer_check.rb](../tools/transfer_check.rb) | 取り込み済みスクリプトとの照合 |
-| `plc/keyence/vm_*.kvs` | 生成物 (コミット対象)。番号がラダーに置く順 |
+| `plc/keyence/KV-5000/vm_*.kvs` | 生成物 (コミット対象)。番号がラダーに置く順 |
+| `plc/keyence/KV-X500/vm_*.st` | 生成物 (コミット対象)。**未確認** |
 
-**`plc/keyence/*.kvs` は生成物です。直接編集しないでください。**
+**`plc/keyence/*/vm_*` は生成物です。直接編集しないでください。**
 命令を追加・変更する場合は `opcode_table.rb` を直してから `rake vm_core` で再生成します。
 
 生成物をコミットするのは、KV Studio に取り込む実体が必要なことと、
@@ -1419,7 +1420,8 @@ EM0:Z9    インデックス修飾   そのまま
 区別を付ければ ST ではその空回り (1 命令あたり約 9 ラダー命令) が
 丸ごと要らなくなります。
 
-`rake vm_st` で `plc/keyence/x500/vm_*.st` を書き出します。
+`rake vm_st` で `plc/keyence/KV-X500/vm_*.st` を書き出します。
+**機種ごとのフォルダは KV Studio のプロジェクトと同じ場所です。**
 
 #### まだ確かめていないこと
 

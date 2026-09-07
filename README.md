@@ -315,14 +315,14 @@ end
 
 ### PLC 側 VM の生成と取り込み
 
-`plc/keyence/*.kvs` は [tools/opcode_table.rb](tools/opcode_table.rb) から生成されます。
+`plc/keyence/KV-5000/*.kvs` は [tools/opcode_table.rb](tools/opcode_table.rb) から生成されます。
 直接編集しないでください。
 
 ```bash
 rake vm_core
 ```
 
-生成された `plc/keyence/vm_*.kvs` を KV Studio に取り込み、PLC へ転送します。
+生成された `plc/keyence/KV-5000/vm_*.kvs` を KV Studio に取り込み、PLC へ転送します。
 **スクリプトは複数に分かれ、ラダーが決まった順に呼びます。**
 並べ方は [doc/architecture.md](doc/architecture.md#スクリプトの分割とラダー-実機で確認済み) にあります。
 命令を追加・変更した場合や、メモリ配置を変えた場合はこの手順が必要です。

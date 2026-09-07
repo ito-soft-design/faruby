@@ -12,7 +12,7 @@ task :console do
   system("cmd /c chcp 65001 >nul && ruby tools/console.rb")
 end
 
-desc "Regenerate plc/keyence/vm_*.kvs from tools/opcode_table.rb"
+desc "Regenerate plc/keyence/KV-5000/vm_*.kvs from tools/opcode_table.rb"
 task :vm_core do
   require_relative "tools/kvs_generator"
   require_relative "tools/config"
@@ -22,33 +22,32 @@ task :vm_core do
   config = FaRuby::Config.new
   layout = config.layout
   puts "配置: #{layout}"
-  changed = FaRuby::KvsGenerator.new(layout: layout).write!
+  generator = FaRuby::KvsGenerator.new(layout: layout)
+  changed = generator.write!
   if changed.empty?
     puts "変更なし (生成結果は既存ファイルと同一)"
   else
-    changed.each { |name| puts "生成: plc/keyence/#{name}" }
+    changed.each { |name| puts "生成: plc/keyence/#{generator.dialect.directory}/#{name}" }
     puts ""
     puts "KV Studio に取り込んで PLC に転送してください。"
   end
 end
 
-desc "Regenerate plc/keyence/x500/vm_*.st (KV-X500 の ST) from tools/opcode_table.rb"
+desc "Regenerate plc/keyence/KV-X500/vm_*.st (KV-X500 の ST) from tools/opcode_table.rb"
 task :vm_st do
   require_relative "tools/kvs_generator"
   require_relative "tools/config"
-
-  dir = File.expand_path("plc/keyence/x500", __dir__)
   require "fileutils"
-  FileUtils.mkdir_p(dir)
 
   layout = FaRuby::Config.new.layout
   puts "配置: #{layout}"
   generator = FaRuby::KvsGenerator.new(layout: layout, dialect: FaRuby::StDialect.new)
-  changed = generator.write!(dir)
+  FileUtils.mkdir_p(generator.output_dir)
+  changed = generator.write!
   if changed.empty?
     puts "変更なし (生成結果は既存ファイルと同一)"
   else
-    changed.each { |name| puts "生成: plc/keyence/x500/#{name}" }
+    changed.each { |name| puts "生成: plc/keyence/#{generator.dialect.directory}/#{name}" }
     puts ""
     puts "**未確認です。** KV-X500 で変換が通るかを確かめてください。"
   end

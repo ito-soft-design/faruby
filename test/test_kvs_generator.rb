@@ -28,7 +28,7 @@ class TestKvsGenerator < Minitest::Test
     body.scan(/#{Regexp.escape("#{pc} = #{pc} + 1")}/).size
   end
 
-  PLC_DIR = File.expand_path("../plc/keyence", __dir__)
+  PLC_DIR = File.expand_path("../plc/keyence/KV-5000", __dir__)
 
   def setup
     @source = FaRuby::KvsGenerator.new.source

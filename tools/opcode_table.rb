@@ -3,7 +3,8 @@
 # オペコード定義表 (唯一の情報源)
 #
 # ここに書いた命令定義から以下すべてが導かれます。
-#   - plc/keyence/vm_core.kvs      (KvsEmitter が KV スクリプトを生成)
+#   - plc/keyence/KV-5000/vm_*.kvs (KvsEmitter が KV スクリプトを生成)
+#   - plc/keyence/KV-X500/vm_*.st  (綴り方を StDialect に差し替えたもの)
 #   - simulator/kv_vm_simulator.rb (SimVm が同じ定義を実行)
 #   - tools/disasm.rb              (MRUBY_OPCODES を参照)
 #

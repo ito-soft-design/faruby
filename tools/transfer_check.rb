@@ -27,7 +27,7 @@ module FaRuby
     end
 
     # 書き出し先を探す。プロジェクト名が変わっても見つかるように glob で引く
-    def self.find_mnemonic(dir = KvsGenerator::OUTPUT_DIR)
+    def self.find_mnemonic(dir = KvsGenerator.new.output_dir)
       Dir[File.join(dir, "**", "tmp", "*.mnm")].max_by { |path| File.mtime(path) }
     end
 

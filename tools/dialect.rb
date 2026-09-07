@@ -32,6 +32,9 @@ module FaRuby
   class KvsDialect < Dialect
     def name = "KV スクリプト"
     def extension = "kvs"
+
+    # 機種ごとの書き出し先 (plc/keyence の下)。KV Studio のプロジェクトと同じ場所
+    def directory = "KV-5000"
   end
 
   # KV-X500 の ST (IEC 61131-3 準拠の構造化テキスト)
@@ -53,6 +56,7 @@ module FaRuby
   class StDialect < Dialect
     def name = "ST"
     def extension = "st"
+    def directory = "KV-X500"
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
