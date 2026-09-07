@@ -249,6 +249,44 @@ end
                "$B1F は 0x1F の個別ビット"
   end
 
+  # === 16 進アドレスと幅サフィックス ===
+  #
+  # B は 16 進アドレスなので A-F はアドレスの一部になる。幅を付けたいときは
+  # `_` で区切る。**ビットデバイスにも幅は付けられる** (連続したビット列)
+
+  def test_a_hex_digit_belongs_to_the_address
+    %w[B1F B1D B1A].each do |name|
+      parsed = FaRuby::PlcCodegen.parse_device_name(name)
+
+      assert_nil parsed[:access_type], "#{name} は個別ビット"
+      assert parsed[:bit], name
+    end
+    assert_equal 0x1F, FaRuby::PlcCodegen.parse_device_name("B1F")[:z_offset]
+  end
+
+  # 区切ればアドレスと幅に分かれる
+  def test_an_underscore_separates_the_width
+    parsed = FaRuby::PlcCodegen.parse_device_name("B1_F")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_F, parsed[:access_type]
+  end
+
+  # 16 進数字でない文字なら区切らなくてもよい
+  def test_a_non_hex_letter_reads_as_a_width
+    parsed = FaRuby::PlcCodegen.parse_device_name("B1L")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_L, parsed[:access_type]
+  end
+
+  # 10 進アドレスのデバイスにこの曖昧さは無い
+  def test_a_decimal_address_has_no_ambiguity
+    parsed = FaRuby::PlcCodegen.parse_device_name("R1F")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_F, parsed[:access_type]
+  end
   # ビットデバイスに文字列を書いても表示器から読めない
   def test_a_string_on_a_bit_device_stops_the_build
     assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_name("MR100T6") }
