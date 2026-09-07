@@ -27,35 +27,35 @@ FRSET(3)
 ' instances = 2
 FOR Z9 = 20000 TO 22000 STEP 2000
 
-    IF EM13:Z9 = 1 THEN
+  IF EM13:Z9 = 1 THEN
 
-        EM0:Z9 = 0      ' PC = 0
-        EM1:Z9 = 0      ' STATUS = stopped
-        EM2:Z9 = 0      ' ERROR = none
-        EM3.L:Z9 = 0    ' STEP_COUNT = 0
+    EM0:Z9 = 0      ' PC = 0
+    EM1:Z9 = 0      ' STATUS = stopped
+    EM2:Z9 = 0      ' ERROR = none
+    EM3.L:Z9 = 0    ' STEP_COUNT = 0
 
-        ' 実行中の irep をトップレベル (0番) に戻す
-        EM31:Z9 = 0      ' 呼び出しの深さ
-        EM39:Z9 = 0      ' 配列プールの空き先頭
-        EM32:Z9 = 56      ' レジスタ窓の先頭
-        EM30:Z9 = 0
-        ' IREP テーブルから実行中の irep の情報を写す
-        Z1 = EM38:Z9
-        EM33:Z9 = FM0:Z1
-        EM10:Z9 = FM1:Z1
-        EM34:Z9 = FM2:Z1
-        EM35:Z9 = FM3:Z1
-        EM11:Z9 = FM4:Z1
+    ' 実行中の irep をトップレベル (0番) に戻す
+    EM31:Z9 = 0      ' 呼び出しの深さ
+    EM39:Z9 = 0      ' 配列プールの空き先頭
+    EM32:Z9 = 56      ' レジスタ窓の先頭
+    EM30:Z9 = 0
+    ' IREP テーブルから実行中の irep の情報を写す
+    Z1 = EM38:Z9
+    EM33:Z9 = FM0:Z1
+    EM10:Z9 = FM1:Z1
+    EM34:Z9 = FM2:Z1
+    EM35:Z9 = FM3:Z1
+    EM11:Z9 = FM4:Z1
 
-        ' レジスタファイルクリア (ブロック先頭 +56 から 80スロット × 4ワード)
-        ' スロット先頭の型タグも 0 (TT_EMPTY) になる
-        FOR Z1 = 56 + Z9 TO 375 + Z9
-            EM0:Z1 = 0
-        NEXT
+    ' レジスタファイルクリア (ブロック先頭 +56 から 80スロット × 4ワード)
+    ' スロット先頭の型タグも 0 (TT_EMPTY) になる
+    FOR Z1 = 56 + Z9 TO 375 + Z9
+      EM0:Z1 = 0
+    NEXT
 
-        EM13:Z9 = 0     ' リセット要求クリア
+    EM13:Z9 = 0     ' リセット要求クリア
 
-    END IF
+  END IF
 
 NEXT
 

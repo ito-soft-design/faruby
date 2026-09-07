@@ -357,6 +357,30 @@ class TestKvsGenerator < Minitest::Test
                  lines.count { |l| l.strip == "NEXT" }
   end
 
+  # === KV Studio の上限 ===
+
+  # 1 スクリプトの文字数。**取り込むまで分からないので、ここで見る**
+  #
+  # 超えると KV Studio が変換を拒む。字下げが全体の 4 割を占めるので、
+  # 詰まってきたら刻みを狭めるのがいちばん安い。詳細は
+  # doc/architecture.md の「KV Studio の変換上限」。
+  SCRIPT_LIMIT = 264_144
+
+  def test_the_scripts_fit_in_one_script
+    FaRuby::KvsGenerator.new.generate.each do |name, source|
+      assert_operator source.bytesize, :<=, SCRIPT_LIMIT,
+                      "#{name} が 1 スクリプトの上限を超えている"
+    end
+  end
+
+  # 余裕がどれくらい残っているかを目に見えるようにしておく
+  def test_the_core_script_has_room_left
+    source = FaRuby::KvsGenerator.new.source
+
+    assert_operator source.bytesize, :<, SCRIPT_LIMIT * 95 / 100,
+                    "上限の 95% を超えた。字下げか重複を削るころ合い"
+  end
+
   private
 
   # 指定オペコードの分岐本体を切り出す

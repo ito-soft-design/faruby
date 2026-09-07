@@ -21,7 +21,12 @@ module FaRuby
   class KvsEmitter
     include VmConstants
 
-    INDENT = "    "
+    # 生成コードの字下げ 1 段ぶん
+    #
+    # **KV Studio は 1 スクリプト 264,144 文字までです。** 入れ子が 12 段まで
+    # あるため、4 文字刻みだと空白だけで 20 万文字を占めて上限を超えました。
+    # 2 文字なら構造は読めて、半分に収まります。
+    INDENT = "  "
 
     # オペランドの並び (格納先アドレスは配置から決まる)
     OPERAND_NAMES = %i[a b c].freeze
