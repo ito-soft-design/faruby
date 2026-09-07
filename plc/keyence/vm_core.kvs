@@ -96,11 +96,11 @@ FOR Z9 = 20000 TO 22000 STEP 2000
             INC(EM3.L:Z9)   ' 累計実行命令数
 
             ' === DECODE & EXECUTE ===
-            ' 番号の範囲で 4 組に分ける。1 本の連なりに 59 本
+            ' 番号の範囲で 8 組に分ける。1 本の連なりに 59 本
             ' 並べると、ラダーの「対のない LABEL / CJ / GOTO」が 200 を超える
 
-            IF EM6:Z9 <= 14 THEN
-                ' 0x00 - 0x0E
+            IF EM6:Z9 <= 7 THEN
+                ' 0x00 - 0x07
                 IF EM6:Z9 = 0 THEN
                     ' OP_NOP (Z): 何もしない
 
@@ -187,7 +187,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM1.L:Z1 = 1
                     EM0:Z1 = 4
 
-                ELSE IF EM6:Z9 = 8 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 15 THEN
+                ' 0x08 - 0x0F
+                IF EM6:Z9 = 8 THEN
                     ' OP_LOADI_2 (B): R[a] = 2
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -264,16 +273,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM1.L:Z1 = EM16.L:Z9
                     EM0:Z1 = 4
 
-                ELSE
-                    ' 未知のオペコード: エラー
-                    EM1:Z9 = 3
-                    EM2:Z9 = EM6:Z9
-                    BREAK
-
-                END IF
-            ELSE IF EM6:Z9 <= 38 THEN
-                ' 0x0F - 0x26
-                IF EM6:Z9 = 15 THEN
+                ELSE IF EM6:Z9 = 15 THEN
                     ' OP_LOADI32 (BSS): R[a] = (b<<16)+c
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -302,7 +302,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM1.L:Z1 = EM16.L:Z9
                     EM0:Z1 = 4
 
-                ELSE IF EM6:Z9 = 16 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 30 THEN
+                ' 0x10 - 0x1E
+                IF EM6:Z9 = 16 THEN
                     ' OP_LOADSYM (BB): R[a] = symbols[b] (シンボル)
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -992,7 +1001,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                     END IF
 
-                ELSE IF EM6:Z9 = 33 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 40 THEN
+                ' 0x21 - 0x28
+                IF EM6:Z9 = 33 THEN
                     ' OP_GETUPVAR (BBB): R[a] = 外側 c 段の R[b]
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -2168,16 +2186,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z9 = EM0:Z9 + EM8:Z9
                     END IF
 
-                ELSE
-                    ' 未知のオペコード: エラー
-                    EM1:Z9 = 3
-                    EM2:Z9 = EM6:Z9
-                    BREAK
-
-                END IF
-            ELSE IF EM6:Z9 <= 66 THEN
-                ' 0x27 - 0x42
-                IF EM6:Z9 = 39 THEN
+                ELSE IF EM6:Z9 = 39 THEN
                     ' OP_JMPNOT (BS): if R[a] が偽 (nil/false) then PC += signed16(b)
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -2219,7 +2228,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z9 = EM0:Z9 + EM8:Z9
                     END IF
 
-                ELSE IF EM6:Z9 = 45 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 61 THEN
+                ' 0x2D - 0x3D
+                IF EM6:Z9 = 45 THEN
                     ' OP_SSEND (BBB): R[a] = self.symbols[b](R[a+1]..)
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -4393,7 +4411,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z1 = 4
                     END IF
 
-                ELSE IF EM6:Z9 = 62 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 69 THEN
+                ' 0x3E - 0x45
+                IF EM6:Z9 = 62 THEN
                     ' OP_SUB (B): R[a] = R[a] - R[a+1]
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -4661,16 +4688,7 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM0:Z1 = 2
                     END IF
 
-                ELSE
-                    ' 未知のオペコード: エラー
-                    EM1:Z9 = 3
-                    EM2:Z9 = EM6:Z9
-                    BREAK
-
-                END IF
-            ELSE
-                ' 0x43 - 0x69
-                IF EM6:Z9 = 67 THEN
+                ELSE IF EM6:Z9 = 67 THEN
                     ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -4805,7 +4823,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         END IF
                     END IF
 
-                ELSE IF EM6:Z9 = 70 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE IF EM6:Z9 <= 88 THEN
+                ' 0x46 - 0x58
+                IF EM6:Z9 = 70 THEN
                     ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1
@@ -5138,7 +5165,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                     EM2:Z1 = 65535   ' メソッドは外側を見ない
                     EM0:Z1 = 12
 
-                ELSE IF EM6:Z9 = 95 THEN
+                ELSE
+                    ' 未知のオペコード: エラー
+                    EM1:Z9 = 3
+                    EM2:Z9 = EM6:Z9
+                    BREAK
+
+                END IF
+            ELSE
+                ' 0x5F - 0x69
+                IF EM6:Z9 = 95 THEN
                     ' OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
                     Z1 = EM0:Z9 + EM33:Z9
                     EM7:Z9 = FM0:Z1

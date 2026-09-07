@@ -484,9 +484,11 @@ class TestBlocks < Minitest::Test
 
   # FOR の中で BREAK すると FOR を抜けるだけで命令ループから出られない。
   # 鎖を辿る途中のエラーは印を立てて FOR の外で判定する。
+  #
+  # **字下げの深さは見ない。** 振り分けの組み方を変えると深さが動くため。
   def test_generated_upvar_walk_does_not_break_inside_the_loop
     source = FaRuby::KvsGenerator.new.source
-    body = source[/ELSE IF #{Regexp.escape(FaRuby::KvsEmitter.new(layout: layout).opcode)} = 33 THEN(.*?)\n            ELSE IF/m, 1]
+    body = source[/' OP_GETUPVAR .*?\n(.*?)\n\s*' OP_\w+ /m, 1]
     refute_nil body, "OP_GETUPVAR の本体が見つからない"
 
     inside = body[/FOR Z\d+ = 1 TO.*?\n\s*NEXT/m]

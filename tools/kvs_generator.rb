@@ -3083,7 +3083,7 @@ module FaRuby
     # 速度にも効きます。今までは後ろの命令ほど手前の枝を全部通っていましたが、
     # 組を選ぶ比較 1-3 回で飛び越えられます。**手前にある比較の数だけが効く**
     # というこれまでの測定と合います。
-    DISPATCH_GROUPS = 4
+    DISPATCH_GROUPS = 8
 
     def emit_dispatch(e)
       groups = @opcodes.each_slice((@opcodes.size.to_f / DISPATCH_GROUPS).ceil).to_a
