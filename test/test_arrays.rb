@@ -437,12 +437,16 @@ class TestArrays < Minitest::Test
   end
 
   # OP_SETIDX の枝を 1 つ取り出す
+  # 生成コードから OP_SETIDX の枝を 1 つ切り出す
+  #
+  # **字下げの深さは見ません。** 振り分けの組み方を変えると深さが動くためです。
+  # 枝の頭と同じ深さで次の ELSE が来たら、そこが終わりです。
   def setidx_branch(tag)
     source = FaRuby::KvsGenerator.new.source
-    setidx = source[/' OP_SETIDX .*?\n(.*?)\n            ELSE IF/m, 1]
-    body = setidx[/ELSE IF EM0:Z1 = #{tag} THEN\n(.*)/m, 1]
-    # 次の枝の手前まで
-    body[/\A(.*?)\n                ELSE(?: IF)?\n?/m, 1] || body
+    setidx = source[/' OP_SETIDX .*?\n(.*?)\n\s*' OP_\w+ /m, 1]
+    head = setidx[/^(\s+)ELSE IF EM0:Z1 = #{tag} THEN$/, 1]
+    body = setidx[/^\s+ELSE IF EM0:Z1 = #{tag} THEN\n(.*)/m, 1]
+    body[/\A(.*?)\n#{head}ELSE(?: IF)?\n?/m, 1] || body
   end
 
   # === ハッシュ ===

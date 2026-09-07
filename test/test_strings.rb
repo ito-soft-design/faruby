@@ -773,10 +773,19 @@ class TestStrings < Minitest::Test
 
   # === 生成コード ===
 
+  # 生成コードから OP_SETGV の文字列の枝を切り出す
+  #
+  # **字下げの深さは見ません。** 振り分けの組み方を変えると深さが動くためです。
+  def string_write_branch
+    source = FaRuby::KvsGenerator.new.source
+    head = source[/^(\s+)ELSE IF EM0:Z2 = #{TT_STRING} THEN$/, 1]
+    body = source[/^\s+ELSE IF EM0:Z2 = #{TT_STRING} THEN\n(.*)/m, 1]
+    body&.[](/\A(.*?)\n#{head}ELSE\n/m, 1)
+  end
+
   # Z6 はデバイスのベースアドレス。写している途中で壊すと書き先がずれる
   def test_the_string_write_does_not_clobber_the_base_address
-    source = FaRuby::KvsGenerator.new.source
-    branch = source[/ELSE IF EM0:Z2 = #{TT_STRING} THEN\n(.*?)\n                ELSE\n/m, 1]
+    branch = string_write_branch
     refute_nil branch, "文字列の書き込みが見つからない"
 
     refute_match(/^\s+Z6 = /, branch, "ベースアドレスを書き換えている")
@@ -786,8 +795,7 @@ class TestStrings < Minitest::Test
   # エラーを書いてもそのまま走り続け、最後に STOP が status を上書きする。
   # デバイス種別の検査は写しの FOR に入る前に済ませる
   def test_the_string_write_does_not_break_inside_the_loop
-    source = FaRuby::KvsGenerator.new.source
-    branch = source[/ELSE IF EM0:Z2 = #{TT_STRING} THEN\n(.*?)\n                ELSE\n/m, 1]
+    branch = string_write_branch
     refute_nil branch, "文字列の書き込みが見つからない"
 
     inside = branch[/FOR Z\d+ = 0 TO.*?\n\s*NEXT/m]

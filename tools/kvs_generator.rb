@@ -3069,11 +3069,50 @@ module FaRuby
       e.blank
     end
 
+    # 命令の振り分けを何組に分けるか
+    #
+    # **KV Studio は「対のない LABEL / CJ / GOTO」を 200 までしか許しません。**
+    # `IF` / `ELSE IF` はラダーの条件ジャンプになり、連なりの各枝は連なりの
+    # 終わりへ飛ぶので `END IF` が出るまで対になりません。**1 本の連なりに
+    # 枝を並べるほど溜まります。**
+    #
+    # 番号の範囲で組に分け、まず組を選んでから中を見ます。溜まりは
+    # 「組の数 + 組の中の枝の数」で済み、1 本に並べたときの命令数より
+    # ずっと小さくなります。
+    #
+    # 速度にも効きます。今までは後ろの命令ほど手前の枝を全部通っていましたが、
+    # 組を選ぶ比較 1-3 回で飛び越えられます。**手前にある比較の数だけが効く**
+    # というこれまでの測定と合います。
+    DISPATCH_GROUPS = 4
+
     def emit_dispatch(e)
+      groups = @opcodes.each_slice((@opcodes.size.to_f / DISPATCH_GROUPS).ceil).to_a
+
       e.note "=== DECODE & EXECUTE ==="
+      e.note "番号の範囲で #{groups.size} 組に分ける。1 本の連なりに #{@opcodes.size} 本"
+      e.note "並べると、ラダーの「対のない LABEL / CJ / GOTO」が 200 を超える"
       e.blank
 
-      @opcodes.each_with_index do |op, i|
+      groups.each_with_index do |group, i|
+        last = i == groups.size - 1
+        if last
+          e.line "ELSE"
+        else
+          e.line(i.zero? ? "IF #{opcode_var} <= #{group.last.code} THEN" \
+                         : "ELSE IF #{opcode_var} <= #{group.last.code} THEN")
+        end
+        e.indent
+        e.note format("0x%02X - 0x%02X", group.first.code, group.last.code)
+        emit_opcode_chain(e, group)
+        e.dedent
+      end
+      e.line "END IF"
+      e.blank
+    end
+
+    # 組の中の連なり。当たらなければ未知のオペコード
+    def emit_opcode_chain(e, group)
+      group.each_with_index do |op, i|
         e.line(i.zero? ? "IF #{opcode_var} = #{op.code} THEN" : "ELSE IF #{opcode_var} = #{op.code} THEN")
         e.indent
         e.begin_instruction
@@ -3093,7 +3132,6 @@ module FaRuby
       e.dedent
       e.blank
       e.line "END IF"
-      e.blank
     end
 
     def emit_range_check(e)
