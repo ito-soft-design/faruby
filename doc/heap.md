@@ -206,6 +206,11 @@ end
 
 数値は範囲比較 (2 回)、配列は末尾なので 1 回で決まります。
 
+**この表はこの時点のものです。** ハッシュと文字列でレシーバの型が増え、
+番号は動きました。今の並びは `METHOD_RECEIVER_GROUPS`
+([tools/vm_constants.rb](../tools/vm_constants.rb))、一覧は
+[README](../README.md#組み込みメソッド) にあります。
+
 **ブロックを取るメソッドが連続しなくなりました。** `times` / `upto` は
 数値の範囲に、`each` (段階 4) は配列の範囲に入るためです。`OP_SENDB` の
 「ブロックを取るメソッドか」の判定は `METHOD_BLOCK_MIN` との 1 比較から、

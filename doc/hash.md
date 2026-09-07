@@ -249,6 +249,11 @@ h = { a: 1, b: 2 }
 | 13 | 配列 | `<<` / `push` |
 | 14- | ハッシュ | `key?` `keys` `values` |
 
+**この表はこの時点のものです。** 文字列が入って区分は 6 つになり、番号も
+動きました。今の並びは `METHOD_RECEIVER_GROUPS`
+([tools/vm_constants.rb](../tools/vm_constants.rb))、一覧は
+[README](../README.md#組み込みメソッド) にあります。
+
 **`h.each { |k| }` は Ruby と違います。** Ruby は `k` に `[鍵, 値]` の配列を
 渡しますが、faRuby は鍵だけを渡します。配列を毎回作るとプールを食い潰す
 ためで、意図的な差です。[mruby との違い](mruby_differences.md) に載せました。
