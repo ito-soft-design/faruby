@@ -8,6 +8,9 @@
 /tmp/
 *.tmp
 
+# KV Studio の書き出し先 (ニーモニックなど)
+tmp/
+
 # Ruby
 *.gem
 .bundle/

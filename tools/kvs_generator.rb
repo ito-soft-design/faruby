@@ -3060,6 +3060,9 @@ module FaRuby
     # デコード対象のオペコードを保持するデバイス
     def opcode_var = query.opcode
 
+    # 振り分けに使う写し。担当の群が実行したら空き番号で潰す
+    def dispatch_var = query.state(layout.dispatch_addr)
+
     # 行を出さずにデバイス式だけを尋ねるための emitter
     def query = @query ||= KvsEmitter.new(layout: layout)
 
@@ -3229,7 +3232,7 @@ module FaRuby
       e.note "群のスクリプトが範囲判定で素通りすることで空回りにする"
       e.line "IF #{e.status} <> #{VM_RUNNING} THEN"
       e.indent
-      e.line "#{e.opcode} = #{UNREACHABLE_OPCODE}"
+      e.line "#{dispatch_var} = #{UNREACHABLE_OPCODE}"
       e.dedent
       e.line "ELSE"
       e.indent
@@ -3247,26 +3250,22 @@ module FaRuby
                       "内側 FOR の中 (#{index + 1} 番目の群)")
       e.blank
       e.note "担当外の番号はここで素通りする。**判定はループの外に置く。**"
-      e.note "下限は前の群の続き。実装していない番号を取りこぼさないため"
-      depth = 0
-      unless range.first.zero?
-        e.line "IF #{opcode_var} >= #{range.first} THEN"
-        e.indent
-        depth += 1
-      end
-      e.line "IF #{opcode_var} <= #{range.last} THEN"
+      e.note "見るのは上限だけ。#{range.first} 未満は手前の群が実行して"
+      e.note "#{UNREACHABLE_OPCODE} で潰しているので、ここには届かない"
+      e.line "IF #{dispatch_var} <= #{range.last} THEN"
       e.indent
-      depth += 1
+      e.blank
+      e.note "後ろの群がもう一度実行しないように潰す。**本体より先に置く。**"
+      e.note "本体は途中で BREAK することがあり、後ろに置くと通らない"
+      e.line "#{dispatch_var} = #{UNREACHABLE_OPCODE}"
       e.blank
       emit_break_frame(e) do
         emit_opcode_chain(e, group)
         e.blank
         emit_range_check(e)
       end
-      depth.times do
-        e.dedent
-        e.line "END IF"
-      end
+      e.dedent
+      e.line "END IF"
       finish(e)
     end
 
@@ -3432,11 +3431,14 @@ module FaRuby
       e.line "#{e.pc} = #{e.pc} + 1"
       e.count_step
       e.blank
+      e.note "振り分け用の写し。担当の群が実行したら空き番号で潰す"
+      e.line "#{dispatch_var} = #{e.opcode}"
+      e.blank
       e.note "どの群の担当でもない番号。群の中の抜けはそれぞれの群が見る"
       e.if_("#{e.opcode} > #{max_opcode}") do
         e.line "#{e.status} = #{VM_ERROR}"
         e.line "#{e.error} = #{e.opcode}"
-        e.line "#{e.opcode} = #{UNREACHABLE_OPCODE}"
+        e.line "#{dispatch_var} = #{UNREACHABLE_OPCODE}"
       end
     end
 

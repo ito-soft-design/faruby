@@ -238,6 +238,17 @@ module FaRuby
     OFFSET_LADDER_INSTANCES = 52  # 外側 (インスタンス) の回数
     OFFSET_LADDER_STEPS     = 53  # 内側 (ステップ) の回数
 
+    # 振り分け用のオペコード番号
+    #
+    # CURRENT_OPCODE の写しですが、**担当の群が実行したら空き番号で潰します。**
+    # 群のスクリプトはラダーの FOR の中で順に必ず呼ばれるため、そのままだと
+    # 後ろの群も自分の担当かどうかを上下 2 回比べることになります。潰して
+    # おけば、どの群も上限との比較 1 回で済みます。
+    #
+    # CURRENT_OPCODE 自体を潰さないのは、群の中の連なりが番号を見るためと、
+    # 止まったときに何の命令だったかを残すためです。
+    OFFSET_DISPATCH         = 54
+
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "fixed_base" => 0, "fixed_align" => 1000,
@@ -468,6 +479,9 @@ module FaRuby
     # Z の退避先と同じく全インスタンスで共有するため、絶対アドレスを返す。
     def ladder_instances_addr = base + OFFSET_LADDER_INSTANCES
     def ladder_steps_addr     = base + OFFSET_LADDER_STEPS
+
+    # 振り分け用のオペコード番号 (インスタンスごと)
+    def dispatch_addr = vm_state_base + OFFSET_DISPATCH
 
     # --- ブロック内オフセット ---
 

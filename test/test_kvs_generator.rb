@@ -159,13 +159,36 @@ class TestKvsGenerator < Minitest::Test
   # ラダーの FOR の中で必ず呼ばれるため、番号で素通りさせるしかない。**
   def test_a_stopped_vm_parks_the_opcode_outside_every_group
     sentinel = FaRuby::KvsGenerator::UNREACHABLE_OPCODE
+    dispatch = emitter.state(layout.dispatch_addr)
     assert_includes @source, "IF #{emitter.status} <> #{VM_RUNNING} THEN"
-    assert_includes @source, "#{emitter.opcode} = #{sentinel}"
+    assert_includes @source, "#{dispatch} = #{sentinel}"
 
     generator = FaRuby::KvsGenerator.new
     generator.send(:dispatch_groups).each_index do |i|
       assert_operator generator.send(:group_range, i).last, :<, sentinel,
                       "群の範囲が空き番号に届いている"
+    end
+  end
+
+  # 群は上限だけを見る。**手前の群が実行したら番号を潰す**ので、
+  # 後ろの群は比較 1 回で素通りできる。潰すのは本体より先でなければ
+  # ならない (本体は BREAK することがあり、後ろに置くと通らない)。
+  def test_a_group_clears_the_number_before_running_its_body
+    dispatch = emitter.state(layout.dispatch_addr)
+    generator = FaRuby::KvsGenerator.new
+    files = generator.generate
+
+    generator.send(:dispatch_groups).each_index do |i|
+      body = files.fetch(generator.file_name("group#{i + 1}"))
+      range = generator.send(:group_range, i)
+
+      assert_includes body, "IF #{dispatch} <= #{range.last} THEN"
+      refute_includes body, "IF #{dispatch} >= ", "下限まで見ている (比較が 1 回で済まない)"
+
+      clear = body.index("#{dispatch} = #{FaRuby::KvsGenerator::UNREACHABLE_OPCODE}")
+      first_opcode = body.index("IF #{opcode_var} = ")
+      refute_nil clear, "群 #{i + 1} が番号を潰していない"
+      assert_operator clear, :<, first_opcode, "群 #{i + 1} は本体より先に潰すこと"
     end
   end
 
