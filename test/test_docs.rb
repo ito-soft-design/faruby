@@ -58,6 +58,20 @@ class TestDocs < Minitest::Test
     assert_empty offsets.uniq.sort - covered, "表に無いオフセット"
   end
 
+  # === 型タグ ===
+
+  # 表に無いタグがあると、値ワードの読み方が分からないまま放置される
+  def test_every_type_tag_is_in_the_table
+    text = doc("doc/architecture.md")
+    tags = FaRuby::VmConstants.constants.grep(/^TT_/)
+                              .reject { |name| name.to_s =~ /FALSY|CANONICAL|NAMES/ }
+    missing = tags.reject do |name|
+      text.include?("| #{name} | #{FaRuby::VmConstants.const_get(name)} |")
+    end
+
+    assert_empty missing, "型タグの表に無いもの"
+  end
+
   # === ロードマップ ===
 
   def test_the_roadmap_opcode_count_matches
