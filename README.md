@@ -361,13 +361,13 @@ PLC が軽度エラーを出します**。0 除算が起こりうる箇所では
 **0 除算だけではありません。** `1.0e30 * 1.0e30` のように単精度の範囲を超える
 計算も `Infinity` になり、その後の**比較が黙って違う答えを返します** (`b > 1.0`
 が偽になる)。faRuby は検出しないので、範囲を超えうる計算は避けてください。
-詳細は [doc/ruby_and_plc.md](doc/ruby_and_plc.md) を参照してください。
+詳細は [doc/differences.md](doc/differences.md) の第 2 部にあります。
 
 文字列はバイト列を変換しません。ソースの文字コードがそのままデバイスへ出ます。
 詳細は [doc/string.md](doc/string.md)。
 
 **Ruby として書いたつもりのものがどうなるかは
-[doc/mruby_differences.md](doc/mruby_differences.md) にまとめてあります。**
+[doc/differences.md](doc/differences.md) の第 1 部にまとめてあります。**
 止まらずに意味だけ変わるもの (大小比較が型を見ない、整数が 32 ビットで
 回り込む) が載っているので、書き始める前に一度目を通してください。
 
@@ -473,8 +473,7 @@ end
 | [doc/heap.md](doc/heap.md) | 配列の置き場所と GC の判断 |
 | [doc/hash.md](doc/hash.md) | ハッシュと Symbol の設計と実装の記録 |
 | [doc/string.md](doc/string.md) | 文字列の設計と実装の記録。文字コードとデバイスへの出し方 |
-| [doc/mruby_differences.md](doc/mruby_differences.md) | mruby との違い。動くが意味が違うもの、使うと止まるもの |
-| [doc/ruby_and_plc.md](doc/ruby_and_plc.md) | Ruby と PLC で意味が違う箇所とその埋め方。新しい機種に対応する際の確認項目 |
+| [doc/differences.md](doc/differences.md) | Ruby との違い。第 1 部は書くときに引く一覧、第 2 部は決めた理由と機種ごとの確認項目 |
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
 | [doc/plc_access_issues.md](doc/plc_access_issues.md) | plc_access で見つかった問題の控え |
