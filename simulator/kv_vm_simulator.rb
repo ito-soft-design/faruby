@@ -85,9 +85,14 @@ module FaRuby
       idx = @irep.symbols.index(sym_name)
       return nil unless idx
 
-      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type, *]
+      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type, kind]
       dev = @vm.send(:device_memory, device_type)
       return nil unless dev
+
+      # 汎用グローバルは値スロット。幅ではなく型タグで読み方が決まる
+      if kind == FaRuby::VmConstants::SYMBOL_KIND_GLOBAL
+        return em.read_s32(device_addr + FaRuby::MemoryLayout::SLOT_VALUE_OFFSET)
+      end
 
       if @vm.send(:bit_device?, device_type)
         dev.read_u16(device_addr)

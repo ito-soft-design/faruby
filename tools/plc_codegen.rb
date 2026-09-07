@@ -128,8 +128,7 @@ module FaRuby
 
       # 汎用グローバル変数のスロットを 0 初期化する
       device_mappings.select { |m| m[:general] }.each do |m|
-        slot = m[:z_offset] - SLOT_VALUE_OFFSET
-        SLOT_WORDS.times { |w| image[slot + w] = 0 }
+        SLOT_WORDS.times { |w| image[m[:z_offset] + w] = 0 }
       end
 
       image
@@ -341,12 +340,13 @@ module FaRuby
           access_type: parsed[:access_type], bit: parsed[:bit],
           family: parsed[:family] || false }
       elsif sym.start_with?("$")
-        # 汎用グローバル変数は Ruby の値を保持するので常に32ビット
-        value_addr = (slots[sym] ||= layout.general_global_addr(slots.size))
+        # 汎用グローバル変数は Ruby の値をそのまま持つ。**アドレスは値スロットの
+        # 先頭**で、VM が型タグごと写す。幅は使わない
+        slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))
         { symbol: sym, index: idx, table_addr: table_addr, general: true,
-          kind: SYMBOL_KIND_VALUE,
+          kind: SYMBOL_KIND_GLOBAL,
           device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
-          address: value_addr.to_s, z_offset: value_addr,
+          address: slot_addr.to_s, z_offset: slot_addr,
           access_type: ACCESS_L, bit: false }
       elsif sym.start_with?(SETTING_PREFIX)
         # faRuby の設定定数。OP_SETCONST が VM 状態へ書く
@@ -605,8 +605,8 @@ module FaRuby
       return [] if slots.empty?
 
       # 汎用グローバルは汎用グローバル領域の先頭から連続して割り当てられる
-      first = slots.min - SLOT_VALUE_OFFSET
-      last  = slots.max - SLOT_VALUE_OFFSET + SLOT_WORDS - 1
+      first = slots.min
+      last  = slots.max + SLOT_WORDS - 1
 
       ["",
        "' --- Clear General Globals (#{slots.size} slots × #{SLOT_WORDS} words) ---",

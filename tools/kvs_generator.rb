@@ -497,10 +497,16 @@ module FaRuby
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(dest)
-      note "種別で 3 つに分ける。普通のデバイスと汎用グローバルはここで決まる"
+      note "種別で 4 つに分ける。いちばん多い普通のデバイスがここで決まる"
       chain_head(true, "Z1 = #{SYMBOL_KIND_VALUE}")
       indent
       device_dispatch(:read, slot: slot, error_code: 0x15)
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_GLOBAL}")
+      indent
+      note "汎用グローバルは値スロット。型タグごと写す"
+      line "Z3 = Z6"
+      copy_slot(from: 3, to: slot.z)
       dedent
       chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
@@ -591,7 +597,13 @@ module FaRuby
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(src)
-      chain_head(true, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      chain_head(true, "Z1 = #{SYMBOL_KIND_GLOBAL}")
+      indent
+      note "汎用グローバルは値スロット。型タグごと写す"
+      line "Z3 = Z6"
+      copy_slot(from: slot.z, to: 3)
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
       note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
       vm_error(0x16)

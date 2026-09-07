@@ -535,10 +535,11 @@ end
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [true, true], mappings.map { |m| m[:general] }
-    assert_equal layout.general_global_addr(0), mappings[0][:z_offset]
-    assert_equal layout.general_global_addr(1), mappings[1][:z_offset]
-    # 値ワードのアドレスなのでスロット先頭ではない
-    assert_equal layout.general_global_base + SLOT_VALUE_OFFSET, mappings[0][:z_offset]
+    assert_equal layout.general_global_slot_addr(0), mappings[0][:z_offset]
+    assert_equal layout.general_global_slot_addr(1), mappings[1][:z_offset]
+    # 値スロットの先頭。VM が型タグごと写す
+    assert_equal layout.general_global_base, mappings[0][:z_offset]
+    assert_equal SYMBOL_KIND_GLOBAL, mappings[0][:kind]
   end
 
   # デバイス名付きシンボルは汎用領域を消費しない
@@ -547,8 +548,8 @@ end
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [false, true, false, true], mappings.map { |m| m[:general] }
-    assert_equal layout.general_global_addr(0), mappings[1][:z_offset]
-    assert_equal layout.general_global_addr(1), mappings[3][:z_offset]
+    assert_equal layout.general_global_slot_addr(0), mappings[1][:z_offset]
+    assert_equal layout.general_global_slot_addr(1), mappings[3][:z_offset]
     assert_equal DEVICE_TYPE_DM, mappings[0][:device_type]
     assert_equal DEVICE_TYPE_MR, mappings[2][:device_type]
   end
@@ -565,14 +566,14 @@ end
     end
   end
 
-  # デバイスマッピングテーブルには値ワードのアドレスが入る
-  def test_device_table_stores_value_address
+  # デバイスマッピングテーブルには値スロットの先頭が入る
+  def test_device_table_stores_the_slot_address
     irep = build_irep(symbols: ["$foo"])
     _em, image = load_image(irep)
 
     table_addr = layout.device_table_base
     assert_equal DEVICE_TYPE_EM, image[table_addr]
-    assert_equal layout.general_global_addr(0), image[table_addr + 1]
+    assert_equal layout.general_global_slot_addr(0), image[table_addr + 1]
   end
 
   # === 生成される KV スクリプト ===

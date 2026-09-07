@@ -250,12 +250,29 @@ module FaRuby
       type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x15) unless dev
+      return copy_slot_into_reg(addr, operand(dest)) if kind == SYMBOL_KIND_GLOBAL
       return write_device_ref(operand(dest), type, addr, access) if kind == SYMBOL_KIND_FAMILY
       if kind == SYMBOL_KIND_STR_DEVICE
         return load_string_from_device(dev, type, addr, access, operand(dest), 0x15, heap_code)
       end
 
       read_device_into(dev, addr, access, operand(dest), bit_device: bit_device?(type))
+    end
+
+    # 汎用グローバルの値スロットをレジスタへ写す (型タグごと)
+    #
+    # デバイスと違って幅がありません。**Ruby の値をそのまま置く場所**なので、
+    # 実数も配列もハッシュも文字列も持てます。配列や文字列はスロット番号が
+    # 入るだけで、プールを余分に使いません。
+    def copy_slot_into_reg(addr, index)
+      write_slot(index, @em.read_u16(addr + SLOT_TYPE_OFFSET),
+                 @em.read_s32(addr + SLOT_VALUE_OFFSET))
+    end
+
+    # レジスタを汎用グローバルの値スロットへ写す (型タグごと)
+    def copy_reg_into_slot(index, addr)
+      @em.write_u16(addr + SLOT_TYPE_OFFSET, read_reg_tag(index))
+      @em.write_s32(addr + SLOT_VALUE_OFFSET, read_reg(index))
     end
 
     # デバイスから文字列を読む (生成コードと同じ規則)
@@ -853,6 +870,7 @@ module FaRuby
       type, addr, access, kind = device_entry(operand(sym_operand))
       dev = device_memory(type)
       return vm_error(0x16) unless dev
+      return copy_reg_into_slot(operand(src), addr) if kind == SYMBOL_KIND_GLOBAL
       return vm_error(0x16) if kind == SYMBOL_KIND_FAMILY # $DM = 1 は意味を持たない
 
       # 値が文字列なら文字列として書く。実数と整数を型で分けているのと同じ

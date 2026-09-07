@@ -348,7 +348,7 @@ end
   end
 
   # 汎用グローバル変数は 4 ワードのスロットに順番に割り当てられ、
-  # デバイステーブルには値ワード (スロット先頭+1) のアドレスが入る
+  # デバイステーブルにはスロット先頭のアドレスが入る
   def test_general_global_slot_layout
     source = <<~RUBY
       $foo = 11
@@ -367,10 +367,10 @@ end
     ]
     assert_equal [11, 22], slot_values.sort
 
-    # 型タグ領域は未使用のまま
-    assert_equal FaRuby::VmConstants::TT_EMPTY,
+    # 型タグも書かれる。整数を入れたので TT_INTEGER
+    assert_equal FaRuby::VmConstants::TT_INTEGER,
                  sim.em.read_u16(layout.general_global_slot_addr(0))
-    assert_equal FaRuby::VmConstants::TT_EMPTY,
+    assert_equal FaRuby::VmConstants::TT_INTEGER,
                  sim.em.read_u16(layout.general_global_slot_addr(1))
   end
 
@@ -386,6 +386,88 @@ end
     assert_equal 99, sim.global_value("$foo")
     # $DM100 は汎用領域を消費しないので $foo はスロット 0
     assert_equal 99, sim.em.read_s32(layout.general_global_addr(0))
+  end
+
+  # === 汎用グローバル変数はどの型でも持てる ===
+  #
+  # 値スロットをそのまま持つので、型タグごと写る。デバイスと違って幅が無い
+
+  def test_a_general_global_keeps_a_float
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 2.5
+      $DM0 = 0
+      if $g == 2.5
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 1, sim.devices[1].read_u16(0), "実数が切り捨てられている"
+  end
+
+  # 以前は 0 が入り、整数 0 は Ruby では真なので条件が通っていた
+  def test_a_general_global_keeps_false_falsy
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = false
+      $DM0 = 0
+      if $g
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(0), "false が真になっている"
+  end
+
+  def test_a_general_global_keeps_nil_falsy
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = nil
+      $DM0 = 0
+      if $g
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(0), "nil が真になっている"
+  end
+
+  def test_a_general_global_keeps_an_array
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = [1, 2, 3]
+      $DM0 = $g.length
+    RUBY
+
+    assert_equal 3, sim.devices[1].read_u16(0)
+  end
+
+  def test_a_general_global_keeps_a_hash
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = { 1 => 2 }
+      $DM0 = $g[1]
+    RUBY
+
+    assert_equal 2, sim.devices[1].read_u16(0)
+  end
+
+  def test_a_general_global_keeps_a_string
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = "abc"
+      $DM100 = $g
+    RUBY
+
+    dm = sim.devices[1]
+
+    assert_equal [0x6162, 0x6300], [dm.read_u16(100), dm.read_u16(101)]
+  end
+
+  # 入るのはスロット番号だけ。プールは増えない
+  def test_a_general_global_does_not_take_a_pool_slot
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1, 2]
+      $g = a
+      $DM0 = $g.length
+    RUBY
+
+    assert_equal 2, sim.devices[1].read_u16(0)
+    assert_equal 1, sim.em.read_u16(layout.array_sp_addr), "配列 1 つぶんだけ使う"
   end
 
   # === 添字によるデバイスアクセス ===
