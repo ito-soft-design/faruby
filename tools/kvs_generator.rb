@@ -254,6 +254,10 @@ module FaRuby
 
     def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset)
     def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", reg_offset)
+    # 引数 2 個のメソッド (`[]`) の 2 つ目
+    def reg_third_slot(name)
+      slot_ref([:reg_third, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}", reg_offset, z: Z_VALUE)
+    end
     # 定数プールは固定領域 (FM) にある
     def pool_slot(name)
       slot_ref([:pool, name], "#{operand(name)} * #{SLOT_WORDS}", pool_offset,
@@ -2166,7 +2170,7 @@ module FaRuby
         first = false
         indent
         note METHOD_NAMES.fetch(code)
-        method_body(code, dest, rhs, type_code, zero_code, heap_code)
+        method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
         dedent
       end
       line "ELSE"
@@ -2452,7 +2456,7 @@ module FaRuby
       line "Z4 = #{fixed_indexed_base}:Z7   ' シンボル種別"
     end
 
-    def method_body(code, dest, rhs, type_code, zero_code, heap_code)
+    def method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
       case code
       when METHOD_NE    then eq_into(dest, rhs, negate: true)
       when METHOD_NOT   then not_into(dest)
@@ -2474,6 +2478,7 @@ module FaRuby
       when METHOD_KEY_P  then key_p_into(dest, rhs)
       when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
       when METHOD_VALUES then hash_column_into(dest, Z_HASH_VALUES, heap_code)
+      when METHOD_SLICE  then slice_into(dest, rhs, reg_third_slot(name), type_code, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
@@ -2690,6 +2695,70 @@ module FaRuby
       if_("#{rhs.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
       yield
       line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a] = R[a][R[a+1], R[a+2]] (デバイス参照から配列を作る)
+    #
+    # `$DML[100, 3]` は DM100・DM102・DM104 を読んで 3 要素の配列にします。
+    # **刻みは幅で決まります。** 書く向き (`$DM100 = a`) と同じ規則です。
+    #
+    # Ruby の `a[i, n]` に合わせて、個数が負なら `nil` を返します。0 なら
+    # 空の配列です。**プールを 1 スロット使います。**
+    #
+    # 書く向きの `$DML[100, 3] = a` は入れていません。Ruby は範囲を置き換えて
+    # 長さを変えますが、デバイスは長さが固定なので同じ意味になりません。
+    # 並べて書くだけなら `$DM100 = a` があります。
+    def slice_into(dest, rhs, count, type_code, heap_code)
+      if_("#{count.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      if_("#{rhs.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+
+      note "デバイス参照から種別と幅を取り出す"
+      line "Z8 = #{dest.word(1)} / #{DEVICE_REF_ACCESS_SCALE}   ' アクセス幅"
+      line "Z5 = #{dest.word(1)} - Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' デバイス種別"
+      note "個別ビットは読めない。1 要素が何ビットか決まらない"
+      if_("Z8 = #{ACCESS_BIT}") { vm_error(type_code) }
+      check_known_device(type_code)
+
+      note "刻み。幅のワード数、ビットデバイスならその 16 倍"
+      line "#{str_limit} = 1"
+      ACCESS_WORDS.select { |_, words| words > 1 }.each_key do |access|
+        if_("Z8 = #{access}") { line "#{str_limit} = #{ACCESS_WORDS.fetch(access)}" }
+      end
+      if_("Z5 > #{DEVICE_TYPE_ZF}") { line "#{str_limit} = #{str_limit} * 16" }
+
+      line "#{scratch32_b} = #{count.value}   ' 個数"
+      line "#{str_temp} = #{dest.word(0)} + #{rhs.value}   ' 読み始め"
+
+      if_else_block("#{scratch32_b} < 0") do
+        note "個数が負なら nil (Ruby と同じ)"
+        set_slot_nil(dest)
+      end
+      if_("#{scratch32_b} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える個数"
+        vm_error(heap_code)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+
+      line "Z4 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{layout.device_name}#{MemoryLayout::ARRAY_LENGTH}:Z4 = #{scratch32_b}"
+      if_("#{scratch32_b} > 0") do
+        line "Z7 = #{scratch32_b}"
+        line "Z7 = Z7 - 1"
+        line "FOR #{str_index} = 0 TO Z7"
+        indent
+        line "Z6 = #{str_index} * #{str_limit} + #{str_temp}   ' 読み先"
+        line "Z3 = #{str_index} * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        device_dispatch(:read, slot: slot_on(3), error_code: type_code, checked: true)
+        dedent
+        line "NEXT"
+      end
+      note "R[a] はデバイス参照から配列に変わる"
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      end_block
     end
 
     # !R[a]。偽なら true、それ以外は false

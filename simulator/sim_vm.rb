@@ -1284,6 +1284,7 @@ module FaRuby
       when METHOD_KEY_P  then send_key_p(index)
       when METHOD_KEYS   then send_hash_column(index, 0, heap_code)
       when METHOD_VALUES then send_hash_column(index, 1, heap_code)
+      when METHOD_SLICE  then send_slice(index, type_code, heap_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
@@ -1384,6 +1385,61 @@ module FaRuby
 
       write_array_element(slot, length, read_reg_tag(index + 1), read_reg(index + 1))
       set_array_length(slot, length + 1)
+    end
+
+    # R[a] = R[a][R[a+1], R[a+2]] (デバイス参照から配列を作る)
+    #
+    # `$DML[100, 3]` は DM100・DM102・DM104 を読む。刻みは幅で決まり、
+    # 書く向き (`$DM100 = a`) と同じ規則。**プールを 1 スロット使う。**
+    # 個数が負なら nil (Ruby の `a[i, -1]` と同じ)。
+    def send_slice(index, type_code, heap_code)
+      return vm_error(type_code) unless read_reg_tag(index + 1) == TT_INTEGER
+      return vm_error(type_code) unless read_reg_tag(index + 2) == TT_INTEGER
+
+      ref = device_ref(index)
+      return vm_error(type_code) unless ref
+      return vm_error(type_code) if ref[:access].nil? || ref[:access] == ACCESS_BIT
+
+      dev = device_memory(ref[:type])
+      return vm_error(type_code) unless dev
+
+      count = read_reg(index + 2)
+      return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL)) if count.negative?
+      return vm_error(heap_code) if count > layout.max_array_len
+
+      slot = array_sp
+      return vm_error(heap_code) if slot >= layout.max_arrays
+
+      step = ACCESS_WORDS.fetch(ref[:access], 1)
+      step *= 16 unless STRING_DEVICE_TYPES.include?(ref[:type])
+      base = ref[:base] + read_reg(index + 1)
+
+      set_array_length(slot, count)
+      count.times do |i|
+        read_device_into_slot(dev, ref[:type], base + i * step, ref[:access],
+                              layout.array_element_addr(slot, i))
+      end
+      write_slot(index, TT_ARRAY, slot)
+      @em.write_u16(layout.array_sp_addr, slot + 1)
+    end
+
+    # デバイス 1 つを値スロットへ読む (プールの要素へ読むために切り出した)
+    def read_device_into_slot(dev, type, addr, access, element)
+      value = if bit_device?(type)
+                read_bit_field(dev, addr, access)
+              elsif access == ACCESS_F
+                SimVm.bits_to_float(dev.read_u32(addr))
+              else
+                read_word_device(dev, addr, access)
+              end
+
+      if value.is_a?(Float)
+        @em.write_u16(element + SLOT_TYPE_OFFSET, TT_FLOAT)
+        @em.write_u32(element + SLOT_VALUE_OFFSET, SimVm.float_bits(value))
+      else
+        @em.write_u16(element + SLOT_TYPE_OFFSET, TT_INTEGER)
+        @em.write_s32(element + SLOT_VALUE_OFFSET, value)
+      end
     end
 
     # 型が違えば等しくない (set_reg_eq の否定)

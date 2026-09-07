@@ -264,6 +264,8 @@ module FaRuby
     METHOD_KEY_P   = 21   # key?
     METHOD_KEYS    = 22
     METHOD_VALUES  = 23
+    # $DML[100, 3]。デバイス参照から連続した値を配列にする
+    METHOD_SLICE   = 24
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -284,7 +286,8 @@ module FaRuby
       [METHOD_CONCAT,  TT_INTEGER, TT_ARRAY, "整数・文字列・配列"],
       [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
       [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
-      [nil,            TT_HASH,    TT_HASH,  "ハッシュ"],
+      [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
+      [nil,            TT_DEVICE,  TT_DEVICE, "デバイス参照"],
     ].freeze
 
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
@@ -327,6 +330,7 @@ module FaRuby
       "key?"   => [METHOD_KEY_P,  1],
       "keys"   => [METHOD_KEYS,   0],
       "values" => [METHOD_VALUES, 0],
+      "[]"     => [METHOD_SLICE,  2],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない

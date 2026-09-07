@@ -2882,9 +2882,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                     EM2:Z9 = 4
                                     BREAK
                                 END IF
-                            ELSE
+                            ELSE IF Z5 <= 23 THEN
                                 ' ハッシュ (タグ 9)
                                 IF EM0:Z1 <> 9 THEN
+                                    EM1:Z9 = 3
+                                    EM2:Z9 = 4
+                                    BREAK
+                                END IF
+                            ELSE
+                                ' デバイス参照 (タグ 11)
+                                IF EM0:Z1 <> 11 THEN
                                     EM1:Z9 = 3
                                     EM2:Z9 = 4
                                     BREAK
@@ -3569,6 +3576,330 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM1.L:Z1 = EM39:Z9   ' スロット番号
                             EM0:Z1 = 8
                             EM39:Z9 = EM39:Z9 + 1
+                        ELSE IF Z5 = 24 THEN
+                            ' []
+                            Z3 = (EM7:Z9 + 2) * 4 + EM32:Z9 + Z9
+                            IF EM0:Z3 <> 4 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            IF EM0:Z2 <> 4 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            ' デバイス参照から種別と幅を取り出す
+                            Z8 = EM2:Z1 / 16   ' アクセス幅
+                            Z5 = EM2:Z1 - Z8 * 16   ' デバイス種別
+                            ' 個別ビットは読めない。1 要素が何ビットか決まらない
+                            IF Z8 = 5 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            ' 生成コードが知っている種別か。知らない種別は FOR に入る前に弾く
+                            EM47:Z9 = 0
+                            IF Z5 = 0 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 1 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 2 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 3 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 4 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 5 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 6 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 8 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF Z5 = 9 THEN
+                                EM47:Z9 = 1
+                            END IF
+                            IF EM47:Z9 = 0 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                            ' 刻み。幅のワード数、ビットデバイスならその 16 倍
+                            EM45:Z9 = 1
+                            IF Z8 = 2 THEN
+                                EM45:Z9 = 2
+                            END IF
+                            IF Z8 = 3 THEN
+                                EM45:Z9 = 2
+                            END IF
+                            IF Z8 = 4 THEN
+                                EM45:Z9 = 2
+                            END IF
+                            IF Z5 > 2 THEN
+                                EM45:Z9 = EM45:Z9 * 16
+                            END IF
+                            EM18.L:Z9 = EM1.L:Z3   ' 個数
+                            EM44:Z9 = EM1:Z1 + EM1.L:Z2   ' 読み始め
+                            IF EM18.L:Z9 < 0 THEN
+                                ' 個数が負なら nil (Ruby と同じ)
+                                EM1.L:Z1 = 0
+                                EM0:Z1 = 1
+                            ELSE
+                                IF EM18.L:Z9 > 12 THEN
+                                    ' 1 スロットの容量を超える個数
+                                    EM1:Z9 = 3
+                                    EM2:Z9 = 10
+                                    BREAK
+                                END IF
+                                ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                                IF EM39:Z9 >= 16 THEN
+                                    EM1:Z9 = 3
+                                    EM2:Z9 = 10
+                                    BREAK
+                                END IF
+                                Z4 = EM39:Z9 * 50 + 1000 + Z9
+                                EM0:Z4 = EM18.L:Z9
+                                IF EM18.L:Z9 > 0 THEN
+                                    Z7 = EM18.L:Z9
+                                    Z7 = Z7 - 1
+                                    FOR EM42:Z9 = 0 TO Z7
+                                        Z6 = EM42:Z9 * EM45:Z9 + EM44:Z9   ' 読み先
+                                        Z3 = EM42:Z9 * 4 + Z4 + 2
+                                        ' デバイスタイプ別読み取り
+                                        ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
+                                        '   2=.L(32bit符号付き)
+                                        '   1=.U(16bit符号なし)
+                                        '   3=.D(32bit符号なし)
+                                        '   4=.F(実数)
+                                        '   それ以外=.S(16bit符号付き/既定)
+                                        ' ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
+                                        '   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
+                                        '   整数にすると if $MR10 が常に成立してしまう
+                                        IF Z5 = 0 THEN
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = EM0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = EM0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = EM0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = EM0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = EM0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        ELSE IF Z5 = 1 THEN
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = DM0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = DM0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = DM0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = DM0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = DM0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        ELSE IF Z5 = 2 THEN
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = ZF0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = ZF0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = ZF0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = ZF0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = ZF0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        ELSE IF Z5 = 3 THEN
+                                            IF Z8 = 5 THEN
+                                                IF R0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = R0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = R0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = R0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 4 THEN
+                                                    EM1.F:Z3 = R0.F:Z6
+                                                    EM0:Z3 = 5
+                                                ELSE
+                                                    EM1.L:Z3 = R0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE IF Z5 = 4 THEN
+                                            IF Z8 = 5 THEN
+                                                IF MR0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = MR0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = MR0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = MR0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 4 THEN
+                                                    EM1.F:Z3 = MR0.F:Z6
+                                                    EM0:Z3 = 5
+                                                ELSE
+                                                    EM1.L:Z3 = MR0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE IF Z5 = 5 THEN
+                                            IF Z8 = 5 THEN
+                                                IF B0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = B0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = B0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = B0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 4 THEN
+                                                    EM1.F:Z3 = B0.F:Z6
+                                                    EM0:Z3 = 5
+                                                ELSE
+                                                    EM1.L:Z3 = B0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE IF Z5 = 6 THEN
+                                            IF Z8 = 5 THEN
+                                                IF LR0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = LR0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = LR0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = LR0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 4 THEN
+                                                    EM1.F:Z3 = LR0.F:Z6
+                                                    EM0:Z3 = 5
+                                                ELSE
+                                                    EM1.L:Z3 = LR0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE IF Z5 = 8 THEN
+                                            IF Z8 = 5 THEN
+                                                IF T0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = T0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = T0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = T0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE
+                                                    EM1.L:Z3 = T0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE IF Z5 = 9 THEN
+                                            IF Z8 = 5 THEN
+                                                IF C0:Z6 THEN
+                                                    EM1.L:Z3 = 1
+                                                    EM0:Z3 = 3
+                                                ELSE
+                                                    EM1.L:Z3 = 0
+                                                    EM0:Z3 = 2
+                                                END IF
+                                            ELSE
+                                                IF Z8 = 2 THEN
+                                                    EM1.L:Z3 = C0.L:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 1 THEN
+                                                    EM1.L:Z3 = C0.U:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE IF Z8 = 3 THEN
+                                                    EM1.L:Z3 = C0.D:Z6
+                                                    EM0:Z3 = 4
+                                                ELSE
+                                                    EM1.L:Z3 = C0.S:Z6
+                                                    EM0:Z3 = 4
+                                                END IF
+                                            END IF
+                                        ELSE
+                                            ' 呼ぶ側が種別を確かめている。ここへは来ない
+                                        END IF
+                                    NEXT
+                                END IF
+                                ' R[a] はデバイス参照から配列に変わる
+                                EM1.L:Z1 = EM39:Z9   ' スロット番号
+                                EM0:Z1 = 8
+                                EM39:Z9 = EM39:Z9 + 1
+                            END IF
                         ELSE
                             ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                             EM1:Z9 = 3
@@ -3718,9 +4049,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM2:Z9 = 4
                                 BREAK
                             END IF
-                        ELSE
+                        ELSE IF Z5 <= 23 THEN
                             ' ハッシュ (タグ 9)
                             IF EM0:Z1 <> 9 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE
+                            ' デバイス参照 (タグ 11)
+                            IF EM0:Z1 <> 11 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
                                 BREAK
@@ -4405,6 +4743,330 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM1.L:Z1 = EM39:Z9   ' スロット番号
                         EM0:Z1 = 8
                         EM39:Z9 = EM39:Z9 + 1
+                    ELSE IF Z5 = 24 THEN
+                        ' []
+                        Z3 = (EM7:Z9 + 2) * 4 + EM32:Z9 + Z9
+                        IF EM0:Z3 <> 4 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        IF EM0:Z2 <> 4 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        ' デバイス参照から種別と幅を取り出す
+                        Z8 = EM2:Z1 / 16   ' アクセス幅
+                        Z5 = EM2:Z1 - Z8 * 16   ' デバイス種別
+                        ' 個別ビットは読めない。1 要素が何ビットか決まらない
+                        IF Z8 = 5 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        ' 生成コードが知っている種別か。知らない種別は FOR に入る前に弾く
+                        EM47:Z9 = 0
+                        IF Z5 = 0 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 1 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 2 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 3 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 4 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 5 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 6 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 8 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF Z5 = 9 THEN
+                            EM47:Z9 = 1
+                        END IF
+                        IF EM47:Z9 = 0 THEN
+                            EM1:Z9 = 3
+                            EM2:Z9 = 4
+                            BREAK
+                        END IF
+                        ' 刻み。幅のワード数、ビットデバイスならその 16 倍
+                        EM45:Z9 = 1
+                        IF Z8 = 2 THEN
+                            EM45:Z9 = 2
+                        END IF
+                        IF Z8 = 3 THEN
+                            EM45:Z9 = 2
+                        END IF
+                        IF Z8 = 4 THEN
+                            EM45:Z9 = 2
+                        END IF
+                        IF Z5 > 2 THEN
+                            EM45:Z9 = EM45:Z9 * 16
+                        END IF
+                        EM18.L:Z9 = EM1.L:Z3   ' 個数
+                        EM44:Z9 = EM1:Z1 + EM1.L:Z2   ' 読み始め
+                        IF EM18.L:Z9 < 0 THEN
+                            ' 個数が負なら nil (Ruby と同じ)
+                            EM1.L:Z1 = 0
+                            EM0:Z1 = 1
+                        ELSE
+                            IF EM18.L:Z9 > 12 THEN
+                                ' 1 スロットの容量を超える個数
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            ' プールの空きスロットを取る。返さないので使い切ったら止まる
+                            IF EM39:Z9 >= 16 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 10
+                                BREAK
+                            END IF
+                            Z4 = EM39:Z9 * 50 + 1000 + Z9
+                            EM0:Z4 = EM18.L:Z9
+                            IF EM18.L:Z9 > 0 THEN
+                                Z7 = EM18.L:Z9
+                                Z7 = Z7 - 1
+                                FOR EM42:Z9 = 0 TO Z7
+                                    Z6 = EM42:Z9 * EM45:Z9 + EM44:Z9   ' 読み先
+                                    Z3 = EM42:Z9 * 4 + Z4 + 2
+                                    ' デバイスタイプ別読み取り
+                                    ' ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ
+                                    '   2=.L(32bit符号付き)
+                                    '   1=.U(16bit符号なし)
+                                    '   3=.D(32bit符号なし)
+                                    '   4=.F(実数)
+                                    '   それ以外=.S(16bit符号付き/既定)
+                                    ' ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
+                                    '   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
+                                    '   整数にすると if $MR10 が常に成立してしまう
+                                    IF Z5 = 0 THEN
+                                        IF Z8 = 2 THEN
+                                            EM1.L:Z3 = EM0.L:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 1 THEN
+                                            EM1.L:Z3 = EM0.U:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 3 THEN
+                                            EM1.L:Z3 = EM0.D:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 4 THEN
+                                            EM1.F:Z3 = EM0.F:Z6
+                                            EM0:Z3 = 5
+                                        ELSE
+                                            EM1.L:Z3 = EM0.S:Z6
+                                            EM0:Z3 = 4
+                                        END IF
+                                    ELSE IF Z5 = 1 THEN
+                                        IF Z8 = 2 THEN
+                                            EM1.L:Z3 = DM0.L:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 1 THEN
+                                            EM1.L:Z3 = DM0.U:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 3 THEN
+                                            EM1.L:Z3 = DM0.D:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 4 THEN
+                                            EM1.F:Z3 = DM0.F:Z6
+                                            EM0:Z3 = 5
+                                        ELSE
+                                            EM1.L:Z3 = DM0.S:Z6
+                                            EM0:Z3 = 4
+                                        END IF
+                                    ELSE IF Z5 = 2 THEN
+                                        IF Z8 = 2 THEN
+                                            EM1.L:Z3 = ZF0.L:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 1 THEN
+                                            EM1.L:Z3 = ZF0.U:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 3 THEN
+                                            EM1.L:Z3 = ZF0.D:Z6
+                                            EM0:Z3 = 4
+                                        ELSE IF Z8 = 4 THEN
+                                            EM1.F:Z3 = ZF0.F:Z6
+                                            EM0:Z3 = 5
+                                        ELSE
+                                            EM1.L:Z3 = ZF0.S:Z6
+                                            EM0:Z3 = 4
+                                        END IF
+                                    ELSE IF Z5 = 3 THEN
+                                        IF Z8 = 5 THEN
+                                            IF R0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = R0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = R0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = R0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = R0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = R0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE IF Z5 = 4 THEN
+                                        IF Z8 = 5 THEN
+                                            IF MR0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = MR0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = MR0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = MR0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = MR0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = MR0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE IF Z5 = 5 THEN
+                                        IF Z8 = 5 THEN
+                                            IF B0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = B0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = B0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = B0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = B0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = B0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE IF Z5 = 6 THEN
+                                        IF Z8 = 5 THEN
+                                            IF LR0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = LR0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = LR0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = LR0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 4 THEN
+                                                EM1.F:Z3 = LR0.F:Z6
+                                                EM0:Z3 = 5
+                                            ELSE
+                                                EM1.L:Z3 = LR0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE IF Z5 = 8 THEN
+                                        IF Z8 = 5 THEN
+                                            IF T0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = T0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = T0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = T0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE
+                                                EM1.L:Z3 = T0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE IF Z5 = 9 THEN
+                                        IF Z8 = 5 THEN
+                                            IF C0:Z6 THEN
+                                                EM1.L:Z3 = 1
+                                                EM0:Z3 = 3
+                                            ELSE
+                                                EM1.L:Z3 = 0
+                                                EM0:Z3 = 2
+                                            END IF
+                                        ELSE
+                                            IF Z8 = 2 THEN
+                                                EM1.L:Z3 = C0.L:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 1 THEN
+                                                EM1.L:Z3 = C0.U:Z6
+                                                EM0:Z3 = 4
+                                            ELSE IF Z8 = 3 THEN
+                                                EM1.L:Z3 = C0.D:Z6
+                                                EM0:Z3 = 4
+                                            ELSE
+                                                EM1.L:Z3 = C0.S:Z6
+                                                EM0:Z3 = 4
+                                            END IF
+                                        END IF
+                                    ELSE
+                                        ' 呼ぶ側が種別を確かめている。ここへは来ない
+                                    END IF
+                                NEXT
+                            END IF
+                            ' R[a] はデバイス参照から配列に変わる
+                            EM1.L:Z1 = EM39:Z9   ' スロット番号
+                            EM0:Z1 = 8
+                            EM39:Z9 = EM39:Z9 + 1
+                        END IF
                     ELSE
                         ' 未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)
                         EM1:Z9 = 3
@@ -4516,9 +5178,16 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM2:Z9 = 4
                                 BREAK
                             END IF
-                        ELSE
+                        ELSE IF Z5 <= 23 THEN
                             ' ハッシュ (タグ 9)
                             IF EM0:Z1 <> 9 THEN
+                                EM1:Z9 = 3
+                                EM2:Z9 = 4
+                                BREAK
+                            END IF
+                        ELSE
+                            ' デバイス参照 (タグ 11)
+                            IF EM0:Z1 <> 11 THEN
                                 EM1:Z9 = 3
                                 EM2:Z9 = 4
                                 BREAK

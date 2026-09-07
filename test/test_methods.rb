@@ -94,6 +94,7 @@ class TestMethods < Minitest::Test
     "push" => [TT_ARRAY, TT_ARRAY],
     "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
     "values" => [TT_HASH, TT_HASH],
+    "[]" => [TT_DEVICE, TT_DEVICE],
   }.freeze
 
   def test_methods_sort_by_receiver_type

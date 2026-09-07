@@ -638,6 +638,93 @@ end
     assert_equal 99, sim.devices[1].read_u16(100)
   end
 
+  # === デバイスから配列へ ($DML[100, 3]) ===
+  #
+  # 引数 2 個の `[]` はメソッド呼び出しで、OP_GETIDX とは別経路。
+  # Ruby の a[i, n] に合わせて、個数が負なら nil、0 なら空の配列
+
+  def test_a_slice_reads_consecutive_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100 = [11, 22, 33]
+      a = $DM[100, 3]
+      $DM200 = a.length
+      $DM201 = a[0]
+      $DM202 = a[2]
+    RUBY
+
+    assert_equal [3, 11, 33], (0..2).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  # .L は 2 ワードずつ進む。書く向きと同じ規則
+  def test_a_wide_slice_steps_by_two_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100L = [7, 8]
+      a = $DML[100, 2]
+      $DM200 = a[0]
+      $DM201 = a[1]
+    RUBY
+
+    assert_equal [7, 8], (0..1).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  def test_a_slice_of_zero_is_an_empty_array
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = $DM[100, 0]
+      $DM200 = a.length
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(200)
+  end
+
+  # Ruby の a[i, -1] は nil
+  def test_a_negative_count_is_nil
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = $DM[100, -1]
+      $DM200 = 0
+      if a == nil
+        $DM200 = 1
+      end
+    RUBY
+
+    assert_equal 1, sim.devices[1].read_u16(200)
+  end
+
+  # 1 スロットの容量を超える個数
+  def test_a_slice_past_the_capacity_stops_the_vm
+    sim = run_until_it_stops("a = $DM[100, #{FaRuby::MemoryLayout.default.max_array_len + 1}]\n")
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # ビットデバイスは 1 ワードが 16 ビット
+  def test_a_slice_from_a_bit_device_with_a_width
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $MRL[64] = [5, 6]
+      a = $MRL[64, 2]
+      $DM200 = a[0]
+      $DM201 = a[1]
+    RUBY
+
+    assert_equal [5, 6], (0..1).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  # 個別ビットは 1 要素が何ビットか決まらない
+  def test_a_slice_from_a_plain_bit_device_stops_the_vm
+    sim = run_until_it_stops("a = $MR[64, 2]\n")
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 配列の部分取り出し (Ruby の a[1, 2]) は入れていない
+  def test_a_slice_of_an_array_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      b = [1, 2, 3]
+      c = b[1, 2]
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
   # === 添字によるデバイスアクセス ===
   #
   # $DM100 はコンパイル時にアドレスが確定するため、実行時に計算した
