@@ -2565,8 +2565,30 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM2:Z9 = 4
                             BREAK
                         END IF
-                        SRA(EM1.L:Z1, EM1.L:Z2, EM16.L:Z9)
-                        EM1.L:Z1 = EM16.L:Z9
+                        EM18.L:Z9 = EM1.L:Z2   ' 桁数
+                        IF EM18.L:Z9 < 0 THEN
+                            ' 桁数が負なら向きが逆 (Ruby と同じ)
+                            EM18.L:Z9 = 0 - EM18.L:Z9
+                            IF EM18.L:Z9 >= 32 THEN
+                                ' 全部ずれる。左は 0、右は符号で埋まる
+                                EM1.L:Z1 = 0
+                            ELSE
+                                SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                EM1.L:Z1 = EM16.L:Z9
+                            END IF
+                        ELSE
+                            IF EM18.L:Z9 >= 32 THEN
+                                ' 全部ずれる。左は 0、右は符号で埋まる
+                                IF EM1.L:Z1 < 0 THEN
+                                    EM1.L:Z1 = -1
+                                ELSE
+                                    EM1.L:Z1 = 0
+                                END IF
+                            ELSE
+                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                EM1.L:Z1 = EM16.L:Z9
+                            END IF
+                        END IF
                         EM0:Z1 = 4
                     ELSE IF Z5 = 16 THEN
                         ' length
@@ -2685,8 +2707,30 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                                 EM2:Z9 = 4
                                 BREAK
                             END IF
-                            SLA(EM1.L:Z1, EM1.L:Z2, EM16.L:Z9)
-                            EM1.L:Z1 = EM16.L:Z9
+                            EM18.L:Z9 = EM1.L:Z2   ' 桁数
+                            IF EM18.L:Z9 < 0 THEN
+                                ' 桁数が負なら向きが逆 (Ruby と同じ)
+                                EM18.L:Z9 = 0 - EM18.L:Z9
+                                IF EM18.L:Z9 >= 32 THEN
+                                    ' 全部ずれる。左は 0、右は符号で埋まる
+                                    IF EM1.L:Z1 < 0 THEN
+                                        EM1.L:Z1 = -1
+                                    ELSE
+                                        EM1.L:Z1 = 0
+                                    END IF
+                                ELSE
+                                    SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                    EM1.L:Z1 = EM16.L:Z9
+                                END IF
+                            ELSE
+                                IF EM18.L:Z9 >= 32 THEN
+                                    ' 全部ずれる。左は 0、右は符号で埋まる
+                                    EM1.L:Z1 = 0
+                                ELSE
+                                    SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                    EM1.L:Z1 = EM16.L:Z9
+                                END IF
+                            END IF
                             EM0:Z1 = 4
                         ELSE IF EM0:Z1 = 7 THEN
                             ' 文字列は中身を継ぎ足す
@@ -3342,8 +3386,30 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                         EM2:Z9 = 4
                         BREAK
                     END IF
-                    SRA(EM1.L:Z1, EM1.L:Z2, EM16.L:Z9)
-                    EM1.L:Z1 = EM16.L:Z9
+                    EM18.L:Z9 = EM1.L:Z2   ' 桁数
+                    IF EM18.L:Z9 < 0 THEN
+                        ' 桁数が負なら向きが逆 (Ruby と同じ)
+                        EM18.L:Z9 = 0 - EM18.L:Z9
+                        IF EM18.L:Z9 >= 32 THEN
+                            ' 全部ずれる。左は 0、右は符号で埋まる
+                            EM1.L:Z1 = 0
+                        ELSE
+                            SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                            EM1.L:Z1 = EM16.L:Z9
+                        END IF
+                    ELSE
+                        IF EM18.L:Z9 >= 32 THEN
+                            ' 全部ずれる。左は 0、右は符号で埋まる
+                            IF EM1.L:Z1 < 0 THEN
+                                EM1.L:Z1 = -1
+                            ELSE
+                                EM1.L:Z1 = 0
+                            END IF
+                        ELSE
+                            SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                            EM1.L:Z1 = EM16.L:Z9
+                        END IF
+                    END IF
                     EM0:Z1 = 4
                 ELSE IF Z5 = 16 THEN
                     ' length
@@ -3462,8 +3528,30 @@ FOR Z9 = 20000 TO 22000 STEP 2000
                             EM2:Z9 = 4
                             BREAK
                         END IF
-                        SLA(EM1.L:Z1, EM1.L:Z2, EM16.L:Z9)
-                        EM1.L:Z1 = EM16.L:Z9
+                        EM18.L:Z9 = EM1.L:Z2   ' 桁数
+                        IF EM18.L:Z9 < 0 THEN
+                            ' 桁数が負なら向きが逆 (Ruby と同じ)
+                            EM18.L:Z9 = 0 - EM18.L:Z9
+                            IF EM18.L:Z9 >= 32 THEN
+                                ' 全部ずれる。左は 0、右は符号で埋まる
+                                IF EM1.L:Z1 < 0 THEN
+                                    EM1.L:Z1 = -1
+                                ELSE
+                                    EM1.L:Z1 = 0
+                                END IF
+                            ELSE
+                                SRA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                EM1.L:Z1 = EM16.L:Z9
+                            END IF
+                        ELSE
+                            IF EM18.L:Z9 >= 32 THEN
+                                ' 全部ずれる。左は 0、右は符号で埋まる
+                                EM1.L:Z1 = 0
+                            ELSE
+                                SLA(EM1.L:Z1, EM18.L:Z9, EM16.L:Z9)
+                                EM1.L:Z1 = EM16.L:Z9
+                            END IF
+                        END IF
                         EM0:Z1 = 4
                     ELSE IF EM0:Z1 = 7 THEN
                         ' 文字列は中身を継ぎ足す

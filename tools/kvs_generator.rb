@@ -2371,7 +2371,7 @@ module FaRuby
       when METHOD_BIT_OR  then bit_op_into(dest, rhs, "OR", type_code)
       when METHOD_BIT_XOR then bit_op_into(dest, rhs, "XOR", type_code)
       when METHOD_BIT_NOT then bit_not_into(dest, type_code)
-      when METHOD_SHIFT_R then shift_into(dest, rhs, "SRA", type_code)
+      when METHOD_SHIFT_R then shift_into(dest, rhs, false, type_code)
       when METHOD_LENGTH then length_into(dest)
       when METHOD_EMPTY_P then empty_into(dest)
       when METHOD_CONCAT then concat_into(dest, rhs, type_code, heap_code)
@@ -2427,7 +2427,7 @@ module FaRuby
     def concat_into(dest, rhs, type_code, heap_code)
       line "IF #{dest.tag} = #{TT_INTEGER} THEN"
       indent
-      shift_into(dest, rhs, "SLA", type_code)
+      shift_into(dest, rhs, true, type_code)
       dedent
       line "ELSE IF #{dest.tag} = #{TT_STRING} THEN"
       indent
@@ -2529,13 +2529,37 @@ module FaRuby
 
     # R[a] = R[a] << R[a+1] / R[a] >> R[a+1]
     #
-    # SLA / SRA は文なので、いったんスクラッチへ出してから写します。
-    # 元と先を同じにできるかが分からないためです。
-    def shift_into(dest, rhs, operator, type_code)
+    # **Ruby は桁数が負なら向きが逆になります** (`a << -1` は `a >> 1`)。
+    # 32 桁以上ずらすと左は 0、右は符号で埋まります。そこまで合わせます。
+    # 合わせないと `SLA` / `SRA` に範囲外の桁数が渡り、何が返るか分かりません。
+    def shift_into(dest, rhs, left, type_code)
       both_integers(dest, rhs, type_code) do
-        line "#{operator}(#{dest.value}, #{rhs.value}, #{scratch32})"
-        line "#{dest.value} = #{scratch32}"
+        line "#{scratch32_b} = #{rhs.value}   ' 桁数"
+        if_else_block("#{scratch32_b} < 0") do
+          note "桁数が負なら向きが逆 (Ruby と同じ)"
+          line "#{scratch32_b} = 0 - #{scratch32_b}"
+          emit_shift(dest, !left)
+        end
+        emit_shift(dest, left)
+        end_block
       end
+    end
+
+    # 桁数は scratch32_b。**SLA / SRA は文**なのでスクラッチへ出してから写す
+    def emit_shift(dest, left)
+      if_else_block("#{scratch32_b} >= 32") do
+        note "全部ずれる。左は 0、右は符号で埋まる"
+        if left
+          line "#{dest.value} = 0"
+        else
+          if_else_block("#{dest.value} < 0") { line "#{dest.value} = -1" }
+          line "#{dest.value} = 0"
+          end_block
+        end
+      end
+      line "#{left ? 'SLA' : 'SRA'}(#{dest.value}, #{scratch32_b}, #{scratch32})"
+      line "#{dest.value} = #{scratch32}"
+      end_block
     end
 
     # 両方が整数のときだけ本体を出す。片方でも違えば止まる

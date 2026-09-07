@@ -174,4 +174,57 @@ class TestBitOps < Minitest::Test
     assert_equal FaRuby::OpcodeTable::METHOD_TYPE_ERROR, error(sim)
   end
 
+  # === シフトの端 ===
+  #
+  # **Ruby は桁数が負なら向きが逆になる。** 32 桁以上ずらすと左は 0、
+  # 右は符号で埋まる。生成コードは SLA / SRA に範囲外の桁数を渡さないよう、
+  # そこまで合わせてある
+
+  def test_shifting_a_negative_value_left
+    assert_result(-10, "$DM0 = -5 << 1\n")
+  end
+
+  # 桁数が負なら逆向き
+  def test_a_negative_shift_count_reverses
+    assert_result 2, "$DM0 = 5 << -1\n"
+  end
+
+  def test_a_negative_shift_count_reverses_the_other_way
+    assert_result 10, "$DM0 = 5 >> -1\n"
+  end
+
+  # 32 桁以上ずらすと左は 0
+  def test_shifting_left_past_the_width
+    assert_result 0, "$DM0 = 5 << 32\n"
+  end
+
+  # 右は符号で埋まる
+  def test_shifting_right_past_the_width
+    assert_result 0, "$DM0 = 5 >> 32\n"
+  end
+
+  def test_shifting_a_negative_right_past_the_width
+    assert_result(-1, "$DM0 = -5 >> 32\n")
+  end
+
+  # 桁数を実行時に決めても同じ
+  def test_a_shift_count_from_a_variable
+    assert_result 20, <<~RUBY
+      n = 2
+      $DM0 = 5 << n
+    RUBY
+  end
+
+  # 生成コードは SLA / SRA に 0-31 しか渡さない。範囲外で何が返るか分からない
+  def test_the_generated_shift_guards_the_count
+    source = FaRuby::KvsGenerator.new.source
+    source.scan(/S[LR]A\(.*?\)/).each do |call|
+      refute_empty call, "シフトが見つからない"
+    end
+
+    guarded = source.scan(/IF (\S+) >= 32 THEN/).flatten.uniq
+
+    refute_empty guarded, "桁数の検査が無い"
+  end
+
 end
