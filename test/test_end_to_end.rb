@@ -470,6 +470,56 @@ end
     assert_equal 1, sim.em.read_u16(layout.array_sp_addr), "配列 1 つぶんだけ使う"
   end
 
+  # === 同じ変数に違う型を入れ直す ===
+  #
+  # スロットごと上書きするので前の値は残らない。**ハッシュとデバイス参照は
+  # 値ワードを 2 つ使う**ため、そこから整数へ戻すときに上のワードが
+  # 消えることを確かめておく
+
+  def test_a_general_global_can_change_type
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 2.5
+      $g = "abc"
+      $g = 7
+      $DM0 = $g
+    RUBY
+
+    assert_equal 7, sim.devices[1].read_u16(0)
+  end
+
+  # ハッシュは +1 に鍵、+2 に値の配列を置く。整数は 32 ビットで書くので両方消える
+  def test_a_general_global_leaves_no_upper_word_behind
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = { 1 => 2 }
+      $g = 9
+      $DM0 = $g
+    RUBY
+
+    assert_equal 9, sim.devices[1].read_u16(0)
+  end
+
+  # 逆向き。整数の後にハッシュを入れても 2 ワードとも書かれる
+  def test_a_general_global_takes_a_hash_after_an_integer
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 1
+      $g = { 5 => 6 }
+      $DM0 = $g[5]
+    RUBY
+
+    assert_equal 6, sim.devices[1].read_u16(0)
+  end
+
+  # デバイス族への参照も 2 ワード使う
+  def test_a_general_global_keeps_a_device_family
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM50 = 3
+      $g = $DM
+      $DM0 = $g[50]
+    RUBY
+
+    assert_equal 3, sim.devices[1].read_u16(0)
+  end
+
   # === 添字によるデバイスアクセス ===
   #
   # $DM100 はコンパイル時にアドレスが確定するため、実行時に計算した
