@@ -5,7 +5,7 @@
 # PLC 上の KV スクリプト VM と同一ロジックで動作する PC 側シミュレータです。
 # 命令の意味は tools/opcode_table.rb の定義表に一本化されており、
 # ここではフェッチとディスパッチだけを行います。実際の解釈は SimVm が担います。
-# PLC 側 (vm_core.kvs) も同じ定義表から生成されるため、片方にだけ命令がある
+# PLC 側のスクリプトも同じ定義表から生成されるため、片方にだけ命令がある
 # といった食い違いは構造的に起きません。
 
 require_relative "em_memory"
@@ -148,7 +148,7 @@ module FaRuby
 
     # 1命令を実行する
     # フェッチ → 定義表を引く → SimVm で本体を実行、という流れは
-    # vm_core.kvs の FETCH / DECODE / EXECUTE と同じ構造
+    # 生成スクリプトの FETCH / DECODE / EXECUTE と同じ構造
     def execute_one_instruction
       opcode = @vm.fetch_byte
       @em.write_u16(layout.current_opcode_addr, opcode)
@@ -156,7 +156,7 @@ module FaRuby
 
       op = OpcodeTable.lookup[opcode]
       unless op
-        # 未実装オペコード (vm_core.kvs 側の ELSE 節に対応)
+        # 未実装オペコード (生成スクリプト側の ELSE 節に対応)
         @em.write_u16(layout.status_addr, VM_ERROR)
         @em.write_u16(layout.error_addr, opcode)
         return

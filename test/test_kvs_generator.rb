@@ -28,8 +28,8 @@ class TestKvsGenerator < Minitest::Test
     body.scan(/#{Regexp.escape("#{pc} = #{pc} + 1")}/).size
   end
 
-  VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
-  VM_INIT_PATH = File.expand_path("../plc/keyence/vm_init.kvs", __dir__)
+  PLC_DIR      = File.expand_path("../plc/keyence", __dir__)
+  VM_INIT_PATH = File.join(PLC_DIR, "vm_init.kvs")
 
   def setup
     @source = FaRuby::KvsGenerator.new.source
@@ -46,16 +46,31 @@ class TestKvsGenerator < Minitest::Test
 
   # 生成物は手で編集しない。編集された場合はここで検出する。
   # 直し方: tools/opcode_table.rb を修正して `rake vm_core` を実行する。
-  def test_committed_file_matches_generated_output
-    committed = File.binread(VM_CORE_PATH)
-    assert_equal @source.b, committed,
-                 "plc/keyence/vm_core.kvs が生成結果と一致しません。" \
-                 "手で編集した場合は tools/opcode_table.rb に反映して `rake vm_core` を実行してください。"
+  def test_committed_files_match_generated_output
+    FaRuby::KvsGenerator.new.generate.each do |name, content|
+      path = File.join(PLC_DIR, name)
+      assert_path_exists path, "plc/keyence/#{name} がありません。`rake vm_core` を実行してください。"
+      assert_equal content.b, File.binread(path),
+                   "plc/keyence/#{name} が生成結果と一致しません。" \
+                   "手で編集した場合は tools/opcode_table.rb に反映して `rake vm_core` を実行してください。"
+    end
   end
 
-  def test_generate_returns_named_files
+  # 群の数を変えると余りが出る。取り残しは KV Studio に古い中身を取り込む元になる
+  def test_no_stale_scripts_are_left_behind
+    generated = FaRuby::KvsGenerator.new.generate.keys
+    on_disk = Dir[File.join(PLC_DIR, "vm_*.kvs")].map { |p| File.basename(p) }
+    assert_empty on_disk - generated,
+                 "生成しなくなったスクリプトが残っています。`rake vm_core` を実行してください。"
+  end
+
+  # ラダーに並べる順。**前口上と後始末はループの外、取り込みと群は内側**
+  def test_generate_returns_the_scripts_in_ladder_order
     files = FaRuby::KvsGenerator.new.generate
-    assert_equal ["vm_core.kvs", "vm_init.kvs"], files.keys.sort
+    groups = (1..FaRuby::KvsGenerator::DISPATCH_GROUPS).map { |i| "vm_group#{i}.kvs" }
+    expected = ["vm_prologue.kvs", "vm_instance.kvs", "vm_fetch.kvs", *groups,
+                "vm_epilogue.kvs", "vm_init.kvs"]
+    assert_equal expected, files.keys
     files.each_value { |content| refute_empty content }
   end
 
@@ -80,12 +95,19 @@ class TestKvsGenerator < Minitest::Test
 
   # === インスタンスループ ===
 
-  # 本体は1つで、ブロック先頭を Z9 に載せ替えて全インスタンスを回す
-  def test_both_scripts_loop_over_instances
-    header = "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} " \
-             "TO #{layout.last_origin} STEP #{layout.instance_size}"
-    assert_includes @source, header
-    assert_includes init_source, header
+  # リセットハンドラは1本なので、自分でインスタンスを回す
+  def test_the_reset_handler_loops_over_instances
+    assert_includes init_source, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} " \
+                                 "TO #{layout.last_origin} STEP #{layout.instance_size}"
+  end
+
+  # 本体のインスタンスループはラダーにある。**回数はスクリプトが渡し、
+  # ブロック先頭は頭出しが 1 つずつ進める。**
+  def test_the_ladder_is_told_how_many_instances_to_run
+    z = "Z#{FaRuby::KvsEmitter::Z_INSTANCE}"
+    assert_includes @source, "#{layout.device(layout.ladder_instances_addr)} = #{layout.instances}"
+    assert_includes @source, "#{z} = #{layout.base - layout.instance_size}"
+    assert_includes @source, "#{z} = #{z} + #{layout.instance_size}"
   end
 
   # 命令本体は1回だけ生成される (インスタンス数だけ複製しない)
@@ -95,16 +117,17 @@ class TestKvsGenerator < Minitest::Test
     emitter3 = FaRuby::KvsEmitter.new(layout: layout3)
 
     assert_equal 1, source3.scan("IF #{emitter3.opcode} = 105 THEN").size
-    assert_includes source3, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout3.base} " \
-                             "TO #{layout3.last_origin} STEP #{layout3.instance_size}"
+    assert_includes source3, "#{layout3.device(layout3.ladder_instances_addr)} = 3"
   end
 
   # ブロック内の位置は絶対アドレスではなくオフセット + Z9 で指す。
   # 絶対アドレスが残っていると instances > 1 でインスタンス0しか動かない。
   #
-  # 例外は Z の退避・復元だけ。これはインスタンスループの外で1回だけ動く。
+  # 例外は Z の退避・復元と、ラダーへ渡す回数だけ。どちらもインスタンス
+  # ループの外から触るため、絶対アドレスで指す。
   def test_state_is_addressed_relative_to_the_block
-    allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) }
+    allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) } +
+              [layout.ladder_instances_addr, layout.ladder_steps_addr]
     offenders = code_lines(@source).select do |l|
       l.scan(/\b#{layout.device_name}(\d+)/).flatten.map(&:to_i)
        .any? { |n| n >= layout.base && !allowed.include?(n) }
@@ -119,10 +142,62 @@ class TestKvsGenerator < Minitest::Test
     assert_includes @source, "IF #{emitter.status} = #{VM_RUNNING} THEN"
   end
 
-  # 命令ループの回数も各インスタンスの設定に従う
+  # 命令ループの回数も各インスタンスの設定に従う。**ラダーの FOR は途中で
+  # 抜けられないため、走らないインスタンスは 0 を渡して丸ごと飛ばす。**
   def test_step_loop_uses_the_instance_own_settings
-    assert_includes @source, "FOR #{emitter.state(layout.loop_counter_addr)} = 1 " \
-                             "TO #{emitter.state(layout.steps_per_cycle_addr)}"
+    steps = layout.device(layout.ladder_steps_addr)
+    assert_includes @source, "#{steps} = #{emitter.state(layout.steps_per_cycle_addr)}"
+    assert_includes @source, "#{steps} = 0"
+  end
+
+  # 止まった後は残りのステップを空回りさせる。**群のスクリプトは
+  # ラダーの FOR の中で必ず呼ばれるため、番号で素通りさせるしかない。**
+  def test_a_stopped_vm_parks_the_opcode_outside_every_group
+    sentinel = FaRuby::KvsGenerator::UNREACHABLE_OPCODE
+    assert_includes @source, "IF #{emitter.status} <> #{VM_RUNNING} THEN"
+    assert_includes @source, "#{emitter.opcode} = #{sentinel}"
+
+    generator = FaRuby::KvsGenerator.new
+    generator.send(:dispatch_groups).each_index do |i|
+      assert_operator generator.send(:group_range, i).last, :<, sentinel,
+                      "群の範囲が空き番号に届いている"
+    end
+  end
+
+  # **実装していない番号が群と群の間に落ちると、どのスクリプトも拾わずに
+  # 素通りする。**1 本の連なりだったころは次の組の ELSE が拾っていた。
+  # 番号は 0 から最大まで途切れなく、どこかの群が担当していなければならない。
+  def test_every_opcode_number_belongs_to_exactly_one_group
+    generator = FaRuby::KvsGenerator.new
+    ranges = generator.send(:dispatch_groups).each_index.map { |i| generator.send(:group_range, i) }
+
+    assert_equal 0, ranges.first.first, "0 番から始まっていない"
+    ranges.each_cons(2) do |a, b|
+      assert_equal a.last + 1, b.first, "#{a.last} と #{b.first} の間に抜けがある"
+    end
+    assert_equal generator.send(:max_opcode), ranges.last.last, "最大の番号まで届いていない"
+  end
+
+  # 範囲から外れた番号は取り込みがエラーにする。素通りさせない
+  def test_numbers_beyond_the_last_group_are_reported
+    max = FaRuby::KvsGenerator.new.send(:max_opcode)
+    assert_includes @source, "IF #{emitter.opcode} > #{max} THEN"
+    assert_includes @source, "#{emitter.status} = #{VM_ERROR}"
+  end
+
+  # BREAK はスクリプトの中で FOR と対になっていなければならない。
+  # ステップのループはラダーにあるので、命令を打ち切る BREAK は
+  # 1 回だけ回るループで受ける。
+  def test_every_group_wraps_its_body_so_break_has_a_partner
+    files = FaRuby::KvsGenerator.new.generate
+    files.each do |name, content|
+      next unless name.start_with?("vm_group")
+
+      next unless content.include?("BREAK")
+
+      assert_includes content, "FOR #{emitter.state(layout.loop_counter_addr)} = 1 TO 1",
+                               "#{name} の BREAK に相手がいない"
+    end
   end
 
   # === Z レジスタの退避・復元 ===
@@ -374,34 +449,30 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # 余裕がどれくらい残っているかを目に見えるようにしておく
-  def test_the_core_script_has_room_left
-    source = FaRuby::KvsGenerator.new.source
+  #
+  # **上限はスクリプトごとなので、いちばん大きいものだけを見る。**
+  # 近づいたら群を増やして分け直せる (ラダーは箱を足すだけ)。
+  def test_every_script_has_room_left
+    largest = FaRuby::KvsGenerator.new.generate.max_by { |_, source| source.bytesize }
 
-    assert_operator source.bytesize, :<, SCRIPT_LIMIT * 95 / 100,
-                    "上限の 95% を超えた。字下げか重複を削るころ合い"
+    assert_operator largest.last.bytesize, :<, SCRIPT_LIMIT * 95 / 100,
+                    "#{largest.first} が上限の 95% を超えた。DISPATCH_GROUPS を増やすころ合い"
   end
 
   private
 
   # 指定オペコードの分岐本体を切り出す
   #
-  # オペコードの分岐はすべて同じ深さに並ぶ。デバイス分岐の中の
-  # ネストした ELSE で切れないよう、インデント幅で判定する。
-  # 幅は生成物から読む (入れ子が変わっても追従する)。
-  def opcode_indent
-    @opcode_indent ||= begin
-      head = @source.lines.find { |l| l =~ /\A\s*IF #{Regexp.escape(opcode_var)} = \d+ THEN\s*\z/ }
-      refute_nil head, "オペコードの分岐が1つも見つからない"
-      head[/\A */]
-    end
-  end
-
+  # デバイス分岐の中のネストした ELSE で切れないよう、インデント幅で
+  # 判定する。**幅は見つけた分岐そのものから読みます。**群ごとに
+  # スクリプトが分かれ、包む IF の数が群によって違うためです
+  # (0 番から始まる群だけ下限の判定が要らない)。
   def opcode_body(code)
-    indent = opcode_indent
     lines = @source.lines
-    start = lines.index { |l| l.rstrip == "#{indent}IF #{opcode_var} = #{code} THEN" ||
-                              l.rstrip == "#{indent}ELSE IF #{opcode_var} = #{code} THEN" }
+    head = /\A( *)(ELSE )?IF #{Regexp.escape(opcode_var)} = #{code} THEN\z/
+    start = lines.index { |l| l.rstrip =~ head }
     refute_nil start, "オペコード #{code} の分岐が見つからない"
+    indent = lines[start].rstrip[head, 1]
 
     rest = lines[(start + 1)..]
     stop = rest.index do |l|

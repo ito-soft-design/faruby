@@ -2,7 +2,7 @@
 
 # KV スクリプト生成器
 #
-# tools/opcode_table.rb の定義から plc/keyence/vm_core.kvs を生成します。
+# tools/opcode_table.rb の定義から plc/keyence/vm_*.kvs を生成します。
 # 再生成は `rake vm_core`。
 #
 # KvsEmitter は「記号バックエンド」です。命令定義の body を実行すると、
@@ -3007,17 +3007,44 @@ module FaRuby
     end
   end
 
-  # vm_core.kvs を生成する
+  # VM のスクリプトを生成する
   #
-  # generate は { ファイル名 => 内容 } を返します。現在は 1 ファイルですが、
-  # KV Studio がスクリプトの大きさで変換できなくなった場合に分割できるよう
-  # 複数ファイルを返せる形にしてあります。
+  # generate は { ファイル名 => 内容 } を返します。**1 本にまとめると
+  # KV Studio の上限 (スクリプト 1 本あたり 264,144 文字、対のない
+  # LABEL / CJ / GOTO が 200) に収まらないため、複数に分けます。**
+  # 上限はスクリプトごとなので、分けた分だけ余裕が増えます。
+  #
+  # 2 つのループはラダーに置きます。**ラダーの FOR は回数しか指定できず、
+  # 途中で抜けられません。**回数はスクリプトが決めてデバイスに置き、
+  # 走らないインスタンスは 0 にして内側ごと飛ばします。
+  #
+  #   [前口上]                  Z 退避 / バンク選択 / 外側の回数
+  #   FOR 外側 (インスタンス)
+  #     [頭出し]                Z9 を進める / 内側の回数
+  #     FOR 内側 (ステップ)
+  #       [取り込み]            範囲検査 / fetch / PC 進め
+  #       [群 1] … [群 n]       自分の担当番号だけ実行する
+  #     NEXT
+  #   NEXT
+  #   [後始末]                  バンク復帰 / Z 復元
   class KvsGenerator
     include VmConstants
 
-    OUTPUT_NAME = "vm_core.kvs"
-    INIT_NAME   = "vm_init.kvs"
-    OUTPUT_DIR  = File.expand_path("../plc/keyence", __dir__)
+    PROLOGUE_NAME = "vm_prologue.kvs"
+    INSTANCE_NAME = "vm_instance.kvs"
+    FETCH_NAME    = "vm_fetch.kvs"
+    EPILOGUE_NAME = "vm_epilogue.kvs"
+    INIT_NAME     = "vm_init.kvs"
+    OUTPUT_DIR    = File.expand_path("../plc/keyence", __dir__)
+
+    def self.group_name(index) = format("vm_group%d.kvs", index + 1)
+
+    # どの群の範囲にも入らない番号
+    #
+    # 走っていないときに取り込みがこれを置きます。**群のスクリプトは
+    # ラダーの FOR の中で必ず呼ばれるため、実行してよいかどうかを
+    # オペコード番号だけで判断できるようにしています。**
+    UNREACHABLE_OPCODE = 65_535
 
     attr_reader :layout
 
@@ -3033,11 +3060,27 @@ module FaRuby
     def query = @query ||= KvsEmitter.new(layout: layout)
 
     def generate
-      { OUTPUT_NAME => build_source, INIT_NAME => build_init_source }
+      files = { PROLOGUE_NAME => build_prologue_source,
+                INSTANCE_NAME => build_instance_source,
+                FETCH_NAME => build_fetch_source }
+      dispatch_groups.each_with_index do |group, i|
+        files[self.class.group_name(i)] = build_group_source(group, i)
+      end
+      files[EPILOGUE_NAME] = build_epilogue_source
+      files[INIT_NAME] = build_init_source
+      files
     end
 
+    # ラダーに並べる順のスクリプト名
+    def script_names = generate.keys - [INIT_NAME]
+
+    # 実行に関わるスクリプトを並び順につないだもの
+    #
+    # 生成結果を通しで検査するために使います。**ラダーはこの順に呼びます**が、
+    # つないだものがそのまま動くわけではありません (ループはラダー側)。
     def source
-      generate.fetch(OUTPUT_NAME)
+      files = generate
+      script_names.map { |name| files.fetch(name) }.join("\n")
     end
 
     def init_source
@@ -3045,14 +3088,21 @@ module FaRuby
     end
 
     # 生成結果をファイルに書き出す。書き換わったファイル名を返す
+    #
+    # **生成しなくなったファイルは消します。**群の数を変えると余りが出ますが、
+    # 残っていると KV Studio に古い中身を取り込むことになります。
     def write!(dir = OUTPUT_DIR)
-      generate.filter_map do |name, content|
+      files = generate
+      written = files.filter_map do |name, content|
         path = File.join(dir, name)
         next if File.exist?(path) && File.binread(path) == content.b
 
         File.binwrite(path, content)
         name
       end
+      removed = Dir[File.join(dir, "vm_*.kvs")].reject { |p| files.key?(File.basename(p)) }
+      removed.each { |path| File.delete(path) }
+      written + removed.map { |path| "#{File.basename(path)} (削除)" }
     end
 
     private
@@ -3112,47 +3162,175 @@ module FaRuby
       "#{e.lines.join("\n")}\n"
     end
 
-    def build_source
+    # [前口上] ラダーの外側 FOR の前に 1 回だけ動く
+    def build_prologue_source
       e = KvsEmitter.new(layout: layout)
       emit_header(e)
       e.blank
       e.save_z_registers
       e.select_fixed_bank
       e.blank
+      e.note "外側 (インスタンス) の回数をラダーへ渡す"
+      e.line "#{layout.device(layout.ladder_instances_addr)} = #{layout.instances}"
+      e.blank
+      e.note "頭出しが最初に足すので、1 つ手前から始める"
+      e.line "Z#{KvsEmitter::Z_INSTANCE} = #{layout.base - layout.instance_size}"
+      finish(e)
+    end
 
-      e.each_instance do
-        e.blank
-        e.line "IF #{e.status} = #{VM_RUNNING} THEN"
-        e.blank
+    # [頭出し] 外側 FOR の中、内側 FOR の前
+    def build_instance_source
+      e = KvsEmitter.new(layout: layout)
+      emit_box_header(e, "インスタンスの頭出し", "外側 FOR の中、内側 FOR の前")
+      e.blank
+      e.note "次のインスタンスのブロック先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
+      e.line "Z#{KvsEmitter::Z_INSTANCE} = Z#{KvsEmitter::Z_INSTANCE} + #{layout.instance_size}"
+      e.blank
+      e.note "内側 (ステップ) の回数をラダーへ渡す"
+      e.note "**走らないインスタンスは 0 にして内側のループごと飛ばす。**"
+      e.note "ラダーの FOR は途中で抜けられないため、ここで決めるしかない"
+      steps = layout.device(layout.ladder_steps_addr)
+      e.line "IF #{e.status} = #{VM_RUNNING} THEN"
+      e.indent
+      e.line "#{steps} = #{e.state(layout.steps_per_cycle_addr)}"
+      e.dedent
+      e.line "ELSE"
+      e.indent
+      e.line "#{steps} = 0"
+      e.dedent
+      e.line "END IF"
+      finish(e)
+    end
+
+    # [取り込み] 内側 FOR の中、群のスクリプトの前
+    def build_fetch_source
+      e = KvsEmitter.new(layout: layout)
+      emit_box_header(e, "命令の取り込み", "内側 FOR の中、群のスクリプトの前")
+      e.blank
+      e.note "**止まっていたら、どの群の範囲にも入らない番号を置く。**"
+      e.note "ラダーの FOR は途中で抜けられないので、残りのステップは"
+      e.note "群のスクリプトが範囲判定で素通りすることで空回りにする"
+      e.line "IF #{e.status} <> #{VM_RUNNING} THEN"
+      e.indent
+      e.line "#{e.opcode} = #{UNREACHABLE_OPCODE}"
+      e.dedent
+      e.line "ELSE"
+      e.indent
+      emit_fetch(e)
+      e.dedent
+      e.line "END IF"
+      finish(e)
+    end
+
+    # [群 n] 内側 FOR の中。自分の担当番号だけ実行する
+    def build_group_source(group, index)
+      e = KvsEmitter.new(layout: layout)
+      range = group_range(index)
+      emit_box_header(e, format("オペコード 0x%02X - 0x%02X", range.first, range.last),
+                      "内側 FOR の中 (#{index + 1} 番目の群)")
+      e.blank
+      e.note "担当外の番号はここで素通りする。**判定はループの外に置く。**"
+      e.note "下限は前の群の続き。実装していない番号を取りこぼさないため"
+      depth = 0
+      unless range.first.zero?
+        e.line "IF #{opcode_var} >= #{range.first} THEN"
         e.indent
-        e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO #{e.state(layout.steps_per_cycle_addr)}"
-        e.blank
-        e.indent
-        emit_fetch(e)
-        emit_dispatch(e)
-        emit_range_check(e)
-        e.dedent
-        e.line "NEXT"
-        e.dedent
-        e.blank
-        e.line "END IF"
-        e.blank
+        depth += 1
       end
+      e.line "IF #{opcode_var} <= #{range.last} THEN"
+      e.indent
+      depth += 1
+      e.blank
+      emit_break_frame(e) do
+        emit_opcode_chain(e, group)
+        e.blank
+        emit_range_check(e)
+      end
+      depth.times do
+        e.dedent
+        e.line "END IF"
+      end
+      finish(e)
+    end
 
+    # [後始末] ラダーの外側 FOR の後に 1 回だけ動く
+    def build_epilogue_source
+      e = KvsEmitter.new(layout: layout)
+      emit_box_header(e, "後始末", "外側 FOR の後")
       e.blank
       e.restore_fixed_bank
       e.restore_z_registers
-      "#{e.lines.join("\n")}\n"
+      finish(e)
     end
 
-    def emit_header(e)
+    # BREAK の相手になる空回りのループ
+    #
+    # **BREAK はスクリプトの中で FOR と対になっていなければなりません。**
+    # ステップのループはラダーへ出したので、命令の途中で処理を打ち切る
+    # BREAK は相手を失います。1 回だけ回るループで包み、抜けたら
+    # スクリプトが終わるようにします。
+    #
+    # 打ち切る側はどれも直前に STATUS を実行中以外にしています。次の
+    # ステップでは取り込みが範囲外の番号を置くので、残りは空回りになります。
+    def emit_break_frame(e)
+      e.note "BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる"
+      e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO 1"
+      e.indent
+      e.blank
+      yield
+      e.dedent
+      e.line "NEXT"
+    end
+
+    def finish(e) = "#{e.lines.join("\n")}\n"
+
+    # 前口上以外のスクリプトの見出し
+    #
+    # オフセットの一覧やデバイスの使い方は前口上にまとめてあります。
+    # ここには置き場所と役割だけを書きます。
+    def emit_box_header(e, title, place)
       e.note "======================================="
-      e.note "faRuby VM Core - Fetch/Decode/Execute"
+      e.note "faRuby VM - #{title}"
       e.note "======================================="
       e.note "【自動生成】このファイルを直接編集しないでください。"
       e.note "  定義: tools/opcode_table.rb"
       e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
       e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
+      e.note ""
+      e.note "ラダーでの置き場所: #{place}"
+      e.note "並び順と役割は #{PROLOGUE_NAME} の先頭にあります。"
+    end
+
+    def emit_header(e)
+      e.note "======================================="
+      e.note "faRuby VM - 前口上 (ラダーの外側 FOR の前)"
+      e.note "======================================="
+      e.note "【自動生成】このファイルを直接編集しないでください。"
+      e.note "  定義: tools/opcode_table.rb"
+      e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
+      e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
+      e.note ""
+      e.note "【ラダーに並べる順】"
+      e.note "  #{PROLOGUE_NAME}    ← このファイル"
+      e.note "  FOR #{layout.device(layout.ladder_instances_addr)} 回          " \
+             "(外側 / インスタンス)"
+      e.note "    #{INSTANCE_NAME}"
+      e.note "    FOR #{layout.device(layout.ladder_steps_addr)} 回        " \
+             "(内側 / ステップ)"
+      e.note "      #{FETCH_NAME}"
+      dispatch_groups.each_index { |i| e.note "      #{self.class.group_name(i)}" }
+      e.note "    NEXT"
+      e.note "  NEXT"
+      e.note "  #{EPILOGUE_NAME}"
+      e.note ""
+      e.note "**ラダーの FOR は回数しか指定できず、途中で抜けられません。**"
+      e.note "回数はスクリプトが決めて上の 2 つのデバイスに置きます。"
+      e.note "走らないインスタンスは 0、止まった後のステップは空回りです。"
+      e.note ""
+      e.note "1 本にまとめないのは KV Studio の上限のためです。"
+      e.note "  スクリプト 1 本あたり 264,144 文字"
+      e.note "  対のない LABEL / CJ / GOTO が 200"
+      e.note "**どちらもスクリプトごとに数えるため、分けた分だけ余裕が増えます。**"
       e.note ""
       e.note "#{layout.device_name} デバイスを使用。"
       e.note ""
@@ -3236,6 +3414,12 @@ module FaRuby
       e.line "#{e.pc} = #{e.pc} + 1"
       e.count_step
       e.blank
+      e.note "どの群の担当でもない番号。群の中の抜けはそれぞれの群が見る"
+      e.if_("#{e.opcode} > #{max_opcode}") do
+        e.line "#{e.status} = #{VM_ERROR}"
+        e.line "#{e.error} = #{e.opcode}"
+        e.line "#{e.opcode} = #{UNREACHABLE_OPCODE}"
+      end
     end
 
     # 命令の振り分けを何組に分けるか
@@ -3245,39 +3429,37 @@ module FaRuby
     # 終わりへ飛ぶので `END IF` が出るまで対になりません。**1 本の連なりに
     # 枝を並べるほど溜まります。**
     #
-    # 番号の範囲で組に分け、まず組を選んでから中を見ます。溜まりは
-    # 「組の数 + 組の中の枝の数」で済み、1 本に並べたときの命令数より
-    # ずっと小さくなります。
+    # 番号の範囲で組に分け、**組ごとに別のスクリプトにします。**溜まりは
+    # 組の中の枝の数だけで済み、文字数の上限もスクリプトごとに別々に
+    # 数えられます。組を増やしても両方の上限から遠ざかります。
     #
-    # 速度にも効きます。今までは後ろの命令ほど手前の枝を全部通っていましたが、
-    # 組を選ぶ比較 1-3 回で飛び越えられます。**手前にある比較の数だけが効く**
-    # というこれまでの測定と合います。
+    # 速度にも効きます。1 本に並べていたときは後ろの命令ほど手前の枝を
+    # 全部通っていましたが、担当外の組は比較 1-2 回で終わります。
+    # **手前にある比較の数だけが効く**というこれまでの測定と合います。
+    #
+    # 振り分けをラダーに置かないのは、置くと組の切り方を変えるたびに
+    # ラダーを描き直すことになるためです。**ラダーは組の数だけスクリプトを
+    # 順に呼ぶだけで、境界を知りません。**
     DISPATCH_GROUPS = 8
 
-    def emit_dispatch(e)
-      groups = @opcodes.each_slice((@opcodes.size.to_f / DISPATCH_GROUPS).ceil).to_a
-
-      e.note "=== DECODE & EXECUTE ==="
-      e.note "番号の範囲で #{groups.size} 組に分ける。1 本の連なりに #{@opcodes.size} 本"
-      e.note "並べると、ラダーの「対のない LABEL / CJ / GOTO」が 200 を超える"
-      e.blank
-
-      groups.each_with_index do |group, i|
-        last = i == groups.size - 1
-        if last
-          e.line "ELSE"
-        else
-          e.line(i.zero? ? "IF #{opcode_var} <= #{group.last.code} THEN" \
-                         : "ELSE IF #{opcode_var} <= #{group.last.code} THEN")
-        end
-        e.indent
-        e.note format("0x%02X - 0x%02X", group.first.code, group.last.code)
-        emit_opcode_chain(e, group)
-        e.dedent
-      end
-      e.line "END IF"
-      e.blank
+    # 番号の範囲で分けた組。1 組が 1 スクリプトになる
+    def dispatch_groups
+      @dispatch_groups ||= @opcodes.each_slice((@opcodes.size.to_f / DISPATCH_GROUPS).ceil).to_a
     end
+
+    # 組が担当する番号の範囲
+    #
+    # **下限は前の組の続きにします。**実装していない番号が組と組の間に
+    # 落ちると、どのスクリプトも拾わずに素通りしてしまうためです。
+    # 1 本の連なりだったころは次の組の `ELSE` が拾っていました。
+    def group_range(index)
+      groups = dispatch_groups
+      low = index.zero? ? 0 : groups[index - 1].last.code + 1
+      low..groups[index].last.code
+    end
+
+    # 実装しているオペコードの最大番号
+    def max_opcode = @opcodes.map(&:code).max
 
     # 組の中の連なり。当たらなければ未知のオペコード
     def emit_opcode_chain(e, group)

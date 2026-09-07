@@ -41,7 +41,7 @@ module FaRuby
       @layout          = MemoryLayout.from_config(merged["memory"] || {})
     end
 
-    # 既定値のみの設定 (vm_core.kvs の再現性を保つために使う)
+    # 既定値のみの設定 (生成スクリプトの再現性を保つために使う)
     def self.defaults
       new(user_config: false)
     end

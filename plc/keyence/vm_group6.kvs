@@ -1,0 +1,439 @@
+' =======================================
+' faRuby VM - オペコード 0x3E - 0x45
+' =======================================
+' 【自動生成】このファイルを直接編集しないでください。
+'   定義: tools/opcode_table.rb
+'   生成: tools/kvs_generator.rb  (rake vm_core)
+'   編集した場合 test_kvs_generator.rb が失敗します。
+'
+' ラダーでの置き場所: 内側 FOR の中 (6 番目の群)
+' 並び順と役割は vm_prologue.kvs の先頭にあります。
+
+' 担当外の番号はここで素通りする。**判定はループの外に置く。**
+' 下限は前の群の続き。実装していない番号を取りこぼさないため
+IF EM6:Z9 >= 62 THEN
+  IF EM6:Z9 <= 69 THEN
+
+    ' BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
+    FOR EM20:Z9 = 1 TO 1
+
+      IF EM6:Z9 = 62 THEN
+        ' OP_SUB (B): R[a] = R[a] - R[a+1]
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            EM1.F:Z1 = EM1.F:Z1 - EM1.F:Z2
+            EM0:Z1 = 5
+          ELSE
+            EM1.F:Z1 = EM1.F:Z1 - EM1.L:Z2
+            EM0:Z1 = 5
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            EM1.F:Z1 = EM1.L:Z1 - EM1.F:Z2
+            EM0:Z1 = 5
+          ELSE
+            EM1.L:Z1 = EM1.L:Z1 - EM1.L:Z2
+            EM0:Z1 = 4
+          END IF
+        END IF
+
+      ELSE IF EM6:Z9 = 63 THEN
+        ' OP_SUBI (BB): R[a] = R[a] - b
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM0:Z9 + EM33:Z9
+        EM8:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          EM1.F:Z1 = EM1.F:Z1 - EM8:Z9
+          EM0:Z1 = 5
+        ELSE
+          EM1.L:Z1 = EM1.L:Z1 - EM8:Z9
+          EM0:Z1 = 4
+        END IF
+
+      ELSE IF EM6:Z9 = 64 THEN
+        ' OP_MUL (B): R[a] = R[a] * R[a+1]
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            EM1.F:Z1 = EM1.F:Z1 * EM1.F:Z2
+            EM0:Z1 = 5
+          ELSE
+            EM1.F:Z1 = EM1.F:Z1 * EM1.L:Z2
+            EM0:Z1 = 5
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            EM1.F:Z1 = EM1.L:Z1 * EM1.F:Z2
+            EM0:Z1 = 5
+          ELSE
+            EM1.L:Z1 = EM1.L:Z1 * EM1.L:Z2
+            EM0:Z1 = 4
+          END IF
+        END IF
+
+      ELSE IF EM6:Z9 = 65 THEN
+        ' OP_DIV (B): R[a] = R[a] / R[a+1]
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            IF EM1.F:Z2 <> 0 THEN
+              EM1.F:Z1 = EM1.F:Z1 / EM1.F:Z2
+            ELSE
+              ' 0 除算。KV の / は CR2012 を出すため実行せず、
+              ' IEEE754 の無限大 / 非数のビット列を直接置く
+              ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+              ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+              ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+              EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
+              IF EM1.F:Z1 > 0 THEN
+                EM16:Z9 = 32640   ' +Infinity
+              END IF
+              IF EM1.F:Z1 < 0 THEN
+                EM16:Z9 = 65408   ' -Infinity
+              END IF
+              EM1:Z1 = 0
+              EM2:Z1 = EM16:Z9
+            END IF
+            EM0:Z1 = 5
+          ELSE
+            IF EM1.L:Z2 <> 0 THEN
+              EM1.F:Z1 = EM1.F:Z1 / EM1.L:Z2
+            ELSE
+              ' 0 除算。KV の / は CR2012 を出すため実行せず、
+              ' IEEE754 の無限大 / 非数のビット列を直接置く
+              ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+              ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+              ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+              EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
+              IF EM1.F:Z1 > 0 THEN
+                EM16:Z9 = 32640   ' +Infinity
+              END IF
+              IF EM1.F:Z1 < 0 THEN
+                EM16:Z9 = 65408   ' -Infinity
+              END IF
+              EM1:Z1 = 0
+              EM2:Z1 = EM16:Z9
+            END IF
+            EM0:Z1 = 5
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            IF EM1.F:Z2 <> 0 THEN
+              EM1.F:Z1 = EM1.L:Z1 / EM1.F:Z2
+            ELSE
+              ' 0 除算。KV の / は CR2012 を出すため実行せず、
+              ' IEEE754 の無限大 / 非数のビット列を直接置く
+              ' 代入先は被除数と同じレジスタなので、先に符号から上位ワードを決める。
+              ' 被除数を書き換えてから符号を見ると、低位ワードを消した時点で
+              ' 整数の 1-65535 が 0 になり、+Infinity が NaN になる
+              EM16:Z9 = 32704   ' 既定は NaN (0.0 / 0.0)
+              IF EM1.L:Z1 > 0 THEN
+                EM16:Z9 = 32640   ' +Infinity
+              END IF
+              IF EM1.L:Z1 < 0 THEN
+                EM16:Z9 = 65408   ' -Infinity
+              END IF
+              EM1:Z1 = 0
+              EM2:Z1 = EM16:Z9
+            END IF
+            EM0:Z1 = 5
+          ELSE
+            IF EM1.L:Z2 <> 0 THEN
+              ' Ruby の整数除算は切り下げ。KV の / は0方向へ切り捨てるため補正する
+              EM16.L:Z9 = EM1.L:Z1       ' 被除数を退避
+              EM1.L:Z1 = EM1.L:Z1 / EM1.L:Z2
+              EM18.L:Z9 = EM16.L:Z9 - EM1.L:Z1 * EM1.L:Z2   ' 余り
+              IF EM18.L:Z9 <> 0 THEN
+                ' 符号が異なるときだけ切り下げになる
+                IF EM16.L:Z9 < 0 THEN
+                  IF EM1.L:Z2 > 0 THEN
+                    EM1.L:Z1 = EM1.L:Z1 - 1
+                  END IF
+                ELSE
+                  IF EM1.L:Z2 < 0 THEN
+                    EM1.L:Z1 = EM1.L:Z1 - 1
+                  END IF
+                END IF
+              END IF
+              EM0:Z1 = 4
+            ELSE
+              EM1:Z9 = 3
+              EM2:Z9 = 1
+              BREAK
+            END IF
+          END IF
+        END IF
+
+      ELSE IF EM6:Z9 = 66 THEN
+        ' OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        ' 数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)
+        ' 数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)
+        ' 結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する
+        EM16:Z9 = 0
+        ' シンボルや配列のタグは 4 より大きいので、上限も見ないと
+        ' 番号やスロット番号が数値として比べられてしまう
+        Z3 = 0
+        IF EM0:Z1 >= 4 THEN
+          IF EM0:Z1 <= 5 THEN
+            Z3 = 1
+          END IF
+        END IF
+        Z4 = 0
+        IF EM0:Z2 >= 4 THEN
+          IF EM0:Z2 <= 5 THEN
+            Z4 = 1
+          END IF
+        END IF
+        IF Z3 = 1 THEN
+          IF Z4 = 1 THEN
+            IF EM0:Z1 = 5 THEN
+              IF EM0:Z2 = 5 THEN
+                IF EM1.F:Z1 = EM1.F:Z2 THEN
+                  EM16:Z9 = 1
+                END IF
+              ELSE
+                IF EM1.F:Z1 = EM1.L:Z2 THEN
+                  EM16:Z9 = 1
+                END IF
+              END IF
+            ELSE
+              IF EM0:Z2 = 5 THEN
+                IF EM1.L:Z1 = EM1.F:Z2 THEN
+                  EM16:Z9 = 1
+                END IF
+              ELSE
+                IF EM1.L:Z1 = EM1.L:Z2 THEN
+                  EM16:Z9 = 1
+                END IF
+              END IF
+            END IF
+          ELSE
+            ' 数値と非数値は等しくない
+          END IF
+        ELSE
+          IF EM0:Z1 = EM0:Z2 THEN
+            IF EM0:Z1 = 7 THEN
+              ' 文字列は中身で比べる。スロット番号ではない
+              ' Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため
+              EM46:Z9 = Z3
+              EM43:Z9 = 0
+              Z3 = EM1.L:Z1
+              Z3 = Z3 * 50 + 1000 + Z9
+              EM44:Z9 = EM0:Z3   ' バイト数
+              Z3 = EM1.L:Z2
+              Z3 = Z3 * 50 + 1000 + Z9
+              IF EM44:Z9 = EM0:Z3 THEN
+                ' バイト数が同じ。ここから中身を見る
+                EM43:Z9 = 1
+                EM45:Z9 = EM44:Z9 + 1
+                EM45:Z9 = EM45:Z9 / 2   ' ワード数
+                IF EM45:Z9 > 0 THEN
+                  EM45:Z9 = EM45:Z9 - 1
+                  FOR EM42:Z9 = 0 TO EM45:Z9
+                    Z3 = EM1.L:Z1
+                    Z3 = Z3 * 50 + 1000 + Z9
+                    Z3 = EM42:Z9 + Z3 + 2
+                    EM44:Z9 = EM0:Z3
+                    Z3 = EM1.L:Z2
+                    Z3 = Z3 * 50 + 1000 + Z9
+                    Z3 = EM42:Z9 + Z3 + 2
+                    IF EM44:Z9 <> EM0:Z3 THEN
+                      EM43:Z9 = 0
+                    END IF
+                  NEXT
+                END IF
+              END IF
+              ' 借りた Z3 を返す
+              Z3 = EM46:Z9
+              IF EM43:Z9 = 1 THEN
+                EM16:Z9 = 1
+              END IF
+            ELSE
+              IF EM1.L:Z1 = EM1.L:Z2 THEN
+                EM16:Z9 = 1
+              END IF
+            END IF
+          END IF
+        END IF
+        IF EM16:Z9 = 1 THEN
+          EM1.L:Z1 = 1
+          EM0:Z1 = 3
+        ELSE
+          EM1.L:Z1 = 0
+          EM0:Z1 = 2
+        END IF
+
+      ELSE IF EM6:Z9 = 67 THEN
+        ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            IF EM1.F:Z1 < EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.F:Z1 < EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            IF EM1.L:Z1 < EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.L:Z1 < EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        END IF
+
+      ELSE IF EM6:Z9 = 68 THEN
+        ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            IF EM1.F:Z1 <= EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.F:Z1 <= EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            IF EM1.L:Z1 <= EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.L:Z1 <= EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        END IF
+
+      ELSE IF EM6:Z9 = 69 THEN
+        ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
+        Z1 = EM0:Z9 + EM33:Z9
+        EM7:Z9 = FM0:Z1
+        EM0:Z9 = EM0:Z9 + 1
+        Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+        Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+        IF EM0:Z1 = 5 THEN
+          IF EM0:Z2 = 5 THEN
+            IF EM1.F:Z1 > EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.F:Z1 > EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        ELSE
+          IF EM0:Z2 = 5 THEN
+            IF EM1.L:Z1 > EM1.F:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          ELSE
+            IF EM1.L:Z1 > EM1.L:Z2 THEN
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            ELSE
+              EM1.L:Z1 = 0
+              EM0:Z1 = 2
+            END IF
+          END IF
+        END IF
+
+      ELSE
+        ' 未知のオペコード: エラー
+        EM1:Z9 = 3
+        EM2:Z9 = EM6:Z9
+        BREAK
+
+      END IF
+
+      ' バイトコード範囲チェック
+      IF EM0:Z9 >= EM10:Z9 THEN
+        EM1:Z9 = 2
+        BREAK
+      END IF
+
+    NEXT
+  END IF
+END IF

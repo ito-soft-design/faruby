@@ -223,6 +223,21 @@ module FaRuby
     OFFSET_STR_FOUND       = 50   # 見つけた文字の先頭バイト
     OFFSET_STR_FOUND_END   = 51   # その次の文字の先頭バイト
 
+    # ラダーの FOR に渡す回数
+    #
+    # **KV Studio はスクリプト 1 本あたりの文字数と、対のない LABEL / CJ /
+    # GOTO の数に上限があります。** 命令を増やすと 1 本に収まらなくなるため、
+    # 群ごとに別のスクリプトへ分け、2 つのループをラダーへ出しました。
+    #
+    # ラダーの FOR は回数しか指定できず、途中で BREAK もできません。回数を
+    # ここに置き、スクリプト側で決めます。**走らないインスタンスは 0 を
+    # 入れて内側のループごと飛ばします。**
+    #
+    # Z の退避先と同じく、インスタンスループの外から読むため絶対アドレスで
+    # 指します。置き場所はインスタンス 0 のブロック内で足ります。
+    OFFSET_LADDER_INSTANCES = 52  # 外側 (インスタンス) の回数
+    OFFSET_LADDER_STEPS     = 53  # 内側 (ステップ) の回数
+
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "fixed_base" => 0, "fixed_align" => 1000,
@@ -447,6 +462,12 @@ module FaRuby
     #
     # 全インスタンスで共有するため、インスタンス番号によらず同じ場所を返す。
     def z_save_addr(index) = base + OFFSET_Z_SAVE + (index - 1)
+
+    # ラダーの FOR に渡す回数の置き場所
+    #
+    # Z の退避先と同じく全インスタンスで共有するため、絶対アドレスを返す。
+    def ladder_instances_addr = base + OFFSET_LADDER_INSTANCES
+    def ladder_steps_addr     = base + OFFSET_LADDER_STEPS
 
     # --- ブロック内オフセット ---
 
