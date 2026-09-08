@@ -67,6 +67,48 @@ class TestTransferCheck < Minitest::Test
     assert_equal "vm_02_prologue.kvs", results.last.name
   end
 
+  # === KV-X500 (ST) の書き出し ===
+  #
+  # 体裁も文字コードも KV-5000 と違う。**名前だけで引き当てる。**
+  #
+  #   KV-5000  Shift_JIS  ;<h1/>vm_01_init
+  #   KV-X500  UTF-16LE   ;vm_01_init  の次に AREA_ST が 1 行
+  def st_mnemonic(scripts)
+    body = scripts.flat_map do |name, source|
+      [";#{name}", "AREA_ST"] + source.split("\n").map { |l| ";#{l}" } +
+        ["LD CR2002", "MOV #0 EM0:Z9"]
+    end
+    (["DEVICE:62", ";MODULE:faruby"] + body).join("\r\n")
+  end
+
+  def check_st(scripts, generated)
+    generator = Minitest::Mock.new
+    2.times { generator.expect(:generate, generated) }
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "faruby.mnm")
+      File.binwrite(path, "\xFF\xFE".b + st_mnemonic(scripts).encode("UTF-16LE").b)
+      FaRuby::TransferCheck.new(path, generator: generator).results
+    end
+  end
+
+  def test_the_st_export_is_read_through_its_bom_and_heading
+    source = "// 見出し\nEM0:Z9 := 0;\n"
+    results = check_st({ "vm_01_init" => source }, { "vm_01_init.st" => source })
+
+    assert_equal [:same], results.map(&:state)
+    assert_equal "vm_01_init.st", results.first.name
+  end
+
+  # 別の群の中身を取り込んでしまった場合 (実機で 1 度やりました)
+  def test_the_wrong_script_in_a_slot_is_reported_as_differing
+    want = "// オペコード 0x1F - 0x28\nEM0:Z9 := 0;\n"
+    got  = "// オペコード 0x10 - 0x1E\nEM0:Z9 := 1;\n"
+    results = check_st({ "vm_08_group4" => got }, { "vm_08_group4.st" => want })
+
+    assert_equal [:differs], results.map(&:state)
+    assert results.first.stale?
+  end
+
   # 生成物の並び (ラダーに置く順) で返す
   def test_results_follow_the_ladder_order
     source = "EM0:Z9 = 0\n"

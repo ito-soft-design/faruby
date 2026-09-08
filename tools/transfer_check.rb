@@ -60,17 +60,36 @@ module FaRuby
     #
     # 行数は生成物と同じだけ取ります。2 度目に現れる交互の並びまで
     # 読まないようにするためです。
+    #
+    # 見出しの書き方は機種で違います。**名前だけで引き当てます。**
+    #
+    #   KV-5000  ;<h1/>vm_01_init
+    #   KV-X500  ;vm_01_init      直後に AREA_ST が 1 行入る
     def parse
-      lines = File.binread(@path).force_encoding(ENCODING).encode("utf-8").split(/\r?\n/)
-      sizes = @generator.generate.transform_keys { |name| File.basename(name, ".kvs") }
+      lines = decode(File.binread(@path)).split(/\r?\n/)
+      sizes = @generator.generate.transform_keys { |name| File.basename(name, ".*") }
                         .transform_values { |content| content.split("\n").size }
 
       lines.each_with_index.with_object({}) do |(line, index), found|
-        next unless line.start_with?(";<h1/>")
+        next unless line.start_with?(";")
 
-        stem = line.sub(";<h1/>", "")
+        stem = line.sub(/\A;(<h1\/>)?/, "")
         size = sizes[stem] or next
-        found[stem] = lines[(index + 1), size].map { |l| l.sub(/\A;/, "") }
+        first = index + 1
+        first += 1 if lines[first] == "AREA_ST"   # ST は区分の見出しが 1 行入る
+        found[stem] = lines[first, size].map { |l| l.sub(/\A;/, "") }
+      end
+    end
+
+    # 文字コードは機種で違う。**BOM で見分けます**
+    #
+    #   KV-5000  Shift_JIS (BOM 無し)
+    #   KV-X500  UTF-16LE  (BOM FF FE)
+    def decode(data)
+      if data.start_with?("\xFF\xFE".b)
+        data.force_encoding("UTF-16LE").encode("utf-8").sub("﻿", "")
+      else
+        data.force_encoding(ENCODING).encode("utf-8")
       end
     end
   end
