@@ -52,22 +52,17 @@ module FaRuby
     # (実機で確認済み)。使えるのは Z1-Z10 で、faRuby は Z1-Z9 を使います。
     USED_Z = (1..9).to_a.freeze
 
-    # 値スロットへの参照。**1 本の Z でタグと値の両方を指します**
+    # 値スロットへの参照
     #
-    # 値は 32ビット整数 (.L) としても単精度実数 (.F) としても読めます。
-    # どちらで読むかは実行時のタグで決まるため、生成コードは両方の書き方を
-    # 出しておいて IF で選びます。
+    # **呼ぶ側が使うのは「タグ」「値」「実数として」の 3 つだけです。**
+    # どう指すかは機種が決めます。KV は 1 本の Z から、MELSEC は構造体の
+    # 添字から作ります。
     #
-    # MELSEC は型ごとに別の配列になるので、この「1 本の Z」に当たるものが
-    # 添字の式そのものになります。
-    Slot = Struct.new(:tag, :z, :device_name) do
-      def ref(suffix) = "#{device_name}#{VmConstants::SLOT_VALUE_OFFSET}.#{suffix}:Z#{z}"
-
-      def value = ref("L")   # 32ビット符号付き整数
-      def float = ref("F")   # 単精度実数
-
+    # 値は 32ビット整数としても単精度実数としても読めます。どちらで読むかは
+    # 実行時のタグで決まるため、生成コードは両方を出しておいて IF で選びます。
+    Slot = Struct.new(:tag, :value, :float, :word_ref) do
       # 値ワードを16ビット単位で指す (IEEE754 のビット列を直接書くときに使う)
-      def word(offset) = "#{device_name}#{VmConstants::SLOT_VALUE_OFFSET + offset}:Z#{z}"
+      def word(offset) = word_ref.call(offset)
     end
 
     attr_reader :layout
@@ -135,16 +130,22 @@ module FaRuby
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
       @emitter.line "Z#{z} = #{index_expr} + #{base_expr}"
-      @slot_cache[key] = Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}", z, device)
+      @slot_cache[key] = build_slot(z, device)
     end
 
     # 既に Z に載っている先頭アドレスを値スロットとして扱う
     #
     # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
     # 自分で載せた場合に使います。
-    def slot_on(z)
-      Slot.new("#{layout.device_name}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}", z,
-               layout.device_name)
+    def slot_on(z) = build_slot(z, layout.device_name)
+
+    # Z 1 本でタグと値の両方を指す。**型サフィックスはデバイス側**に付ける
+    def build_slot(z, device)
+      value = VmConstants::SLOT_VALUE_OFFSET
+      Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}",
+               "#{device}#{value}.L:Z#{z}",
+               "#{device}#{value}.F:Z#{z}",
+               ->(offset) { "#{device}#{value + offset}:Z#{z}" })
     end
 
     # 命令 1 つを出し終えたら忘れる。次の命令では Z を組み直す

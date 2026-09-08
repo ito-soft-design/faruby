@@ -496,7 +496,7 @@ module FaRuby
       indent
       note "汎用グローバルは値スロット。型タグごと写す"
       line "Z3 = Z6"
-      copy_slot(from: 3, to: slot.z)
+      copy_slot(from: slot_on(3), to: slot)
       dedent
       chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
@@ -591,7 +591,7 @@ module FaRuby
       indent
       note "汎用グローバルは値スロット。型タグごと写す"
       line "Z3 = Z6"
-      copy_slot(from: slot.z, to: 3)
+      copy_slot(from: slot, to: slot_on(3))
       dedent
       chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
@@ -1633,10 +1633,10 @@ module FaRuby
         indent
         line "Z6 = (#{operand(name)} + Z5 * 2) * #{SLOT_WORDS} + #{reg_offset}   ' 鍵"
         line "Z7 = Z5 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
-        copy_slot(from: 6, to: 7)
+        copy_slot(from: slot_on(6), to: slot_on(7))
         line "Z6 = (#{operand(name)} + Z5 * 2 + 1) * #{SLOT_WORDS} + #{reg_offset}   ' 値"
         line "Z7 = Z5 * #{SLOT_WORDS} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
-        copy_slot(from: 6, to: 7)
+        copy_slot(from: slot_on(6), to: slot_on(7))
         dedent
         line "NEXT"
       end
@@ -1650,11 +1650,11 @@ module FaRuby
     end
 
     # Z に載っている値スロットどうしを写す
+    # **スロットを渡します。**呼ぶ側が Z 番号を知らずに済むように。
+    # Z はアドレスの作り方であって、写す側の関心ではありません
     def copy_slot(from:, to:)
-      src = slot_on(from)
-      dst = slot_on(to)
-      line "#{dst.value} = #{src.value}"
-      line "#{dst.tag} = #{src.tag}"
+      line "#{to.value} = #{from.value}"
+      line "#{to.tag} = #{from.tag}"
     end
 
     # 鍵の配列の見出しを Z4 に、組の数を32ビットスクラッチ B に置く
@@ -2590,7 +2590,7 @@ module FaRuby
         indent
         line "Z7 = Z6 * #{SLOT_WORDS} + Z#{source_z} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
         line "Z3 = Z6 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
-        copy_slot(from: 7, to: 3)
+        copy_slot(from: slot_on(7), to: slot_on(3))
         dedent
         line "NEXT"
       end
