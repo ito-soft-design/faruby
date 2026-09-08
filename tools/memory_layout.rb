@@ -265,14 +265,18 @@ module FaRuby
                 :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len,
                 :max_string_words
 
-    # faruby_default.yml だけから作った配置
+    # faruby_default.yml だけから作った配置 (既定の機種のもの)
     #
     # 利用者の faruby.yml を読まないため、環境によらず同じ結果になります。
-    # vm_core.kvs のバイト一致検証やテストはこちらを使います。
+    # 生成物のバイト一致検証やテストはこちらを使います。
+    #
+    # **配置は機種ごとに持ちます。** ここが見るのは `plc.model` の機種の欄です。
+    # 別の機種の配置は Config#for_model から取ります。
     def self.default
       @default ||= begin
         path = File.expand_path("../faruby_default.yml", __dir__)
-        from_config((File.exist?(path) ? YAML.load_file(path) : {})&.fetch("memory", nil) || {})
+        data = (File.exist?(path) ? YAML.load_file(path) : {}) || {}
+        from_config(data.dig("models", data.dig("plc", "model"), "memory") || {})
       end
     end
 

@@ -152,4 +152,21 @@ class TestConfig < Minitest::Test
   def test_the_defaults_only_config_can_switch_models
     assert_equal "KV-X500", FaRuby::Config.defaults.for_model("KV-X500").model
   end
+
+  # === 既定設定 ===
+
+  # **機種の欄を見れば、その機種の設定が全部揃っている**形にしてあります。
+  # 共通の位置に既定値を置いていないので、機種を増やして欄を作り忘れると
+  # 値が欠けたまま動きます。
+  def test_every_model_has_a_complete_default
+    FaRuby::Dialect.models.each do |model|
+      config = FaRuby::Config.defaults.for_model(model)
+      missing = { "plc.protocol" => config.plc_protocol,
+                  "plc.port" => config.plc_port,
+                  "vm.steps_per_cycle" => config.steps_per_cycle }.select { |_, v| v.nil? }
+
+      assert_empty missing.keys, "#{model} の既定値が欠けています"
+      assert_operator config.layout.base, :>, 0, "#{model} のメモリ配置"
+    end
+  end
 end

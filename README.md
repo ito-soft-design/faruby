@@ -105,8 +105,29 @@ vm:
 
 #### 機種ごとの設定
 
-**PLC が変われば IP もメモリ配置も変わります。** 共通の設定を `models:` の下で
-機種ごとに上書きできます。書いた項目だけが差し替わり、残りは共通のままです。
+**接続先・実行・メモリ配置は機種ごとに持ちます。** 機種が変われば PLC も
+変わり、IP もメモリ配置も別になるためです。既定値は
+[faruby_default.yml](faruby_default.yml) が機種ごとに一式を持っていて、
+`models:` の見出しは機種名です。
+
+```yaml
+models:
+  KV-5000:
+    plc:
+      protocol: keyence_kv
+      host:
+      port: 8501
+    vm:
+      steps_per_cycle: 50
+    memory:
+      device: EM
+      base: 20000
+      instances: 2
+      ...
+```
+
+`faruby.yml` には違うところだけを書けば足ります。共通の位置 (`models:` の外)
+に書いた項目はどの機種にも効き、機種の下に書いた項目がそれを上回ります。
 
 ```yaml
 plc:
