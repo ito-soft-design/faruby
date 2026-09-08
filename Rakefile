@@ -48,6 +48,46 @@ end
 desc "Alias for vm_core"
 task vm: :vm_core
 
+desc "Run test/ruby_programs on the PLC and check them against their headers"
+task :hw do
+  require_relative "tools/hardware_check"
+  require_relative "tools/config"
+
+  config = FaRuby::Config.new(connection: ENV["CONNECTION"]).validate_connection!
+  puts "対象: #{[config.connection, config.model].compact.join(' / ')} @ #{config.plc_host}"
+  puts "配置: #{config.layout}"
+  puts ""
+
+  results =
+    begin
+      FaRuby::HardwareCheck.new(config).run(only: ENV["ONLY"])
+    rescue FaRuby::UnreachableError => e
+      puts e.message
+      exit 1
+    end
+
+  results.reject(&:skipped?).each do |r|
+    puts format("  %-4s %-28s %s", r.ok? ? "OK" : "NG", r.name, r.detail)
+    r.mismatches.each { |m| puts "         #{m}" }
+  end
+
+  skipped = results.select(&:skipped?)
+  failed = results.reject { |r| r.ok? || r.skipped? }
+  puts ""
+  puts "確認した値: #{results.sum(&:checked)}"
+  # **飛ばしたものは黙って落とさない。**確かめたつもりで抜けるのを防ぐ
+  skipped.each { |r| puts "  飛ばし: #{r.name} (#{r.detail})" }
+
+  puts ""
+  if failed.empty?
+    puts "すべて一致しました。"
+  else
+    puts "合わなかったもの:"
+    failed.each { |r| puts "  #{r.name}  #{r.detail}" }
+    exit 1
+  end
+end
+
 desc "Compare the scripts in KV Studio with the generated ones"
 task :transfer do
   require_relative "tools/transfer_check"
