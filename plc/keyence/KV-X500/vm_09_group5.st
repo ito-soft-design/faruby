@@ -859,12 +859,6 @@ IF EM54:Z9 <= 61 THEN
           IF Z5 = 6 THEN
             EM47:Z9 := 1;
           END_IF;
-          IF Z5 = 8 THEN
-            EM47:Z9 := 1;
-          END_IF;
-          IF Z5 = 9 THEN
-            EM47:Z9 := 1;
-          END_IF;
           IF EM47:Z9 = 0 THEN
             EM1:Z9 := 3;
             EM2:Z9 := 4;
@@ -918,7 +912,7 @@ IF EM54:Z9 <= 61 THEN
                 //   3=.D(32bit符号なし)
                 //   4=.F(実数)
                 //   それ以外=.S(16bit符号付き/既定)
-                // ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
+                // ビットデバイス (R, MR, B, LR): ON→true, OFF→false
                 //   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
                 //   整数にすると if $MR10 が常に成立してしまう
                 IF Z5 = 0 THEN
@@ -1077,54 +1071,6 @@ IF EM54:Z9 <= 61 THEN
                       EM0:Z3 := 5;
                     ELSE
                       EM1.L:Z3 := LR0.S:Z6;
-                      EM0:Z3 := 4;
-                    END_IF;
-                  END_IF;
-                ELSIF Z5 = 8 THEN
-                  IF Z8 = 5 THEN
-                    IF T0:Z6 THEN
-                      EM1.L:Z3 := 1;
-                      EM0:Z3 := 3;
-                    ELSE
-                      EM1.L:Z3 := 0;
-                      EM0:Z3 := 2;
-                    END_IF;
-                  ELSE
-                    IF Z8 = 2 THEN
-                      EM1.L:Z3 := T0.L:Z6;
-                      EM0:Z3 := 4;
-                    ELSIF Z8 = 1 THEN
-                      EM1.L:Z3 := T0.U:Z6;
-                      EM0:Z3 := 4;
-                    ELSIF Z8 = 3 THEN
-                      EM1.L:Z3 := T0.D:Z6;
-                      EM0:Z3 := 4;
-                    ELSE
-                      EM1.L:Z3 := T0.S:Z6;
-                      EM0:Z3 := 4;
-                    END_IF;
-                  END_IF;
-                ELSIF Z5 = 9 THEN
-                  IF Z8 = 5 THEN
-                    IF C0:Z6 THEN
-                      EM1.L:Z3 := 1;
-                      EM0:Z3 := 3;
-                    ELSE
-                      EM1.L:Z3 := 0;
-                      EM0:Z3 := 2;
-                    END_IF;
-                  ELSE
-                    IF Z8 = 2 THEN
-                      EM1.L:Z3 := C0.L:Z6;
-                      EM0:Z3 := 4;
-                    ELSIF Z8 = 1 THEN
-                      EM1.L:Z3 := C0.U:Z6;
-                      EM0:Z3 := 4;
-                    ELSIF Z8 = 3 THEN
-                      EM1.L:Z3 := C0.D:Z6;
-                      EM0:Z3 := 4;
-                    ELSE
-                      EM1.L:Z3 := C0.S:Z6;
                       EM0:Z3 := 4;
                     END_IF;
                   END_IF;
@@ -2026,12 +1972,6 @@ IF EM54:Z9 <= 61 THEN
         IF Z5 = 6 THEN
           EM47:Z9 := 1;
         END_IF;
-        IF Z5 = 8 THEN
-          EM47:Z9 := 1;
-        END_IF;
-        IF Z5 = 9 THEN
-          EM47:Z9 := 1;
-        END_IF;
         IF EM47:Z9 = 0 THEN
           EM1:Z9 := 3;
           EM2:Z9 := 4;
@@ -2085,7 +2025,7 @@ IF EM54:Z9 <= 61 THEN
               //   3=.D(32bit符号なし)
               //   4=.F(実数)
               //   それ以外=.S(16bit符号付き/既定)
-              // ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
+              // ビットデバイス (R, MR, B, LR): ON→true, OFF→false
               //   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
               //   整数にすると if $MR10 が常に成立してしまう
               IF Z5 = 0 THEN
@@ -2244,54 +2184,6 @@ IF EM54:Z9 <= 61 THEN
                     EM0:Z3 := 5;
                   ELSE
                     EM1.L:Z3 := LR0.S:Z6;
-                    EM0:Z3 := 4;
-                  END_IF;
-                END_IF;
-              ELSIF Z5 = 8 THEN
-                IF Z8 = 5 THEN
-                  IF T0:Z6 THEN
-                    EM1.L:Z3 := 1;
-                    EM0:Z3 := 3;
-                  ELSE
-                    EM1.L:Z3 := 0;
-                    EM0:Z3 := 2;
-                  END_IF;
-                ELSE
-                  IF Z8 = 2 THEN
-                    EM1.L:Z3 := T0.L:Z6;
-                    EM0:Z3 := 4;
-                  ELSIF Z8 = 1 THEN
-                    EM1.L:Z3 := T0.U:Z6;
-                    EM0:Z3 := 4;
-                  ELSIF Z8 = 3 THEN
-                    EM1.L:Z3 := T0.D:Z6;
-                    EM0:Z3 := 4;
-                  ELSE
-                    EM1.L:Z3 := T0.S:Z6;
-                    EM0:Z3 := 4;
-                  END_IF;
-                END_IF;
-              ELSIF Z5 = 9 THEN
-                IF Z8 = 5 THEN
-                  IF C0:Z6 THEN
-                    EM1.L:Z3 := 1;
-                    EM0:Z3 := 3;
-                  ELSE
-                    EM1.L:Z3 := 0;
-                    EM0:Z3 := 2;
-                  END_IF;
-                ELSE
-                  IF Z8 = 2 THEN
-                    EM1.L:Z3 := C0.L:Z6;
-                    EM0:Z3 := 4;
-                  ELSIF Z8 = 1 THEN
-                    EM1.L:Z3 := C0.U:Z6;
-                    EM0:Z3 := 4;
-                  ELSIF Z8 = 3 THEN
-                    EM1.L:Z3 := C0.D:Z6;
-                    EM0:Z3 := 4;
-                  ELSE
-                    EM1.L:Z3 := C0.S:Z6;
                     EM0:Z3 := 4;
                   END_IF;
                 END_IF;

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "vm_constants"
+
 module FaRuby
   # 生成コードの綴り方
   #
@@ -11,6 +13,8 @@ module FaRuby
   # 生成器は KV スクリプトの形で文を組み立て、ここで綴り直します。
   # KV 向けは素通しなので、この層を挟んでも出力は 1 バイトも変わりません。
   class Dialect
+    include VmConstants
+
     # 1 文を綴り直す
     def statement(text) = text
 
@@ -19,6 +23,12 @@ module FaRuby
 
     # ファイルレジスタのバンクを選ぶ。nil を返すと行そのものを出さない
     def select_bank(bank) = "FRSET(#{bank})"
+
+    # 指せないデバイス種別。**分岐ごと生成コードから外します**
+    #
+    # 綴り方の違いではなく、その機種で書けない文です。外した種別は VM が
+    # 知らない種別として扱い、使おうとしたプログラムは実行時に止まります。
+    def unsupported_devices = []
 
     # ビットデバイスに真偽を書く
     #
@@ -53,6 +63,8 @@ module FaRuby
   #
   # **`INC(x)` は使わず `x := x + 1;` に開きます。** ST にあるか分からない
   # ためで、開いても意味は同じです。
+  #
+  # 綴り方以外の違いが 1 つあります。**タイマ・カウンタ (T / C) は使えません。**
   class StDialect < Dialect
     def name = "ST"
     def extension = "st"
@@ -60,6 +72,14 @@ module FaRuby
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
+
+    # **タイマ・カウンタは ST では読み取りもできません。**
+    #
+    # KV-5000 の KV スクリプトでは接点 (`T0:Z6`) と現在値 (`T0.D:Z6`) を
+    # 読めましたが、KV-X500 で変換を通すとどちらも通りませんでした
+    # (KV Studio が読み出しもできないと出します)。綴り替えでは直らないので、
+    # 分岐ごと外します。
+    def unsupported_devices = [DEVICE_TYPE_T, DEVICE_TYPE_C]
 
     def comment(text) = text.empty? ? "//" : "// #{text}"
 

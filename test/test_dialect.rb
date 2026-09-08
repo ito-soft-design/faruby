@@ -116,6 +116,26 @@ class TestDialect < Minitest::Test
     assert_empty offenders.first(5)
   end
 
+  # **タイマ・カウンタは KV-X500 では読み取りもできません。**
+  # 綴り替えでは直らないので、分岐ごと生成コードから外す
+  def test_the_generated_st_has_no_timer_or_counter
+    files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
+    offenders = files.flat_map do |name, content|
+      content.split("\n").each_with_index.filter_map do |line, i|
+        code = line.split("//").first.to_s
+        "#{name}:#{i + 1} #{code.strip}" if code.match?(/\b[TC]0(\.[SLUDF])?:Z/)
+      end
+    end
+    assert_empty offenders.first(5)
+  end
+
+  # KV-5000 の KV スクリプトからは外さない。読み取りはできる
+  def test_the_generated_kv_script_keeps_the_timer_and_counter
+    files = FaRuby::KvsGenerator.new.generate
+    assert(files.values.any? { |c| c.include?("T0:Z6") }, "タイマの接点が消えています")
+    assert(files.values.any? { |c| c.include?("C0.D:Z6") }, "カウンタの現在値が消えています")
+  end
+
   def test_the_generated_st_files_carry_the_st_extension
     files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
     assert(files.keys.all? { |name| name.end_with?(".st") }, files.keys.first)

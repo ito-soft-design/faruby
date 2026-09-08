@@ -112,7 +112,7 @@ IF EM54:Z9 <= 30 THEN
         //   3=.D(32bit符号なし)
         //   4=.F(実数)
         //   それ以外=.S(16bit符号付き/既定)
-        // ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false
+        // ビットデバイス (R, MR, B, LR): ON→true, OFF→false
         //   整数の 1/0 ではなく真偽値。0 は Ruby では真なので、
         //   整数にすると if $MR10 が常に成立してしまう
         IF Z5 = 0 THEN
@@ -271,54 +271,6 @@ IF EM54:Z9 <= 30 THEN
               EM0:Z2 := 5;
             ELSE
               EM1.L:Z2 := LR0.S:Z6;
-              EM0:Z2 := 4;
-            END_IF;
-          END_IF;
-        ELSIF Z5 = 8 THEN
-          IF Z8 = 5 THEN
-            IF T0:Z6 THEN
-              EM1.L:Z2 := 1;
-              EM0:Z2 := 3;
-            ELSE
-              EM1.L:Z2 := 0;
-              EM0:Z2 := 2;
-            END_IF;
-          ELSE
-            IF Z8 = 2 THEN
-              EM1.L:Z2 := T0.L:Z6;
-              EM0:Z2 := 4;
-            ELSIF Z8 = 1 THEN
-              EM1.L:Z2 := T0.U:Z6;
-              EM0:Z2 := 4;
-            ELSIF Z8 = 3 THEN
-              EM1.L:Z2 := T0.D:Z6;
-              EM0:Z2 := 4;
-            ELSE
-              EM1.L:Z2 := T0.S:Z6;
-              EM0:Z2 := 4;
-            END_IF;
-          END_IF;
-        ELSIF Z5 = 9 THEN
-          IF Z8 = 5 THEN
-            IF C0:Z6 THEN
-              EM1.L:Z2 := 1;
-              EM0:Z2 := 3;
-            ELSE
-              EM1.L:Z2 := 0;
-              EM0:Z2 := 2;
-            END_IF;
-          ELSE
-            IF Z8 = 2 THEN
-              EM1.L:Z2 := C0.L:Z6;
-              EM0:Z2 := 4;
-            ELSIF Z8 = 1 THEN
-              EM1.L:Z2 := C0.U:Z6;
-              EM0:Z2 := 4;
-            ELSIF Z8 = 3 THEN
-              EM1.L:Z2 := C0.D:Z6;
-              EM0:Z2 := 4;
-            ELSE
-              EM1.L:Z2 := C0.S:Z6;
               EM0:Z2 := 4;
             END_IF;
           END_IF;
@@ -532,12 +484,6 @@ IF EM54:Z9 <= 30 THEN
         IF Z5 = 6 THEN
           EM47:Z9 := 1;
         END_IF;
-        IF Z5 = 8 THEN
-          EM47:Z9 := 1;
-        END_IF;
-        IF Z5 = 9 THEN
-          EM47:Z9 := 1;
-        END_IF;
         IF EM47:Z9 = 0 THEN
           EM1:Z9 := 3;
           EM2:Z9 := 22;
@@ -602,7 +548,7 @@ IF EM54:Z9 <= 30 THEN
               //   3=.D(32bit符号なし)
               //   4=.F(実数)
               //   それ以外=.S(16bit符号付き/既定)
-              // ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF
+              // ビットデバイス (R, MR, B, LR): 非0→ON, 0→OFF
               //   true=1 / false=nil=0 なので値だけで判定できる
               IF Z5 = 0 THEN
                 IF Z8 = 2 THEN
@@ -720,34 +666,6 @@ IF EM54:Z9 <= 30 THEN
                     LR0.S:Z6 := EM16.L:Z9;
                   END_IF;
                 END_IF;
-              ELSIF Z5 = 8 THEN
-                IF Z8 = 5 THEN
-                  // 接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない
-                ELSE
-                  IF Z8 = 2 THEN
-                    T0.L:Z6 := EM16.L:Z9;
-                  ELSIF Z8 = 1 THEN
-                    T0.U:Z6 := EM16.L:Z9;
-                  ELSIF Z8 = 3 THEN
-                    T0.D:Z6 := EM16.L:Z9;
-                  ELSE
-                    T0.S:Z6 := EM16.L:Z9;
-                  END_IF;
-                END_IF;
-              ELSIF Z5 = 9 THEN
-                IF Z8 = 5 THEN
-                  // 接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない
-                ELSE
-                  IF Z8 = 2 THEN
-                    C0.L:Z6 := EM16.L:Z9;
-                  ELSIF Z8 = 1 THEN
-                    C0.U:Z6 := EM16.L:Z9;
-                  ELSIF Z8 = 3 THEN
-                    C0.D:Z6 := EM16.L:Z9;
-                  ELSE
-                    C0.S:Z6 := EM16.L:Z9;
-                  END_IF;
-                END_IF;
               ELSE
                 // 呼ぶ側が種別を確かめている。ここへは来ない
               END_IF;
@@ -795,7 +713,7 @@ IF EM54:Z9 <= 30 THEN
         //   3=.D(32bit符号なし)
         //   4=.F(実数)
         //   それ以外=.S(16bit符号付き/既定)
-        // ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF
+        // ビットデバイス (R, MR, B, LR): 非0→ON, 0→OFF
         //   true=1 / false=nil=0 なので値だけで判定できる
         IF Z5 = 0 THEN
           IF Z8 = 2 THEN
@@ -911,40 +829,6 @@ IF EM54:Z9 <= 30 THEN
               LR0.F:Z6 := EM18.F:Z9;
             ELSE
               LR0.S:Z6 := EM16.L:Z9;
-            END_IF;
-          END_IF;
-        ELSIF Z5 = 8 THEN
-          IF Z8 = 5 THEN
-            // 接点は書けない。タイムアップ・カウントアップで決まる
-            EM1:Z9 := 3;
-            EM2:Z9 := 22;
-            EXIT;
-          ELSE
-            IF Z8 = 2 THEN
-              T0.L:Z6 := EM16.L:Z9;
-            ELSIF Z8 = 1 THEN
-              T0.U:Z6 := EM16.L:Z9;
-            ELSIF Z8 = 3 THEN
-              T0.D:Z6 := EM16.L:Z9;
-            ELSE
-              T0.S:Z6 := EM16.L:Z9;
-            END_IF;
-          END_IF;
-        ELSIF Z5 = 9 THEN
-          IF Z8 = 5 THEN
-            // 接点は書けない。タイムアップ・カウントアップで決まる
-            EM1:Z9 := 3;
-            EM2:Z9 := 22;
-            EXIT;
-          ELSE
-            IF Z8 = 2 THEN
-              C0.L:Z6 := EM16.L:Z9;
-            ELSIF Z8 = 1 THEN
-              C0.U:Z6 := EM16.L:Z9;
-            ELSIF Z8 = 3 THEN
-              C0.D:Z6 := EM16.L:Z9;
-            ELSE
-              C0.S:Z6 := EM16.L:Z9;
             END_IF;
           END_IF;
         ELSE

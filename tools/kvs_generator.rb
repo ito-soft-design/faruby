@@ -61,6 +61,8 @@ module FaRuby
     #
     # **タイマ・カウンタの接点は書けません。** タイムアップ・カウントアップで
     # 決まるものなので、代入しようとすると変換が通りません。読み取りはできます。
+    #
+    # 機種によっては読み取りもできません。使える種別は `bit_devices` が返します。
     BIT_DEVICES = [
       [DEVICE_TYPE_R,  "R",  true],  [DEVICE_TYPE_MR, "MR", true],
       [DEVICE_TYPE_B,  "B",  true],  [DEVICE_TYPE_L,  "LR", true],
@@ -89,6 +91,14 @@ module FaRuby
       @layout = layout
       @dialect = dialect
       @slot_cache = {}
+    end
+
+    # この機種で指せるビットデバイス
+    #
+    # KV-X500 の ST はタイマ・カウンタを指せないため、そこだけ短くなります。
+    # 外れた種別は生成コードから分岐ごと消え、VM は知らない種別として止めます。
+    def bit_devices
+      @bit_devices ||= BIT_DEVICES.reject { |type, _n, _w| dialect.unsupported_devices.include?(type) }
     end
 
     # インデックス修飾の基点 (例: "EM0")
@@ -1581,7 +1591,7 @@ module FaRuby
     def check_known_device(error_code)
       note "生成コードが知っている種別か。知らない種別は FOR に入る前に弾く"
       line "#{str_count} = 0"
-      (WORD_DEVICES + BIT_DEVICES).each do |type, _name, _writable|
+      (WORD_DEVICES + bit_devices).each do |type, _name, _writable|
         if_("Z5 = #{type}") { line "#{str_count} = 1" }
       end
       if_("#{str_count} = 0") { vm_error(error_code) }
@@ -2355,12 +2365,13 @@ module FaRuby
       note "ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ"
       ACCESS_BRANCHES.each { |value, sfx| note "  #{value}=.#{sfx}(#{ACCESS_NAMES.fetch(value)})" }
       note "  それ以外=.#{ACCESS_DEFAULT_SUFFIX}(#{ACCESS_NAMES.fetch(ACCESS_S)}/既定)"
+      bit_names = bit_devices.map { |_type, name, _writable| name }.join(", ")
       if mode == :read
-        note "ビットデバイス (R, MR, B, LR, T, C): ON→true, OFF→false"
+        note "ビットデバイス (#{bit_names}): ON→true, OFF→false"
         note "  整数の 1/0 ではなく真偽値。0 は Ruby では真なので、"
         note "  整数にすると if $MR10 が常に成立してしまう"
       else
-        note "ビットデバイス (R, MR, B, LR, T, C): 非0→ON, 0→OFF"
+        note "ビットデバイス (#{bit_names}): 非0→ON, 0→OFF"
         note "  true=1 / false=nil=0 なので値だけで判定できる"
       end
 
@@ -2375,7 +2386,7 @@ module FaRuby
 
       # ビットデバイスは幅サフィックスの有無で意味が変わる。
       # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T/C は現在値)。
-      BIT_DEVICES.each do |type, name, writable|
+      bit_devices.each do |type, name, writable|
         chain_head(first, "Z5 = #{type}")
         first = false
         indent
