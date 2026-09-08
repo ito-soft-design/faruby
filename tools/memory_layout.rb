@@ -62,9 +62,14 @@ module FaRuby
     # --- 固定領域 (FM) ---
     #
     # FM は ZF をバンクに分けたもの。1 バンク 32768 ワードで、n = 0-3。
-    # faRuby はバンク 3 を使い、スクリプトの出入りで FRSET を切り替える。
+    #
+    # **どのバンクを使うかは機種ごとの設定です** (`memory.fixed_bank`)。
+    # KV スクリプトは `FRSET(n)` で選べるのでバンク 3 を使い、他と離して
+    # おけます。**ST にはバンクを選ぶ手立てが無く、常にバンク 0 です。**
+    # ホストは ZF の絶対アドレスで書くため、ここが食い違うとスクリプトは
+    # 空のバンクを読み、命令が全部 0 に見えます (実機で 1 度やりました)。
     FIXED_BANK_SIZE = 32_768
-    FIXED_BANK      = 3
+    FIXED_BANK      = 3   # 既定 (KV スクリプト)
 
     # スクリプトから見たデバイス名 (バンク切り替え後)
     FIXED_DEVICE_NAME = "FM"
@@ -251,7 +256,7 @@ module FaRuby
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
-      "fixed_base" => 0, "fixed_align" => 1000,
+      "fixed_base" => 0, "fixed_align" => 1000, "fixed_bank" => FIXED_BANK,
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
@@ -260,7 +265,7 @@ module FaRuby
     }.freeze
 
     attr_reader :device_name, :base, :instances, :instance_index, :align,
-                :fixed_base, :fixed_align,
+                :fixed_base, :fixed_align, :fixed_bank,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
                 :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len,
                 :max_string_words
@@ -291,7 +296,8 @@ module FaRuby
         max_frames: c["max_frames"], max_methods: c["max_methods"],
         max_arrays: c["max_arrays"], max_array_len: c["max_array_len"],
         max_string_words: c["max_string_words"],
-        fixed_base: c["fixed_base"], fixed_align: c["fixed_align"]
+        fixed_base: c["fixed_base"], fixed_align: c["fixed_align"],
+        fixed_bank: c["fixed_bank"]
       )
     end
 
@@ -300,7 +306,7 @@ module FaRuby
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 64,
                    max_arrays: 16, max_array_len: 12, max_string_words: 500,
-                   fixed_base: 0, fixed_align: 1000)
+                   fixed_base: 0, fixed_align: 1000, fixed_bank: FIXED_BANK)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
@@ -308,6 +314,7 @@ module FaRuby
       @align          = Integer(align)
       @fixed_base     = Integer(fixed_base)
       @fixed_align    = Integer(fixed_align)
+      @fixed_bank     = Integer(fixed_bank)
       @max_regs       = Integer(max_regs)
       @max_bytecode   = Integer(max_bytecode)
       @max_pool       = Integer(max_pool)
@@ -333,7 +340,7 @@ module FaRuby
         max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
         max_arrays: max_arrays, max_array_len: max_array_len,
         max_string_words: max_string_words,
-        fixed_base: fixed_base, fixed_align: fixed_align
+        fixed_base: fixed_base, fixed_align: fixed_align, fixed_bank: fixed_bank
       )
     end
 
@@ -389,9 +396,10 @@ module FaRuby
 
     # --- ホストから見た固定領域 ---
     #
-    # スクリプトは FRSET(#{FIXED_BANK}) でバンクを選んでから FM で触りますが、
-    # ホストにはバンクを選ぶ手段が無いため ZF の絶対アドレスで触ります。
-    def fixed_host_base = FIXED_BANK * FIXED_BANK_SIZE
+    # スクリプトは FRSET でバンクを選んでから FM で触りますが、ホストには
+    # バンクを選ぶ手段が無いため ZF の絶対アドレスで触ります。**どちらも
+    # 同じ `fixed_bank` から出しているので、食い違いません。**
+    def fixed_host_base = fixed_bank * FIXED_BANK_SIZE
     def fixed_host_addr(fm_addr) = fixed_host_base + fm_addr
     def fixed_host_device = FIXED_HOST_DEVICE
     def fixed_device_name = FIXED_DEVICE_NAME

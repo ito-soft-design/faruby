@@ -194,7 +194,7 @@ module FaRuby
     def select_fixed_bank
       note "固定領域 (#{layout.fixed_device_name}) のバンクを選ぶ"
       note "現在のバンクを読む命令が無いため、抜けるときは 0 に戻す"
-      bank = dialect.select_bank(MemoryLayout::FIXED_BANK)
+      bank = dialect.select_bank(layout.fixed_bank)
       line bank if bank
     end
 
@@ -3430,14 +3430,15 @@ module FaRuby
       e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
              "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
       e.note ""
-      bank = e.dialect.select_bank(MemoryLayout::FIXED_BANK)
+      bank = e.dialect.select_bank(layout.fixed_bank)
       e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
-             "(#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの) に置く。"
+             "(#{layout.fixed_host_device} をバンク #{layout.fixed_bank} に分けたもの) に置く。"
       if bank
         e.note "スクリプトの先頭で #{bank} を実行済みのため、" \
                "#{layout.fixed_device_name} のアドレスで直接指せる。"
       else
-        e.note "**バンクを選ぶ手立てが無く常に 0 です。** 置き場所は見直しが要ります。"
+        e.note "**バンクを選ぶ手立てが無く常に 0 です。** ホスト側も同じ " \
+               "バンクへ書くので食い違いません (memory.fixed_bank)。"
       end
       e.note "インスタンス#{layout.instance_index}のブロックは " \
              "#{layout.fixed_device(layout.fixed_origin)}-" \

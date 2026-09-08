@@ -233,7 +233,7 @@ module FaRuby
         print_regions(layout.regions) { |addr| layout.device(addr) }
         puts ""
         puts "  実行中に変わらない領域 (#{layout.fixed_device_name} = " \
-             "#{layout.fixed_host_device} をバンク #{MemoryLayout::FIXED_BANK} に分けたもの)"
+             "#{layout.fixed_host_device} をバンク #{layout.fixed_bank} に分けたもの)"
         print_regions(layout.fixed_regions) do |addr|
           "#{layout.fixed_device(addr)} (#{layout.fixed_host_device}#{layout.fixed_host_addr(addr)})"
         end
