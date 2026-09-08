@@ -26,9 +26,12 @@ module FaRuby
         raise(ArgumentError, "知らない機種です: #{model.inspect} (#{models.join(', ')})")
     end
 
-    # 書き出し先 (plc/keyence の下)。**KV Studio のプロジェクトと同じ場所**で、
-    # フォルダ名が機種名そのものです
-    def directory = model
+    # 書き出し先 (plc の下)。**エンジニアリングツールのプロジェクトと同じ場所**で、
+    # 末尾のフォルダ名が機種名そのものです
+    #
+    #   keyence/KV-5000    KV Studio のプロジェクト
+    #   mitsubishi/Q       GX Works2 のプロジェクト
+    def directory = "#{vendor}/#{model}"
 
     # 1 文を綴り直す
     def statement(text) = text
@@ -61,6 +64,7 @@ module FaRuby
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの
   class KvsDialect < Dialect
+    def vendor = "keyence"
     def model = "KV-5000"
     def name = "KV スクリプト"
     def extension = "kvs"
@@ -85,6 +89,7 @@ module FaRuby
   #
   # 綴り方以外の違いが 1 つあります。**タイマ・カウンタ (T / C) は使えません。**
   class StDialect < Dialect
+    def vendor = "keyence"
     def model = "KV-X500"
     def name = "ST"
     def extension = "st"

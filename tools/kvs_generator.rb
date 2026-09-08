@@ -3,8 +3,8 @@
 # KV スクリプト生成器
 #
 # tools/opcode_table.rb の定義から機種ごとのスクリプトを生成します。
-#   plc/keyence/KV-5000/vm_*.kvs   KV スクリプト
-#   plc/keyence/KV-X500/vm_*.st    ST
+#   plc/keyence/KV-5000/vm_*.kvs      KV スクリプト
+#   plc/keyence/KV-X500/vm_*.st       ST
 # 再生成は `rake vm_core`。
 #
 # KvsEmitter は「記号バックエンド」です。命令定義の body を実行すると、
@@ -3105,8 +3105,8 @@ module FaRuby
   class KvsGenerator
     include VmConstants
 
-    # 機種ごとのフォルダの親。書き出し先は dialect.directory で決まる
-    PLC_DIR = File.expand_path("../plc/keyence", __dir__)
+    # 生成物の親。**書き出し先は dialect.directory で決まります** (メーカー/機種)
+    PLC_DIR = File.expand_path("../plc", __dir__)
 
     # ファイル名の通し番号
     #

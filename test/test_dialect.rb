@@ -18,10 +18,20 @@ class TestDialect < Minitest::Test
 
   # **機種名は書き出し先のフォルダ名で、設定の models: の見出しでもあります。**
   # 3 つが同じ名前だからこそ、機種を増やすのが綴り方を足すだけで済みます。
+  #
+  # 書き出し先はメーカー名を挟みます。エンジニアリングツールが違えば
+  # プロジェクトの置き場所も分かれるためです。
   def test_the_model_names_the_output_directory
     assert_equal %w[KV-5000 KV-X500], FaRuby::Dialect.models
-    assert_equal "KV-5000", kvs.directory
-    assert_equal "KV-X500", st.directory
+    assert_equal "keyence/KV-5000", kvs.directory
+    assert_equal "keyence/KV-X500", st.directory
+  end
+
+  # 機種を増やすときに書き出し先が衝突しないこと
+  def test_every_model_writes_somewhere_of_its_own
+    directories = FaRuby::Dialect.all.map(&:directory)
+
+    assert_equal directories.uniq, directories
   end
 
   def test_a_dialect_can_be_looked_up_by_model

@@ -34,7 +34,7 @@ task :vm_core do
     if changed.empty?
       puts "  変更なし (生成結果は既存ファイルと同一)"
     else
-      changed.each { |name| puts "  生成: plc/keyence/#{dialect.directory}/#{name}" }
+      changed.each { |name| puts "  生成: plc/#{dialect.directory}/#{name}" }
       stale << dialect
     end
   end
@@ -146,7 +146,7 @@ task :transfer do
   unless path
     puts "ニーモニックが見つかりません。"
     puts "KV Studio で書き出してから実行してください " \
-         "(既定の場所: plc/keyence/#{dialect.directory}/**/tmp/*.mnm)"
+         "(既定の場所: plc/#{dialect.directory}/**/tmp/*.mnm)"
     exit 1
   end
 
@@ -165,7 +165,7 @@ task :transfer do
     puts "すべて一致しています。"
   else
     puts "KV Studio に取り込み直してください:"
-    stale.each { |r| puts "  plc/keyence/#{dialect.directory}/#{r.name}" }
+    stale.each { |r| puts "  plc/#{dialect.directory}/#{r.name}" }
     exit 1
   end
 end
