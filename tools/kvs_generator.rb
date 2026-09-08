@@ -3081,9 +3081,9 @@ module FaRuby
 
     def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default,
                    dialect: KvsDialect.new)
-      @opcodes = opcodes
       @layout = layout
       @dialect = dialect
+      @opcodes = dialect.select_opcodes(opcodes)
     end
 
     # デコード対象のオペコードを保持するデバイス
