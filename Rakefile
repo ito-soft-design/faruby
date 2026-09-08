@@ -88,6 +88,50 @@ task :hw do
   end
 end
 
+desc "Measure execution speed on the PLC"
+task :bench do
+  require_relative "tools/benchmark"
+  require_relative "tools/config"
+
+  config = FaRuby::Config.new(connection: ENV["CONNECTION"]).validate_connection!
+  bench = FaRuby::Benchmark.new(config)
+  seconds = (ENV["SECONDS"] || FaRuby::Benchmark::DEFAULT_SECONDS).to_f
+  rounds = (ENV["ROUNDS"] || FaRuby::Benchmark::DEFAULT_ROUNDS).to_i
+
+  puts "対象: #{[config.connection, config.model].compact.join(' / ')} @ #{config.plc_host}"
+  puts "1スキャンあたりの命令数: #{config.steps_per_cycle}"
+  puts "#{seconds} 秒 × #{rounds} 回"
+  puts ""
+
+  results =
+    begin
+      bench.run(seconds: seconds, rounds: rounds, only: ENV["ONLY"])
+    rescue FaRuby::UnreachableError => e
+      puts e.message
+      exit 1
+    end
+
+  puts format("  %-10s %12s %10s %14s %10s", "ループ", "命令/秒", "1命令", "スキャン周期", "ばらつき")
+  results.each do |r|
+    puts format("  %-10s %12s %8.1f µs %11.2f ms %8.1f%%",
+                r.name, r.rate.round.to_s.gsub(/(\d)(?=(\d{3})+\z)/, '\1,'),
+                r.micros_per_step, r.scan_ms, r.spread)
+  end
+
+  # **1 周の命令数が前提どおりか。**ずれたら前に測った数字と並べられない
+  drifted = results.reject(&:steps_match?)
+  unless drifted.empty?
+    puts ""
+    puts "1 周の命令数が変わっています。tools/benchmark.rb の steps_per_loop を"
+    puts "直すまで、前に測った数字と並べないでください:"
+    drifted.each do |r|
+      puts format("  %-10s 前提 %d 命令/周  実測 %.3f", r.name, r.expected_steps_per_loop,
+                  r.steps_per_loop)
+    end
+    exit 1
+  end
+end
+
 desc "Compare the scripts in KV Studio with the generated ones"
 task :transfer do
   require_relative "tools/transfer_check"
