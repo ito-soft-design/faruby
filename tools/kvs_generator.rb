@@ -2848,13 +2848,31 @@ module FaRuby
       end_block
     end
 
+    # 実数を整数へ写す。**0 方向へ切り捨てます**
+    #
+    # KV スクリプトの代入はそのまま切り捨てますが、**ST は四捨五入します**
+    # (実機で確認済み: 3.7 が 4、-2.7 が -3 になりました)。丸めた向きを見て
+    # 1 だけ戻します。`to_i` も `floor` も `round` もデバイスへの書き込みも
+    # この切り捨てを当てにしているので、直すのはここ 1 箇所で足ります。
+    def truncate_float_into(target, source, comment = nil)
+      line "#{target} = #{source}#{comment ? "      ' #{comment}" : ''}"
+      return unless dialect.rounds_float_to_int?
+
+      note "この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す"
+      if_else_block("#{source} >= 0") do
+        if_("#{target} > #{source}") { line "#{target} = #{target} - 1" }
+      end
+      if_("#{target} < #{source}") { line "#{target} = #{target} + 1" }
+      end_block
+    end
+
     # 実数→整数。整数はそのまま
     #
     # 同じスロットを .F で読んで .L で書くため、一度スクラッチに移します。
     def to_i_into(dest)
       if_("#{dest.tag} = #{TT_FLOAT}") do
         note "0 方向へ切り捨て (Ruby の Float#to_i と同じ)"
-        line "#{scratch32} = #{dest.float}"
+        truncate_float_into(scratch32, dest.float)
         line "#{dest.value} = #{scratch32}"
         line "#{dest.tag} = #{TT_INTEGER}"
       end
@@ -2874,7 +2892,7 @@ module FaRuby
     def floor_into(dest)
       if_("#{dest.tag} = #{TT_FLOAT}") do
         note "KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く"
-        line "#{scratch32} = #{dest.float}"
+        truncate_float_into(scratch32, dest.float)
         if_("#{dest.float} < 0") do
           if_("#{scratch32} <> #{dest.float}") { line "#{scratch32} = #{scratch32} - 1" }
         end
@@ -2890,7 +2908,7 @@ module FaRuby
         if_else_block("#{dest.float} >= 0") { line "#{scratch_float} = #{dest.float} + 0.5" }
         line "#{scratch_float} = #{dest.float} - 0.5"
         end_block
-        line "#{scratch32} = #{scratch_float}"
+        truncate_float_into(scratch32, scratch_float)
         line "#{dest.value} = #{scratch32}"
         line "#{dest.tag} = #{TT_INTEGER}"
       end
@@ -3011,7 +3029,7 @@ module FaRuby
         end_block
       end
       if_else_block("#{slot.tag} = #{TT_FLOAT}") do
-        line "#{scratch32} = #{slot.float}      ' 実数→整数 (0方向へ切り捨て)"
+        truncate_float_into(scratch32, slot.float, "実数→整数 (0方向へ切り捨て)")
       end
       line "#{scratch32} = #{slot.value}"
       end_block

@@ -145,6 +145,19 @@ class TestDialect < Minitest::Test
     assert_empty offenders.first(5)
   end
 
+  # **ST の実数→整数は四捨五入です** (実機で確認済み)。生成コードは
+  # 0 方向への切り捨てを当てにしているので、丸めた向きを見て 1 だけ戻す
+  def test_the_generated_st_corrects_the_float_to_int_rounding
+    st_files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
+    kvs_files = FaRuby::KvsGenerator.new.generate
+
+    corrections = st_files.values.sum { |c| c.scan("IF EM16.L:Z9 > EM1.F:Z1 THEN").size }
+
+    assert_operator corrections, :>, 0, "0 方向へ戻す補正が入っていません"
+    assert(kvs_files.values.none? { |c| c.include?("IF EM16.L:Z9 > EM1.F:Z1 THEN") },
+           "KV スクリプトは元から切り捨てるので、補正は要りません")
+  end
+
   # KV-5000 の KV スクリプトからは外さない。読み取りはできる
   def test_the_generated_kv_script_keeps_the_timer_and_counter
     files = FaRuby::KvsGenerator.new.generate

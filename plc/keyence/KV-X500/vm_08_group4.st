@@ -870,6 +870,16 @@ IF EM54:Z9 <= 40 THEN
                 ELSE
                   IF EM0:Z3 = 5 THEN
                     EM16.L:Z9 := EM1.F:Z3;   // 実数→整数 (0方向へ切り捨て)
+                    // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+                    IF EM1.F:Z3 >= 0 THEN
+                      IF EM16.L:Z9 > EM1.F:Z3 THEN
+                        EM16.L:Z9 := EM16.L:Z9 - 1;
+                      END_IF;
+                    ELSE
+                      IF EM16.L:Z9 < EM1.F:Z3 THEN
+                        EM16.L:Z9 := EM16.L:Z9 + 1;
+                      END_IF;
+                    END_IF;
                   ELSE
                     EM16.L:Z9 := EM1.L:Z3;
                   END_IF;
@@ -1034,6 +1044,16 @@ IF EM54:Z9 <= 40 THEN
           ELSE
             IF EM0:Z3 = 5 THEN
               EM16.L:Z9 := EM1.F:Z3;   // 実数→整数 (0方向へ切り捨て)
+              // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+              IF EM1.F:Z3 >= 0 THEN
+                IF EM16.L:Z9 > EM1.F:Z3 THEN
+                  EM16.L:Z9 := EM16.L:Z9 - 1;
+                END_IF;
+              ELSE
+                IF EM16.L:Z9 < EM1.F:Z3 THEN
+                  EM16.L:Z9 := EM16.L:Z9 + 1;
+                END_IF;
+              END_IF;
             ELSE
               EM16.L:Z9 := EM1.L:Z3;
             END_IF;

@@ -297,6 +297,16 @@ IF EM54:Z9 <= 61 THEN
           IF EM0:Z1 = 5 THEN
             // 0 方向へ切り捨て (Ruby の Float#to_i と同じ)
             EM16.L:Z9 := EM1.F:Z1;
+            // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+            IF EM1.F:Z1 >= 0 THEN
+              IF EM16.L:Z9 > EM1.F:Z1 THEN
+                EM16.L:Z9 := EM16.L:Z9 - 1;
+              END_IF;
+            ELSE
+              IF EM16.L:Z9 < EM1.F:Z1 THEN
+                EM16.L:Z9 := EM16.L:Z9 + 1;
+              END_IF;
+            END_IF;
             EM1.L:Z1 := EM16.L:Z9;
             EM0:Z1 := 4;
           END_IF;
@@ -313,6 +323,16 @@ IF EM54:Z9 <= 61 THEN
           IF EM0:Z1 = 5 THEN
             // KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く
             EM16.L:Z9 := EM1.F:Z1;
+            // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+            IF EM1.F:Z1 >= 0 THEN
+              IF EM16.L:Z9 > EM1.F:Z1 THEN
+                EM16.L:Z9 := EM16.L:Z9 - 1;
+              END_IF;
+            ELSE
+              IF EM16.L:Z9 < EM1.F:Z1 THEN
+                EM16.L:Z9 := EM16.L:Z9 + 1;
+              END_IF;
+            END_IF;
             IF EM1.F:Z1 < 0 THEN
               IF EM16.L:Z9 <> EM1.F:Z1 THEN
                 EM16.L:Z9 := EM16.L:Z9 - 1;
@@ -331,6 +351,16 @@ IF EM54:Z9 <= 61 THEN
               EM18.F:Z9 := EM1.F:Z1 - 0.5;
             END_IF;
             EM16.L:Z9 := EM18.F:Z9;
+            // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+            IF EM18.F:Z9 >= 0 THEN
+              IF EM16.L:Z9 > EM18.F:Z9 THEN
+                EM16.L:Z9 := EM16.L:Z9 - 1;
+              END_IF;
+            ELSE
+              IF EM16.L:Z9 < EM18.F:Z9 THEN
+                EM16.L:Z9 := EM16.L:Z9 + 1;
+              END_IF;
+            END_IF;
             EM1.L:Z1 := EM16.L:Z9;
             EM0:Z1 := 4;
           END_IF;
@@ -1410,6 +1440,16 @@ IF EM54:Z9 <= 61 THEN
         IF EM0:Z1 = 5 THEN
           // 0 方向へ切り捨て (Ruby の Float#to_i と同じ)
           EM16.L:Z9 := EM1.F:Z1;
+          // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+          IF EM1.F:Z1 >= 0 THEN
+            IF EM16.L:Z9 > EM1.F:Z1 THEN
+              EM16.L:Z9 := EM16.L:Z9 - 1;
+            END_IF;
+          ELSE
+            IF EM16.L:Z9 < EM1.F:Z1 THEN
+              EM16.L:Z9 := EM16.L:Z9 + 1;
+            END_IF;
+          END_IF;
           EM1.L:Z1 := EM16.L:Z9;
           EM0:Z1 := 4;
         END_IF;
@@ -1426,6 +1466,16 @@ IF EM54:Z9 <= 61 THEN
         IF EM0:Z1 = 5 THEN
           // KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く
           EM16.L:Z9 := EM1.F:Z1;
+          // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+          IF EM1.F:Z1 >= 0 THEN
+            IF EM16.L:Z9 > EM1.F:Z1 THEN
+              EM16.L:Z9 := EM16.L:Z9 - 1;
+            END_IF;
+          ELSE
+            IF EM16.L:Z9 < EM1.F:Z1 THEN
+              EM16.L:Z9 := EM16.L:Z9 + 1;
+            END_IF;
+          END_IF;
           IF EM1.F:Z1 < 0 THEN
             IF EM16.L:Z9 <> EM1.F:Z1 THEN
               EM16.L:Z9 := EM16.L:Z9 - 1;
@@ -1444,6 +1494,16 @@ IF EM54:Z9 <= 61 THEN
             EM18.F:Z9 := EM1.F:Z1 - 0.5;
           END_IF;
           EM16.L:Z9 := EM18.F:Z9;
+          // この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す
+          IF EM18.F:Z9 >= 0 THEN
+            IF EM16.L:Z9 > EM18.F:Z9 THEN
+              EM16.L:Z9 := EM16.L:Z9 - 1;
+            END_IF;
+          ELSE
+            IF EM16.L:Z9 < EM18.F:Z9 THEN
+              EM16.L:Z9 := EM16.L:Z9 + 1;
+            END_IF;
+          END_IF;
           EM1.L:Z1 := EM16.L:Z9;
           EM0:Z1 := 4;
         END_IF;
