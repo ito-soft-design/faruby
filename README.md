@@ -87,8 +87,8 @@ cp faruby.yml.example faruby.yml
 
 ```yaml
 connections:
-  current: line1         # いま対象にしている接続先
-  line1:
+  current: target1       # いま対象にしている接続先
+  target1:
     model: KV-5000
     host: 192.168.0.10   # PLC の IP アドレス
 
@@ -107,23 +107,26 @@ mrbc:
 
 ```yaml
 connections:
-  current: line1
-  line1:
+  current: target1
+  target1:
     model: KV-5000
     host: 10.0.1.201
-  line2:
+  target2:
     model: KV-5000
     host: 10.0.1.202
-  shiken:
+  target3:
     model: KV-X500
     host: 10.0.1.203
 ```
 
+名前は自由に付けられます。設備や装置の名前にしておくと、どれに繋いでいるかが
+コンソールの表示だけで分かります。
+
 接続先が機種を決め、機種の設定 (実行・メモリ配置) がそのまま付いてきます。
 コンソールと `rake transfer` がこれに従います。1 つだけなら `current` は
 省けます。一度だけ別の相手にするなら
-`ruby tools/console.rb --connection line2`、照合は
-`rake transfer CONNECTION=line2` です。
+`ruby tools/console.rb --connection target2`、照合は
+`rake transfer CONNECTION=target2` です。
 
 **接続先が持つのは接続情報だけです。** 書けるのは `model` / `protocol` /
 `host` / `port` で、メモリ配置と実行設定は機種のものです。配置は生成物に

@@ -21,14 +21,14 @@
 # どれを使うかは `current` で選びます。
 #
 #   connections:
-#     current: line1
-#     line1:
+#     current: target1
+#     target1:
 #       model: KV-5000
 #       host: 10.0.1.201
-#     line2:
+#     target2:
 #       model: KV-5000
 #       host: 10.0.1.202
-#     shiken:
+#     target3:
 #       model: KV-X500
 #       host: 10.0.1.203
 #

@@ -7,20 +7,23 @@
 #
 # 同じ機種の PLC が複数あっても、ここに並べておけば current を書き替える
 # だけで切り替えられます。1 つだけなら current は省けます。
-# 一度だけ別の相手にするなら --connection line2 と渡します。
+# 一度だけ別の相手にするなら --connection target2 と渡します。
+#
+# 名前は自由に付けられます。設備や装置の名前にしておくと、どれに繋いで
+# いるかがコンソールの表示だけで分かります。
 #
 # 書けるのは model / protocol / host / port だけです。**接続先が持つのは
 # 接続情報だけで、メモリ配置と実行設定は機種のものです。**
 connections:
-  current: line1
+  current: target1
 
-  line1:
+  target1:
     model: KV-5000
     host: 192.168.0.10
-  line2:
+  target2:
     model: KV-5000
     host: 192.168.0.11
-  shiken:
+  target3:
     model: KV-X500
     host: 192.168.0.12
 

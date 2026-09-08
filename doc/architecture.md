@@ -107,25 +107,28 @@ memory:
 
 ```yaml
 connections:
-  current: line1
-  line1:
+  current: target1
+  target1:
     model: KV-5000
     host: 10.0.1.201
-  line2:
+  target2:
     model: KV-5000
     host: 10.0.1.202
-  shiken:
+  target3:
     model: KV-X500
     host: 10.0.1.203
 ```
+
+名前は自由に付けられます。設備や装置の名前にしておくと、どれに繋いでいるかが
+コンソールの表示だけで分かります。
 
 接続先が機種を決め、機種の設定 (実行・メモリ配置) がそのまま付いてきます。
 コンソールと `rake transfer` がこれに従い、生成 (`rake vm_core`) は選ばず
 全機種ぶん出します。1 つだけなら `current` は省けます。接続先を 1 つも
 書かなければ `plc.model` の機種を使います。
 
-一度だけ別の相手にするなら `ruby tools/console.rb --connection line2`、
-照合は `rake transfer CONNECTION=line2` です。
+一度だけ別の相手にするなら `ruby tools/console.rb --connection target2`、
+照合は `rake transfer CONNECTION=target2` です。
 
 #### 接続先が持つのは接続情報だけ
 

@@ -160,18 +160,18 @@ class TestConfig < Minitest::Test
   def test_current_picks_the_connection
     yaml = <<~YAML
       connections:
-        current: line2
-        line1:
+        current: target2
+        target1:
           model: KV-5000
           host: 10.0.0.1
-        line2:
+        target2:
           model: KV-5000
           host: 10.0.0.2
     YAML
     with_config(yaml) do |path|
       config = FaRuby::Config.new(path)
 
-      assert_equal ["line2", "10.0.0.2", "KV-5000"],
+      assert_equal ["target2", "10.0.0.2", "KV-5000"],
                    [config.connection, config.plc_host, config.model]
     end
   end
@@ -180,8 +180,8 @@ class TestConfig < Minitest::Test
   def test_the_connection_decides_the_model
     yaml = <<~YAML
       connections:
-        current: shiken
-        shiken:
+        current: target3
+        target3:
           model: KV-X500
           host: 10.0.0.3
       models:
@@ -200,16 +200,16 @@ class TestConfig < Minitest::Test
   def test_the_argument_wins_over_current
     yaml = <<~YAML
       connections:
-        current: line1
-        line1:
+        current: target1
+        target1:
           model: KV-5000
           host: 10.0.0.1
-        line2:
+        target2:
           model: KV-5000
           host: 10.0.0.2
     YAML
     with_config(yaml) do |path|
-      config = FaRuby::Config.new(path, connection: "line2")
+      config = FaRuby::Config.new(path, connection: "target2")
 
       assert_equal "10.0.0.2", config.plc_host
     end
@@ -217,11 +217,11 @@ class TestConfig < Minitest::Test
 
   # 1 つしか無ければ選ぶまでもない
   def test_a_single_connection_needs_no_current
-    yaml = "connections:\n  line1:\n    model: KV-X500\n    host: 10.0.0.1\n"
+    yaml = "connections:\n  target1:\n    model: KV-X500\n    host: 10.0.0.1\n"
     with_config(yaml) do |path|
       config = FaRuby::Config.new(path)
 
-      assert_equal ["line1", "KV-X500"], [config.connection, config.model]
+      assert_equal ["target1", "KV-X500"], [config.connection, config.model]
     end
   end
 
@@ -239,7 +239,7 @@ class TestConfig < Minitest::Test
   def test_a_connection_only_replaces_what_it_writes
     yaml = <<~YAML
       connections:
-        line1:
+        target1:
           model: KV-5000
           host: 10.0.0.1
       models:
@@ -255,10 +255,10 @@ class TestConfig < Minitest::Test
   end
 
   def test_an_unknown_connection_is_refused
-    yaml = "connections:\n  current: line9\n  line1:\n    model: KV-5000\n"
+    yaml = "connections:\n  current: target9\n  target1:\n    model: KV-5000\n"
     with_config(yaml) do |path|
       error = assert_raises(FaRuby::ConfigError) { FaRuby::Config.new(path) }
-      assert_includes error.message, "line9"
+      assert_includes error.message, "target9"
     end
   end
 
@@ -267,7 +267,7 @@ class TestConfig < Minitest::Test
   def test_a_connection_cannot_carry_the_layout
     yaml = <<~YAML
       connections:
-        line1:
+        target1:
           model: KV-5000
           host: 10.0.0.1
           memory:
