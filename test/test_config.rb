@@ -153,6 +153,132 @@ class TestConfig < Minitest::Test
     assert_equal "KV-X500", FaRuby::Config.defaults.for_model("KV-X500").model
   end
 
+  # === 接続先 ===
+
+  # **同じ機種の PLC が複数あるので、接続先は名前を付けて並べます。**
+  # current を書き替えるだけで相手を変えられること
+  def test_current_picks_the_connection
+    yaml = <<~YAML
+      connections:
+        current: line2
+        line1:
+          model: KV-5000
+          host: 10.0.0.1
+        line2:
+          model: KV-5000
+          host: 10.0.0.2
+    YAML
+    with_config(yaml) do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_equal ["line2", "10.0.0.2", "KV-5000"],
+                   [config.connection, config.plc_host, config.model]
+    end
+  end
+
+  # 接続先が機種を決める。機種ごとの配置がそのまま付いてくる
+  def test_the_connection_decides_the_model
+    yaml = <<~YAML
+      connections:
+        current: shiken
+        shiken:
+          model: KV-X500
+          host: 10.0.0.3
+      models:
+        KV-X500:
+          memory:
+            base: 24000
+    YAML
+    with_config(yaml) do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_equal ["KV-X500", 24_000], [config.model, config.layout.base]
+    end
+  end
+
+  # 一度だけ別の相手にする (コンソールの --connection)
+  def test_the_argument_wins_over_current
+    yaml = <<~YAML
+      connections:
+        current: line1
+        line1:
+          model: KV-5000
+          host: 10.0.0.1
+        line2:
+          model: KV-5000
+          host: 10.0.0.2
+    YAML
+    with_config(yaml) do |path|
+      config = FaRuby::Config.new(path, connection: "line2")
+
+      assert_equal "10.0.0.2", config.plc_host
+    end
+  end
+
+  # 1 つしか無ければ選ぶまでもない
+  def test_a_single_connection_needs_no_current
+    yaml = "connections:\n  line1:\n    model: KV-X500\n    host: 10.0.0.1\n"
+    with_config(yaml) do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_equal ["line1", "KV-X500"], [config.connection, config.model]
+    end
+  end
+
+  # 書かない使い方も残す (接続先が 1 台しか無い設備)
+  def test_without_connections_the_model_comes_from_plc_model
+    with_config("plc:\n  model: KV-X500\n  host: 10.0.0.1\n") do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_nil config.connection
+      assert_equal ["KV-X500", "10.0.0.1"], [config.model, config.plc_host]
+    end
+  end
+
+  # 接続先に書いていない項目は機種のものが残る
+  def test_a_connection_only_replaces_what_it_writes
+    yaml = <<~YAML
+      connections:
+        line1:
+          model: KV-5000
+          host: 10.0.0.1
+      models:
+        KV-5000:
+          plc:
+            port: 8502
+    YAML
+    with_config(yaml) do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_equal ["10.0.0.1", 8502], [config.plc_host, config.plc_port]
+    end
+  end
+
+  def test_an_unknown_connection_is_refused
+    yaml = "connections:\n  current: line9\n  line1:\n    model: KV-5000\n"
+    with_config(yaml) do |path|
+      error = assert_raises(FaRuby::ConfigError) { FaRuby::Config.new(path) }
+      assert_includes error.message, "line9"
+    end
+  end
+
+  # **配置と実行設定は機種のもの。**接続先に書いても効かないので、
+  # 黙って無視せずここで止める
+  def test_a_connection_cannot_carry_the_layout
+    yaml = <<~YAML
+      connections:
+        line1:
+          model: KV-5000
+          host: 10.0.0.1
+          memory:
+            base: 24000
+    YAML
+    with_config(yaml) do |path|
+      error = assert_raises(FaRuby::ConfigError) { FaRuby::Config.new(path) }
+      assert_includes error.message, "memory"
+    end
+  end
+
   # === 既定設定 ===
 
   # **機種の欄を見れば、その機種の設定が全部揃っている**形にしてあります。

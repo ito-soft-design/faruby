@@ -86,27 +86,54 @@ cp faruby.yml.example faruby.yml
 ```
 
 ```yaml
-plc:
-  protocol: keyence_kv
-  model: KV-5000         # いま相手にしている機種
-  host: 192.168.0.10     # PLC の IP アドレス
-  port: 8501
+connections:
+  current: line1         # いま対象にしている接続先
+  line1:
+    model: KV-5000
+    host: 192.168.0.10   # PLC の IP アドレス
 
 mrbc:
   path: /path/to/mrbc    # mrbc コンパイラのパス
-
-vm:
-  steps_per_cycle: 50     # 1スキャンあたりの実行命令数
 ```
 
 設定は 2 層になっています。`faruby.yml` に書いた項目だけが `faruby_default.yml`
 の既定値を上書きし、書かなかった項目は既定値のまま残ります。既定値の一覧と
 説明は [faruby_default.yml](faruby_default.yml) にあります。
 
+#### 接続先
+
+**同じ機種の PLC が複数あるので、接続先は名前を付けて並べます。** どれを使うかは
+`current` で選びます。
+
+```yaml
+connections:
+  current: line1
+  line1:
+    model: KV-5000
+    host: 10.0.1.201
+  line2:
+    model: KV-5000
+    host: 10.0.1.202
+  shiken:
+    model: KV-X500
+    host: 10.0.1.203
+```
+
+接続先が機種を決め、機種の設定 (実行・メモリ配置) がそのまま付いてきます。
+コンソールと `rake transfer` がこれに従います。1 つだけなら `current` は
+省けます。一度だけ別の相手にするなら
+`ruby tools/console.rb --connection line2`、照合は
+`rake transfer CONNECTION=line2` です。
+
+**接続先が持つのは接続情報だけです。** 書けるのは `model` / `protocol` /
+`host` / `port` で、メモリ配置と実行設定は機種のものです。配置は生成物に
+焼き込まれるため、接続先ごとに変えられるようにすると、生成物と中身が合わない
+組み合わせが作れてしまいます。**設備で配置が違うときはフォルダを分けます**
+([doc/architecture.md](doc/architecture.md#設備で配置が違うときはフォルダを分ける))。
+
 #### 機種ごとの設定
 
-**接続先・実行・メモリ配置は機種ごとに持ちます。** 機種が変われば PLC も
-変わり、IP もメモリ配置も別になるためです。既定値は
+**実行とメモリ配置は機種ごとに持ちます。** 既定値は
 [faruby_default.yml](faruby_default.yml) が機種ごとに一式を持っていて、
 `models:` の見出しは機種名です。
 
@@ -127,29 +154,17 @@ models:
 ```
 
 `faruby.yml` には違うところだけを書けば足ります。共通の位置 (`models:` の外)
-に書いた項目はどの機種にも効き、機種の下に書いた項目がそれを上回ります。
+に書いた項目はどの機種にも効き、機種の下がそれを上回り、接続先の接続情報が
+最後に上書きします。
 
 ```yaml
-plc:
-  model: KV-5000        # いま相手にしている機種
-  host: 10.0.1.201      # どの機種でもこれを使う
-
 models:
   KV-X500:
-    plc:
-      host: 10.0.1.202  # KV-X500 のときだけ差し替わる
+    vm:
+      steps_per_cycle: 30
     memory:
       base: 24000
 ```
-
-`plc.model` で選んだ機種をコンソールと `rake transfer` が使います。一度だけ
-別の機種を相手にするなら `ruby tools/console.rb --model KV-X500` と渡します。
-
-**機種と接続先は 1 対 1 です。** 同じ機種の PLC が複数あるときは、設備ごとに
-フォルダを分けて `faruby.yml` を別に持ちます。メモリ配置は生成物に焼き込まれる
-ので、設備で配置が違えば生成物も別物になるためです。理由は
-[doc/architecture.md](doc/architecture.md#設備ごとの設定--機種と接続先は-1-対-1)
-にあります。
 
 **生成 (`rake vm_core`) は機種を選ばず、全機種ぶんまとめて出します。**
 片方だけ生成すると、もう片方が古いまま残っていることに気づけないためです。

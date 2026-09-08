@@ -3,38 +3,42 @@
 # ここに書いた項目だけが faruby_default.yml の既定値を上書きします。
 # 書かなかった項目は既定値のまま残ります。
 
-plc:
-  protocol: keyence_kv
-  model: KV-5000        # いま相手にしている機種
-  host: 192.168.0.10
-  port: 8501
+# 接続先。名前を付けて並べ、current でどれを使うかを選びます。
+#
+# 同じ機種の PLC が複数あっても、ここに並べておけば current を書き替える
+# だけで切り替えられます。1 つだけなら current は省けます。
+# 一度だけ別の相手にするなら --connection line2 と渡します。
+#
+# 書けるのは model / protocol / host / port だけです。**接続先が持つのは
+# 接続情報だけで、メモリ配置と実行設定は機種のものです。**
+connections:
+  current: line1
+
+  line1:
+    model: KV-5000
+    host: 192.168.0.10
+  line2:
+    model: KV-5000
+    host: 192.168.0.11
+  shiken:
+    model: KV-X500
+    host: 192.168.0.12
 
 mrbc:
   path: C:/mruby-build/mruby/build/host/bin/mrbc.exe
 
-vm:
-  steps_per_cycle: 50
-
-# faRuby が使用する PLC デバイスの領域。
-# ラダーが使用していない範囲を割り当ててください。
-# 変更したら `rake vm_core` で再生成し、KV Studio に取り込み直します。
-# 既定値と項目の説明は faruby_default.yml を参照してください。
-# memory:
-#   device: EM
-#   base: 20000
-
 # 機種ごとの設定。
 #
-# 接続先・実行・メモリ配置は機種ごとに持ちます。既定値は機種ごとに
+# 実行とメモリ配置は機種ごとに持ちます。既定値は機種ごとに
 # faruby_default.yml にあるので、ここには違うところだけを書きます。
-# 上の共通の位置に書いた項目はどの機種にも効き、機種の下がそれを上回ります。
+# 共通の位置 (models: の外) に書いた項目はどの機種にも効き、機種の下が
+# それを上回ります。
+#
+# faRuby が使用する PLC デバイスの領域は、ラダーが使用していない範囲を
+# 割り当ててください。変更したら `rake vm_core` で再生成し、KV Studio に
+# 取り込み直します。項目の説明は faruby_default.yml を参照してください。
 # models:
-#   KV-5000:
-#     plc:
-#       host: 10.0.1.201
 #   KV-X500:
-#     plc:
-#       host: 10.0.1.202
 #     vm:
 #       steps_per_cycle: 30
 #     memory:

@@ -53,8 +53,8 @@ task :transfer do
   require_relative "tools/transfer_check"
   require_relative "tools/config"
 
-  # 照合するのは plc.model で選んだ機種。取り込むのは機種ごとに別だから
-  config = FaRuby::Config.new
+  # 照合するのはいまの接続先の機種。取り込むのは機種ごとに別だから
+  config = FaRuby::Config.new(connection: ENV["CONNECTION"])
   dialect = FaRuby::Dialect.for(config.model)
   generator = FaRuby::KvsGenerator.new(layout: config.layout, dialect: dialect)
 
@@ -66,7 +66,7 @@ task :transfer do
     exit 1
   end
 
-  puts "機種: #{config.model} (#{dialect.name})"
+  puts "対象: #{[config.connection, config.model].compact.join(' / ')} (#{dialect.name})"
   puts "照合: #{path}"
   puts ""
   results = FaRuby::TransferCheck.new(path, generator: generator).results
