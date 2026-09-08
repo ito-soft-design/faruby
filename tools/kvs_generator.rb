@@ -781,10 +781,35 @@ module FaRuby
       indent
       load_string_index(ref, index, heap_code)
       dedent
+      line "ELSE IF #{ref.tag} = #{TT_INTEGER} THEN"
+      indent
+      load_integer_bit(ref, index, error_code)
+      dedent
       line "ELSE"
       indent
-      note "デバイス参照・配列・ハッシュ・文字列以外への添字アクセスは未対応"
+      note "デバイス参照・配列・ハッシュ・文字列・整数以外への添字アクセスは未対応"
       vm_error(error_code)
+      end_block
+    end
+
+    # 整数のビットを 1 つ取る (Ruby の Integer#[])
+    #
+    # **PLC はビットを扱う場面が多いので、`(n >> i) & 1` と書かずに済ませます。**
+    # Ruby と同じで、添字が負なら 0、32 以上なら符号ビットです (上は無限に
+    # 符号が続いているものとして扱います)。
+    #
+    # ずらし方は `>>` と同じものを使います。KV のシフトが論理か算術か
+    # 分からないため、負の値は反転して挟みます。
+    def load_integer_bit(ref, index, error_code)
+      if_("#{index.tag} <> #{TT_INTEGER}") { vm_error(error_code) }
+      note "整数のビットを 1 つ取る (Ruby の Integer#[])"
+      if_else_block("#{index.value} < 0") do
+        note "添字が負なら 0 (Ruby と同じ)"
+        line "#{ref.value} = 0"
+      end
+      line "#{scratch32_b} = #{index.value}   ' 桁数"
+      emit_shift(ref, false)
+      line "#{ref.value} = #{ref.value} AND 1"
       end_block
     end
 
@@ -2690,11 +2715,13 @@ module FaRuby
 
     # 桁数は scratch32_b。`SLA` / `SRA` は `結果 = SLA(元, 桁数)` の形
     #
-    # 右シフトは**負の値をビット反転で挟みます**。Ruby の `>>` は符号を保ち
-    # ますが、KV のシフトが論理シフトだと 0 で埋まって大きな正の数になります。
-    # `~((~v) >> n)` は**論理でも算術でも同じ答え**になるので、どちらか
-    # 分からないうちはこの形にしておきます (正の値では両者が一致するため、
-    # 反転して正にしてからずらせばよい)。
+    # 右シフトは**負の値をビット反転で挟みます**。**`SRA` / `SHR` は論理
+    # シフト**で、負の値をそのままずらすと 0 で埋まって大きな正の数になり
+    # ます。Ruby の `>>` は符号を保つので、これでは合いません。
+    #
+    # `~((~v) >> n)` なら符号が保たれます。正の値では論理と算術が一致する
+    # ので、反転して正にしてからずらせばよいためです。**この挟み込みは
+    # 省けません。**
     #
     # 左シフトは論理と算術で結果が同じなのでそのままです。
     def emit_shift(dest, left)

@@ -729,8 +729,41 @@ IF EM54:Z9 <= 40 THEN
             EM39:Z9 = EM39:Z9 + 1
           END IF
         END IF
+      ELSE IF EM0:Z1 = 4 THEN
+        IF EM0:Z2 <> 4 THEN
+          EM1:Z9 = 3
+          EM2:Z9 = 2
+          BREAK
+        END IF
+        ' 整数のビットを 1 つ取る (Ruby の Integer#[])
+        IF EM1.L:Z2 < 0 THEN
+          ' 添字が負なら 0 (Ruby と同じ)
+          EM1.L:Z1 = 0
+        ELSE
+          EM18.L:Z9 = EM1.L:Z2   ' 桁数
+          IF EM18.L:Z9 >= 32 THEN
+            ' 全部ずれる。左は 0、右は符号で埋まる
+            IF EM1.L:Z1 < 0 THEN
+              EM1.L:Z1 = -1
+            ELSE
+              EM1.L:Z1 = 0
+            END IF
+          ELSE
+            IF EM1.L:Z1 < 0 THEN
+              ' 負は反転して正にしてからずらし、戻す。符号が保たれる
+              EM16.L:Z9 = NEG(EM1.L:Z1)
+              EM16.L:Z9 = EM16.L:Z9 - 1   ' ~x = -x - 1
+              EM16.L:Z9 = SRA(EM16.L:Z9, EM18.L:Z9)
+              EM1.L:Z1 = NEG(EM16.L:Z9)
+              EM1.L:Z1 = EM1.L:Z1 - 1   ' ~x = -x - 1
+            ELSE
+              EM1.L:Z1 = SRA(EM1.L:Z1, EM18.L:Z9)
+            END IF
+          END IF
+          EM1.L:Z1 = EM1.L:Z1 AND 1
+        END IF
       ELSE
-        ' デバイス参照・配列・ハッシュ・文字列以外への添字アクセスは未対応
+        ' デバイス参照・配列・ハッシュ・文字列・整数以外への添字アクセスは未対応
         EM1:Z9 = 3
         EM2:Z9 = 2
         BREAK

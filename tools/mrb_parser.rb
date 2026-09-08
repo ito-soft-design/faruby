@@ -4,6 +4,8 @@
 # mruby の mrbc が出力する RITE 形式のバイトコードを解析し、
 # IREP (命令列、定数プール、シンボル) を抽出します。
 
+require_relative "opcode_table"
+
 module FaRuby
   # RITE バイナリヘッダー (20 bytes)
   class RiteHeader
@@ -102,10 +104,64 @@ module FaRuby
     def parse
       @header = parse_header
       parse_sections
+      rewrite_index_sends(@irep) if @irep
       self
     end
 
     private
+
+    # 添字への複合代入を専用命令に置き換える
+    #
+    # **`x[i] op= v` は `[]` と `[]=` のメソッド呼び出しになります。** 素の
+    # `x[i]` と `x[i] = v` が OP_GETIDX / OP_SETIDX なのに、複合代入だけ
+    # メソッド呼び出しになるのは mruby の出し方です。そのままでは
+    # `$DM[a] |= 1 << 3` も `a[0] += 1` も未対応のメソッドで止まります。
+    #
+    # **OP_GETIDX / OP_SETIDX はレジスタの並びまで同じ**なので、ここで
+    # 置き換えます。OP_SEND は 4 バイト、専用命令は 2 バイトなので、
+    # 残りは OP_NOP で埋めて**長さを変えません** (飛び先がずれるため)。
+    #
+    #   OP_SEND a, [], 1   →  OP_GETIDX a + OP_NOP × 2
+    #   OP_SEND a, []=, 2  →  OP_SETIDX a + OP_NOP × 2
+    #
+    # 引数 2 個の `[]` ($DML[100, 3] の連続読み) はそのままにします。
+    # あちらは連続した値を配列にするもので、意味が違います。
+    #
+    # VM は 1 行も増えません。**組み込みメソッドを増やすと OP_SEND の中で
+    # デバイスアクセスをもう一式持つことになり**、いちばん大きいスクリプトが
+    # KV Studio の上限に近づきます。
+    def rewrite_index_sends(irep)
+      bytes = irep.instructions.b.bytes
+      pc = 0
+      while pc < bytes.size
+        info = OpcodeTable::MRUBY_OPCODES[bytes[pc]]
+        break unless info   # 知らない命令。長さが分からないのでここで止める
+
+        # OP_SEND は a=レシーバ、b=シンボル、c=引数の数
+        if bytes[pc] == OP_SEND &&
+           (target = index_opcode_for(irep.symbols[bytes[pc + 2]], bytes[pc + 3]))
+          bytes[pc]     = target       # a (pc + 1) はそのまま使える
+          bytes[pc + 2] = OP_NOP
+          bytes[pc + 3] = OP_NOP
+        end
+
+        pc += 1 + OpcodeTable::FORMAT_SIZES.fetch(info[1], 0)
+      end
+      irep.instructions = bytes.pack("C*")
+      irep.children.each { |child| rewrite_index_sends(child) }
+    end
+
+    OP_NOP    = 0x00
+    OP_GETIDX = 0x23
+    OP_SETIDX = 0x24
+    OP_SEND   = 0x2F
+
+    def index_opcode_for(symbol, argc)
+      return OP_GETIDX if symbol == "[]" && argc == 1
+      return OP_SETIDX if symbol == "[]=" && argc == 2
+
+      nil
+    end
 
     def parse_header
       header = RiteHeader.new(@data[@pos, RiteHeader::HEADER_SIZE])

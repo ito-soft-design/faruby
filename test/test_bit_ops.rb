@@ -215,6 +215,118 @@ class TestBitOps < Minitest::Test
     RUBY
   end
 
+  # === 整数のビットを取る (Integer#[]) ===
+  #
+  # **PLC はビットを扱う場面が多いので、`(n >> i) & 1` と書かずに済ませます。**
+  # `n[i]` は OP_GETIDX になり、配列や文字列と同じ命令を通ります。
+
+  def test_a_bit_is_read_by_its_index
+    assert_result 1, "$DM0 = 5[0]"
+    assert_result 0, "$DM0 = 5[1]"
+    assert_result 1, "$DM0 = 5[2]"
+    assert_result 0, "$DM0 = 5[3]"
+  end
+
+  def test_the_index_can_come_from_a_variable
+    assert_result 1, <<~RUBY
+      n = 2
+      $DM0 = 5[n]
+    RUBY
+  end
+
+  # **上は無限に符号が続いているものとして扱う** (Ruby と同じ)
+  def test_above_the_word_the_sign_bit_repeats
+    assert_result 0, "$DM0 = 5[31]"
+    assert_result 1, "$DM0 = -1[40]"
+    assert_result 1, "$DM0 = -2[31]"
+  end
+
+  # 負の添字は 0。Ruby は例外にせずこう返す
+  def test_a_negative_index_is_zero
+    assert_result 0, "$DM0 = 5[-1]"
+  end
+
+  # 添字が整数でなければ止める
+  def test_a_non_integer_index_stops
+    sim = run_source("$DM0 = 5[1.5]")
+
+    assert_equal VM_ERROR, status(sim)
+  end
+
+  # === 添字への複合代入 ===
+  #
+  # **`x[i] op= v` は `[]` と `[]=` のメソッド呼び出しになります。** 素の
+  # `x[i]` が OP_GETIDX なのに複合代入だけ呼び出しになるのは mruby の出し方で、
+  # そのままでは未対応のメソッドで止まります。パーサが専用命令に置き換えます。
+  #
+  # **ラダーの `DM0.0` に当たるものです。** インデックス修飾ではビットを
+  # 指定できないので、読んで直して書く形になります。
+
+  def test_a_bit_is_set_through_an_index
+    assert_result 9, <<~RUBY
+      i = 0
+      $DM[i] = 1
+      $DM[i] |= 1 << 3
+    RUBY
+  end
+
+  def test_a_bit_is_cleared_through_an_index
+    assert_result 14, <<~RUBY
+      i = 0
+      $DM[i] = 15
+      $DM[i] &= ~(1 << 0)
+    RUBY
+  end
+
+  # 同じ穴が配列とハッシュにも空いていた。まとめて塞がる
+  def test_an_array_element_can_be_updated_in_place
+    assert_result 15, <<~RUBY
+      a = [10, 20]
+      a[0] += 5
+      $DM0 = a[0]
+    RUBY
+  end
+
+  def test_a_hash_value_can_be_updated_in_place
+    assert_result 3, <<~RUBY
+      h = { "n" => 1 }
+      h["n"] += 2
+      $DM0 = h["n"]
+    RUBY
+  end
+
+  # 置き換えるのは引数 1 個の `[]` だけ。**2 個は連続読みで意味が違う**
+  def test_the_two_argument_slice_is_left_alone
+    sim = run_source(<<~RUBY)
+      $DM10 = 11
+      $DM11 = 22
+      a = $DM[10, 2]
+      $DM0 = a[1]
+    RUBY
+    assert_finished sim
+    assert_equal 22, sim.devices[DEVICE_TYPE_DM].read_u16(0)
+  end
+
+  # 置き換えた跡。長さを変えないため OP_NOP で埋める
+  def test_the_send_is_replaced_in_place
+    dir = File.expand_path("../tmp", __dir__)
+    Dir.mkdir(dir) unless Dir.exist?(dir)
+    skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
+
+    src = File.join(dir, "index_assign.rb")
+    mrb = File.join(dir, "index_assign.mrb")
+    File.binwrite(src, "a = [1]\na[0] += 1\n")
+    assert system(mrbc_path, "-o", mrb, src, out: File::NULL, err: File::NULL)
+    irep = FaRuby::MrbParser.new(File.binread(mrb)).parse.irep
+    names = FaRuby::Disassembler.new(irep).disassemble.map { |i| i[:name] }
+
+    assert_includes names, :OP_GETIDX
+    assert_includes names, :OP_SETIDX
+    assert_includes names, :OP_NOP, "長さを合わせる埋め物"
+  ensure
+    [src, mrb].each { |f| File.delete(f) if f && File.exist?(f) }
+  end
+
   # 生成コードは SLA / SRA に 0-31 しか渡さない。範囲外で何が返るか分からない
   def test_the_generated_shift_guards_the_count
     source = FaRuby::KvsGenerator.new.source

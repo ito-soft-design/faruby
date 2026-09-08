@@ -970,6 +970,7 @@ module FaRuby
       return load_array_index(index) if read_reg_tag(index) == TT_ARRAY
       return load_hash_index(index) if read_reg_tag(index) == TT_HASH
       return load_string_index(index, heap_code) if read_reg_tag(index) == TT_STRING
+      return load_integer_bit(index, error_code) if read_reg_tag(index) == TT_INTEGER
 
       ref = device_ref(index)
       return vm_error(error_code) unless ref
@@ -1022,6 +1023,18 @@ module FaRuby
     # --- 配列の添字アクセス ---
 
     # R[a] = R[a][R[a+1]]。範囲外は Ruby と同じく nil
+    # 整数のビットを 1 つ取る (Ruby の Integer#[])
+    #
+    # 添字が負なら 0、桁数以上なら符号ビットです。Ruby と同じで、
+    # 上は無限に符号が続いているものとして扱います。
+    def load_integer_bit(index, error_code)
+      return vm_error(error_code) unless read_reg_tag(index + 1) == TT_INTEGER
+
+      shift = read_reg(index + 1)
+      bit = shift.negative? ? 0 : (read_reg(index) >> [shift, 32].min) & 1
+      write_slot(index, TT_INTEGER, bit)
+    end
+
     def load_array_index(index)
       slot = read_reg(index)
       position = array_position(slot, read_reg(index + 1))

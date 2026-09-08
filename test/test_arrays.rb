@@ -34,6 +34,7 @@ class TestArrays < Minitest::Test
   GETIDX   = 0x23
   SETIDX   = 0x24
   LOADSYM  = 0x10
+  LOADNIL  = 0x11
   STOP     = 0x69
 
   def run_bytecode(bytes, nregs: 16)
@@ -210,9 +211,18 @@ class TestArrays < Minitest::Test
     assert_equal TT_NIL, tag_of(1)
   end
 
-  # 配列でもデバイス族でもないものへの添字アクセスは止まる
-  def test_indexing_a_number_stops_the_vm
-    run_bytecode(load(1, 5) + load(2, 0) + [GETIDX, 1, STOP])
+  # **整数への添字はビットを 1 つ取ります** (Ruby の Integer#[])。
+  # 詳しくは test_bit_ops.rb
+  def test_indexing_a_number_takes_a_bit
+    run_bytecode(load(1, 5) + load(2, 2) + [GETIDX, 1, STOP])
+
+    assert_equal VM_FINISHED, status
+    assert_equal 1, value_of(1)
+  end
+
+  # 配列・デバイス族・文字列・ハッシュ・整数のどれでもなければ止まる
+  def test_indexing_something_else_stops_the_vm
+    run_bytecode([LOADNIL, 1] + load(2, 0) + [GETIDX, 1, STOP])
 
     assert_equal VM_ERROR, status
     assert_equal DEVICE_INDEX_ERROR, error
