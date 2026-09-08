@@ -22,6 +22,7 @@
 # **アドレス計算そのものが要らなくなる**ので、綴り替えでは届きません。
 
 require_relative "memory_layout"
+require_relative "vm_constants"
 
 module FaRuby
   # KV スクリプト / ST (KV-5000・KV-X500) のデバイスの指し方
@@ -51,10 +52,32 @@ module FaRuby
     # (実機で確認済み)。使えるのは Z1-Z10 で、faRuby は Z1-Z9 を使います。
     USED_Z = (1..9).to_a.freeze
 
+    # 値スロットへの参照。**1 本の Z でタグと値の両方を指します**
+    #
+    # 値は 32ビット整数 (.L) としても単精度実数 (.F) としても読めます。
+    # どちらで読むかは実行時のタグで決まるため、生成コードは両方の書き方を
+    # 出しておいて IF で選びます。
+    #
+    # MELSEC は型ごとに別の配列になるので、この「1 本の Z」に当たるものが
+    # 添字の式そのものになります。
+    Slot = Struct.new(:tag, :z, :device_name) do
+      def ref(suffix) = "#{device_name}#{VmConstants::SLOT_VALUE_OFFSET}.#{suffix}:Z#{z}"
+
+      def value = ref("L")   # 32ビット符号付き整数
+      def float = ref("F")   # 単精度実数
+
+      # 値ワードを16ビット単位で指す (IEEE754 のビット列を直接書くときに使う)
+      def word(offset) = "#{device_name}#{VmConstants::SLOT_VALUE_OFFSET + offset}:Z#{z}"
+    end
+
     attr_reader :layout
 
-    def initialize(layout)
+    # emitter: 行を出す相手。**アドレスを Z に載せる行が要る**ため持ちます。
+    # MELSEC は添字で直接指すので、その実装では行が出ません。
+    def initialize(layout, emitter = nil)
       @layout = layout
+      @emitter = emitter
+      @slot_cache = {}
     end
 
     # --- インデックス修飾の基点 ---
@@ -100,5 +123,44 @@ module FaRuby
 
     # Z の退避先。インスタンスループの外で 1 回だけ触るので絶対アドレス
     def z_save(z) = layout.device(layout.z_save_addr(z))
+
+    # --- 値スロット ---
+
+    # スロットの先頭アドレスを Z に載せ、その Z を指す Slot を返す
+    #
+    # **同じスロットを 2 度指すときは行を出しません** (key で覚えます)。
+    # 命令 1 つの中で R[a] を何度も触るため、毎回 Z を組み直すと無駄が出ます。
+    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
+      return @slot_cache[key] if @slot_cache.key?(key)
+
+      z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
+      @emitter.line "Z#{z} = #{index_expr} + #{base_expr}"
+      @slot_cache[key] = Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}", z, device)
+    end
+
+    # 既に Z に載っている先頭アドレスを値スロットとして扱う
+    #
+    # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
+    # 自分で載せた場合に使います。
+    def slot_on(z)
+      Slot.new("#{layout.device_name}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}", z,
+               layout.device_name)
+    end
+
+    # 命令 1 つを出し終えたら忘れる。次の命令では Z を組み直す
+    def forget_slots = @slot_cache.clear
+
+    # --- バイトコード ---
+
+    # 現在位置を読み、PC を 1 つ進める
+    #
+    # 固定領域はインデックス修飾でしか指せないので、アドレスを Z に載せてから
+    # 読みます。MELSEC は `VMBC[VMPC]` の 1 文で済みます。
+    def read_bytecode_into(dest)
+      pc = state(layout.pc_addr)
+      @emitter.line "Z1 = #{pc} + #{bytecode_offset}"
+      @emitter.line "#{dest} = #{fixed_indexed_base}:Z1"
+      @emitter.line "#{pc} = #{pc} + 1"
+    end
   end
 end

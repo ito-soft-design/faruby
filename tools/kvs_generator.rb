@@ -84,8 +84,7 @@ module FaRuby
       @level = level
       @layout = layout
       @dialect = dialect
-      @devices = KvDevices.new(layout)
-      @slot_cache = {}
+      @devices = KvDevices.new(layout, self)
     end
 
     # この機種で指せるビットデバイス
@@ -195,9 +194,7 @@ module FaRuby
     def dedent = @level -= 1
 
     # 命令ごとにインデックスレジスタの割り当てをリセットする
-    def begin_instruction
-      @slot_cache = {}
-    end
+    def begin_instruction = devices.forget_slots
 
     # IF cond THEN <block> END IF
     def if_(cond)
@@ -240,15 +237,7 @@ module FaRuby
     # 値は 32ビット整数 (.L) としても単精度実数 (.F) としても読めます。
     # どちらで読むかは実行時のタグで決まるため、生成コードは両方の書き方を
     # 出しておいて IF で選びます。
-    Slot = Struct.new(:tag, :z, :device_name) do
-      def ref(suffix) = "#{device_name}#{SLOT_VALUE_OFFSET}.#{suffix}:Z#{z}"
-
-      def value = ref("L")   # 32ビット符号付き整数
-      def float = ref("F")   # 単精度実数
-
-      # 値ワードを16ビット単位で指す (IEEE754 のビット列を直接書くときに使う)
-      def word(offset) = "#{device_name}#{SLOT_VALUE_OFFSET + offset}:Z#{z}"
-    end
+    Slot = KvDevices::Slot
 
     def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset)
     def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", reg_offset)
@@ -1199,9 +1188,7 @@ module FaRuby
     #
     # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
     # 自分で載せた場合に使います。
-    def slot_on(z)
-      Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}", z, layout.device_name)
-    end
+    def slot_on(z) = devices.slot_on(z)
 
     # --- 文字列 ---
     #
@@ -2929,19 +2916,11 @@ module FaRuby
     # EM1:Z1.L と書くと .L がインデックスレジスタに結合し、
     # エラーにならないまま16ビットアクセスに退化する。
     def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
-      return @slot_cache[key] if @slot_cache.key?(key)
-
-      z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
-      line "Z#{z} = #{index_expr} + #{base_expr}"
-      @slot_cache[key] = Slot.new("#{device}#{SLOT_TYPE_OFFSET}:Z#{z}", z, device)
+      devices.slot_ref(key, index_expr, base_expr, z: z, device: device)
     end
 
     # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
-    def read_bytecode_into(dest)
-      line "Z1 = #{pc} + #{bytecode_offset}"
-      line "#{dest} = #{fixed_indexed_base}:Z1"
-      line "#{pc} = #{pc} + 1"
-    end
+    def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
 
     def fetch_byte(target) = read_bytecode_into(target)
 
