@@ -40,7 +40,7 @@ module FaRuby
     def results
       transferred = parse
       @generator.generate.map do |name, content|
-        stem = File.basename(name, ".kvs")
+        stem = File.basename(name, ".*")   # 拡張子は機種で違う (.kvs / .st)
         want = content.split("\n").map(&:rstrip)
         got = transferred[stem]
         next Result.new(name, :missing, "取り込まれていません") if got.nil?

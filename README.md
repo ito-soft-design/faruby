@@ -88,6 +88,7 @@ cp faruby.yml.example faruby.yml
 ```yaml
 plc:
   protocol: keyence_kv
+  model: KV-5000         # いま相手にしている機種
   host: 192.168.0.10     # PLC の IP アドレス
   port: 8501
 
@@ -101,6 +102,35 @@ vm:
 設定は 2 層になっています。`faruby.yml` に書いた項目だけが `faruby_default.yml`
 の既定値を上書きし、書かなかった項目は既定値のまま残ります。既定値の一覧と
 説明は [faruby_default.yml](faruby_default.yml) にあります。
+
+#### 機種ごとの設定
+
+**PLC が変われば IP もメモリ配置も変わります。** 共通の設定を `models:` の下で
+機種ごとに上書きできます。書いた項目だけが差し替わり、残りは共通のままです。
+
+```yaml
+plc:
+  model: KV-5000        # いま相手にしている機種
+  host: 10.0.1.201      # どの機種でもこれを使う
+
+models:
+  KV-X500:
+    plc:
+      host: 10.0.1.202  # KV-X500 のときだけ差し替わる
+    memory:
+      base: 24000
+```
+
+`plc.model` で選んだ機種をコンソールと `rake transfer` が使います。一度だけ
+別の機種を相手にするなら `ruby tools/console.rb --model KV-X500` と渡します。
+
+**生成 (`rake vm_core`) は機種を選ばず、全機種ぶんまとめて出します。**
+片方だけ生成すると、もう片方が古いまま残っていることに気づけないためです。
+機種ごとにメモリ配置を変えていれば、それぞれの生成物にその配置が入ります。
+
+**綴り方 (KV スクリプト / ST) と書き出し先は設定では選べません。** 機種に
+付いて回るもので、選ぶ余地が無いためです ([tools/dialect.rb](tools/dialect.rb))。
+機種を増やすときは、ここに綴り方を 1 つ足します。
 
 ### メモリ配置
 
@@ -326,14 +356,15 @@ end
 
 ### PLC 側 VM の生成と取り込み
 
-`plc/keyence/KV-5000/*.kvs` は [tools/opcode_table.rb](tools/opcode_table.rb) から生成されます。
+`plc/keyence/<機種>/vm_*` は [tools/opcode_table.rb](tools/opcode_table.rb) から生成されます。
 直接編集しないでください。
 
 ```bash
 rake vm_core
 ```
 
-生成された `plc/keyence/KV-5000/vm_*.kvs` を KV Studio に取り込み、PLC へ転送します。
+**全機種ぶんまとめて出します** (KV-5000 の `.kvs` と KV-X500 の `.st`)。
+生成されたものを KV Studio に取り込み、PLC へ転送します。
 **スクリプトは複数に分かれ、ラダーが決まった順に呼びます。**
 並べ方は [doc/architecture.md](doc/architecture.md#スクリプトの分割とラダー-実機で確認済み) にあります。
 命令を追加・変更した場合や、メモリ配置を変えた場合はこの手順が必要です。

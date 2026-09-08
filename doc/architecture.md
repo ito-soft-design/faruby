@@ -1146,7 +1146,8 @@ END IF
 | [tools/opcode_table.rb](../tools/opcode_table.rb) | 命令定義 (唯一の情報源) |
 | [tools/kvs_generator.rb](../tools/kvs_generator.rb) | KV スクリプトを組み立てるバックエンド |
 | [simulator/sim_vm.rb](../simulator/sim_vm.rb) | EM メモリ上で実行するバックエンド |
-| [tools/dialect.rb](../tools/dialect.rb) | 生成コードの綴り方 (KV スクリプト / ST) |
+| [tools/dialect.rb](../tools/dialect.rb) | 機種ごとの綴り方と書き出し先 (KV スクリプト / ST) |
+| [tools/config.rb](../tools/config.rb) | 設定の読み込み。機種ごとの上書きもここ |
 | [tools/transfer_check.rb](../tools/transfer_check.rb) | 取り込み済みスクリプトとの照合 |
 | `plc/keyence/KV-5000/vm_*.kvs` | 生成物 (コミット対象)。番号がラダーに置く順 |
 | `plc/keyence/KV-X500/vm_*.st` | 生成物 (コミット対象)。**未確認** |
@@ -1424,8 +1425,9 @@ EM0:Z9    インデックス修飾   そのまま
 区別を付ければ ST ではその空回り (1 命令あたり約 9 ラダー命令) が
 丸ごと要らなくなります。
 
-`rake vm_st` で `plc/keyence/KV-X500/vm_*.st` を書き出します。
+`rake vm_core` が `plc/keyence/KV-X500/vm_*.st` も一緒に書き出します。
 **機種ごとのフォルダは KV Studio のプロジェクトと同じ場所です。**
+フォルダ名は機種名そのもので、設定の `models:` の見出しにも同じ名前を使います。
 
 ### タイマ・カウンタは使えない (KV-X500)
 

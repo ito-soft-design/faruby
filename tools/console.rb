@@ -33,8 +33,8 @@ module FaRuby
         "help"    => :cmd_help,
       }.freeze
 
-      def initialize(config_path: nil)
-        @config = Config.new(config_path)
+      def initialize(config_path: nil, model: nil)
+        @config = Config.new(config_path, model: model)
         @adapter = PlcConnection.create(@config)
         @transfer = MemoryTransfer.new(@adapter, layout: @config.layout)
         @commands = Commands.new(config: @config, adapter: @adapter, transfer: @transfer)
@@ -102,7 +102,7 @@ module FaRuby
 
       def print_banner
         puts "=== faRuby Console ==="
-        puts "PLC   : #{@config.plc_protocol} @ #{@config.plc_host}:#{@config.plc_port}"
+        puts "PLC   : #{@config.model} (#{@config.plc_protocol}) @ #{@config.plc_host}:#{@config.plc_port}"
         puts "mrbc  : #{@config.mrbc_path}"
         puts "config: #{@config.config_path || '(default)'}"
         puts "Type 'help' for available commands."
@@ -117,6 +117,7 @@ if __FILE__ == $0
   OptionParser.new do |opts|
     opts.banner = "Usage: ruby console.rb [options]"
     opts.on("--config PATH", "Config file path") { |v| options[:config_path] = v }
+    opts.on("--model NAME", "PLC model (default: plc.model)") { |v| options[:model] = v }
   end.parse!
 
   FaRuby::Console::Repl.new(**options).run

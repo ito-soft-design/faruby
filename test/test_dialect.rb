@@ -14,6 +14,22 @@ class TestDialect < Minitest::Test
   def kvs = FaRuby::KvsDialect.new
   def st = FaRuby::StDialect.new
 
+  # === 機種 ===
+
+  # **機種名は書き出し先のフォルダ名で、設定の models: の見出しでもあります。**
+  # 3 つが同じ名前だからこそ、機種を増やすのが綴り方を足すだけで済みます。
+  def test_the_model_names_the_output_directory
+    assert_equal %w[KV-5000 KV-X500], FaRuby::Dialect.models
+    assert_equal "KV-5000", kvs.directory
+    assert_equal "KV-X500", st.directory
+  end
+
+  def test_a_dialect_can_be_looked_up_by_model
+    assert_instance_of FaRuby::KvsDialect, FaRuby::Dialect.for("KV-5000")
+    assert_instance_of FaRuby::StDialect, FaRuby::Dialect.for("KV-X500")
+    assert_raises(ArgumentError) { FaRuby::Dialect.for("KV-5500") }
+  end
+
   # === KV スクリプト ===
 
   # 生成器は KV スクリプトの形で組み立てるので、KV 向けは素通し。

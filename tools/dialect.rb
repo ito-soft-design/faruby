@@ -15,6 +15,21 @@ module FaRuby
   class Dialect
     include VmConstants
 
+    # 機種の一覧。**設定の `models:` の見出しはこの名前です**
+    def self.models = all.map(&:model)
+
+    def self.all = CLASSES.map(&:new)
+
+    # 機種名から綴り方を引く
+    def self.for(model)
+      all.find { |dialect| dialect.model == model } ||
+        raise(ArgumentError, "知らない機種です: #{model.inspect} (#{models.join(', ')})")
+    end
+
+    # 書き出し先 (plc/keyence の下)。**KV Studio のプロジェクトと同じ場所**で、
+    # フォルダ名が機種名そのものです
+    def directory = model
+
     # 1 文を綴り直す
     def statement(text) = text
 
@@ -40,11 +55,9 @@ module FaRuby
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの
   class KvsDialect < Dialect
+    def model = "KV-5000"
     def name = "KV スクリプト"
     def extension = "kvs"
-
-    # 機種ごとの書き出し先 (plc/keyence の下)。KV Studio のプロジェクトと同じ場所
-    def directory = "KV-5000"
   end
 
   # KV-X500 の ST (IEC 61131-3 準拠の構造化テキスト)
@@ -66,9 +79,9 @@ module FaRuby
   #
   # 綴り方以外の違いが 1 つあります。**タイマ・カウンタ (T / C) は使えません。**
   class StDialect < Dialect
+    def model = "KV-X500"
     def name = "ST"
     def extension = "st"
-    def directory = "KV-X500"
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
@@ -139,5 +152,11 @@ module FaRuby
           .gsub(/\bSRA\(/) { "SHR(" }
           .gsub(/\bNEG\(/) { "-(" }
     end
+  end
+
+  class Dialect
+    # 対応している機種。**増やすときはここに足すだけ**で、生成 (`rake vm_core`)
+    # も設定の `models:` もこの一覧から決まります。
+    CLASSES = [KvsDialect, StDialect].freeze
   end
 end

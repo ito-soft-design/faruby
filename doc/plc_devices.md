@@ -211,7 +211,8 @@ plc_access は略記を知らず、`L100` を受け付けても**番号の付け
 | `tools/memory_map.rb` | `ACCESS_*` / `ACCESS_SUFFIXES` の調整 (機種で使える幅が違う場合) |
 | `simulator/kv_vm_simulator.rb` | `BIT_DEVICE_TYPES` の調整、デバイスメモリ数の調整 |
 | `tools/kvs_generator.rb` | 各デバイスの間接アクセスコード生成 (`WORD_DEVICES` / `BIT_DEVICES`) |
-| `tools/dialect.rb` | 文の綴り方と、その機種で使えないデバイス種別 (`unsupported_devices`) |
+| `tools/dialect.rb` | 文の綴り方、書き出し先、その機種で使えないデバイス種別 (`unsupported_devices`)。機種名を `Dialect::CLASSES` に足すと生成も設定もそれに従う |
+| `faruby.yml` | 機種ごとに違う設定 (接続先・メモリ配置・実行設定) を `models:` の下に |
 | `doc/plc_devices.md` | 本ドキュメントにセクション追加 |
 
 ### テンプレート
