@@ -468,12 +468,20 @@ module FaRuby
 
     attr_reader :layout
 
-    def initialize(layout, emitter = nil, labels = {})
+    def initialize(layout, emitter = nil, labels = {}, retain_fixed: false)
       @layout = layout
       @emitter = emitter
       @labels = labels
+      @retain_fixed = retain_fixed
       register_arrays
     end
+
+    # 固定領域のラベルを保持クラスにするか
+    #
+    # **iQ-R は ZR がラッチデバイスです。** そこに割り付けたラベルを
+    # `VAR_GLOBAL` にすると変換が通りません。GX Works2 にはこの検査が
+    # ありませんでした。
+    attr_reader :retain_fixed
 
     # 配ったラベルの定義。**生成コードと 1 つの出どころから出ます**
     #
@@ -504,9 +512,9 @@ module FaRuby
     # (`TEMP32` の +1 など) や、見出しコメントが一覧を並べるときに通ります。
     def state_label(addr, long: false, float: false)
       offset = layout.offset_of(addr)
-      suffix, type = if float then ["F", "単精度実数"]
-                     elsif long then ["L", "ダブルワード[符号付き]"]
-                     else ["", "ワード[符号付き]"]
+      suffix, type = if float then ["F", "REAL"]
+                     elsif long then ["L", "DINT"]
+                     else ["", "INT"]
                      end
       name = "#{STATE_PREFIX}#{self.class.state_names[offset] || "W#{offset}"}#{suffix}"
       remember(name, type, "#{layout.device_name}#{addr}", "VM 状態 +#{offset}")
@@ -840,28 +848,18 @@ module FaRuby
 
     # --- 書き出し ---
 
-    # グローバルラベルの一覧。GX Works2 に貼り付けられる形です
-    #
-    # **手で作ると必ずずれます。** 生成コードが指したラベルをそのまま
-    # 覚えてあるので、その一覧を出します。使っていないラベルは出ません。
-    #
-    # 列は 区分・名前・型・(空)・デバイス・IEC アドレス と、後ろに空欄 5 つ
-    # です。**11 列で 1 行**で、GX Works2 が書き出す形と同じにしてあります。
-    def label_table
-      rows = labels.values.sort_by { |label| [label.device[0], sort_key(label.device), label.name] }
-      rows.map { |label|
-        device, address = label_device(label)
-        (["VAR_GLOBAL", label.name, label.type, "", device, address] + [""] * 5).join("\t")
-      }.join("\n") + "\n"
-    end
-
     # 構造体の配列は先頭デバイスを表に書けません
     #
     # **GX Works2 が「詳細設定」の別画面で持ちます。** 表には押しボタンが
     # 出るだけなので、貼り付けでは渡せません。5 つだけ手で設定します。
     DETAIL = "詳細設定"
 
-    def structure_label?(label) = label.type.start_with?(STATE_PREFIX)
+    def structure_label?(label) = label.type.include?("OF #{STATE_PREFIX}")
+
+    # ラベルの区分。**ラッチデバイスに割り付けたものは保持クラス**です
+    def label_class(label)
+      retain_fixed && label.device.start_with?(fixed_device) ? "VAR_GLOBAL_RETAIN" : "VAR_GLOBAL"
+    end
 
     # 先頭デバイスを手で設定するラベル。名前 => デバイス
     def structure_labels
@@ -870,15 +868,79 @@ module FaRuby
             .map { |l| [l.name, l.device] }
     end
 
+    # IEC の型を貼り付けの表の綴りに直す
+    JAPANESE_TYPES = { "INT" => "ワード[符号付き]", "DINT" => "ダブルワード[符号付き]",
+                       "REAL" => "単精度実数" }.freeze
+
+    def japanese_type(type)
+      if (m = type.match(/\AARRAY \[0\.\.(\d+)\] OF (.+)\z/))
+        return "#{JAPANESE_TYPES.fetch(m[2], m[2])}(0..#{m[1]})"
+      end
+
+      JAPANESE_TYPES.fetch(type, type)
+    end
+
+    # --- 取り込み用の CSV ---
+    #
+    # **貼り付けより確実です。** 表への貼り付けは列の数え方が版で変わり、
+    # 構造体は別の画面になります。CSV はそのまま取り込めます。
+    #
+    # UTF-16LE、タブ区切り。**1 行目のファイル名と見出しと中身、すべて
+    # 引用符で囲みます**。エンジニアリングツールが書き出すとおりです。
+    #
+    # **列は版で違います** (GX Works2 は 11、GX Works3 は 28)。並びも違うので、
+    # 見出しの名前で値を置きます。綴り方が見出しを持ちます (tools/dialect.rb)。
+    CSV_NAME = "faruby"
+
+    def label_csv(header)
+      rows = labels.values.sort_by { |label| [label.device[0], sort_key(label.device), label.name] }
+      csv_file(header, rows.map { |label| csv_row(header.map { |c| label_cell(c, label) }) })
+    end
+
+    # 構造体 1 つぶん。**型ごとに別ファイル**です
+    def structure_csv(name, header)
+      members = structure_definitions.to_h[name] or
+        raise ArgumentError, "知らない構造体です (#{name})"
+
+      body = members.map do |member, type|
+        csv_row(header.map { |c| { "ラベル名" => member, "データ型" => type }.fetch(c, "") })
+      end
+      csv_file(header, body)
+    end
+
+    # 見出し 1 つぶんの値
+    #
+    # **構造体の配列はデバイスを空にします。** 「詳細設定」は画面の表示で
+    # あって取り込める値ではありません。先頭デバイスは別画面で設定します。
+    def label_cell(column, label)
+      device, address = label_device(label)
+      device = address = "" if structure_label?(label)
+      case column
+      when "クラス" then label_class(label)
+      when "ラベル名" then label.name
+      when "データ型" then label.type
+      when "デバイス", "割付け(デバイス/ラベル)" then device
+      when "アドレス" then address
+      when "外部機器からのアクセス" then "0"
+      else ""
+      end
+    end
+
+    def csv_file(header, body)
+      ["\"#{CSV_NAME}\"", csv_row(header), *body].join("\n") + "\n"
+    end
+
+    def csv_row(cells) = cells.map { |c| "\"#{c}\"" }.join("\t")
+
     # 構造体の定義。ラベルより先にこちらを登録します
+
     #
     # **同じ 4 ワードを 3 通りに見ます。** 値が 32 ビット整数か実数か、
     # 16 ビット 2 つかは実行時にしか決まらないためです。重ねて割り付けます。
     def structure_definitions
-      [[SLOT_TYPE,       [[TAG, "ワード[符号付き]"], [NUM, "ダブルワード[符号付き]"], [PAD, "ワード[符号付き]"]]],
-       [SLOT_FLOAT_TYPE, [[TAG, "ワード[符号付き]"], [NUM, "単精度実数"], [PAD, "ワード[符号付き]"]]],
-       [SLOT_WORD_TYPE,  [[TAG, "ワード[符号付き]"], [WORDS[0], "ワード[符号付き]"],
-                          [WORDS[1], "ワード[符号付き]"], [PAD, "ワード[符号付き]"]]]]
+      [[SLOT_TYPE,       [[TAG, "INT"], [NUM, "DINT"], [PAD, "INT"]]],
+       [SLOT_FLOAT_TYPE, [[TAG, "INT"], [NUM, "REAL"], [PAD, "INT"]]],
+       [SLOT_WORD_TYPE,  [[TAG, "INT"], [WORDS[0], "INT"], [WORDS[1], "INT"], [PAD, "INT"]]]]
     end
 
     private
@@ -952,11 +1014,19 @@ module FaRuby
       return [DETAIL, DETAIL] if structure_label?(label)
 
       area = label.device.start_with?(fixed_device) ? 12 : 0
-      width = label.type.start_with?("ワード") ? "W" : "D"
+      width = label.type.start_with?("INT", "ARRAY [0..") && !label.type.include?("VM") ? "W" : "D"
       [label.device, "%M#{width}#{area}.#{label.device[/\d+/]}"]
     end
 
+    # 配列の型。**IEC の綴りで持ちます**
+    #
+    # 取り込みの CSV はこの綴りで、貼り付けの表は日本語です。どちらも
+    # 同じところから作ります。
+    def array_of(type, count) = "ARRAY [0..#{count - 1}] OF #{type}"
+
+
     # 同じ名前を 2 度覚えない。指すたびに呼ばれます
+
 
     def remember(name, type, device, comment)
       @labels[name] ||= Label.new(name, type, device, comment)
@@ -974,16 +1044,15 @@ module FaRuby
       variable = "#{layout.device_name}#{layout.origin}"
       fixed = "#{fixed_device}#{layout.fixed_origin}"
 
-      remember(SLOT,  "#{SLOT_TYPE}(0..#{slots - 1})",  variable, "値スロット")
-      remember(SLOTF, "#{SLOT_FLOAT_TYPE}(0..#{slots - 1})", variable, "同じ場所を実数で")
-      remember(SLOTW, "#{SLOT_WORD_TYPE}(0..#{slots - 1})", variable, "同じ場所を 16 ビット 2 つで")
-      remember(FIXED_SLOT,  "#{SLOT_TYPE}(0..#{fixed_slots - 1})",  fixed, "定数プール")
-      remember(FIXED_SLOTF, "#{SLOT_FLOAT_TYPE}(0..#{fixed_slots - 1})", fixed, "同じ場所を実数で")
-      remember(FIXED_SLOTW, "#{SLOT_WORD_TYPE}(0..#{fixed_slots - 1})", fixed,
+      remember(SLOT,  array_of(SLOT_TYPE, slots),  variable, "値スロット")
+      remember(SLOTF, array_of(SLOT_FLOAT_TYPE, slots), variable, "同じ場所を実数で")
+      remember(SLOTW, array_of(SLOT_WORD_TYPE, slots), variable, "同じ場所を 16 ビット 2 つで")
+      remember(FIXED_SLOT,  array_of(SLOT_TYPE, fixed_slots),  fixed, "定数プール")
+      remember(FIXED_SLOTF, array_of(SLOT_FLOAT_TYPE, fixed_slots), fixed, "同じ場所を実数で")
+      remember(FIXED_SLOTW, array_of(SLOT_WORD_TYPE, fixed_slots), fixed,
                "同じ場所を 16 ビット 2 つで")
-      remember(FIXED_WORD, "ワード[符号付き](0..#{layout.fixed_instance_size - 1})", fixed,
-               "バイトコードと表")
-      remember(Z_SAVE, "ワード[符号付き](0..8)",
+      remember(FIXED_WORD, array_of("INT", layout.fixed_instance_size), fixed, "バイトコードと表")
+      remember(Z_SAVE, array_of("INT", 9),
                "#{layout.device_name}#{layout.z_save_addr(1)}", "Z の退避先")
       noop_statement
     end

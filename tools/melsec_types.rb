@@ -17,6 +17,15 @@ module FaRuby
     # 広さの順。**狭いほうを広げます**
     ORDER = { int: 0, long: 1, real: 2 }.freeze
 
+    # **32 ビットを 16 ビットへ切り詰めるところはビット列を経由します。**
+    # `DINT_TO_INT` は範囲を検査し、iQ-R は 60000 を書こうとすると
+    # 「データ変換できない不正」で CPU が止まります (`$D320U = 60000`)。
+    # faRuby が欲しいのは値の変換ではなくビット列です。
+    #
+    # GX Works2 (Q) は検査せず黙って切り詰めていました。**機種で分けません。**
+    # 分けるとどちらかだけ直して忘れることになります。
+    NARROW = "WORD_TO_INT(DINT_TO_WORD(%s))"
+
     CONVERSION = {
       [:int, :long] => "INT_TO_DINT", [:long, :int] => "DINT_TO_INT",
       [:int, :real] => "INT_TO_REAL", [:real, :int] => "REAL_TO_INT",
@@ -73,9 +82,10 @@ module FaRuby
     # 中に括弧があり、そのままだと変換の括弧と見分けが付きません。
     def masked(expr)
       text = expr.gsub(/\[[^\]]*\]/, "[]")
+      names = CONVERSION.values + %w[WORD_TO_INT DINT_TO_WORD DWORD_TO_DINT DINT_TO_DWORD]
       loop do
-        replaced = text.gsub(/\b(#{CONVERSION.values.join("|")})\(([^()]*)\)/) do
-          MARKER.fetch(CONVERSION.key(Regexp.last_match(1)).last)
+        replaced = text.gsub(/\b(#{names.join("|")})\(([^()]*)\)/) do
+          MARKER.fetch(result_type(Regexp.last_match(1)))
         end
         return text if replaced == text
 
@@ -161,6 +171,7 @@ module FaRuby
 
     def convert(expr, from, to)
       return expr if from == to
+      return format(NARROW, expr.strip) if from == :long && to == :int
 
       "#{CONVERSION.fetch([from, to])}(#{expr.strip})"
     end
@@ -170,6 +181,12 @@ module FaRuby
       index = statement.index("(*")
       index ? [statement[0...index].rstrip, statement[index..].prepend("   ")] : [statement, ""]
     end
+
+    # 変換の結果の型
+    RESULT_TYPES = { "WORD_TO_INT" => :int, "DINT_TO_WORD" => :int,
+                     "DWORD_TO_DINT" => :long, "DINT_TO_DWORD" => :long }.freeze
+
+    def result_type(name) = RESULT_TYPES[name] || CONVERSION.key(name).last
 
     def type_of_term(term)
       return nil if term.match?(LITERAL)
@@ -192,11 +209,15 @@ module FaRuby
       member ? member_type(name, member) : label_type(name)
     end
 
+    # **型は IEC の綴りで持っています** (tools/devices.rb)。取り込みの CSV が
+    # その綴りで、貼り付けの表の日本語はそこから作ります。
     def label_type(name)
-      case labels[name]&.type
-      when /\A単精度実数/ then :real
-      when /\Aダブルワード/ then :long
-      when /\Aワード/ then :int
+      type = labels[name]&.type or return nil
+      element = type[/\AARRAY \[[^\]]*\] OF (.+)\z/, 1] || type
+      case element
+      when "REAL" then :real
+      when "DINT" then :long
+      when "INT" then :int
       end
     end
 

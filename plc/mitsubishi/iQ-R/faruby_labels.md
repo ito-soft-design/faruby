@@ -1,4 +1,4 @@
-# faRuby のラベル (Q)
+# faRuby のラベル (iQ-R)
 
 `rake vm_core` が生成します。手で編集しないでください。
 

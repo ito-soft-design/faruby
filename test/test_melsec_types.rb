@@ -106,9 +106,9 @@ class TestMelsecTypes < Minitest::Test
 
   def types
     labels = {
-      "VMPC" => label("VMPC", "ワード[符号付き]"),
-      "VMTEMP32L" => label("VMTEMP32L", "ダブルワード[符号付き]"),
-      "VMTEMP32F" => label("VMTEMP32F", "単精度実数"),
+      "VMPC" => label("VMPC", "INT"),
+      "VMTEMP32L" => label("VMTEMP32L", "DINT"),
+      "VMTEMP32F" => label("VMTEMP32F", "REAL"),
     }
     FaRuby::MelsecTypes.new(labels, FaRuby::DeviceSet.melsec)
   end
@@ -120,9 +120,21 @@ class TestMelsecTypes < Minitest::Test
     assert_equal "VMTEMP32L := INT_TO_DINT(VMPC);", types.coerce("VMTEMP32L := VMPC;")
   end
 
-  # 逆は狭める。**入りきらない値は落ちますが、KV も同じです**
-  def test_a_wide_value_narrows_on_assignment
-    assert_equal "VMPC := DINT_TO_INT(VMTEMP32L);", types.coerce("VMPC := VMTEMP32L;")
+  # **狭めるところはビット列を経由します。** `DINT_TO_INT` は範囲を検査し、
+  # iQ-R は 60000 を書こうとすると CPU が止まります。欲しいのは値の変換では
+  # なくビット列です
+  def test_a_wide_value_narrows_through_a_bit_string
+    assert_equal "VMPC := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));",
+                 types.coerce("VMPC := VMTEMP32L;")
+  end
+
+  # 生成器が自分で書いた変換は数え直す。**包み直さない**
+  #
+  # ビット演算は `DWORD_TO_DINT(DINT_TO_DWORD(a) AND DINT_TO_DWORD(b))` の形で
+  # 出ます。中を 32 ビットと読めないと、外から包んで二重になります。
+  def test_a_hand_written_conversion_keeps_its_type
+    line = "VMTEMP32L := DWORD_TO_DINT(DINT_TO_DWORD(VMTEMP32L) AND DINT_TO_DWORD(1));"
+    assert_equal line, types.coerce(line)
   end
 
   # 合っていれば触らない

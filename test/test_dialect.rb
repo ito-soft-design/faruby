@@ -22,10 +22,11 @@ class TestDialect < Minitest::Test
   # 書き出し先はメーカー名を挟みます。エンジニアリングツールが違えば
   # プロジェクトの置き場所も分かれるためです。
   def test_the_model_names_the_output_directory
-    assert_equal %w[KV-5000 KV-X500 Q], FaRuby::Dialect.models
+    assert_equal %w[KV-5000 KV-X500 Q iQ-R], FaRuby::Dialect.models
     assert_equal "keyence/KV-5000", kvs.directory
     assert_equal "keyence/KV-X500", st.directory
     assert_equal "mitsubishi/Q", FaRuby::MelsecDialect.new.directory
+    assert_equal "mitsubishi/iQ-R", FaRuby::MelsecIqrDialect.new.directory
   end
 
   # **Z はラダーと共有する資源です。** どの機種も退避して戻します。

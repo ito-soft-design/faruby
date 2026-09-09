@@ -3195,13 +3195,21 @@ module FaRuby
     # 既定の書き出し先 (KV Studio のプロジェクトと同じ場所)
     def output_dir = File.join(PLC_DIR, dialect.directory)
 
+    # **CSV は UTF-16LE です。** GX Works3 が書き出す形に合わせます
+    def encoded(name, content)
+      return content.b unless name.end_with?(".csv")
+
+      ("\uFEFF" + content).encode("utf-16le").b
+    end
+
     def write!(dir = output_dir)
       files = generate
       written = files.filter_map do |name, content|
         path = File.join(dir, name)
-        next if File.exist?(path) && File.binread(path) == content.b
+        bytes = encoded(name, content)
+        next if File.exist?(path) && File.binread(path) == bytes
 
-        File.binwrite(path, content)
+        File.binwrite(path, bytes)
         name
       end
       pattern = File.join(dir, "vm_*.#{dialect.extension}")

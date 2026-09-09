@@ -252,7 +252,13 @@ module FaRuby
     # **ラベルの控えは綴り方が持ちます。** 生成はファイルごとに別の emitter で
     # 行うので、デバイス層に持たせると 1 ファイルぶんしか集まりません。
     # 綴り方は 1 回の生成で 1 つなので、ここが全体の受け皿になります。
-    def devices_for(layout, emitter) = MelsecDevices.new(layout, emitter, labels)
+    def devices_for(layout, emitter)
+      MelsecDevices.new(layout, emitter, labels, retain_fixed: retain_fixed_labels?)
+    end
+
+    # **ラッチデバイスに割り付けたラベルは保持クラスにします。** GX Works2 は
+    # 見ませんが、GX Works3 は `VAR_GLOBAL` だと変換を通しません。
+    def retain_fixed_labels? = false
 
     def labels = @labels ||= {}
 
@@ -366,10 +372,28 @@ module FaRuby
       filled.join("\n")
     end
 
+    # ラベルと構造体は CSV で取り込みます
+    #
+    # **貼り付けより確実です。** 表への貼り付けは列の数え方が版で変わり、
+    # 構造体は別の画面になります。UTF-16LE なので書き出すときに変換します。
     def companion_files(devices)
-      { "faruby_labels.tsv" => devices.label_table,
-        "faruby_labels.md" => label_document(devices) }
+      files = { "Global.csv" => devices.label_csv(label_columns) }
+      devices.structure_definitions.each do |name, _members|
+        files["#{name}.csv"] = devices.structure_csv(name, structure_columns)
+      end
+      files.merge("faruby_labels.md" => label_document(devices))
     end
+
+    # CSV の列。**版で数も並びも違います**
+    #
+    # GX Works2 は 11 列、GX Works3 は 28 列です。見出しの名前で値を置くので、
+    # ここを差し替えるだけで済みます。
+    def label_columns
+      %w[クラス ラベル名 データ型 定数値 デバイス アドレス コメント 備考
+         システムラベルの関連 システムラベル名 属性]
+    end
+
+    def structure_columns = %w[ラベル名 データ型 定数値 コメント]
 
     private
 
@@ -383,7 +407,7 @@ module FaRuby
 
     def label_document(devices)
       structures = devices.structure_definitions.map { |name, members|
-        rows = members.map { |member, type| "| #{member} | #{type} |" }
+        rows = members.map { |member, type| "| #{member} | #{devices.japanese_type(type)} |" }
         "### #{name}\n\n| メンバ | データ型 |\n|---|---|\n#{rows.join("\n")}\n"
       }
       <<~TEXT
@@ -393,17 +417,21 @@ module FaRuby
 
         ## 手順
 
-        1. 下の構造体を「構造体設定」に登録します
-        2. `faruby_labels.tsv` をグローバルラベルの表に貼り付けます
+        1. 構造体の CSV を取り込みます (`VMSLOTT.csv` `VMSLOTFT.csv` `VMSLOTWT.csv`)
+        2. `Global.csv` を取り込みます
         3. **構造体の配列 #{devices.structure_labels.size} つに先頭デバイスを設定します** (下の表)
 
-        **構造体を先に登録します。** ラベルの型の欄が構造体名を指すためです。
+        **構造体を先に取り込みます。** ラベルの型の欄が構造体名を指すためです。
+
+        **3 は取り込むたびに毎回です。** 取り込みで先頭デバイスが消えます
+        (実機で確認済み)。ラベルを 1 つ足しただけでも、6 つを設定し直す
+        ことになります。
 
         ## 構造体の配列に先頭デバイスを設定する
 
-        **ここだけ手作業です。** GX Works2 は構造体の先頭デバイスを別画面で
-        持っていて、表には「詳細設定」の押しボタンが出るだけなので、
-        貼り付けでは渡せません。
+        **ここだけ手作業で、取り込むたびに毎回です。** 構造体の先頭デバイスは
+        別画面が持っていて、CSV の欄には入りません。取り込むと消えるので、
+        そのつど設定し直します。
 
         | ラベル | 先頭デバイス |
         |-------|------------|
@@ -423,9 +451,37 @@ module FaRuby
     end
   end
 
+  # 三菱 MELSEC iQ-R の ST (GX Works3)
+  #
+  # **デバイスの種別は Q と同じ**です (D / W / R / ZR / M / L / B / X / Y)。
+  # 違うのはエンジニアリングツールで、ラベルの書式と PLC 側の設定が変わります。
+  #
+  # **綴りは Q から始めます。** 実機で確かめた性質 (doc/melsec.md) の多くは
+  # 同じ MELSEC なので通るはずで、違うところは変換のエラーが教えてくれます。
+  # Q のときもその進め方で 6 つの穴を 1 つずつ潰しました。
+  class MelsecIqrDialect < MelsecDialect
+    def model = "iQ-R"
+    def name = "ST (GX Works3)"
+
+    # **ZR はラッチデバイスです** (実機で確認済み)
+    def retain_fixed_labels? = true
+
+    # GX Works3 は列が増え、並びも違います
+    def label_columns
+      ["クラス", "ラベル名", "データ型", "定数", "初期値", "割付け(デバイス/ラベル)",
+       "アドレス", "コメント", "コメント2", "コメント3", "コメント4", "コメント5",
+       "Japanese/日本語", "English", "Chinese Simplified/简体中文", "Korean/한국어",
+       "Chinese Traditional/繁體中文", "German/Deutsch", "Italian/Italiano",
+       "Reserved1", "Reserved2", "Reserved3", "Reserved4", "備考",
+       "システムラベルの関連", "システムラベル名", "属性", "外部機器からのアクセス"]
+    end
+
+    def structure_columns = label_columns[0...-1]
+  end
+
   class Dialect
     # 対応している機種。**増やすときはここに足すだけ**で、生成 (`rake vm_core`)
     # も設定の `models:` もこの一覧から決まります。
-    CLASSES = [KvsDialect, StDialect, MelsecDialect].freeze
+    CLASSES = [KvsDialect, StDialect, MelsecDialect, MelsecIqrDialect].freeze
   end
 end
