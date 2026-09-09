@@ -336,7 +336,7 @@ end
 
       assert_equal FaRuby::VmConstants::ACCESS_F, codegen.device_mappings[0][:access_type]
       # 実数リテラルは IEEE754 単精度でプールに載る
-      image = codegen.memory_image
+      image = codegen.fixed_image
       layout = codegen.layout
       bits = image[layout.pool_addr(0)] | (image[layout.pool_addr(0) + 1] << 16)
       assert_equal FaRuby::VmConstants::TT_FLOAT, image[layout.pool_type_addr(0)]
@@ -348,7 +348,7 @@ end
   end
 
   # 汎用グローバル変数は 4 ワードのスロットに順番に割り当てられ、
-  # デバイステーブルには値ワード (スロット先頭+1) のアドレスが入る
+  # デバイステーブルにはスロット先頭のアドレスが入る
   def test_general_global_slot_layout
     source = <<~RUBY
       $foo = 11
@@ -367,10 +367,10 @@ end
     ]
     assert_equal [11, 22], slot_values.sort
 
-    # 型タグ領域は未使用のまま
-    assert_equal FaRuby::VmConstants::TT_EMPTY,
+    # 型タグも書かれる。整数を入れたので TT_INTEGER
+    assert_equal FaRuby::VmConstants::TT_INTEGER,
                  sim.em.read_u16(layout.general_global_slot_addr(0))
-    assert_equal FaRuby::VmConstants::TT_EMPTY,
+    assert_equal FaRuby::VmConstants::TT_INTEGER,
                  sim.em.read_u16(layout.general_global_slot_addr(1))
   end
 
@@ -388,7 +388,450 @@ end
     assert_equal 99, sim.em.read_s32(layout.general_global_addr(0))
   end
 
+  # === 汎用グローバル変数はどの型でも持てる ===
+  #
+  # 値スロットをそのまま持つので、型タグごと写る。デバイスと違って幅が無い
+
+  def test_a_general_global_keeps_a_float
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 2.5
+      $DM0 = 0
+      if $g == 2.5
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 1, sim.devices[1].read_u16(0), "実数が切り捨てられている"
+  end
+
+  # 以前は 0 が入り、整数 0 は Ruby では真なので条件が通っていた
+  def test_a_general_global_keeps_false_falsy
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = false
+      $DM0 = 0
+      if $g
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(0), "false が真になっている"
+  end
+
+  def test_a_general_global_keeps_nil_falsy
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = nil
+      $DM0 = 0
+      if $g
+        $DM0 = 1
+      end
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(0), "nil が真になっている"
+  end
+
+  def test_a_general_global_keeps_an_array
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = [1, 2, 3]
+      $DM0 = $g.length
+    RUBY
+
+    assert_equal 3, sim.devices[1].read_u16(0)
+  end
+
+  def test_a_general_global_keeps_a_hash
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = { 1 => 2 }
+      $DM0 = $g[1]
+    RUBY
+
+    assert_equal 2, sim.devices[1].read_u16(0)
+  end
+
+  def test_a_general_global_keeps_a_string
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = "abc"
+      $DM100 = $g
+    RUBY
+
+    dm = sim.devices[1]
+
+    assert_equal [0x6162, 0x6300], [dm.read_u16(100), dm.read_u16(101)]
+  end
+
+  # 入るのはスロット番号だけ。プールは増えない
+  def test_a_general_global_does_not_take_a_pool_slot
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1, 2]
+      $g = a
+      $DM0 = $g.length
+    RUBY
+
+    assert_equal 2, sim.devices[1].read_u16(0)
+    assert_equal 1, sim.em.read_u16(layout.array_sp_addr), "配列 1 つぶんだけ使う"
+  end
+
+  # === 同じ変数に違う型を入れ直す ===
+  #
+  # スロットごと上書きするので前の値は残らない。**ハッシュとデバイス参照は
+  # 値ワードを 2 つ使う**ため、そこから整数へ戻すときに上のワードが
+  # 消えることを確かめておく
+
+  def test_a_general_global_can_change_type
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 2.5
+      $g = "abc"
+      $g = 7
+      $DM0 = $g
+    RUBY
+
+    assert_equal 7, sim.devices[1].read_u16(0)
+  end
+
+  # ハッシュは +1 に鍵、+2 に値の配列を置く。整数は 32 ビットで書くので両方消える
+  def test_a_general_global_leaves_no_upper_word_behind
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = { 1 => 2 }
+      $g = 9
+      $DM0 = $g
+    RUBY
+
+    assert_equal 9, sim.devices[1].read_u16(0)
+  end
+
+  # 逆向き。整数の後にハッシュを入れても 2 ワードとも書かれる
+  def test_a_general_global_takes_a_hash_after_an_integer
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $g = 1
+      $g = { 5 => 6 }
+      $DM0 = $g[5]
+    RUBY
+
+    assert_equal 6, sim.devices[1].read_u16(0)
+  end
+
+  # デバイス族への参照も 2 ワード使う
+  def test_a_general_global_keeps_a_device_family
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM50 = 3
+      $g = $DM
+      $DM0 = $g[50]
+    RUBY
+
+    assert_equal 3, sim.devices[1].read_u16(0)
+  end
+
+  # === 配列をデバイスへ写す ===
+  #
+  # 刻みは幅で決まる。ビットデバイスは 1 ワードが 16 ビットにあたる。
+  # 個別ビット (幅なし) には書けない
+
+  # 止まることを確かめる用。compile_and_run は完走を前提にしている
+  def run_until_it_stops(source)
+    rb_file = Tempfile.new(["stop", ".rb"], "C:/tmp")
+    rb_file.write(source)
+    rb_file.close
+    mrb_path = rb_file.path.sub(/.rb$/, ".mrb")
+    assert system(@mrbc, "-o", mrb_path, rb_file.path), "mrbc に失敗"
+
+    parser = FaRuby::MrbParser.new(File.binread(mrb_path)).parse
+    sim = FaRuby::KvVmSimulator.new
+    sim.load_irep_and_run(parser.irep)
+    sim
+  ensure
+    [rb_file&.path, mrb_path].each { |f| File.delete(f) if f && File.exist?(f) }
+  end
+
+  def test_an_array_writes_consecutive_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [11, 22, 33]
+      $DM100 = a
+    RUBY
+
+    assert_equal [11, 22, 33], (0..2).map { |i| sim.devices[1].read_u16(100 + i) }
+  end
+
+  # .L は 2 ワードずつ進む
+  def test_a_wide_array_steps_by_two_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1, 2, 3]
+      $DM100L = a
+    RUBY
+
+    assert_equal [1, 2, 3], (0..2).map { |i| sim.devices[1].read_s32(100 + i * 2) }
+  end
+
+  def test_an_array_of_floats
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [1.5, 2.5]
+      $DM100F = a
+    RUBY
+
+    bits = (0..1).map { |i| sim.devices[1].read_u32(100 + i * 2) }
+
+    assert_equal [1.5, 2.5], bits.map { |b| [b].pack("L").unpack1("f") }
+  end
+
+  # 添字を付けた形も同じ
+  def test_an_indexed_array_write
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [7, 8]
+      i = 0
+      $DML[100 + i] = a
+    RUBY
+
+    assert_equal [7, 8], (0..1).map { |i| sim.devices[1].read_s32(100 + i * 2) }
+  end
+
+  # ビットデバイスは 1 ワードが 16 ビット。$MRL なら 32 ビットずつ進む。
+  # 書いたものを faRuby 自身で読み戻して確かめる
+  def test_an_array_to_a_bit_device_with_a_width
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = [5, 6]
+      i = 0
+      $MRL[64 + i] = a
+      $DM100L = $MRL[64]
+      $DM102L = $MRL[96]
+    RUBY
+
+    assert_equal [5, 6], [sim.devices[1].read_s32(100), sim.devices[1].read_s32(102)]
+  end
+
+  # 個別ビットには書けない。1 要素が何ビットか決まらない
+  def test_an_array_to_a_plain_bit_device_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      a = [1, 0]
+      i = 0
+      $MR[64 + i] = a
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 数値でない要素があると止まる。入れ子の書き出し方は決めていない
+  def test_an_array_with_a_string_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      a = [1, "x"]
+      $DM100 = a
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # ハッシュは鍵の並べ方が決まらない
+  def test_a_hash_to_a_device_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      h = { 1 => 2 }
+      $DM100 = h
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 空の配列は何も書かない
+  def test_an_empty_array_writes_nothing
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100 = 99
+      a = []
+      $DM100 = a
+    RUBY
+
+    assert_equal 99, sim.devices[1].read_u16(100)
+  end
+
+  # === デバイスから配列へ ($DML[100, 3]) ===
+  #
+  # 引数 2 個の `[]` はメソッド呼び出しで、OP_GETIDX とは別経路。
+  # Ruby の a[i, n] に合わせて、個数が負なら nil、0 なら空の配列
+
+  def test_a_slice_reads_consecutive_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100 = [11, 22, 33]
+      a = $DM[100, 3]
+      $DM200 = a.length
+      $DM201 = a[0]
+      $DM202 = a[2]
+    RUBY
+
+    assert_equal [3, 11, 33], (0..2).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  # .L は 2 ワードずつ進む。書く向きと同じ規則
+  def test_a_wide_slice_steps_by_two_words
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $DM100L = [7, 8]
+      a = $DML[100, 2]
+      $DM200 = a[0]
+      $DM201 = a[1]
+    RUBY
+
+    assert_equal [7, 8], (0..1).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  def test_a_slice_of_zero_is_an_empty_array
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = $DM[100, 0]
+      $DM200 = a.length
+    RUBY
+
+    assert_equal 0, sim.devices[1].read_u16(200)
+  end
+
+  # Ruby の a[i, -1] は nil
+  def test_a_negative_count_is_nil
+    sim = compile_and_run(<<~RUBY)[:sim]
+      a = $DM[100, -1]
+      $DM200 = 0
+      if a == nil
+        $DM200 = 1
+      end
+    RUBY
+
+    assert_equal 1, sim.devices[1].read_u16(200)
+  end
+
+  # 1 スロットの容量を超える個数
+  def test_a_slice_past_the_capacity_stops_the_vm
+    sim = run_until_it_stops("a = $DM[100, #{FaRuby::MemoryLayout.default.max_array_len + 1}]\n")
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # ビットデバイスは 1 ワードが 16 ビット
+  def test_a_slice_from_a_bit_device_with_a_width
+    sim = compile_and_run(<<~RUBY)[:sim]
+      $MRL[64] = [5, 6]
+      a = $MRL[64, 2]
+      $DM200 = a[0]
+      $DM201 = a[1]
+    RUBY
+
+    assert_equal [5, 6], (0..1).map { |i| sim.devices[1].read_u16(200 + i) }
+  end
+
+  # 個別ビットは 1 要素が何ビットか決まらない
+  def test_a_slice_from_a_plain_bit_device_stops_the_vm
+    sim = run_until_it_stops("a = $MR[64, 2]\n")
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # 配列の部分取り出し (Ruby の a[1, 2]) は入れていない
+  def test_a_slice_of_an_array_stops_the_vm
+    sim = run_until_it_stops(<<~RUBY)
+      b = [1, 2, 3]
+      c = b[1, 2]
+    RUBY
+
+    assert_equal FaRuby::VmConstants::VM_ERROR, sim.status
+  end
+
+  # === 添字によるデバイスアクセス ===
+  #
+  # $DM100 はコンパイル時にアドレスが確定するため、実行時に計算した
+  # アドレスを読み書きできない。裸の $DM に添字を付けて解決する。
+
+  def test_device_index_write_and_read_in_a_loop
+    source = <<~RUBY
+      i = 0
+      while i < 5
+        $DM[600 + i] = i * 10
+        i = i + 1
+      end
+      sum = 0
+      i = 0
+      while i < 5
+        sum = sum + $DM[600 + i]
+        i = i + 1
+      end
+    RUBY
+    result = compile_and_run(source)
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [0, 10, 20, 30, 40], (0..4).map { |i| dm.read_s16(600 + i) }
+    assert_equal 100, result[:locals]["sum"]
+  end
+
+  def test_device_index_honours_the_width_suffix
+    result = compile_and_run("$DML[612] = 70000\n")
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 70_000, dm.read_s32(612)
+  end
+
+  # 範囲外は黙って別の場所を読み書きしてしまうため、VM を止める
+  def test_device_index_out_of_range_stops_the_vm
+    [-1, 70_000].each do |index|
+      sim = run_expecting_error("$DM[#{index}] = 1\n")
+      assert_equal FaRuby::VmConstants::VM_ERROR, sim.status, "添字 #{index}"
+    end
+  end
+
+  # 幅サフィックスを付けると、そのビットから連続したビット列を整数として扱う
+  # (実機で確認済み。1ビット刻みでチャンネル境界に揃っていなくてよい)
+  def test_bit_device_with_a_width_reads_a_bit_field
+    source = <<~RUBY
+      $MR[64] = true
+      $MR[65] = true
+      $MR[66] = true
+      a = $MRL[64]
+    RUBY
+    result = compile_and_run(source)
+
+    assert_equal 7, result[:locals]["a"], "下位3ビットが立つ"
+  end
+
+  def test_bit_device_with_a_width_writes_a_bit_field
+    result = compile_and_run("$MRU[80] = 6\n")
+    mr = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_MR]
+
+    assert_equal [0, 1, 1, 0], (80..83).map { |n| mr.read_u16(n) }, "6 = 0b110"
+  end
+
+  # チャンネル境界に揃っていない位置から読める
+  def test_bit_field_can_start_anywhere
+    source = <<~RUBY
+      $MR[17] = true
+      $MR[20] = true
+      a = $MRU[17]
+    RUBY
+    result = compile_and_run(source)
+
+    assert_equal 9, result[:locals]["a"], "bit0 と bit3"
+  end
+
+  # ビットデバイスも同じ経路。添字はデバイス番号 (MR400 は 64)
+  def test_device_index_works_for_bit_devices
+    source = <<~RUBY
+      $MR[64] = true
+      $MR[65] = false
+      $MR[66] = true
+    RUBY
+    result = compile_and_run(source)
+    mr = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_MR]
+
+    assert_equal [1, 0, 1], [64, 65, 66].map { |n| mr.read_u16(n) }
+  end
+
   private
+
+  # エラー停止することを期待して実行する (compile_and_run は完了を要求する)
+  def run_expecting_error(source)
+    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file.write(source)
+    rb_file.close
+    mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
+
+    begin
+      assert system(@mrbc, "-o", mrb_path, rb_file.path)
+      irep = FaRuby::MrbParser.new(File.binread(mrb_path)).parse.irep
+      sim = FaRuby::KvVmSimulator.new
+      sim.load_irep_and_run(irep)
+      sim
+    ensure
+      rb_file.unlink
+      File.delete(mrb_path) if File.exist?(mrb_path)
+    end
+  end
 
   def find_mrbc
     MRBC_PATHS.each do |path|

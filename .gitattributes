@@ -1,6 +1,12 @@
-# KV スクリプトは改行コードを LF に固定する
+# 生成したスクリプトは改行コードを LF に固定する
 #
 # core.autocrlf = true の環境では、チェックアウト時に LF が CRLF へ変換される。
-# vm_core.kvs は tools/kvs_generator.rb が LF で生成するため、変換されると
-# test_kvs_generator.rb のバイト一致検証 (手編集の検出) が誤って失敗する。
+# 生成物は tools/kvs_generator.rb が LF で書くため、変換されるとバイト一致の
+# 検証 (手編集の検出) が誤って失敗し、git status も常に変更ありになる。
+#
+# **`.kvs` だけでは足りませんでした。** KV-X500 と三菱は `.st` で、
+# ラベルの CSV と手順の md も生成物です。
 *.kvs text eol=lf
+*.st  text eol=lf
+faruby_labels.md text eol=lf
+*.csv binary

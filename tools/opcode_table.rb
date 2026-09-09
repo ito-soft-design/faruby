@@ -3,7 +3,8 @@
 # オペコード定義表 (唯一の情報源)
 #
 # ここに書いた命令定義から以下すべてが導かれます。
-#   - plc/keyence/vm_core.kvs      (KvsEmitter が KV スクリプトを生成)
+#   - plc/keyence/KV-5000/vm_*.kvs (KvsEmitter が KV スクリプトを生成)
+#   - plc/keyence/KV-X500/vm_*.st  (綴り方を StDialect に差し替えたもの)
 #   - simulator/kv_vm_simulator.rb (SimVm が同じ定義を実行)
 #   - tools/disasm.rb              (MRUBY_OPCODES を参照)
 #
@@ -175,17 +176,30 @@ module FaRuby
 
   # 1 命令の定義。name / format は MRUBY_OPCODES から引くので取り違えが起きない。
   class OpcodeDef
-    attr_reader :code, :name, :format, :summary, :body
+    attr_reader :code, :name, :format, :summary, :body, :enters
 
-    def initialize(code, summary, &body)
+    # enters: 前置きだけ実行して、別の命令の枝へ入る
+    #
+    # **mruby の vm.c と同じ形です。** `OP_SSEND` は `regs[a] = regs[0]` で
+    # self をレシーバ位置に置いてから `OP_SEND` へ落ちます。そこを真似ず
+    # 別々に書いていたころは、組み込みメソッドの振り分けが**生成コードに
+    # 2 度展開**され、KV 全体の 14% を占めていました。
+    #
+    # 前置きは命令の取り込みで実行します。**オペランドはまだ読めない**ので、
+    # 覗くだけで PC は進めません。
+    def initialize(code, summary, enters: nil, &body)
       info = OpcodeTable::MRUBY_OPCODES[code]
       raise ArgumentError, format("未知のオペコード 0x%02X", code) unless info
 
       @code = code
       @name, @format = info
       @summary = summary
+      @enters = enters
       @body = body
     end
+
+    # 枝を持つか。前置きだけの命令は持たない
+    def branch? = enters.nil?
 
     def operand_sizes
       OpcodeTable::FORMAT_OPERANDS.fetch(format)
@@ -275,12 +289,74 @@ module FaRuby
         vm.set_reg_special(:a, VmConstants::TT_FALSE)
       end
 
+      # R[a] = :name
+      #
+      # 値はホストが名前ごとに振った通し番号。シンボル表は irep ごとに別なので、
+      # オペランドの索引をそのまま値にすると別の irep の同じ名前と等しくならない。
+      # 番号を挟むことで OP_EQ の「タグと値の一致」がそのまま使える。
+      defs << OpcodeDef.new(0x10, "R[a] = symbols[b] (シンボル)") do |vm|
+        vm.load_symbol(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
       defs << OpcodeDef.new(0x15, "R[a] = global[symbols[b]]") do |vm|
-        vm.load_global_into_reg(:a, :b)
+        vm.load_global_into_reg(:a, :b, HEAP_ERROR)
       end
 
       defs << OpcodeDef.new(0x16, "global[symbols[b]] = R[a]") do |vm|
         vm.store_reg_into_global(:b, :a)
+      end
+
+      # 添字アクセス。デバイス族 ($DM[100 + i])・配列 (a[0])・ハッシュ・
+      # 文字列 (s[0]) が通る。OP_GETIDX / OP_SETIDX は専用命令なので
+      # メソッド呼び出しは要らない。
+      #
+      # 配列の読みは範囲外でも nil で、エラーにしない (Ruby と同じ)。
+      # 書きは Ruby なら配列を伸ばすが、容量が固定なので超えたら止まる。
+      # 文字列の読みは 1 文字の文字列を作るので、プールを 1 スロット使う。
+      defs << OpcodeDef.new(0x23, "R[a] = R[a][R[a+1]] (デバイス・配列・文字列)") do |vm|
+        vm.load_device_index(:a, DEVICE_INDEX_ERROR, HEAP_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x24, "R[a][R[a+1]] = R[a+2] (デバイス・配列)") do |vm|
+        vm.store_device_index(:a, DEVICE_INDEX_ERROR, HEAP_ERROR)
+      end
+
+      # --- 配列 ---
+      #
+      # 実体は固定数のスロットを並べた配列プールに置き、レジスタには
+      # スロット番号だけを入れる。スロットは順に渡して返さない。
+      # 使い切ったら停止する (回収は行わない)。
+      #
+      # OP_ARRAY は R[a] が要素の先頭と結果の両方を兼ねるため、
+      # 要素を写し終えてから R[a] を書く。
+      defs << OpcodeDef.new(0x47, "R[a] = [R[a] .. R[a+b-1]]") do |vm|
+        vm.new_array(:a, :a, :b, HEAP_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x48, "R[a] = [R[b] .. R[b+c-1]]") do |vm|
+        vm.new_array(:a, :b, :c, HEAP_ERROR)
+      end
+
+      # --- 文字列 ---
+      #
+      # OP_STRING は毎回複製する。Ruby の文字列は変更できるので、同じリテラルを
+      # 2 回書けば別のものになる。
+      defs << OpcodeDef.new(0x51, "R[a] = pool[b] の複製 (文字列)") do |vm|
+        vm.new_string(:a, :b, HEAP_ERROR)
+      end
+
+      # faRuby の設定 (FARUBY_ で始まる定数) だけを見る。
+      # それ以外の定数は利用者のものなので何もしない。
+      defs << OpcodeDef.new(0x1E, "FARUBY_ の設定なら VM 状態へ書く") do |vm|
+        vm.set_constant(:a, :b)
+      end
+
+      # --- ハッシュ ---
+      #
+      # 実体は配列 2 本 (鍵と値)。専用のプールを作らず、配列のスロットを
+      # 2 つ使う。オペランド b は **組の数**で、R[a] から鍵と値が交互に並ぶ。
+      defs << OpcodeDef.new(0x53, "R[a] = { R[a] => R[a+1], .. } (b 組)") do |vm|
+        vm.new_hash(:a, :b, HEAP_ERROR)
       end
 
       defs << OpcodeDef.new(0x25, "PC += signed16(a)") do |vm|
@@ -305,15 +381,106 @@ module FaRuby
         vm.if_nil(:a) { vm.jump_relative(:b) }
       end
 
-      defs << OpcodeDef.new(0x38, "トップレベルでは VM 停止") do |vm|
-        vm.vm_finish
+      # --- メソッドの定義 ---
+      #
+      # def は OP_TCLASS + OP_METHOD + OP_DEF の3命令になる。
+      # トップレベルにクラスは無いため、定義先は self (main) 固定。
+
+      defs << OpcodeDef.new(0x63, "R[a] = 定義先クラス (トップレベルは main)") do |vm|
+        vm.set_reg_special(:a, VmConstants::TT_OBJECT)
+      end
+
+      defs << OpcodeDef.new(0x58, "R[a] = 子 irep b への参照") do |vm|
+        vm.load_child_irep(:a, :b, IREP_INDEX_ERROR)
+      end
+
+      # --- ブロックと上位の変数 ---
+      #
+      # ブロックはメソッドと違い、外側のローカル変数を読み書きする。
+      # そのため本体の irep だけでなく定義元のフレームも覚えておく。
+
+      defs << OpcodeDef.new(0x57, "R[a] = 子 irep b から作ったブロック") do |vm|
+        vm.load_block(:a, :b, IREP_INDEX_ERROR)
+      end
+
+      # オペランド c は遡る段数。0 なら 1 つ外側
+      defs << OpcodeDef.new(0x21, "R[a] = 外側 c 段の R[b]") do |vm|
+        vm.load_upvar(:a, :b, :c, UPVAR_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x22, "外側 c 段の R[b] = R[a]") do |vm|
+        vm.store_upvar(:a, :b, :c, UPVAR_ERROR)
+      end
+
+      # ブロック付きの呼び出し。times / upto だけが受け付ける。
+      #
+      # OP_SENDB は呼び出しの仕組みでしかなく、繰り返すのは times の側。
+      # VM は再帰できないため、反復はフレームの状態として持つ。
+      defs << OpcodeDef.new(0x30, "R[a].symbols[b](R[a+1]..) { ブロック }") do |vm|
+        vm.send_block_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
+                             BLOCK_ERROR, CALL_DEPTH_ERROR)
+      end
+
+      # ブロックの中の break。反復を打ち切り、値を呼び出し全体の値にする
+      defs << OpcodeDef.new(0x3A, "反復を打ち切って R[a] を返す") do |vm|
+        vm.break_from_block(:a, BLOCK_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x5F, "メソッド表に symbols[b] = R[a+1] を登録") do |vm|
+        vm.define_method(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
+      # レシーバを書かない呼び出し (foo(1) や再帰) はこちら。
+      #
+      # **mruby と同じく、self をレシーバ位置に置いてから OP_SEND へ落ちます。**
+      # 別々に書いていたころは組み込みメソッドの振り分けが 2 度展開され、
+      # KV 全体の 14% を占めていました。
+      defs << OpcodeDef.new(0x2D, "self をレシーバ位置に置いて OP_SEND へ",
+                            enters: 0x2F) do |vm|
+        vm.move_self_to_receiver(:a)
+      end
+
+      # メソッド本体の入口。引数の数を定義と突き合わせる
+      defs << OpcodeDef.new(0x34, "引数の数を検査し、残りのレジスタを空にする") do |vm|
+        vm.enter_method(:a, ARGUMENT_ERROR)
+      end
+
+      # メソッドの呼び出し。組み込みならフレームを積まずその場で計算し、
+      # ユーザー定義ならフレームを積んで本体へ移ります。
+      # 引数は R[a+1] から連続して並び、結果は R[a] に返る。
+      # メソッド名はホスト側で番号に解決してシンボル表に載せてある。
+      #
+      # オペランド c は引数の数そのものではない。下位4ビットが位置引数、
+      # 上位4ビットがキーワード引数の数で、15 は配列やハッシュにまとめて
+      # 渡す印 (mruby の CALL_MAXARGS)。普通の呼び出しでは引数の数と一致
+      # するためそのまま比べており、スプラットやキーワード付きは弾かれる。
+      defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..)") do |vm|
+        vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
+                       DIVIDE_BY_ZERO_ERROR, HEAP_ERROR, CALL_DEPTH_ERROR)
+      end
+
+      # メソッドの中なら呼び出し元へ戻り、トップレベルなら VM 停止。
+      # 呼ばれた側の R[0] は呼んだ側の R[a] と同じ場所なので、
+      # R[b] を R[0] へ写せば戻り値のコピーは要らない。
+      defs << OpcodeDef.new(0x38, "R[b] を返して呼び出し元へ (トップレベルでは VM 停止)") do |vm|
+        vm.return_from_method(:a)
       end
 
       # 二項算術: R[a] = R[a] <op> R[a+1]
       #
       # 両オペランドの型で振り分ける。実数が絡めば実数演算になり、
       # 整数どうしなら整数演算のまま (32ビット整数は単精度に収まらないため)。
-      { 0x3C => :add, 0x3E => :sub, 0x40 => :mul }.each do |code, op|
+      # 足し算だけは文字列の連結も見る。判定は整数どうしの枝の中に置く
+      defs << OpcodeDef.new(0x3C, "R[a] = R[a] + R[a+1]") do |vm|
+        vm.set_reg_add(:a, HEAP_ERROR)
+      end
+
+      # 式展開 ("x#{s}y") が出す。継ぎ足す先をそのまま伸ばす
+      defs << OpcodeDef.new(0x52, "R[a] = R[a] + R[a+1] (文字列を継ぎ足す)") do |vm|
+        vm.concat_string(:a, METHOD_TYPE_ERROR, HEAP_ERROR)
+      end
+
+      { 0x3E => :sub, 0x40 => :mul }.each do |code, op|
         defs << OpcodeDef.new(code, "R[a] = R[a] #{OPERATOR_TEXT[op]} R[a+1]") do |vm|
           vm.set_reg_arith(:a, op)
         end
@@ -351,6 +518,38 @@ module FaRuby
 
     # 0 除算のエラーコード
     DIVIDE_BY_ZERO_ERROR = 1
+
+    # 添字アクセスのエラーコード
+    # デバイス参照以外への添字、または範囲外のアドレス
+    DEVICE_INDEX_ERROR = 2
+
+    # 未対応のメソッド呼び出し。引数の数が合わない場合も含む
+    UNKNOWN_METHOD_ERROR = 3
+
+    # メソッドのレシーバまたは引数の型が扱えない
+    METHOD_TYPE_ERROR = 4
+
+    # 呼び出しが深すぎる (フレームまたはレジスタが足りない)
+    # PLC はメモリが固定なので、深さの上限を決めてエラーにするしかない
+    CALL_DEPTH_ERROR = 5
+
+    # 引数の数または形が扱えない (省略可能引数・可変長・キーワードは未対応)
+    ARGUMENT_ERROR = 6
+
+    # OP_METHOD / OP_BLOCK が指す子 irep が無い
+    IREP_INDEX_ERROR = 7
+
+    # 上位の変数に届かない (指定された段数だけ遡れなかった)
+    UPVAR_ERROR = 8
+
+    # ブロックの扱いが不正
+    # ブロックでない値を渡した、反復の外で break した、など
+    BLOCK_ERROR = 9
+
+    # 配列の領域が足りない
+    # プールのスロットを使い切った、または要素数が 1 スロットの容量を超えた。
+    # 回収を持たないため、ループの中で作り続けるとここで止まる
+    HEAP_ERROR = 10
 
     # 見出しコメントに使う演算子の表記
     OPERATOR_TEXT = {

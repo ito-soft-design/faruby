@@ -31,13 +31,18 @@ end
     irep
   end
 
-  # memory_image を EmMemory にロードして返す
+  # 固定領域 (FM) のイメージを EmMemory にロードして返す
+  #
+  # 定数プールとシンボル表は固定領域にあるため fixed_image を見る
   def load_image(irep)
-    image = FaRuby::PlcCodegen.new(irep).memory_image
+    image = FaRuby::PlcCodegen.new(irep).fixed_image
     em = FaRuby::EmMemory.new
     em.load_image(image)
     [em, image]
   end
+
+  # 可変領域 (EM) のイメージ。レジスタや汎用グローバルの初期化を見る
+  def mutable_image(irep) = FaRuby::PlcCodegen.new(irep).memory_image
 
   # === 定数プール ===
 
@@ -92,12 +97,199 @@ end
   # OP_LOADL はタグごと複製するため、書かずに残すと不定のタグを拾う。
   # TT_EMPTY なら少なくとも偽として扱われ、挙動が決まる。
   def test_unsupported_pool_entry_is_zeroed
-    irep = build_irep(pool: [[:string, "hi"]])
+    irep = build_irep(pool: [[:bigint, { sign: 0, digits: "\x01" }]])
     em, image = load_image(irep)
 
     assert image.key?(layout.pool_type_addr(0)), "タグを書かずに残さない"
     assert_equal TT_EMPTY, em.read_u16(layout.pool_type_addr(0))
     assert_equal 0, em.read_s32(layout.pool_addr(0))
+  end
+
+  # === 文字列定数 ===
+  #
+  # 値スロットには入らないので、FM の文字列領域に置いて位置と長さだけを持つ
+
+  def codegen(irep, **opts) = FaRuby::PlcCodegen.new(irep, **opts)
+
+  def test_a_string_pool_entry_holds_its_position_and_length
+    irep = build_irep(pool: [[:string, "hi"]])
+    em, = load_image(irep)
+
+    assert_equal TT_STRING, em.read_u16(layout.pool_type_addr(0))
+    assert_equal 0, em.read_u16(layout.pool_addr(0)), "文字列領域の先頭からの位置"
+    assert_equal 2, em.read_u16(layout.pool_addr(0) + 1), "バイト数"
+  end
+
+  # 1 ワードに 2 バイト、先の文字が上位。KV-5000 の文字列デバイスと同じ並び
+  def test_string_bytes_pack_two_to_a_word_with_the_first_byte_high
+    irep = build_irep(pool: [[:string, "ABCDE "]])
+    em, = load_image(irep)
+
+    assert_equal 0x4142, em.read_u16(layout.string_addr(0))
+    assert_equal 0x4344, em.read_u16(layout.string_addr(1))
+    assert_equal 0x4520, em.read_u16(layout.string_addr(2))
+  end
+
+  # 奇数バイトなら最後のワードの下位バイトは 0。デバイスへ書けば終端になる
+  def test_an_odd_length_string_pads_the_last_word_with_zero
+    irep = build_irep(pool: [[:string, "abc"]])
+    em, = load_image(irep)
+
+    assert_equal 0x6162, em.read_u16(layout.string_addr(0))
+    assert_equal 0x6300, em.read_u16(layout.string_addr(1))
+  end
+
+  # OP_STRING は毎回複製するので、元を共有しても Ruby の意味は変わらない
+  def test_the_same_bytes_share_one_constant
+    irep = build_irep(pool: [[:string, "hi"], [:string, "hi"]])
+    em, = load_image(irep)
+
+    assert_equal em.read_u16(layout.pool_addr(0)), em.read_u16(layout.pool_addr(1))
+    assert_equal 1, codegen(irep).string_constants.size
+  end
+
+  def test_different_strings_take_different_positions
+    irep = build_irep(pool: [[:string, "hi"], [:string, "yo"]])
+    em, = load_image(irep)
+
+    assert_equal 0, em.read_u16(layout.pool_addr(0))
+    assert_equal 1, em.read_u16(layout.pool_addr(1))
+  end
+
+  # 1 スロットに収まらない文字列は転送前に止める
+  def test_a_string_longer_than_a_slot_stops_the_build
+    long = "a" * (layout.max_string_bytes + 1)
+    irep = build_irep(pool: [[:string, long]])
+
+    assert_raises(FaRuby::CodegenError) { codegen(irep).fixed_image }
+  end
+
+  # === 文字コード ===
+  #
+  # バイト列は変換しない。種別だけを VM 状態に置き、文字数を数えるのに使う
+
+  def test_the_encoding_defaults_to_utf8
+    irep = build_irep
+    em = FaRuby::EmMemory.new
+    em.load_image(mutable_image(irep))
+
+    assert_equal ENCODING_UTF8, em.read_u16(layout.str_encoding_addr)
+  end
+
+  def test_the_encoding_is_written_to_vm_state
+    irep = build_irep
+    em = FaRuby::EmMemory.new
+    em.load_image(codegen(irep, encoding: ENCODING_SJIS).memory_image)
+
+    assert_equal ENCODING_SJIS, em.read_u16(layout.str_encoding_addr)
+  end
+
+  # mrbc はマジックコメントを見ないので、読むのは faRuby の仕事
+  def test_reading_the_magic_comment
+    detect = ->(s) { FaRuby::PlcCodegen.detect_encoding(s) }
+
+    assert_equal ENCODING_UTF8, detect.call("x = 1\n")
+    assert_equal ENCODING_UTF8, detect.call("# encoding: utf-8\nx = 1\n")
+    assert_equal ENCODING_SJIS, detect.call("# encoding: shift_jis\n")
+    assert_equal ENCODING_SJIS, detect.call("# coding: windows-31j\n")
+    assert_equal ENCODING_SJIS, detect.call("#!/usr/bin/env ruby\n# coding: cp932\n")
+    assert_equal ENCODING_ASCII, detect.call("# encoding: ascii\n")
+  end
+
+  def test_an_unsupported_encoding_stops_the_build
+    assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.detect_encoding("# encoding: euc-jp\n")
+    end
+  end
+
+  # === 設定定数 ===
+
+  def test_a_setting_constant_gets_its_own_symbol_kind
+    irep = build_irep(symbols: ["FARUBY_STR_FILL"])
+    em, = load_image(irep)
+
+    assert_equal SYMBOL_KIND_SETTING,
+                 em.read_u16(layout.device_table_addr(0) + DEVICE_TABLE_KIND_OFFSET)
+    assert_equal SETTING_STR_FILL, em.read_u16(layout.device_table_addr(0))
+  end
+
+  # 接頭辞で始まって表に無い名前は書き間違い。実行してから気づくより早く止める
+  def test_an_unknown_faruby_constant_stops_the_build
+    irep = build_irep(symbols: ["FARUBY_NOPE"])
+
+    assert_raises(FaRuby::CodegenError) { load_image(irep) }
+  end
+
+  # 接頭辞で始まらない定数は利用者のもの。メソッド名と同じ扱いで放っておく
+  def test_an_ordinary_constant_is_left_alone
+    irep = build_irep(symbols: ["MY_LIMIT"])
+    em, = load_image(irep)
+
+    assert_equal SYMBOL_KIND_METHOD,
+                 em.read_u16(layout.device_table_addr(0) + DEVICE_TABLE_KIND_OFFSET)
+  end
+
+  # === 文字列を書くデバイス ===
+
+  def test_a_plain_device_keeps_its_width
+    assert_equal ACCESS_S, FaRuby::PlcCodegen.parse_device_name("DM100")[:access_type]
+    assert_equal ACCESS_L, FaRuby::PlcCodegen.parse_device_name("DM100L")[:access_type]
+  end
+
+  # 長さは同じワードに詰める。既存の幅は 0-5 なので 6 以上なら文字列
+  def test_the_string_suffix_packs_its_length
+    assert_equal ACCESS_STR, FaRuby::PlcCodegen.parse_device_name("DM100T")[:access_type]
+    assert_equal ACCESS_STR + 6 * ACCESS_STR_LENGTH_SCALE,
+                 FaRuby::PlcCodegen.parse_device_name("DM100T6")[:access_type]
+  end
+
+  # 16進アドレスの B でも T は16進数字ではないので曖昧にならない
+  def test_the_string_suffix_on_a_hex_address
+    assert_nil FaRuby::PlcCodegen.parse_device_name("B1F")[:access_type],
+               "$B1F は 0x1F の個別ビット"
+  end
+
+  # === 16 進アドレスと幅サフィックス ===
+  #
+  # B は 16 進アドレスなので A-F はアドレスの一部になる。幅を付けたいときは
+  # `_` で区切る。**ビットデバイスにも幅は付けられる** (連続したビット列)
+
+  def test_a_hex_digit_belongs_to_the_address
+    %w[B1F B1D B1A].each do |name|
+      parsed = FaRuby::PlcCodegen.parse_device_name(name)
+
+      assert_nil parsed[:access_type], "#{name} は個別ビット"
+      assert parsed[:bit], name
+    end
+    assert_equal 0x1F, FaRuby::PlcCodegen.parse_device_name("B1F")[:z_offset]
+  end
+
+  # 区切ればアドレスと幅に分かれる
+  def test_an_underscore_separates_the_width
+    parsed = FaRuby::PlcCodegen.parse_device_name("B1_F")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_F, parsed[:access_type]
+  end
+
+  # 16 進数字でない文字なら区切らなくてもよい
+  def test_a_non_hex_letter_reads_as_a_width
+    parsed = FaRuby::PlcCodegen.parse_device_name("B1L")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_L, parsed[:access_type]
+  end
+
+  # 10 進アドレスのデバイスにこの曖昧さは無い
+  def test_a_decimal_address_has_no_ambiguity
+    parsed = FaRuby::PlcCodegen.parse_device_name("R1F")
+
+    assert_equal 1, parsed[:z_offset]
+    assert_equal ACCESS_F, parsed[:access_type]
+  end
+  # ビットデバイスに文字列を書いても表示器から読めない
+  def test_a_string_on_a_bit_device_stops_the_build
+    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_name("MR100T6") }
   end
 
   # プール領域がデバイスマッピングテーブル (EM5000) を侵さないこと
@@ -110,7 +302,7 @@ end
 
   def test_validate_rejects_pool_overflow
     irep = build_irep(pool: Array.new(layout.max_pool + 1) { [:int32, 1] })
-    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
+    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).fixed_image }
     assert_match(/定数プール/, err.message)
   end
 
@@ -121,7 +313,7 @@ end
 
   def test_validate_rejects_symbol_overflow
     irep = build_irep(symbols: Array.new(layout.max_symbols + 1) { |i| "$v#{i}" })
-    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).memory_image }
+    assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).fixed_image }
   end
 
   def test_validate_accepts_limits
@@ -133,7 +325,7 @@ end
 
   def test_register_file_cleared_by_slot
     irep = build_irep(nregs: 3)
-    _em, image = load_image(irep)
+    image = mutable_image(irep)
 
     3.times do |i|
       slot = layout.reg_slot_addr(i)
@@ -144,10 +336,10 @@ end
     end
   end
 
-  # レジスタ領域がバイトコード領域を侵さないこと
-  def test_register_region_fits_before_bytecode
+  # レジスタ領域が呼び出しスタックを侵さないこと
+  def test_register_region_fits_before_the_call_stack
     last = layout.reg_slot_addr(layout.max_regs - 1) + SLOT_WORDS - 1
-    assert_operator last, :<, layout.bytecode_base
+    assert_operator last, :<, layout.frame_stack_base
   end
 
   # === シンボル解析 (アクセス幅サフィックス) ===
@@ -209,8 +401,108 @@ end
       addr = layout.device_table_base + idx * DEVICE_TABLE_STRIDE
       assert_equal expected, image[addr + 2], "シンボル #{idx} の access_type"
     end
-    # ビットデバイスは 0 (未使用)
-    assert_equal 0, image[layout.device_table_base + 2 * DEVICE_TABLE_STRIDE + 2]
+    # サフィックス無しのビットデバイスは ACCESS_BIT。
+    # 0 (ACCESS_S) と区別が要る。幅を付けると整数として扱われるため。
+    assert_equal ACCESS_BIT, image[layout.device_table_base + 2 * DEVICE_TABLE_STRIDE + 2]
+  end
+
+  # ビットデバイスに幅を付けると整数として扱う
+  # (MR 等はそのビットから連続したビット列、T / C は現在値)
+  def test_bit_device_with_a_width_suffix_is_a_word_access
+    irep = build_irep(symbols: ["$MR100", "$MR100L", "$MR100_L", "$T0D"])
+    _em, image = load_image(irep)
+
+    widths = (0..3).map { |i| image[layout.device_table_base + i * DEVICE_TABLE_STRIDE + 2] }
+    assert_equal [ACCESS_BIT, ACCESS_L, ACCESS_L, ACCESS_D], widths
+  end
+
+  # B は16進アドレスなので D と F が数字と重なる。
+  # アンダースコアで区切れば幅として読める。
+  def test_hex_address_keeps_its_digits_unless_separated
+    assert_equal 0x1F, FaRuby::PlcCodegen.parse_device_symbol("$B1F")[:z_offset]
+    assert_nil FaRuby::PlcCodegen.parse_device_symbol("$B1F")[:access_type]
+
+    separated = FaRuby::PlcCodegen.parse_device_symbol("$B1_F")
+    assert_equal 0x1, separated[:z_offset]
+    assert_equal ACCESS_F, separated[:access_type]
+  end
+
+  # KV が受け付ける略記 (E, D, M, L) は正式名に正規化する。
+  # plc_access は略記を知らず、"L100" を受け付けても番号 100 を返して
+  # LR100 (番号 16) と食い違うため、正規化しないと別のビットを読み書きする。
+  ALIAS_PAIRS = {
+    "$E100" => ["EM", DEVICE_TYPE_EM, 100],
+    "$D100" => ["DM", DEVICE_TYPE_DM, 100],
+    "$M100" => ["MR", DEVICE_TYPE_MR, 16],
+    "$L100" => ["LR", DEVICE_TYPE_L,  16],
+  }.freeze
+
+  def test_shorthand_device_names_normalise_to_the_protocol_name
+    ALIAS_PAIRS.each do |sym, (name, type, z_offset)|
+      parsed = FaRuby::PlcCodegen.parse_device_symbol(sym)
+      assert_equal name, parsed[:device_name], sym
+      assert_equal type, parsed[:device_type], sym
+      assert_equal z_offset, parsed[:z_offset], "#{sym} は #{name}100 と同じ番号"
+    end
+  end
+
+  # 略記と正式名は同じものを指す
+  def test_shorthand_matches_the_full_name
+    { "$E100" => "$EM100", "$D100L" => "$DM100L",
+      "$M100U" => "$MR100U", "$L100" => "$LR100" }.each do |short, full|
+      assert_equal FaRuby::PlcCodegen.parse_device_symbol(full),
+                   FaRuby::PlcCodegen.parse_device_symbol(short),
+                   "#{short} と #{full}"
+    end
+  end
+
+  def test_shorthand_device_families_normalise_too
+    { "$L" => "LR", "$M" => "MR", "$D" => "DM", "$E" => "EM" }.each do |sym, name|
+      assert_equal name, FaRuby::PlcCodegen.parse_device_family(sym)[:device_name], sym
+    end
+  end
+
+  # 正式名を略記より先にマッチさせないと、LR100 が L + "R100"、
+  # EM100 が E + "M100" になる
+  def test_full_names_match_before_shorthands
+    assert_equal 160, FaRuby::PlcCodegen.parse_device_symbol("$LR1000")[:z_offset]
+    assert_equal DEVICE_TYPE_MR, FaRuby::PlcCodegen.parse_device_symbol("$MR100")[:device_type]
+    assert_equal DEVICE_TYPE_EM, FaRuby::PlcCodegen.parse_device_symbol("$EM100")[:device_type]
+    assert_equal DEVICE_TYPE_DM, FaRuby::PlcCodegen.parse_device_symbol("$DM100")[:device_type]
+  end
+
+  # $DML は DM + L。略記の D を先に取ると "ML" が幅として解釈できず壊れる
+  def test_family_suffix_is_read_after_the_full_name
+    assert_equal FaRuby::PlcCodegen.parse_device_family("$DL"),
+                 FaRuby::PlcCodegen.parse_device_family("$DML")
+  end
+
+  # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
+  def test_timer_and_counter_reject_float
+    %w[$T0F $C0F $T0_F $T $C].each do |sym|
+      next if %w[$T $C].include?(sym) # 幅無しは個別ビットなので対象外
+
+      err = assert_raises(FaRuby::CodegenError, sym) { FaRuby::PlcCodegen.parse_device_symbol(sym) }
+      assert_match(/実数/, err.message)
+    end
+
+    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.parse_device_family("$TF") }
+    assert_match(/実数/, err.message)
+  end
+
+  # 生成コードにも T / C の実数分岐を出さない
+  def test_generated_code_has_no_float_branch_for_timers
+    source = FaRuby::KvsGenerator.new.source
+    refute_match(/\b[TC]0\.F:Z/, source)
+    assert_match(/\bMR0\.F:Z/, source, "他のビットデバイスには残る")
+  end
+
+  # 10進アドレスのデバイスでは区切りが無くても曖昧にならない
+  def test_decimal_address_needs_no_separator
+    { "$T0D" => ACCESS_D, "$T0_D" => ACCESS_D, "$MR100L" => ACCESS_L,
+      "$DM100_L" => ACCESS_L }.each do |sym, access|
+      assert_equal access, FaRuby::PlcCodegen.parse_device_symbol(sym)[:access_type], sym
+    end
   end
 
   # 汎用グローバルは Ruby の値を持つので常に32ビット
@@ -243,10 +535,11 @@ end
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [true, true], mappings.map { |m| m[:general] }
-    assert_equal layout.general_global_addr(0), mappings[0][:z_offset]
-    assert_equal layout.general_global_addr(1), mappings[1][:z_offset]
-    # 値ワードのアドレスなのでスロット先頭ではない
-    assert_equal layout.general_global_base + SLOT_VALUE_OFFSET, mappings[0][:z_offset]
+    assert_equal layout.general_global_slot_addr(0), mappings[0][:z_offset]
+    assert_equal layout.general_global_slot_addr(1), mappings[1][:z_offset]
+    # 値スロットの先頭。VM が型タグごと写す
+    assert_equal layout.general_global_base, mappings[0][:z_offset]
+    assert_equal SYMBOL_KIND_GLOBAL, mappings[0][:kind]
   end
 
   # デバイス名付きシンボルは汎用領域を消費しない
@@ -255,8 +548,8 @@ end
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings
 
     assert_equal [false, true, false, true], mappings.map { |m| m[:general] }
-    assert_equal layout.general_global_addr(0), mappings[1][:z_offset]
-    assert_equal layout.general_global_addr(1), mappings[3][:z_offset]
+    assert_equal layout.general_global_slot_addr(0), mappings[1][:z_offset]
+    assert_equal layout.general_global_slot_addr(1), mappings[3][:z_offset]
     assert_equal DEVICE_TYPE_DM, mappings[0][:device_type]
     assert_equal DEVICE_TYPE_MR, mappings[2][:device_type]
   end
@@ -264,7 +557,7 @@ end
   # 汎用グローバルのスロットは 0 初期化される
   def test_general_global_slots_cleared
     irep = build_irep(symbols: ["$foo"])
-    _em, image = load_image(irep)
+    image = mutable_image(irep)
 
     slot = layout.general_global_slot_addr(0)
     SLOT_WORDS.times do |w|
@@ -273,14 +566,14 @@ end
     end
   end
 
-  # デバイスマッピングテーブルには値ワードのアドレスが入る
-  def test_device_table_stores_value_address
+  # デバイスマッピングテーブルには値スロットの先頭が入る
+  def test_device_table_stores_the_slot_address
     irep = build_irep(symbols: ["$foo"])
     _em, image = load_image(irep)
 
     table_addr = layout.device_table_base
     assert_equal DEVICE_TYPE_EM, image[table_addr]
-    assert_equal layout.general_global_addr(0), image[table_addr + 1]
+    assert_equal layout.general_global_slot_addr(0), image[table_addr + 1]
   end
 
   # === 生成される KV スクリプト ===
@@ -289,10 +582,12 @@ end
     irep = build_irep(nregs: 2, pool: [[:int32, 99]])
     script = FaRuby::PlcCodegen.new(irep).generate
 
-    # プールの型タグと値がそれぞれのアドレスに出力される
-    assert_includes script, "EM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
-    assert_includes script, "EM#{layout.pool_addr(0)}.L = 99"
+    # プールは固定領域 (FM) に出力される
+    assert_includes script, "FM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
+    assert_includes script, "FM#{layout.pool_addr(0)}.L = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
-    assert_includes script, "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_file_base + 2 * SLOT_WORDS - 1}"
+    # 窓が呼び出しごとにずれるため、irep の nregs ではなく領域全体を回る
+    assert_includes script,
+                    "FOR Z1 = #{layout.reg_file_base} TO #{layout.reg_slot_addr(layout.max_regs) - 1}"
   end
 end

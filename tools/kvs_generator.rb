@@ -2,7 +2,9 @@
 
 # KV スクリプト生成器
 #
-# tools/opcode_table.rb の定義から plc/keyence/vm_core.kvs を生成します。
+# tools/opcode_table.rb の定義から機種ごとのスクリプトを生成します。
+#   plc/keyence/KV-5000/vm_*.kvs      KV スクリプト
+#   plc/keyence/KV-X500/vm_*.st       ST
 # 再生成は `rake vm_core`。
 #
 # KvsEmitter は「記号バックエンド」です。命令定義の body を実行すると、
@@ -14,6 +16,8 @@
 # ここだけで守れば全命令に反映されます。
 
 require_relative "vm_constants"
+require_relative "dialect"
+require_relative "devices"
 require_relative "memory_layout"
 require_relative "opcode_table"
 
@@ -21,7 +25,12 @@ module FaRuby
   class KvsEmitter
     include VmConstants
 
-    INDENT = "    "
+    # 生成コードの字下げ 1 段ぶん
+    #
+    # **KV Studio は 1 スクリプト 264,144 文字までです。** 入れ子が 12 段まで
+    # あるため、4 文字刻みだと空白だけで 20 万文字を占めて上限を超えました。
+    # 2 文字なら構造は読めて、半分に収まります。
+    INDENT = "  "
 
     # オペランドの並び (格納先アドレスは配置から決まる)
     OPERAND_NAMES = %i[a b c].freeze
@@ -30,34 +39,31 @@ module FaRuby
     # Z1 = 主オペランド (通常は代入先の R[a])、Z2 = 副オペランド
     # Z3-Z8 はバイトコードフェッチとデバイステーブル参照が使う
     # Z9 = 実行中インスタンスのブロック先頭
-    Z_PRIMARY = 1
-    Z_SECONDARY = 2
-    Z_INSTANCE = 9
-
-    # faRuby が書き換える Z レジスタ
-    #
-    # PLC の Z はラダーと共有する資源なので、スクリプトの先頭で退避し
-    # 末尾で復元する。ここに挙げたものだけを使うことを
-    # test_kvs_generator.rb が検証する。
-    #
-    # Z11 / Z12 は特別な用途があり使用できない (実機で確認済み)。
-    # 使えるのは Z1-Z10 で、faRuby が Z1-Z9 を使うため
-    # ラダー側に残るのは Z10 の1本。
-    USED_Z = (1..9).to_a.freeze
-
-    # ワードデバイス (アクセス幅の選択が必要)
-    WORD_DEVICES = [[DEVICE_TYPE_EM, "EM"], [DEVICE_TYPE_DM, "DM"], [DEVICE_TYPE_ZF, "ZF"]].freeze
-
-    # ビットデバイス。set_res が true のものは代入ではなく SET/RES を使う
-    BIT_DEVICES = [
-      [DEVICE_TYPE_R,  "R",  false], [DEVICE_TYPE_MR, "MR", false],
-      [DEVICE_TYPE_B,  "B",  false], [DEVICE_TYPE_L,  "L",  false],
-      [DEVICE_TYPE_T,  "T",  true],  [DEVICE_TYPE_C,  "C",  true],
-    ].freeze
+    # **本体は tools/devices.rb にあります。** 割り当ても使う本数も
+    # デバイスの指し方の一部なので、そちらを 1 つの出どころにしています。
+    # ここに挙げたものだけを使うことを test_kvs_generator.rb が検証します。
+    Z_PRIMARY   = KvDevices::Z_PRIMARY
+    Z_SECONDARY = KvDevices::Z_SECONDARY
+    Z_INSTANCE  = KvDevices::Z_INSTANCE
+    Z_VALUE     = KvDevices::Z_VALUE
+    USED_Z      = KvDevices::USED_Z
 
     # アクセス幅の分岐順。最後 (.S) が ELSE になる
     ACCESS_BRANCHES = [[ACCESS_L, "L"], [ACCESS_U, "U"], [ACCESS_D, "D"], [ACCESS_F, "F"]].freeze
     ACCESS_DEFAULT_SUFFIX = "S"
+
+    # デバイスのアドレスを載せるインデックスレジスタ
+    #
+    # **Ruby プログラムが指した先です** (`$DM100` の 100)。生成コードは
+    # 種別を Z5、幅を Z8、アドレスをここに載せてから分岐します。
+    Z_DEVICE = 6
+
+    # 書き込む値の見え方
+    #
+    #   value  幅の付いた 1 つの式で書けるとき (KV)
+    #   long   同じ場所を 32 ビット整数として見たもの
+    #   lo/hi  同じ場所を 16 ビット 2 つとして見たもの (三菱の 32 ビット)
+    WriteSource = Struct.new(:value, :long, :lo, :hi, keyword_init: true)
 
     # KV スクリプトの比較演算子
     COMPARISON = { eq: "=", ne: "<>", lt: "<", le: "<=", gt: ">", ge: ">=" }.freeze
@@ -65,75 +71,110 @@ module FaRuby
 
     attr_reader :lines, :layout
 
-    def initialize(level: 0, layout: MemoryLayout.default)
+    attr_reader :dialect
+
+    def initialize(level: 0, layout: MemoryLayout.default, dialect: KvsDialect.new)
       @lines = []
       @level = level
       @layout = layout
-      @slot_cache = {}
+      @dialect = dialect
+      @devices = dialect.devices_for(layout, self)
     end
 
-    # インデックス修飾の基点 (例: "EM0")
-    # PC を指す layout.pc_addr とは別物なので混同しないこと。
-    # デバイス番号 0 からの相対を Z レジスタで指定する書き方に使う。
-    def indexed_base = "#{layout.device_name}0"
-
-    # --- インスタンス相対のデバイス参照 ---
+    # この機種で指せるビットデバイス
     #
-    # ブロック先頭は Z9 に載っている。ブロック内の固定位置はオフセットを
-    # インデックス修飾で足して指す (EM7:Z9)。こうすることで、どのインスタンス
-    # でも同じコードが動く。
+    # KV-X500 の ST はタイマ・カウンタを指せないため、そこだけ短くなります。
+    # 外れた種別は生成コードから分岐ごと消え、VM は知らない種別として止めます。
+    # Ruby プログラムから触れるラダーのデバイス
     #
-    # 型サフィックスはデバイス側に付ける (EM16.L:Z9)。EM16:Z9.L と書くと
-    # .L がインデックスレジスタに結合し、16ビットアクセスに退化する。
+    # **種別はメーカーごとに違います** (tools/device_set.rb)。生成コードが
+    # 出す分岐はこの表から決まるので、機種を増やすときに触るのは表だけです。
+    #
+    # 並び順に意味があります。ワードが先・ビットが後で、生成コードは
+    # 「種別 > 最後のワード種別」の 1 比較で見分けます。
+    def device_set = dialect.device_set
 
-    # ブロック内の固定位置を指す (16ビット)
-    def state(addr) = "#{layout.device_name}#{layout.offset_of(addr)}:Z#{Z_INSTANCE}"
+    def word_devices = @word_devices ||= device_set.word_devices.map { |d| [d.type, d.name] }
+    def bit_devices  = @bit_devices  ||= device_set.bit_devices.map { |d| [d.type, d.name, d.writable] }
 
-    # ブロック内の固定位置を指す (32ビット)
-    def state_long(addr) = "#{layout.device_name}#{layout.offset_of(addr)}.L:Z#{Z_INSTANCE}"
+    # ワードとビットの境目
+    def last_word_type = device_set.last_word_type
 
-    # Z に絶対アドレスを組み立てる式の末尾に足す項
-    def block_offset(base) = "#{layout.offset_of(base)} + Z#{Z_INSTANCE}"
+    # --- デバイスの指し方 ---
+    #
+    # **機種で違うのはここだけです。** 中身は [tools/devices.rb](devices.rb) に
+    # あります。算法 (型の区分・エラーコード・文字列の扱い) は機種によらないので、
+    # この生成器の残りはそのまま共有します。
+    attr_reader :devices
+
+    def indexed_base       = devices.indexed_base
+    def fixed_indexed_base = devices.fixed_indexed_base
+    def state(addr)        = devices.state(addr)
+    def state_long(addr)   = devices.state_long(addr)
+    def block_offset(base) = devices.block_offset(base)
+    def bytecode_offset    = devices.bytecode_offset
+    def pool_offset        = devices.pool_offset
+    def symbols_offset     = devices.symbols_offset
+    def irep_table_offset  = devices.irep_table_offset
+    def fixed_offset(base) = devices.fixed_offset(base)
+    def reg_offset         = devices.reg_offset
+
+    # バイトコードの現在位置を読み、PC を 1 つ進める
+    def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
+    def peek_bytecode_into(dest) = devices.peek_bytecode_into(dest)
+
+    # 命令ごとの下ごしらえ。**要るかどうかは機種が決めます**
+    def prepare_instruction = devices.prepare_instruction
+
+    # Z に載せたアドレスで 1 ワードを指す。**区切り記号は機種による**
+    def word_at(z, offset = 0)  = devices.word_at(z, offset)
+    def fixed_at(z, offset = 0) = devices.fixed_at(z, offset)
+
 
     # --- インスタンスループ ---
 
-    # 実行するインスタンスを順に巡る
+    # 実行するインスタンスを順に巡る。**巡り方は機種が決めます**
+    def each_instance(&block) = devices.each_instance(&block)
+
+    # レジスタファイルを 0 で埋める。**潰し方は機種が決めます**
+    def clear_register_file(z) = devices.clear_register_file(z)
+
+    # --- インデックスレジスタの退避・復元 ---
     #
-    # ブロック先頭そのものをループ変数にすることで、インスタンス番号を
-    # 別に持たずに済む。instances が 1 でも同じ形にして経路を1本に保つ。
-    def each_instance
-      note "インスタンスごとの実行 (ブロック先頭を Z#{Z_INSTANCE} に載せる)"
-      note "instances = #{layout.instances}"
-      line "FOR Z#{Z_INSTANCE} = #{layout.base} TO #{layout.last_origin} " \
-           "STEP #{layout.instance_size}"
-      indent
-      yield
-      dedent
-      line "NEXT"
+    # **退避するかどうかも機種が決めます。** ラダーと取り合う資源かどうかが
+    # 機種によるためです。
+    def save_z_registers    = devices.save_index_registers
+    def restore_z_registers = devices.restore_index_registers
+
+    # --- ファイルレジスタのバンク ---
+    #
+    # 固定領域は FM (ZF をバンクに分けたもの) に置いてあります。触る前に
+    # FRSET でバンクを選び、抜けるときに 0 に戻します。
+    #
+    # **現在のバンクを読む命令が無いため、Z のように退避して戻せません。**
+    # ラダーが 0 以外のバンクを使っていると壊すことになります。
+
+    def select_fixed_bank
+      note "固定領域 (#{layout.fixed_device_name}) のバンクを選ぶ"
+      note "現在のバンクを読む命令が無いため、抜けるときは 0 に戻す"
+      bank = dialect.select_bank(layout.fixed_bank)
+      line bank if bank
     end
 
-    # --- Z レジスタの退避・復元 ---
-    #
-    # インスタンスループの外側で1回だけ行うため、退避先は絶対アドレスで指す。
-
-    # 使用する Z レジスタをメモリへ退避する
-    def save_z_registers
-      note "インデックスレジスタの退避"
-      note "Z はラダーと共有する資源のため、faRuby の実行前後で"
-      note "内容が変わらないようにする (1スキャンにつき1回)"
-      USED_Z.each { |z| line "#{layout.device(layout.z_save_addr(z))} = Z#{z}" }
-    end
-
-    # 退避した Z レジスタを復元する
-    def restore_z_registers
-      note "インデックスレジスタの復元"
-      USED_Z.each { |z| line "Z#{z} = #{layout.device(layout.z_save_addr(z))}" }
+    def restore_fixed_bank
+      note "ファイルレジスタのバンクを 0 に戻す"
+      bank = dialect.select_bank(0)
+      line bank if bank
     end
 
     # --- 行の組み立て ---
 
+    # 1 文を出す。**綴り方は dialect が決める** (KV 向けは素通し)
     def line(text)
-      @lines << (INDENT * @level + text)
+      rendered = dialect.statement(text)
+      return if rendered.empty?
+
+      @lines << (INDENT * @level + rendered)
     end
 
     def blank
@@ -141,7 +182,7 @@ module FaRuby
     end
 
     def note(text)
-      line(text.empty? ? "'" : "' #{text}")
+      @lines << (INDENT * @level + dialect.comment(text))
     end
     alias comment note
 
@@ -149,9 +190,7 @@ module FaRuby
     def dedent = @level -= 1
 
     # 命令ごとにインデックスレジスタの割り当てをリセットする
-    def begin_instruction
-      @slot_cache = {}
-    end
+    def begin_instruction = devices.forget_slots
 
     # IF cond THEN <block> END IF
     def if_(cond)
@@ -194,19 +233,18 @@ module FaRuby
     # 値は 32ビット整数 (.L) としても単精度実数 (.F) としても読めます。
     # どちらで読むかは実行時のタグで決まるため、生成コードは両方の書き方を
     # 出しておいて IF で選びます。
-    Slot = Struct.new(:tag, :z, :device_name) do
-      def ref(suffix) = "#{device_name}#{SLOT_VALUE_OFFSET}.#{suffix}:Z#{z}"
+    Slot = KvDevices::Slot
 
-      def value = ref("L")   # 32ビット符号付き整数
-      def float = ref("F")   # 単精度実数
-
-      # 値ワードを16ビット単位で指す (IEEE754 のビット列を直接書くときに使う)
-      def word(offset) = "#{device_name}#{SLOT_VALUE_OFFSET + offset}:Z#{z}"
+    def reg_slot(name)      = devices.reg_slot([:reg, name], operand(name))
+    def reg_next_slot(name) = devices.reg_slot([:reg_next, name], "#{operand(name)} + 1")
+    # 引数 2 個のメソッド (`[]`) の 2 つ目
+    def reg_third_slot(name)
+      devices.reg_slot([:reg_third, name], "#{operand(name)} + 2", z: Z_VALUE)
     end
-
-    def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", layout.reg_file_base)
-    def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", layout.reg_file_base)
-    def pool_slot(name)     = slot_ref([:pool, name], "#{operand(name)} * #{SLOT_WORDS}", layout.pool_base)
+    # 定数プールは固定領域 (FM) にある
+    def pool_slot(name)
+      devices.pool_slot([:pool, name], operand(name))
+    end
 
     def reg(name)      = reg_slot(name).value
     def reg_next(name) = reg_next_slot(name).value
@@ -219,16 +257,13 @@ module FaRuby
     def cmp(op, lhs, rhs)   = "#{lhs} #{COMPARISON.fetch(op)} #{rhs}"
 
     # 符号拡張して32ビットスクラッチに置く
+    #
+    # **やり方は機種によります。** KV のデバイスは符号なしなので上位ワードを
+    # 手で埋めますが、三菱はラベルに型があるので変換 1 文で済みます
+    # (`INT_TO_DINT`)。
     def sign_extend(value, bits)
       note "#{bits}ビット値を符号拡張して32ビットスクラッチに置く"
-      note "16ビット符号なしのまま引き算すると桁が壊れるため" if bits < 16
-      threshold = 1 << (bits - 1)
-      line "#{scratch_lo} = #{value}"
-      line "#{scratch_hi} = 0"
-      if_("#{value} >= #{threshold}") do
-        line "#{scratch_lo} = #{value} + #{0x1_0000 - (1 << bits)}" if bits < 16
-        line "#{scratch_hi} = 65535"
-      end
+      devices.sign_extend(value, bits)
       scratch32
     end
 
@@ -241,14 +276,11 @@ module FaRuby
       scratch32
     end
 
-    # 2の補数を32ビットで組み立てる
-    def negate(value)
-      note "2の補数を32ビットで組み立てる"
-      line "#{scratch_lo} = 0 - #{value}"
-      line "#{scratch_hi} = 0"
-      if_("#{value} <> 0") { line "#{scratch_hi} = 65535" }
-      scratch32
-    end
+    # 符号を反転した値を返す。**作り方は機種が決めます**
+    #
+    # KV は 16 ビットを 2 つ並べて 32 ビットを組み立てますが、型のある機種は
+    # 1 文で書けます。
+    def negate(value) = devices.negate(value)
 
     # --- 動作 ---
 
@@ -272,8 +304,7 @@ module FaRuby
     # R[a] = R[b] (タグごと複製)
     def move_reg(dest_name, src_name)
       dest = reg_slot(dest_name)
-      src = slot_ref([:reg_src, src_name], "#{operand(src_name)} * #{SLOT_WORDS}",
-                     layout.reg_file_base, z: Z_SECONDARY)
+      src = devices.reg_slot([:reg_src, src_name], operand(src_name), z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
     end
@@ -321,6 +352,27 @@ module FaRuby
       end_block
     end
 
+    # R[a] = R[a] + R[a+1]
+    #
+    # 文字列どうしなら連結します。**判定は整数どうしの枝の中**に置きます。
+    # 足し算は最も多く通る経路なので、手前に比較を足すと全体が遅くなります。
+    def set_reg_add(name, heap_code)
+      dest = reg_slot(name)
+      rhs = reg_next_slot(name)
+
+      numeric_dispatch(dest, rhs, rhs_tag: rhs.tag) do |kind, l, r|
+        if kind == :float
+          line "#{dest.float} = #{binop(:add, l, r)}"
+          line "#{dest.tag} = #{TT_FLOAT}"
+        else
+          if_else_block("#{dest.tag} = #{TT_STRING}") { add_strings(dest, rhs, heap_code) }
+          line "#{dest.value} = #{binop(:add, l, r)}"
+          line "#{dest.tag} = #{TT_INTEGER}"
+          end_block
+        end
+      end
+    end
+
     # R[a] = R[a] <op> R[a+1] / R[a] <op> 即値
     def set_reg_arith(name, op, immediate: nil)
       dest = reg_slot(name)
@@ -365,16 +417,21 @@ module FaRuby
     # 型が違えば等しくない (Ruby では nil == false も 1 == true も偽)。
     # 値だけを比べると nil と false と 0 が同一になってしまう。
     def set_reg_eq(name)
-      lhs = reg_slot(name)
-      rhs = reg_next_slot(name)
+      eq_into(reg_slot(name), reg_next_slot(name))
+    end
 
+    def eq_into(lhs, rhs, negate: false)
       note "数値は型が違っても値で比べる (Ruby では 1 == 1.0 は真)"
       note "数値以外は型と値の両方が一致したときだけ真 (nil == false は偽)"
       note "結果を R[a] に書くと比較元が壊れるため、先に判定してから代入する"
       line "#{scratch_lo} = 0"
+      note "シンボルや配列のタグは #{TT_INTEGER} より大きいので、上限も見ないと"
+      note "番号やスロット番号が数値として比べられてしまう"
+      lhs_numeric = numeric_flag_into(3, lhs.tag)
+      rhs_numeric = numeric_flag_into(4, rhs.tag)
 
-      if_else_block(numeric?(lhs.tag)) do
-        if_else_block(numeric?(rhs.tag)) do
+      if_else_block(lhs_numeric) do
+        if_else_block(rhs_numeric) do
           numeric_dispatch(lhs, rhs, rhs_tag: rhs.tag) do |_kind, l, r|
             if_(cmp(:eq, l, r)) { line "#{scratch_lo} = 1" }
           end
@@ -383,12 +440,17 @@ module FaRuby
         end_block
       end
       if_(cmp(:eq, lhs.tag, rhs.tag)) do
+        if_else_block(cmp(:eq, lhs.tag, const(TT_STRING))) do
+          compare_string_content(lhs.value, rhs.value)
+          if_("#{str_flag} = 1") { line "#{scratch_lo} = 1" }
+        end
         if_(cmp(:eq, lhs.value, rhs.value)) { line "#{scratch_lo} = 1" }
+        end_block
       end
       end_block
 
-      if_else_block("#{scratch_lo} = 1") { assign_bool(lhs, true) }
-      assign_bool(lhs, false)
+      if_else_block("#{scratch_lo} = 1") { assign_bool(lhs, !negate) }
+      assign_bool(lhs, negate)
       end_block
     end
 
@@ -404,18 +466,1758 @@ module FaRuby
       end
     end
 
-    def load_global_into_reg(dest, sym_operand)
+    # R[a] = global[symbols[b]]
+    #
+    # **普通の読み取りを先に置きます。** 種別を 1 回見るだけで済むので、
+    # 桁付きやデバイス族のための比較を通りません。命令の本体に置いた比較は
+    # その命令が走るたびに効くため、いちばん多く通る枝を先頭にします。
+    def load_global_into_reg(dest, sym_operand, heap_code)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
-      device_dispatch(:read, slot: global_reg_slot(dest), error_code: 0x15)
+      slot = global_reg_slot(dest)
+      note "種別で 4 つに分ける。いちばん多い普通のデバイスがここで決まる"
+      chain_head(true, "Z1 = #{SYMBOL_KIND_VALUE}")
+      indent
+      device_dispatch(:read, slot: slot, error_code: 0x15)
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_GLOBAL}")
+      indent
+      note "汎用グローバルは値スロット。型タグごと写す"
+      line "Z3 = Z6"
+      copy_slot(from: slot_on(3), to: slot)
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      indent
+      assign_device_ref(slot)
+      dedent
+      line "ELSE"
+      indent
+      load_string_from_device(slot, 0x15, heap_code)
+      dedent
+      line "END IF"
+    end
+
+    # デバイスから文字列を読む
+    #
+    # **桁数がそのままバイト数**です。桁が空白や 0 で埋まっていれば、それも
+    # 中身に入ります。**何も落としません。** 落とす規則を持つと、末尾の空白が
+    # 意味を持つデータを扱えなくなるためです。
+    #
+    # 桁の無い `T` (桁数 0) は読めません。書くときは終端付きの意味ですが、
+    # 読むときは長さが決まらないためです。
+    #
+    # 並びが同じ (1 ワード 2 バイト、先の文字が上位) なので、ワード単位で
+    # そのまま写せます。**プールを 1 スロット使います。**
+    def load_string_from_device(slot, error_code, heap_code)
+      note "文字列を読めるのは #{word_devices.map(&:last).join(' / ')} だけ"
+      note "**この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      if_("Z5 > #{last_word_type}") { vm_error(error_code) }
+      line "#{str_temp} = Z8 / #{ACCESS_STR_LENGTH_SCALE}   ' 桁数 = バイト数"
+      if_("#{str_temp} = 0") do
+        note "桁の無い T は読めない。長さが決まらない"
+        vm_error(error_code)
+      end
+      if_("#{str_temp} > #{layout.max_string_bytes}") do
+        note "1 スロットに収まらない桁数"
+        vm_error(heap_code)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+
+      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{str_temp}"
+      note "ワード単位で写す。並びが同じなので詰め替えは要らない"
+      line "#{str_limit} = #{str_temp} + 1"
+      line "#{str_limit} = #{str_limit} / 2   ' ワード数"
+      if_("#{str_limit} > 0") do
+        line "#{str_limit} = #{str_limit} - 1"
+        line "FOR #{str_index} = 0 TO #{str_limit}"
+        indent
+        line "Z4 = #{str_index} + Z6   ' デバイスの位置"
+        note "ワードデバイスから 1 ワード。種別は FOR に入る前に検査済み"
+        first = true
+        last = device_set.word_devices.last
+        device_set.word_devices.each do |device|
+          if device == last
+            line "ELSE"
+          else
+            chain_head(first, "Z5 = #{device.type}")
+            first = false
+          end
+          indent
+          line "Z7 = #{devices.raw_word(device, 4)}"
+          dedent
+        end
+        line "END IF"
+        line "Z4 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{word_at(4, 0)} = Z7"
+        dedent
+        line "NEXT"
+      end
+      note "桁が奇数なら最後のワードの下位バイトは桁の外。0 にして中身に混ぜない"
+      note "残すと同じ中身どうしの == がワード単位の比較で外れる"
+      line "#{str_limit} = #{str_temp} / 2"
+      line "#{str_flag} = #{str_limit} * 2"
+      if_("#{str_temp} <> #{str_flag}") do
+        line "Z4 = #{str_limit} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z7 = #{word_at(4, 0)}"
+        devices.high_byte_of("Z7")
+        line "#{word_at(4, 0)} = Z7 * 256"
+      end
+      line "#{slot.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{slot.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
     end
 
     def store_reg_into_global(sym_operand, src)
       device_table_lookup(sym_operand)
       note "レジスタアドレス"
       slot = global_reg_slot(src)
+      chain_head(true, "Z1 = #{SYMBOL_KIND_GLOBAL}")
+      indent
+      note "汎用グローバルは値スロット。型タグごと写す"
+      line "Z3 = Z6"
+      copy_slot(from: slot, to: slot_on(3))
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
+      indent
+      note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
+      vm_error(0x16)
+      dedent
+      chain_head(false, "#{slot.tag} = #{TT_STRING}")
+      indent
+      store_string_into_device(slot, 0x16)
+      dedent
+      chain_head(false, "#{slot.tag} = #{TT_ARRAY}")
+      indent
+      store_array_into_device(slot, 0x16)
+      dedent
+      chain_head(false, "#{slot.tag} = #{TT_HASH}")
+      indent
+      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
+      vm_error(0x16)
+      dedent
+      line "ELSE"
+      indent
+      if_("Z8 >= #{ACCESS_STR}") do
+        note "文字列の桁 (T) に文字列以外を書こうとした"
+        vm_error(0x16)
+      end
       prepare_write_scratches(slot)
       device_dispatch(:write, slot: slot, error_code: 0x16)
+      dedent
+      line "END IF"
+    end
+
+    # 文字列をデバイスへ書く
+    #
+    # 2 つの形があります。桁数はシンボル表の幅ワードに
+    # `#{'ACCESS_STR'} + 桁数 * #{'ACCESS_STR_LENGTH_SCALE'}` で詰めてあります。
+    #
+    #   桁数 0  終端付き。バイト列の後ろに 0 を 1 つ足す
+    #   桁数 n  固定長。足りなければ FARUBY_STR_FILL で埋め、
+    #           はみ出す分は切り詰める。ちょうどなら終端は書かない
+    #
+    # 並びが同じ (1 ワード 2 バイト、先の文字が上位) なので、中身が 2 バイトとも
+    # 揃っているワードはそのまま写します。半端になるのは末尾の 1 ワードだけです。
+    def store_string_into_device(slot, error_code)
+      note "文字列を書けるのは #{word_devices.map(&:last).join(' / ')} だけ"
+      note "**この検査は FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      if_("Z5 > #{last_word_type}") { vm_error(error_code) }
+      note "桁数。0 なら終端付き"
+      line "Z7 = Z8 / #{ACCESS_STR_LENGTH_SCALE}"
+      note "文字列スロットの見出し"
+      line "Z4 = #{slot.value}"
+      line "Z4 = Z4 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}   ' バイト数"
+
+      note "書く長さと埋めるバイトを決める"
+      if_else_block("Z7 = 0") do
+        note "終端付き。バイト列 + 0"
+        line "#{scratch32} = #{scratch32_b} + 1"
+        line "Z8 = 0"
+      end
+      note "固定長。余りは FARUBY_STR_FILL"
+      line "#{scratch32} = Z7"
+      line "Z8 = #{state(layout.str_fill_addr)}"
+      end_block
+
+      note "中身の長さ。桁からはみ出す分は切り詰める"
+      if_("#{scratch32_b} > #{scratch32}") { line "#{scratch32_b} = #{scratch32}" }
+
+      note "ワード数。奇数バイトなら最後のワードの下位バイトは埋めるバイト"
+      line "Z2 = #{scratch32} + 1"
+      line "Z2 = Z2 / 2"
+      if_("Z2 > 0") do
+        line "Z2 = Z2 - 1"
+        line "FOR Z3 = 0 TO Z2"
+        indent
+        line "Z1 = Z3 * 2   ' 先頭バイトの位置"
+        line "Z7 = Z1 + 1"
+        if_else_block("Z7 < #{scratch32_b}") do
+          note "2 バイトとも中身。並びが同じなのでそのまま写す"
+          line "Z7 = Z3 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "Z7 = #{word_at(7, 0)}"
+        end
+        note "末尾の半端なワード。バイトごとに決める"
+        line "Z7 = 0"
+        if_else_block("Z1 < #{scratch32_b}") do
+          line "Z7 = Z3 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "Z7 = #{word_at(7, 0)}"
+          note "上位バイトだけ中身"
+          devices.high_byte_of("Z7")
+        end
+        if_("Z1 < #{scratch32}") { line "Z7 = Z8" }
+        end_block
+        line "Z7 = Z7 * 256"
+        line "Z1 = Z1 + 1"
+        if_("Z1 < #{scratch32}") { line "Z7 = Z7 + Z8" }
+        end_block
+
+        note "ワードデバイスへ 1 ワード。種別は FOR に入る前に検査済み"
+        line "Z1 = Z3 + Z6"
+        first = true
+        last = device_set.word_devices.last
+        device_set.word_devices.each do |device|
+          if device == last
+            line "ELSE"
+          else
+            chain_head(first, "Z5 = #{device.type}")
+            first = false
+          end
+          indent
+          line "#{devices.raw_word(device, 1)} = Z7"
+          dedent
+        end
+        line "END IF"
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # --- 添字によるデバイスアクセス ---
+    #
+    # $DM[100 + i] のように実行時にアドレスを決める経路です。
+    # OP_GETIDX / OP_SETIDX は専用命令なので、メソッド呼び出しは要りません。
+
+    # R[a] = R[a][R[a+1]]
+    def load_device_index(name, error_code, heap_code)
+      ref = reg_slot(name)          # デバイス参照または配列 (結果の格納先でもある)
+      index = reg_next_slot(name)   # 添字
+
+      line "IF #{ref.tag} = #{TT_DEVICE} THEN"
+      indent
+      device_ref_lookup(ref, index.value, error_code)
+      if_else_block("Z8 >= #{ACCESS_STR}") { load_string_from_device(ref, error_code, heap_code) }
+      device_dispatch(:read, slot: ref, error_code: error_code)
+      end_block
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+      indent
+      load_array_index(ref, index)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+      indent
+      load_hash_index(ref, index)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_STRING} THEN"
+      indent
+      load_string_index(ref, index, heap_code)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_INTEGER} THEN"
+      indent
+      load_integer_bit(ref, index, error_code)
+      dedent
+      line "ELSE"
+      indent
+      note "デバイス参照・配列・ハッシュ・文字列・整数以外への添字アクセスは未対応"
+      vm_error(error_code)
+      end_block
+    end
+
+    # 整数のビットを 1 つ取る (Ruby の Integer#[])
+    #
+    # **PLC はビットを扱う場面が多いので、`(n >> i) & 1` と書かずに済ませます。**
+    # Ruby と同じで、添字が負なら 0、32 以上なら符号ビットです (上は無限に
+    # 符号が続いているものとして扱います)。
+    #
+    # ずらし方は `>>` と同じものを使います。KV のシフトが論理か算術か
+    # 分からないため、負の値は反転して挟みます。
+    def load_integer_bit(ref, index, error_code)
+      if_("#{index.tag} <> #{TT_INTEGER}") { vm_error(error_code) }
+      note "整数のビットを 1 つ取る (Ruby の Integer#[])"
+      if_else_block("#{index.value} < 0") do
+        note "添字が負なら 0 (Ruby と同じ)"
+        line "#{ref.value} = 0"
+      end
+      line "#{scratch32_b} = #{index.value}   ' 桁数"
+      emit_shift(ref, false)
+      devices.bit_op(ref.value, ref.value, "AND", "1")
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2]
+    def store_device_index(name, error_code, heap_code)
+      ref = reg_slot(name)
+      index = reg_next_slot(name)
+      value = devices.reg_slot([:reg_value, name], "#{operand(name)} + 2", z: Z_VALUE)
+
+      line "IF #{ref.tag} = #{TT_DEVICE} THEN"
+      indent
+      device_ref_lookup(ref, index.value, error_code)
+      chain_head(true, "#{value.tag} = #{TT_STRING}")
+      indent
+      store_string_into_device(value, error_code)
+      dedent
+      chain_head(false, "#{value.tag} = #{TT_ARRAY}")
+      indent
+      store_array_into_device(value, error_code)
+      dedent
+      chain_head(false, "#{value.tag} = #{TT_HASH}")
+      indent
+      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
+      vm_error(error_code)
+      dedent
+      chain_head(false, "Z8 >= #{ACCESS_STR}")
+      indent
+      note "文字列の桁 (T) に文字列以外を書こうとした"
+      vm_error(error_code)
+      dedent
+      line "ELSE"
+      indent
+      prepare_write_scratches(value)
+      device_dispatch(:write, slot: value, error_code: error_code)
+      dedent
+      line "END IF"
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+      indent
+      store_array_index(ref, index, value, error_code, heap_code)
+      dedent
+      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+      indent
+      store_hash_index(ref, index, value, heap_code)
+      dedent
+      line "ELSE"
+      indent
+      note "デバイス参照・配列・ハッシュ以外への添字代入は未対応"
+      vm_error(error_code)
+      end_block
+    end
+
+    # --- 配列の添字アクセス ---
+    #
+    # Z1 は R[a] (配列そのもの)、Z2 は R[a+1] (添字)、Z3 は OP_SETIDX の
+    # R[a+2] (書き込む値) が使っています。**Z4 以降しか使えません。**
+
+    Z_ARRAY_SLOT    = 4   # スロットの見出し
+    Z_ARRAY_ELEMENT = 5   # 要素の先頭
+
+    # スロットの見出しを Z4 に、要素数を32ビットスクラッチ B に置く
+    #
+    # ref は R[a] で結果の格納先でもあるため、**書き換える前に**呼びます。
+    def array_slot_into_z(ref)
+      note "スロットの見出し。R[a] を書き換える前に読む"
+      line "Z#{Z_ARRAY_SLOT} = #{ref.value}"
+      line "Z#{Z_ARRAY_SLOT} = Z#{Z_ARRAY_SLOT} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{word_at(Z_ARRAY_SLOT, MemoryLayout::ARRAY_LENGTH)}" \
+           "   ' 要素数"
+    end
+
+    # 負の添字を後ろからの位置に直して32ビットスクラッチに置く
+    #
+    # Ruby の a[-1] は最後の要素です。直しても負のままなら範囲外。
+    def normalize_array_index(index)
+      note "負の添字は後ろから数える (Ruby の a[-1] は最後の要素)"
+      line "#{scratch32} = #{index.value}"
+      if_("#{scratch32} < 0") { line "#{scratch32} = #{scratch32} + #{scratch32_b}" }
+    end
+
+    # 添字の位置にある要素の先頭を Z5 に置く
+    def array_element_into_z
+      line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
+      line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z#{Z_ARRAY_SLOT} + " \
+           "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+      slot_on(Z_ARRAY_ELEMENT)
+    end
+
+    # R[a] = nil (添字が範囲外のとき)
+    def set_slot_nil(slot)
+      line "#{slot.value} = #{TT_CANONICAL_VALUE.fetch(TT_NIL)}"
+      line "#{slot.tag} = #{TT_NIL}"
+    end
+
+    # R[a] = R[a][R[a+1]] (文字列)
+    #
+    # Ruby と同じく**1 文字の文字列**を返します。範囲外は nil です。
+    # 負の添字は後ろから数えるので、先に文字数を数えます。
+    #
+    # **プールを 1 スロット使います。** ループの中で呼び続けると使い切ります。
+    def load_string_index(ref, index, heap_code)
+      string_header_into(4, ref.value)
+      line "#{scratch32} = #{index.value}"
+      if_("#{scratch32} < 0") do
+        note "負の添字は後ろから数える。文字数が要るので一度なめる"
+        line "#{str_target} = #{str_no_target}"
+        scan_string_characters
+        line "#{scratch32} = #{scratch32} + #{str_count}"
+      end
+      line "IF #{scratch32} < 0 THEN"
+      indent
+      note "後ろから数えても先頭より前。範囲外は nil (Ruby と同じ)"
+      set_slot_nil(ref)
+      dedent
+      line "ELSE IF #{scratch32} > #{layout.max_string_bytes} THEN"
+      indent
+      note "1 文字 1 バイト以上なので、バイト数を超える番号は必ず範囲外"
+      set_slot_nil(ref)
+      dedent
+      line "ELSE"
+      indent
+      line "#{str_target} = #{scratch32}"
+      scan_string_characters
+      if_else_block("#{str_found} >= #{str_limit}") do
+        note "そこまで文字が無い。範囲外は nil (Ruby と同じ)"
+        set_slot_nil(ref)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      string_header_into(3, state(layout.array_sp_addr))
+      line "#{scratch32} = 0   ' 新しいスロットは空から始める"
+      line "#{scratch32_b} = #{str_found_end} - #{str_found}   ' その文字のバイト数"
+      append_string_bytes(source_offset: str_found)
+      line "#{ref.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{ref.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      end_block
+      dedent
+      line "END IF"
+    end
+
+    # R[a] = R[a][R[a+1]] (配列)
+    #
+    # 範囲外は Ruby と同じく nil。エラーにはしません。
+    def load_array_index(ref, index)
+      array_slot_into_z(ref)
+      normalize_array_index(index)
+      note "範囲外は nil (Ruby と同じ)。エラーにはしない"
+      line "IF #{scratch32} < 0 THEN"
+      indent
+      set_slot_nil(ref)
+      dedent
+      line "ELSE IF #{scratch32} >= #{scratch32_b} THEN"
+      indent
+      set_slot_nil(ref)
+      dedent
+      line "ELSE"
+      indent
+      element = array_element_into_z
+      line "#{ref.value} = #{element.value}"
+      line "#{ref.tag} = #{element.tag}"
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2] (配列)
+    #
+    # Ruby は要素数を超える添字への代入で配列を伸ばし、間を nil で埋めます。
+    # 容量は固定なので、**容量を超えたらエラー**です。
+    def store_array_index(ref, index, value, error_code, heap_code)
+      array_slot_into_z(ref)
+      normalize_array_index(index)
+      if_("#{scratch32} < 0") do
+        note "後ろから数えても先頭より前 (Ruby は IndexError)"
+        vm_error(error_code)
+      end
+      if_("#{scratch32} >= #{layout.max_array_len}") do
+        note "1 スロットの容量を超える位置"
+        vm_error(heap_code)
+      end
+      note "要素数を超える位置への代入は、間を nil で埋めて伸ばす"
+      if_("#{scratch32} > #{scratch32_b}") do
+        line "Z6 = #{scratch32_b}   ' 埋め始め (今の要素数)"
+        line "Z7 = #{scratch32}"
+        line "Z7 = Z7 - 1   ' 埋め終わり。ここは添字 > 要素数 >= 0 なので 0 未満にならない"
+        line "FOR Z8 = Z6 TO Z7"
+        indent
+        line "Z#{Z_ARRAY_ELEMENT} = Z8 * #{SLOT_WORDS} + Z#{Z_ARRAY_SLOT} + " \
+             "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+        set_slot_nil(slot_on(Z_ARRAY_ELEMENT))
+        dedent
+        line "NEXT"
+      end
+      if_("#{scratch32} >= #{scratch32_b}") do
+        line "Z6 = #{scratch32}"
+        line "#{word_at(Z_ARRAY_SLOT, MemoryLayout::ARRAY_LENGTH)} = Z6 + 1" \
+             "   ' 要素数を伸ばす"
+      end
+      element = array_element_into_z
+      line "#{element.value} = #{value.value}"
+      line "#{element.tag} = #{value.tag}"
+    end
+
+    # --- 実行中の irep ---
+
+    # 実行をトップレベルの irep に戻す (リセット時)
+    #
+    # IREP テーブルの 0 番から VM 状態へ写します。テーブルの内容はプログラムを
+    # 転送するたびに変わるため、生成コードに焼き込むことはできません。
+    def reset_to_top_irep
+      note "実行中の irep をトップレベル (0番) に戻す"
+      line "#{state(layout.frame_sp_addr)} = 0      ' 呼び出しの深さ"
+      line "#{state(layout.array_sp_addr)} = 0      ' 配列プールの空き先頭"
+      line "#{state(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
+           "      ' レジスタ窓の先頭"
+      line "#{state(layout.cur_irep_addr)} = 0"
+      load_irep_state(irep_table_offset)
+    end
+
+    # IREP テーブルの 1 エントリを VM 状態へ写す
+    #
+    # 命令ごとにテーブルを引くとスキャンタイムが延びるため、切り替え時に
+    # 写して使います。table_expr はエントリ先頭を指す Z の設定式。
+    def load_irep_state(table_expr)
+      note "IREP テーブルから実行中の irep の情報を写す"
+      line "Z#{Z_PRIMARY} = #{table_expr}"
+      { MemoryLayout::IREP_BYTECODE     => layout.cur_bytecode_addr,
+        MemoryLayout::IREP_BYTECODE_LEN => layout.bytecode_len_addr,
+        MemoryLayout::IREP_POOL         => layout.cur_pool_addr,
+        MemoryLayout::IREP_SYMBOLS      => layout.cur_symbols_addr,
+        MemoryLayout::IREP_NREGS        => layout.nregs_addr }.each do |field, addr|
+        line "#{state(addr)} = #{fixed_at(Z_PRIMARY, field)}"
+      end
+    end
+
+    # --- メソッドの定義と呼び出し ---
+
+    # R[a] = 子 irep b への参照 (OP_METHOD)
+    #
+    # irep は階層ごとに並べてあり同じ親の子が連続するため、実行中の irep の
+    # 「最初の子の番号」に b を足せば通し番号になります。
+    def load_child_irep(name, child_name, error_code)
+      child_irep_into(scratch_lo, child_name, error_code)
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{scratch_lo}   ' 本体の irep"
+      line "#{dest.word(1)} = #{MemoryLayout::FRAME_NONE}   ' メソッドは外側を見ない"
+      line "#{dest.tag} = #{TT_PROC}"
+    end
+
+    # 親から見た子の番号を通し番号に直す
+    def child_irep_into(dest, child_name, error_code)
+      note "実行中の irep の最初の子の番号に、親から見た子の番号を足す"
+      line "Z3 = #{state(layout.cur_irep_addr)} * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
+           "#{irep_table_offset}"
+      line "Z4 = Z3 + #{MemoryLayout::IREP_FIRST_CHILD}"
+      line "#{dest} = #{fixed_at(4)} + #{operand(child_name)}"
+      if_("#{dest} >= #{state(layout.num_ireps_addr)}") do
+        note "指す先の irep が無い"
+        vm_error(error_code)
+      end
+    end
+
+    # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
+    #
+    # 名前はホスト側でユーザー定義メソッド ID に解決済みです。シンボル表は
+    # irep ごとに別なので、ID を挟まないとどのエントリから呼んでも同じ
+    # メソッドに行き着きません。
+    def define_method(name, sym_name, error_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(error_code) }
+      line "Z3 = Z3 + 1"
+      line "Z5 = #{fixed_at(3)}   ' ユーザー定義メソッドID"
+      if_("Z5 = #{METHOD_ID_NONE}") do
+        note "組み込みと同じ名前は再定義できない"
+        vm_error(error_code)
+      end
+      body = reg_next_slot(name)
+      if_("#{body.tag} <> #{TT_PROC}") { vm_error(error_code) }
+      note "メソッド表 (ID => 本体の irep 番号)"
+      line "Z3 = Z5 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      line "#{word_at(3)} = #{body.word(0)}"
+      note "OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる"
+      dest = reg_slot(name)
+      line "#{dest.value} = #{operand(sym_name)}"
+      line "#{dest.tag} = #{TT_SYMBOL}"
+    end
+
+    # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
+    #
+    # mruby は R[a] に self を置いてから OP_SEND と同じ経路に入ります。
+    # 組み込みならその場で計算し、ユーザー定義ならフレームを積んで移ります。
+    # self をレシーバ位置に置く (mruby の regs[a] = regs[0])
+    #
+    # **これだけが OP_SSEND の中身です。** あとは OP_SEND と同じ経路に入ります。
+    # 呼ぶのは命令の取り込みで、オペランドはまだ読めないので覗くだけです。
+    def move_self_to_receiver(name)
+      note "self をレシーバ位置に置く (mruby の regs[a] = regs[0])"
+      self_slot = devices.reg_slot([:reg_self, name], "0", z: Z_VALUE)
+      dest = reg_slot(name)
+      line "#{dest.value} = #{self_slot.value}"
+      line "#{dest.tag} = #{self_slot.tag}"
+    end
+
+    # ユーザー定義メソッドへ移る
+    def call_user_method(name, argc_name, unknown_code, depth_code)
+      if_("Z6 = #{METHOD_ID_NONE}") do
+        note "組み込みでもユーザー定義でもない"
+        vm_error(unknown_code)
+      end
+      line "Z3 = Z6 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      line "Z5 = #{word_at(3)}   ' 本体の irep 番号"
+      if_("Z5 = #{METHOD_UNDEFINED}") do
+        note "まだ def が実行されていない"
+        vm_error(unknown_code)
+      end
+
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE)
+      line "#{state(layout.call_argc_addr)} = #{operand(argc_name)}"
+      switch_to_irep("Z5", depth_code)
+      line "#{pc} = 0"
+    end
+
+    # 戻り先を呼び出しスタックに積み、レジスタ窓をずらす
+    #
+    # shift はレジスタ窓を進める量 (呼び出しなら R[a] まで)。呼ばれた側の R[0] が
+    # 呼んだ側の R[a] になるため、戻り値の受け渡しが要りません。
+    # outer は上位の変数を辿る鎖。メソッドは上位を見ないので FRAME_NONE です。
+    def push_frame(depth_code, shift, outer:, kind: MemoryLayout::FRAME_KIND_CALL)
+      if_("#{state(layout.frame_sp_addr)} >= #{layout.max_frames}") do
+        note "呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない"
+        vm_error(depth_code)
+      end
+      note "戻り先を積む"
+      line "Z3 = #{frame_expr(state(layout.frame_sp_addr))}"
+      { MemoryLayout::FRAME_RETURN_PC   => pc,
+        MemoryLayout::FRAME_RETURN_IREP => state(layout.cur_irep_addr),
+        MemoryLayout::FRAME_RETURN_BASE => state(layout.reg_base_addr),
+        MemoryLayout::FRAME_OUTER       => outer,
+        MemoryLayout::FRAME_KIND        => kind }.each do |field, value|
+        line "#{word_at(3, field)} = #{value}"
+      end
+      note "レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]"
+      line "#{state(layout.reg_base_addr)} = #{state(layout.reg_base_addr)} + #{shift}"
+      line "#{word_at(3, MemoryLayout::FRAME_OWN_BASE)} = " \
+           "#{state(layout.reg_base_addr)}   ' このフレームの窓 (OP_GETUPVAR が見る)"
+      line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} + 1"
+    end
+
+    # R[a] = :name (OP_LOADSYM)
+    #
+    # 値はシンボル表の 2 ワード目 (ホストが名前ごとに振った通し番号) です。
+    # 索引をそのまま使うと irep をまたいで同じ名前が別物になります。
+    def load_symbol(name, sym_name, error_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
+        note "デバイス名や変数名はシンボルとして扱えない"
+        vm_error(error_code)
+      end
+      line "Z3 = Z3 + 1"
+      line "Z6 = #{fixed_at(3)}   ' シンボルの通し番号"
+      dest = reg_slot(name)
+      line "#{dest.value} = Z6"
+      line "#{dest.tag} = #{TT_SYMBOL}"
+    end
+
+    # --- 配列 ---
+
+    # R[dest] = [R[first] .. R[first+count-1]] (OP_ARRAY / OP_ARRAY2)
+    #
+    # 実体は配列プールのスロットに置き、レジスタにはスロット番号だけを
+    # 入れます。スロットは順に渡して返しません。使い切ったら止まります。
+    #
+    # OP_ARRAY は dest と first が同じレジスタなので、**要素を写し終えて
+    # から R[dest] を書きます。**
+    def new_array(dest_name, first_name, count_name, error_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("#{operand(count_name)} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える要素数"
+        vm_error(error_code)
+      end
+      note "スロットの見出し"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+      note "要素を写す。要素数 0 (空配列) では引き算もしない"
+      note "EM は16ビット符号なしのため、0 - 1 は 65535 になり得る"
+      if_("#{operand(count_name)} > 0") do
+        line "Z3 = #{operand(count_name)} - 1"
+        line "FOR Z4 = 0 TO Z3"
+        indent
+        line "Z5 = (#{operand(first_name)} + Z4) * #{SLOT_WORDS} + #{reg_offset}"
+        line "Z6 = Z4 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        src = slot_on(5)
+        element = slot_on(6)
+        line "#{element.value} = #{src.value}"
+        line "#{element.tag} = #{src.tag}"
+        dedent
+        line "NEXT"
+      end
+      dest = reg_slot(dest_name)
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # 既に Z に載っている先頭アドレスを値スロットとして扱う
+    #
+    # レジスタ番号から作るのと違い、Z を計算する行は出しません。呼ぶ側が FOR の中などで
+    # 自分で載せた場合に使います。
+    def slot_on(z) = devices.slot_on(z)
+
+    # --- 文字列 ---
+    #
+    # 実体は配列プールのスロットです。見出しの後ろに **1 ワード 2 バイト、
+    # 先の文字が上位バイト**で詰めます。KV の文字列デバイスと同じ並びなので、
+    # デバイスとの行き来がワード単位の写しで済みます。
+    #
+    # バイト列は変換しません。ソースの文字コードがそのままデバイスへ出ます。
+
+    # R[a] = pool[b] の複製 (OP_STRING)
+    #
+    # **毎回複製します。** Ruby の文字列は変更できるので、同じリテラルを 2 回
+    # 書けば別のものです。リテラルを書くたびにスロットを 1 つ使います。
+    def new_string(name, pool_name, error_code)
+      src = pool_slot(pool_name)
+      note "文字列は値スロットに入らない。位置とバイト数だけが入っている"
+      line "Z3 = #{src.word(0)}   ' 文字列領域の位置 (ワード)"
+      line "Z4 = #{src.word(1)}   ' バイト数"
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("Z4 > #{layout.max_string_bytes}") do
+        note "1 スロットに収まらない (ホストでも見ているが念のため)"
+        vm_error(error_code)
+      end
+      note "スロットの見出しはバイト数"
+      line "Z5 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(5, MemoryLayout::ARRAY_LENGTH)} = Z4"
+      note "ワード単位で写す。並びが同じなので詰め替えは要らない"
+      note "奇数バイトのときは最後のワードの下位バイトが 0 になる"
+      line "Z6 = (Z4 + 1) / 2   ' ワード数"
+      if_("Z6 > 0") do
+        line "Z6 = Z6 - 1"
+        line "FOR Z7 = 0 TO Z6"
+        indent
+        line "Z8 = Z7 + Z3 + #{fixed_offset(layout.string_pool_base)}"
+        line "Z2 = Z7 + Z5 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{word_at(2, 0)} = #{fixed_at(8, 0)}"
+        dedent
+        line "NEXT"
+      end
+      dest = reg_slot(name)
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # --- 文字列の中身を比べる ---
+    #
+    # スロット番号だけを比べると、同じ内容が別のスロットにあるときに
+    # 等しくなりません。**Ruby の文字列は中身で比べます。**
+    #
+    # 並びが揃っている (1 ワード 2 バイト、奇数バイトの余りは 0) ので、
+    # バイト数が同じならワード単位で比べられます。回数はバイト数の半分です。
+
+    def str_index = state(layout.str_index_addr)
+    def str_flag  = state(layout.str_flag_addr)
+    def str_temp  = state(layout.str_temp_addr)
+    def str_limit = state(layout.str_limit_addr)
+    def str_saved_z = state(layout.str_saved_z_addr)
+    def str_count     = state(layout.str_count_addr)
+    def str_skip      = state(layout.str_skip_addr)
+    def str_target    = state(layout.str_target_addr)
+    def str_found     = state(layout.str_found_addr)
+    def str_found_end = state(layout.str_found_end_addr)
+
+    # 探している文字が無いことを表す番号 (16ビットに収まる最大値)
+    #
+    # 文字数を数えるだけのときに置きます。文字列は max_string_bytes バイトまで
+    # なので、この番号が本物の文字番号とぶつかることはありません。
+    STR_NO_TARGET = 65535
+
+    # **この機種で使う番号。** 三菱の INT は符号付きなので上限が違います
+    def str_no_target = dialect.word_sentinel
+
+    # 位置 position のバイトを Z7 に取り出す (Z4 が文字列スロットの見出し)
+    #
+    # 1 ワード 2 バイトで**先の文字が上位**なので、偶数の位置は上位バイト、
+    # 奇数の位置は下位バイトです。Z8 を作業に使います。
+    def string_byte_into_z7(position)
+      line "Z8 = #{position} / 2"
+      line "Z7 = Z8 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      line "Z7 = #{word_at(7, 0)}"
+      devices.split_word_bytes(low: 7, high: 8)
+      if_("#{position} - (#{position} / 2) * 2 = 0") do
+        line "Z7 = Z8   ' 偶数の位置は上位バイト"
+      end
+    end
+
+    # 文字の切れ目を先頭から数える
+    #
+    # 入力  Z4         文字列スロットの見出し
+    #       str_target 探している文字の番号 (STR_NO_TARGET なら数えるだけ)
+    # 出力  str_limit     バイト数
+    #       str_count     文字数
+    #       str_found     探している文字の先頭バイト (無ければ str_limit)
+    #       str_found_end その次の文字の先頭バイト
+    #
+    # `"あ".length` は Ruby では 1 です。**バイト数ではなく文字数**を返すため、
+    # バイト列を 1 回なめて切れ目を数えます。同じ走査で `s[i]` の位置も出ます。
+    #
+    # **Shift_JIS は自己同期しません。** 後続バイトの範囲が ASCII と重なるので、
+    # バイト 1 つを見ても先導か後続か分かりません。必ず先頭から走査します。
+    #
+    # 作業に Z6・Z7・Z8 を使います。**Z6 は FOR の上限**なので中で触れません。
+    def scan_string_characters
+      note "文字の切れ目を先頭から数える。バイト列は 1 回だけなめる"
+      line "#{str_limit} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}   ' バイト数"
+      line "#{str_count} = 0"
+      line "#{str_skip} = 0"
+      line "#{str_found} = #{str_limit}   ' 見つからなければバイト数のまま"
+      line "#{str_found_end} = #{str_limit}"
+      if_("#{str_limit} > 0") do
+        line "Z6 = #{str_limit}"
+        line "Z6 = Z6 - 1"
+        line "FOR #{str_index} = 0 TO Z6"
+        indent
+        string_byte_into_z7(str_index)
+        note "この位置が文字の先頭かどうか"
+        line "#{str_flag} = 1"
+        line "IF #{state(layout.str_encoding_addr)} = #{ENCODING_UTF8} THEN"
+        indent
+        note "継続バイト (10xxxxxx) は文字の途中"
+        if_("Z7 >= 128") { if_("Z7 < 192") { line "#{str_flag} = 0" } }
+        dedent
+        line "ELSE IF #{state(layout.str_encoding_addr)} = #{ENCODING_SJIS} THEN"
+        indent
+        if_else_block("#{str_skip} = 1") do
+          note "先導バイトの次は後続バイト"
+          line "#{str_flag} = 0"
+          line "#{str_skip} = 0"
+        end
+        note "先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続"
+        if_("Z7 >= 129") { if_("Z7 <= 159") { line "#{str_skip} = 1" } }
+        if_("Z7 >= 224") { if_("Z7 <= 239") { line "#{str_skip} = 1" } }
+        end_block
+        dedent
+        line "END IF"
+        note "ASCII はどのバイトも文字の先頭なので何も見ない"
+        if_("#{str_flag} = 1") do
+          if_("#{str_target} <= #{layout.max_string_bytes}") do
+            note "探している文字なら位置を控える。次の切れ目がその文字の終わり"
+            if_("#{str_count} = #{str_target}") { line "#{str_found} = #{str_index}" }
+            line "Z7 = #{str_target} + 1"
+            if_("#{str_count} = Z7") { line "#{str_found_end} = #{str_index}" }
+          end
+          line "#{str_count} = #{str_count} + 1"
+        end
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # スロット番号の式からスロットの見出しを Z3 に置く
+    def string_slot_into_z3(slot_number)
+      line "Z3 = #{slot_number}"
+      line "Z3 = Z3 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+    end
+
+    # 2 つの文字列の中身が同じなら str_flag に 1、違えば 0 を置く
+    #
+    # **Z3 を借りて返します。** アドレスの計算にインデックスレジスタが要りますが、
+    # `OP_SETIDX` は Z3 に書き込む値を載せているため、勝手に潰せません。
+    # 借りるのは 1 本だけで、残りの作業は VM 状態の空きワードで行います。
+    # FOR のループ変数もデバイスにできるので、これで足ります。
+    def compare_string_content(x_value, y_value)
+      note "文字列は中身で比べる。スロット番号ではない"
+      note "Z3 を借りる。返すまでの間に呼ぶ側の値を壊さないため"
+      line "#{str_saved_z} = Z3"
+      line "#{str_flag} = 0"
+      string_slot_into_z3(x_value)
+      line "#{str_temp} = #{word_at(3, MemoryLayout::ARRAY_LENGTH)}   ' バイト数"
+      string_slot_into_z3(y_value)
+      if_("#{str_temp} = #{word_at(3, MemoryLayout::ARRAY_LENGTH)}") do
+        note "バイト数が同じ。ここから中身を見る"
+        line "#{str_flag} = 1"
+        line "#{str_limit} = #{str_temp} + 1"
+        line "#{str_limit} = #{str_limit} / 2   ' ワード数"
+        if_("#{str_limit} > 0") do
+          line "#{str_limit} = #{str_limit} - 1"
+          line "FOR #{str_index} = 0 TO #{str_limit}"
+          indent
+          string_slot_into_z3(x_value)
+          line "Z3 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          line "#{str_temp} = #{word_at(3, 0)}"
+          string_slot_into_z3(y_value)
+          line "Z3 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          if_("#{str_temp} <> #{word_at(3, 0)}") { line "#{str_flag} = 0" }
+          dedent
+          line "NEXT"
+        end
+      end
+      note "借りた Z3 を返す"
+      line "Z3 = #{str_saved_z}"
+    end
+
+    # --- 文字列の継ぎ足し ---
+
+    # 文字列スロットの見出しを Z に置く
+    def string_header_into(z, slot_number)
+      line "Z#{z} = #{slot_number}"
+      line "Z#{z} = Z#{z} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+    end
+
+    # Z3 の文字列の後ろへ Z4 の文字列を継ぎ足す
+    #
+    # 長さは scratch32 (継ぎ足す先) と scratch32_b (継ぎ足す元) に置いてから
+    # 呼びます。**Z1・Z2 は使いません。** 呼ぶ側がレジスタを載せたままのため、
+    # 作業には Z5-Z8 と VM 状態の空きワードを使います。
+    #
+    # 継ぎ足す先の長さが奇数だとワードの途中から始まるので、**バイト単位**で
+    # 書きます。偶数の位置に書くときは下位バイトを 0 にしておき、次のバイトか
+    # 詰め物がそこに入ります。
+    #
+    # source_offset を渡すと、継ぎ足す元の**その位置から**写します
+    # (`s[i]` が 1 文字だけを取り出すときに使います)。
+    def append_string_bytes(source_offset: nil)
+      if_("#{scratch32_b} > 0") do
+        line "Z6 = #{scratch32_b}"
+        line "Z6 = Z6 - 1"
+        line "FOR Z5 = 0 TO Z6"
+        indent
+        note "継ぎ足す元のバイトを 1 つ取り出す"
+        from = "Z5"
+        if source_offset
+          line "#{str_skip} = #{source_offset} + Z5   ' 元の位置"
+          from = str_skip
+        end
+        line "Z7 = #{from} / 2"
+        line "Z8 = Z7 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z8 = #{word_at(8, 0)}"
+        line "Z7 = Z7 * 2"
+        if_else_block("#{from} = Z7") do
+          note "偶数の位置は上位バイト"
+          devices.high_byte_of("Z8")
+        end
+        note "奇数の位置は下位バイト"
+        devices.low_byte_of("Z8", 7)
+        end_block
+        note "書き先の位置 (継ぎ足す先の長さ + 何バイト目か)"
+        line "#{str_temp} = #{scratch32} + Z5"
+        line "Z7 = #{str_temp}"
+        line "Z7 = Z7 / 2"
+        line "Z7 = Z7 + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{str_limit} = #{str_temp} / 2"
+        line "#{str_limit} = #{str_limit} * 2"
+        if_else_block("#{str_temp} = #{str_limit}") do
+          note "偶数。下位バイトは 0 にしておく (次のバイトか詰め物が入る)"
+          line "#{word_at(7, 0)} = Z8 * 256"
+        end
+        note "奇数。上位バイトを残して下位に入れる"
+        line "#{str_limit} = #{word_at(7, 0)}"
+        devices.high_byte_of(str_limit)
+        line "#{word_at(7, 0)} = #{str_limit} * 256 + Z8"
+        end_block
+        dedent
+        line "NEXT"
+      end
+      note "長さを更新する"
+      line "#{scratch32} = #{scratch32} + #{scratch32_b}"
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{scratch32}"
+    end
+
+    # R[a] = R[a] + R[a+1] (OP_STRCAT)。**継ぎ足す先をそのまま伸ばす**
+    def concat_string(name, type_code, heap_code)
+      dest = reg_slot(name)
+      src = reg_next_slot(name)
+      if_("#{dest.tag} <> #{TT_STRING}") { vm_error(type_code) }
+      append_string_slots(dest, src, type_code, heap_code)
+    end
+
+    # dest の後ろへ src を継ぎ足す。dest が文字列であることは呼ぶ側で確かめる
+    def append_string_slots(dest, src, type_code, heap_code)
+      if_("#{src.tag} <> #{TT_STRING}") { vm_error(type_code) }
+      string_header_into(3, dest.value)
+      string_header_into(4, src.value)
+      line "#{scratch32} = #{word_at(3, MemoryLayout::ARRAY_LENGTH)}"
+      line "#{scratch32_b} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}"
+      note "1 スロットに収まること"
+      line "Z5 = #{scratch32} + #{scratch32_b}"
+      if_("Z5 > #{layout.max_string_bytes}") { vm_error(heap_code) }
+      append_string_bytes
+    end
+
+    # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
+    def add_strings(dest, rhs, heap_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      string_header_into(4, dest.value)
+      line "#{scratch32} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}"
+      string_header_into(5, rhs.value)
+      line "#{scratch32_b} = #{word_at(5, MemoryLayout::ARRAY_LENGTH)}"
+      note "1 スロットに収まること"
+      line "Z6 = #{scratch32} + #{scratch32_b}"
+      if_("Z6 > #{layout.max_string_bytes}") { vm_error(heap_code) }
+
+      note "新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま"
+      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{scratch32}"
+      line "#{str_limit} = #{scratch32} + 1"
+      line "#{str_limit} = #{str_limit} / 2"
+      if_("#{str_limit} > 0") do
+        line "#{str_limit} = #{str_limit} - 1"
+        line "FOR #{str_index} = 0 TO #{str_limit}"
+        indent
+        line "Z7 = #{str_index} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z8 = #{str_index} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "#{word_at(8, 0)} = #{word_at(7, 0)}"
+        dedent
+        line "NEXT"
+      end
+
+      note "右側を継ぎ足す。Z4 を継ぎ足す元にする"
+      line "Z4 = Z5"
+      append_string_bytes
+
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_STRING}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # 配列をデバイスへ写す
+    #
+    # `$DM10 = [1, 2, 3]` は DM10・DM11・DM12 へ書きます。**刻みは幅で決まり**、
+    # `.L` なら 2 ワードずつ進みます。ビットデバイスは 1 ワードが 16 ビットに
+    # あたるので、`$MRL[64] = a` は 64・96・128 ビット目へ書きます。
+    #
+    # **個別ビット (幅なし) には書けません。** 刻みが決まらないためです。
+    #
+    # 要素は数値だけです。中に配列や文字列があるとエラーになります。
+    # 入れ子を書き出す形は決めていません。
+    def store_array_into_device(slot, error_code)
+      note "**検査はすべて FOR の外に置く。** 中の BREAK は FOR を抜けるだけで"
+      note "命令ループから出られず、エラーを書いてもそのまま走り続ける"
+      note "個別ビットには書けない。1 要素が何ビットか決まらない"
+      if_("Z8 = #{ACCESS_BIT}") { vm_error(error_code) }
+      check_known_device(error_code)
+
+      note "刻み。幅のワード数、ビットデバイスならその 16 倍"
+      line "#{str_limit} = 1"
+      ACCESS_WORDS.select { |_, words| words > 1 }.each_key do |access|
+        if_("Z8 = #{access}") { line "#{str_limit} = #{ACCESS_WORDS.fetch(access)}" }
+      end
+      if_("Z5 > #{last_word_type}") { line "#{str_limit} = #{str_limit} * 16" }
+
+      note "スロットの見出しと書き先の先頭。どちらもループの中で動かさない"
+      line "Z4 = #{slot.value}"
+      line "Z4 = Z4 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "#{str_temp} = Z6   ' 書き先の先頭"
+      line "#{scratch32_b} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}   ' 要素数"
+
+      note "数値でない要素があった印。FOR を出てから判定する"
+      line "#{str_flag} = 0"
+      if_("#{scratch32_b} > 0") do
+        line "Z7 = #{scratch32_b}"
+        line "Z7 = Z7 - 1"
+        line "FOR #{str_index} = 0 TO Z7"
+        indent
+        line "Z3 = #{str_index} * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        element = slot_on(3)
+        line "#{str_count} = 0"
+        if_("#{element.tag} >= #{TT_INTEGER}") do
+          if_("#{element.tag} <= #{TT_FLOAT}") { line "#{str_count} = 1" }
+        end
+        if_else_block("#{str_count} = 0") { line "#{str_flag} = 1" }
+        line "Z6 = #{str_index} * #{str_limit} + #{str_temp}"
+        prepare_write_scratches(element)
+        device_dispatch(:write, slot: element, error_code: error_code, checked: true)
+        end_block
+        dedent
+        line "NEXT"
+      end
+      if_("#{str_flag} = 1") do
+        note "数値でない要素があった。入れ子の書き出し方は決めていない"
+        vm_error(error_code)
+      end
+    end
+
+    # 生成コードが知っているデバイス種別かどうかを FOR に入る前に確かめる
+    #
+    # `device_dispatch` は知らない種別で `BREAK` を出しますが、それが `FOR` の
+    # 中にあると命令ループから出られません。ここで弾いておけば通りません。
+    def check_known_device(error_code)
+      note "生成コードが知っている種別か。知らない種別は FOR に入る前に弾く"
+      line "#{str_count} = 0"
+      (word_devices + bit_devices).each do |type, _name, _writable|
+        if_("Z5 = #{type}") { line "#{str_count} = 1" }
+      end
+      if_("#{str_count} = 0") { vm_error(error_code) }
+    end
+
+    # 定数への代入 (OP_SETCONST)
+    #
+    # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書きます。
+    # それ以外の定数は利用者のものなので放っておきます。読む手段
+    # (OP_GETCONST) が無いため、使おうとすれば未知のオペコードで止まります。
+    def set_constant(name, sym_name)
+      line "Z3 = #{operand(sym_name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
+      line "Z4 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z5 = #{fixed_at(4, 0)}   ' シンボル種別"
+      if_("Z5 = #{SYMBOL_KIND_SETTING}") do
+        line "Z6 = #{fixed_at(3, 0)}   ' 設定番号"
+        src = reg_slot(name)
+        if_("Z6 = #{SETTING_STR_FILL}") do
+          note "固定長でデバイスへ書いたときの余りを埋めるバイト"
+          line "#{state(layout.str_fill_addr)} = #{src.value}"
+        end
+      end
+    end
+
+    # --- ハッシュ ---
+    #
+    # 実体は配列 2 本です。値スロットの下位に鍵の配列、上位に値の配列の
+    # スロット番号を入れます (デバイス参照やブロックと同じ手)。専用のプールを
+    # 作らないので、確保も容量検査も配列のものがそのまま使えます。
+    #
+    # 引き換えにハッシュ 1 つがプールを 2 スロット消費します。
+
+    Z_HASH_KEYS   = 4   # 鍵の配列の見出し
+    Z_HASH_VALUES = 5   # 値の配列の見出し
+
+    # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
+    #
+    # 鍵と値が交互に並んでいるので、1 組ごとに 2 レジスタ進みます。
+    def new_hash(name, count_name, error_code)
+      note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
+      line "Z2 = #{state(layout.array_sp_addr)} + 1"
+      if_("Z2 >= #{layout.max_arrays}") { vm_error(error_code) }
+      if_("#{operand(count_name)} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える組の数"
+        vm_error(error_code)
+      end
+
+      note "鍵の配列と値の配列の見出し"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "Z3 = Z2 + #{layout.array_slot_words}"
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+
+      note "組を写す。組の数 0 (空ハッシュ) では引き算もしない"
+      if_("#{operand(count_name)} > 0") do
+        line "Z4 = #{operand(count_name)} - 1"
+        line "FOR Z5 = 0 TO Z4"
+        indent
+        line "Z6 = (#{operand(name)} + Z5 * 2) * #{SLOT_WORDS} + #{reg_offset}   ' 鍵"
+        line "Z7 = Z5 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: slot_on(6), to: slot_on(7))
+        line "Z6 = (#{operand(name)} + Z5 * 2 + 1) * #{SLOT_WORDS} + #{reg_offset}   ' 値"
+        line "Z7 = Z5 * #{SLOT_WORDS} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: slot_on(6), to: slot_on(7))
+        dedent
+        line "NEXT"
+      end
+
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{state(layout.array_sp_addr)}   ' 鍵の配列"
+      line "Z2 = #{state(layout.array_sp_addr)} + 1"
+      line "#{dest.word(1)} = Z2   ' 値の配列"
+      line "#{dest.tag} = #{TT_HASH}"
+      line "#{state(layout.array_sp_addr)} = Z2 + 1"
+    end
+
+    # Z に載っている値スロットどうしを写す
+    # **スロットを渡します。**呼ぶ側が Z 番号を知らずに済むように。
+    # Z はアドレスの作り方であって、写す側の関心ではありません
+    def copy_slot(from:, to:)
+      line "#{to.value} = #{from.value}"
+      line "#{to.tag} = #{from.tag}"
+    end
+
+    # 鍵の配列の見出しを Z4 に、組の数を32ビットスクラッチ B に置く
+    #
+    # 値の配列が要らないときはこちらを使います。**Z5 を書かない**ので、
+    # メソッド番号を持ったままでも呼べます。
+    def hash_keys_into_z(ref)
+      note "鍵の配列の見出し。R[a] を書き換える前に読む"
+      line "Z#{Z_HASH_KEYS} = #{ref.word(0)}"
+      line "Z#{Z_HASH_KEYS} = Z#{Z_HASH_KEYS} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{scratch32_b} = #{word_at(Z_HASH_KEYS, MemoryLayout::ARRAY_LENGTH)}" \
+           "   ' 組の数"
+    end
+
+    # 鍵と値の配列の見出しを Z に置き、組の数を32ビットスクラッチ B に置く
+    def hash_slots_into_z(ref)
+      hash_keys_into_z(ref)
+      line "Z#{Z_HASH_VALUES} = #{ref.word(1)}   ' 値の配列"
+      line "Z#{Z_HASH_VALUES} = Z#{Z_HASH_VALUES} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+    end
+
+    # 鍵を先頭から探し、見つかった位置を32ビットスクラッチに置く (無ければ -1)
+    #
+    # ハッシュ表は作らず順に見ます。容量が #{'%d'} 程度なら、ハッシュ値を
+    # 計算するより速いためです。
+    #
+    # **一致は型と値の両方**です。Ruby の Hash も `eql?` で引くので
+    # `{1 => :a}[1.0]` は `nil` です。ここは合っています。
+    def find_hash_key(key)
+      note "鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)"
+      line "#{scratch32} = -1"
+      if_("#{scratch32_b} > 0") do
+        line "Z8 = #{scratch32_b}"
+        line "Z8 = Z8 - 1"
+        line "FOR Z6 = 0 TO Z8"
+        indent
+        if_("#{scratch32} < 0") do
+          note "最初に一致したものを採る"
+          line "Z7 = Z6 * #{SLOT_WORDS} + Z#{Z_HASH_KEYS} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+          element = slot_on(7)
+          if_("#{element.tag} = #{key.tag}") do
+            if_else_block("#{key.tag} = #{TT_STRING}") do
+              note "文字列の鍵は中身で照合する。スロットが違っても同じ鍵"
+              compare_string_content(element.value, key.value)
+              if_("#{str_flag} = 1") { line "#{scratch32} = Z6" }
+            end
+            if_("#{element.value} = #{key.value}") { line "#{scratch32} = Z6" }
+            end_block
+          end
+        end
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # 見つかった位置の値スロットを Z7 に置く
+    def hash_value_into_z
+      line "Z7 = #{scratch32}"
+      line "Z7 = Z7 * #{SLOT_WORDS} + Z#{Z_HASH_VALUES} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      slot_on(7)
+    end
+
+    # R[a] = R[a][R[a+1]] (ハッシュ)。無い鍵は Ruby と同じく nil
+    def load_hash_index(ref, key)
+      hash_slots_into_z(ref)
+      find_hash_key(key)
+      if_else_block("#{scratch32} < 0") do
+        note "無い鍵は nil (Ruby と同じ)"
+        set_slot_nil(ref)
+      end
+      element = hash_value_into_z
+      line "#{ref.value} = #{element.value}"
+      line "#{ref.tag} = #{element.tag}"
+      end_block
+    end
+
+    # R[a][R[a+1]] = R[a+2] (ハッシュ)
+    def store_hash_index(ref, key, value, heap_code)
+      hash_slots_into_z(ref)
+      find_hash_key(key)
+      if_else_block("#{scratch32} >= 0") do
+        note "既にある鍵は値だけ差し替える"
+        element = hash_value_into_z
+        line "#{element.value} = #{value.value}"
+        line "#{element.tag} = #{value.tag}"
+      end
+      note "新しい鍵は鍵と値の両方の末尾に足す"
+      if_("#{scratch32_b} >= #{layout.max_array_len}") do
+        note "1 スロットの容量がいっぱい"
+        vm_error(heap_code)
+      end
+      line "#{scratch32} = #{scratch32_b}"
+      line "Z7 = #{scratch32}"
+      line "Z7 = Z7 * #{SLOT_WORDS} + Z#{Z_HASH_KEYS} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      new_key = slot_on(7)
+      line "#{new_key.value} = #{key.value}"
+      line "#{new_key.tag} = #{key.tag}"
+      element = hash_value_into_z
+      line "#{element.value} = #{value.value}"
+      line "#{element.tag} = #{value.tag}"
+      line "Z8 = #{scratch32_b}"
+      line "Z8 = Z8 + 1   ' 組の数を 1 増やす"
+      line "#{word_at(Z_HASH_KEYS, MemoryLayout::ARRAY_LENGTH)} = Z8"
+      line "#{word_at(Z_HASH_VALUES, MemoryLayout::ARRAY_LENGTH)} = Z8"
+      end_block
+    end
+
+    # --- ブロックと上位の変数 ---
+
+    # R[a] = 子 irep b から作ったブロック (OP_BLOCK)
+    #
+    # メソッドと違い、ブロックは外側のローカル変数を読み書きします。そのため
+    # 本体の irep だけでなく **定義元のフレーム**も覚えておきます。
+    # 値スロットは 2 ワードあるので下位に irep、上位にフレーム番号を入れます。
+    def load_block(name, child_name, error_code)
+      child_irep_into(scratch_lo, child_name, error_code)
+      dest = reg_slot(name)
+      line "#{dest.word(0)} = #{scratch_lo}   ' 本体の irep"
+      line "#{dest.word(1)} = #{current_frame_expr}   ' 定義元のフレーム"
+      line "#{dest.tag} = #{TT_PROC}"
+    end
+
+    # 実行中のフレーム番号。トップレベルなら FRAME_NONE
+    def current_frame_expr
+      line "Z4 = #{MemoryLayout::FRAME_NONE}"
+      if_("#{state(layout.frame_sp_addr)} > 0") do
+        line "Z4 = #{state(layout.frame_sp_addr)} - 1"
+      end
+      "Z4"
+    end
+
+    # 上位の変数の入っているレジスタ窓を Z6 に求める (OP_GETUPVAR / OP_SETUPVAR)
+    #
+    # オペランド c は遡る段数です。フレームの「定義元」を c 回辿ります。
+    # 辿り切る前に鎖が尽きたらエラーですが、**FOR の中で BREAK すると FOR を
+    # 抜けるだけ**なので、印を立てておいて外で判定します。
+    def upvar_base(level_name, error_code)
+      if_("#{state(layout.frame_sp_addr)} = 0") do
+        note "トップレベルには外側が無い"
+        vm_error(error_code)
+      end
+      note "定義元のフレームを #{level_name} 段たどる"
+      line "Z3 = #{top_frame_expr}"
+      line "Z4 = #{word_at(3, MemoryLayout::FRAME_OUTER)}"
+      line "#{scratch_lo} = 0   ' 鎖が尽きた印"
+      if_("#{operand(level_name)} > 0") do
+        line "FOR Z5 = 1 TO #{operand(level_name)}"
+        indent
+        if_else_block("Z4 = #{MemoryLayout::FRAME_NONE}") { line "#{scratch_lo} = 1" }
+        line "Z3 = #{frame_expr('Z4')}"
+        line "Z4 = #{word_at(3, MemoryLayout::FRAME_OUTER)}"
+        end_block
+        dedent
+        line "NEXT"
+      end
+      if_("#{scratch_lo} <> 0") do
+        note "指定された段数だけ遡れなかった"
+        vm_error(error_code)
+      end
+
+      note "たどり着いたフレームのレジスタ窓。FRAME_NONE ならトップレベル"
+      line "Z6 = #{layout.offset_of(layout.reg_file_base)}"
+      if_("Z4 <> #{MemoryLayout::FRAME_NONE}") do
+        line "Z3 = #{frame_expr('Z4')}"
+        line "Z6 = #{word_at(3, MemoryLayout::FRAME_OWN_BASE)}"
+      end
+    end
+
+    # R[a] = 外側の R[b] (OP_GETUPVAR)
+    def load_upvar(name, index_name, level_name, error_code)
+      upvar_base(level_name, error_code)
+      src = devices.frame_slot([:upvar, name], operand(index_name),
+                     "Z6", z: Z_VALUE)
+      dest = reg_slot(name)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+    end
+
+    # 外側の R[b] = R[a] (OP_SETUPVAR)
+    def store_upvar(name, index_name, level_name, error_code)
+      src = reg_slot(name)
+      upvar_base(level_name, error_code)
+      dest = devices.frame_slot([:upvar, name], operand(index_name),
+                      "Z6", z: Z_VALUE)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+    end
+
+    # 実行中の irep を切り替える。レジスタ窓が領域に収まるかも見る
+    def switch_to_irep(index_expr, depth_code)
+      line "#{state(layout.cur_irep_addr)} = #{index_expr}"
+      load_irep_state("#{index_expr} * #{MemoryLayout::IREP_TABLE_STRIDE} + " \
+                      "#{irep_table_offset}")
+      note "レジスタ窓が領域からはみ出さないこと"
+      line "#{scratch_lo} = #{state(layout.reg_base_addr)} + " \
+           "#{state(layout.nregs_addr)} * #{SLOT_WORDS}"
+      if_("#{scratch_lo} > #{layout.offset_of(layout.reg_slot_addr(layout.max_regs))}") do
+        vm_error(depth_code)
+      end
+    end
+
+    # メソッド本体の入口 (OP_ENTER)
+    #
+    # aspec は 24 ビットで、16 ビットの #{layout.device_name} には収まりません。
+    # そのため上位バイトを operand a、下位 2 バイトを operand b に分けて持ちます
+    # (fetch_u24 を参照)。必須引数の数は `aspec >> 18` で、これは上位バイトを
+    # 4 で割った値と同じです。残りのビットが立っていれば省略可能引数・可変長・
+    # キーワードのいずれかで、いずれも未対応です。
+    def enter_method(name, error_code)
+      note "必須引数の数 = aspec >> #{ASPEC_REQ_SHIFT}。上位バイトを 4 で割った値と同じ"
+      line "Z3 = #{operand(name)} / 4"
+      if_("#{operand(name)} <> Z3 * 4") do
+        note "必須引数以外の指定 (省略可能・可変長・キーワード) は未対応"
+        vm_error(error_code)
+      end
+      if_("#{operand(:b)} <> 0") { vm_error(error_code) }
+
+      note "ブロックは引数の数を検査しない。Ruby は足りなければ nil、余れば捨てる"
+      note "(引数を書かないブロックでも times は 1 個渡す)"
+      line "Z4 = 0"
+      if_("#{state(layout.frame_sp_addr)} > 0") do
+        line "Z5 = #{top_frame_expr}"
+        if_("#{word_at(5, MemoryLayout::FRAME_KIND)} >= " \
+            "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+          line "Z4 = 1"
+        end
+      end
+      if_("Z4 = 0") do
+        if_("#{state(layout.call_argc_addr)} <> Z3") do
+          note "実引数の数が定義と違う"
+          vm_error(error_code)
+        end
+      end
+
+      note "引数の後ろのレジスタを空にする (未代入のローカル変数は偽になる)"
+      note "受け取れなかった引数も空になる (Ruby の nil に相当)"
+      if_("#{state(layout.call_argc_addr)} < Z3") do
+        line "Z3 = #{state(layout.call_argc_addr)}"
+      end
+      line "Z4 = (Z3 + 1) * #{SLOT_WORDS} + #{reg_offset}"
+      line "Z5 = #{state(layout.nregs_addr)} * #{SLOT_WORDS} + #{reg_offset} - 1"
+      if_("Z4 <= Z5") do
+        line "FOR Z6 = Z4 TO Z5"
+        indent
+        line "#{word_at(6)} = 0"
+        dedent
+        line "NEXT"
+      end
+    end
+
+    # 呼び出し元へ戻る (OP_RETURN)
+    #
+    # 反復のフレームなら「戻る」のではなく **次の回に入り直します**。
+    # VM は再帰できないため、繰り返しはここで組み立てます。
+    def return_from_method(name)
+      if_else_block("#{state(layout.frame_sp_addr)} = 0") do
+        note "トップレベルの return は VM 停止"
+        vm_finish
+      end
+      line "Z3 = #{top_frame_expr}"
+      if_else_block("#{word_at(3, MemoryLayout::FRAME_KIND)} >= " \
+                    "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+        advance_iteration
+      end
+      note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
+      note "これで戻り値が呼び出し元から見える位置に入る"
+      src = reg_slot(name)
+      dest = devices.reg_slot([:reg_self, name], "0", z: Z_SECONDARY)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+      pop_frame
+      end_block
+      end_block
+    end
+
+    # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
+    def advance_iteration
+      line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_INDEX)} + 1"
+      if_else_block("#{scratch32} <= #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}") do
+        note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
+        note "irep もレジスタ窓もそのまま使い回す"
+        write_long_at(3, MemoryLayout::FRAME_INDEX, scratch_source)
+        set_block_argument
+        line "#{pc} = 0"
+      end
+      note "反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる"
+      pop_frame
+      end_block
+    end
+
+    # ブロックに渡す値と引数の数を書く
+    #
+    # 何を渡すかはフレームの種別で決まります。times / upto は添字、a.each は
+    # その位置の要素、h.each は鍵と値です。レシーバは R[0] に残っています。
+    # Z3 は呼ぶ側がフレームを指したままにしています。
+    #
+    # **Z6 は使えません。** enter_iteration が移り先の irep を載せています。
+    #
+    # **引数の数もここで書きます。** 反復の途中でユーザー定義メソッドを呼ぶと
+    # call_argc がその引数の数で上書きされ、次の回の OP_ENTER が引数の後ろだと
+    # 思った位置からレジスタを消してブロックの引数を壊すためです。
+    # 再突入 (OP_RETURN) からも呼ばれるので、ここで書けば毎回正しくなります。
+    def set_block_argument
+      line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
+      argument = slot_on(2)
+      element = slot_on(Z_ARRAY_ELEMENT)
+      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      indent
+      note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
+      line "Z4 = 0 + #{reg_offset}"
+      receiver = slot_on(4)
+      pool_element_into_z(receiver.word(0))
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "Z2 = 2 * #{SLOT_WORDS} + #{reg_offset}   ' R[2] に値"
+      pool_element_into_z(receiver.word(1))
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "#{state(layout.call_argc_addr)} = 2"
+      dedent
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}")
+      indent
+      note "a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
+      line "Z4 = 0 + #{reg_offset}"
+      note "**スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が"
+      note "載っていて、これから要素の位置を出すのに使う"
+      pool_element_into_z(long_at(4, SLOT_VALUE_OFFSET, secondary: true))
+      line "#{argument.value} = #{element.value}"
+      line "#{argument.tag} = #{element.tag}"
+      line "#{state(layout.call_argc_addr)} = 1"
+      dedent
+      line "ELSE"
+      indent
+      note "times / upto は添字を渡す"
+      line "#{argument.value} = #{scratch32}"
+      line "#{argument.tag} = #{TT_INTEGER}"
+      line "#{state(layout.call_argc_addr)} = 1"
+      dedent
+      line "END IF"
+    end
+
+    # 実行中のフレームの種別 (Z3 がそのフレームを指していること)
+    def frame_kind = "#{word_at(3, MemoryLayout::FRAME_KIND)}"
+
+    # スロット番号の式から、今の反復位置にある要素の先頭を Z5 に置く
+    def pool_element_into_z(slot_number)
+      line "Z7 = #{slot_number}   ' スロット番号"
+      line "Z7 = Z7 * #{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+      line "Z#{Z_ARRAY_ELEMENT} = #{scratch32}"
+      line "Z#{Z_ARRAY_ELEMENT} = Z#{Z_ARRAY_ELEMENT} * #{SLOT_WORDS} + Z7 + " \
+           "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+    end
+
+    # 積んであるフレームから PC・irep・レジスタ窓を復元する
+    def pop_frame
+      line "#{state(layout.frame_sp_addr)} = #{state(layout.frame_sp_addr)} - 1"
+      note "外した段がそのまま戻り先。減らした後なので top_frame_expr ではない"
+      line "Z3 = #{frame_expr(state(layout.frame_sp_addr))}"
+      line "#{pc} = #{word_at(3, MemoryLayout::FRAME_RETURN_PC)}"
+      line "Z5 = #{word_at(3, MemoryLayout::FRAME_RETURN_IREP)}"
+      line "#{state(layout.reg_base_addr)} = " \
+           "#{word_at(3, MemoryLayout::FRAME_RETURN_BASE)}"
+      line "#{state(layout.cur_irep_addr)} = Z5"
+      load_irep_state("Z5 * #{MemoryLayout::IREP_TABLE_STRIDE} + #{irep_table_offset}")
+    end
+
+    # index 段目のフレームを指す式
+    def frame_expr(index)
+      "#{index} * #{MemoryLayout::FRAME_WORDS} + " \
+        "#{layout.offset_of(layout.frame_stack_base)} + Z#{Z_INSTANCE}"
+    end
+
+    # 積んである一番上のフレーム = 実行中のフレームを指す式 (frame_sp - 1 段目)
+    def top_frame_expr = frame_expr("(#{state(layout.frame_sp_addr)} - 1)")
+
+    # --- 反復 ---
+
+    # R[a].メソッド(R[a+1]..) { ブロック } (OP_SENDB)
+    #
+    # `3.times do |i| ... end` は OP_SENDB ですが、繰り返すのは `Integer#times`
+    # の側です。VM は再帰できないため、反復フレームに「今何回目か」と「上限」を
+    # 持たせ、ブロックの OP_RETURN で次の回に入り直します。
+    def send_block_method(name, sym_name, argc_name, unknown_code, type_code,
+                          block_code, depth_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
+      note "ブロックを取るメソッドはレシーバの型で並んでいるため連続していない"
+      line "Z6 = 0"
+      BLOCK_METHODS.each { |code| if_("Z5 = #{code}") { line "Z6 = 1" } }
+      if_("Z6 = 0") do
+        note "ブロックを取らないメソッドにブロックを渡した"
+        vm_error(unknown_code)
+      end
+      if_("#{operand(argc_name)} <> Z8") { vm_error(unknown_code) }
+
+      recv = reg_slot(name)
+      check_receiver_type(recv, type_code)
+
+      note "ブロックは引数の後ろ R[a + 引数の数 + 1] にある"
+      block = devices.reg_slot([:block, name],
+                                   "#{operand(name)} + #{operand(argc_name)} + 1", z: Z_VALUE)
+      if_("#{block.tag} <> #{TT_PROC}") { vm_error(block_code) }
+
+      iteration_range(name, recv, type_code)
+      if_("#{scratch32} <= #{scratch32_b}") do
+        enter_iteration(name, argc_name, depth_code)
+      end
+      note "1 回も回らないときはレシーバがそのまま呼び出しの値になる"
+    end
+
+    # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
+    def iteration_range(name, recv, type_code)
+      line "IF Z5 = #{METHOD_TIMES} THEN"
+      indent
+      note "n.times は 0 から n-1 まで"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{recv.value} - 1"
+      dedent
+      line "ELSE IF Z5 = #{METHOD_EACH} THEN"
+      indent
+      note "a.each / h.each は 0 から要素数-1 まで"
+      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
+      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
+      array_slot_into_z(recv)
+      end_block
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{scratch32_b} - 1"
+      dedent
+      line "ELSE"
+      indent
+      note "a.upto(b) は a から b まで"
+      limit = reg_next_slot(name)
+      if_("#{limit.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      line "#{scratch32} = #{recv.value}"
+      line "#{scratch32_b} = #{limit.value}"
+      end_block
+    end
+
+    # 反復フレームを積み、ブロックの本体へ移る
+    def enter_iteration(name, argc_name, depth_code)
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE,
+                 kind: MemoryLayout::FRAME_KIND_ITERATE)
+      if_("Z5 = #{METHOD_EACH}") do
+        note "each はブロックに添字ではなく要素を渡す"
+        note "ハッシュは鍵と値の 2 つを渡すので種別を分ける"
+        line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
+        if_else_block("#{slot_on(4).tag} = #{TT_HASH}") do
+          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}"
+        end
+        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
+        end_block
+      end
+      note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
+      line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
+      line "Z6 = #{word_at(2, SLOT_VALUE_OFFSET)}       ' 本体の irep"
+      line "Z7 = #{word_at(2, SLOT_VALUE_OFFSET + 1)}   ' 定義元のフレーム"
+      note "反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)"
+      line "#{word_at(3, MemoryLayout::FRAME_OUTER)} = Z7"
+      write_long_at(3, MemoryLayout::FRAME_INDEX, scratch_source)
+      write_long_at(3, MemoryLayout::FRAME_LIMIT, scratch_source(layout.temp32_b_addr))
+      note "渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く"
+      set_block_argument
+      switch_to_irep("Z6", depth_code)
+      line "#{pc} = 0"
+    end
+
+    # 反復を打ち切って R[a] を返す (OP_BREAK)
+    def break_from_block(name, block_code)
+      if_("#{state(layout.frame_sp_addr)} = 0") do
+        note "反復の外での break"
+        vm_error(block_code)
+      end
+      line "Z3 = #{top_frame_expr}"
+      if_("#{word_at(3, MemoryLayout::FRAME_KIND)} < " \
+          "#{MemoryLayout::FRAME_KIND_ITERATE}") do
+        vm_error(block_code)
+      end
+      note "break の値を R[0] へ。R[0] は呼んだ側の R[a] と同じ場所"
+      src = reg_slot(name)
+      dest = devices.reg_slot([:reg_self, name], "0", z: Z_SECONDARY)
+      line "#{dest.value} = #{src.value}"
+      line "#{dest.tag} = #{src.tag}"
+      pop_frame
+    end
+
+    # --- 組み込みメソッド ---
+    #
+    # 呼び出しフレームは作りません。引数は R[a+1] から連続して並び、結果は
+    # R[a] に返るため、その場で計算して置き換えるだけで済みます。
+    #
+    # メソッド名はホスト側で番号に解決してシンボル表に載せてあります。
+    # VM は文字列を持たず、整数の分岐だけで振り分けます。
+
+    # R[a] = R[a].メソッド(R[a+1])
+    # **組み込みとユーザー定義の両方をここで振り分けます。**
+    #
+    # レシーバを書かない呼び出し (OP_SSEND) も、self をレシーバ位置に置いて
+    # からここへ来ます。分けて書いていたころは振り分けが 2 度展開され、
+    # KV 全体の 14% を占めていました。
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code,
+                    heap_code, depth_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
+        note "メソッド名でないシンボルへの呼び出し"
+        vm_error(unknown_code)
+      end
+      line "Z3 = Z3 + 1"
+      line "Z6 = #{fixed_at(3)}   ' ユーザー定義メソッドID"
+
+      if_else_block("Z5 <> #{METHOD_NONE}") do
+        note "組み込みメソッド。フレームを積まずその場で計算する"
+        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
+      end
+      call_user_method(name, argc_name, unknown_code, depth_code)
+      end_block
+    end
+
+    # Z5 (メソッド番号) と Z8 (引数の数) を読んだ後の共通部分
+    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
+      if_("#{operand(argc_name)} <> Z8") do
+        note "引数の数が定義と違う"
+        note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
+        note "普通の呼び出しでは引数の数と一致し、スプラットやキーワード付きは弾かれる"
+        vm_error(unknown_code)
+      end
+
+      dest = reg_slot(name)
+      rhs = reg_next_slot(name)
+
+      check_receiver_type(dest, type_code)
+
+      first = true
+      BUILTIN_PLAIN_METHODS.each_key do |code|
+        chain_head(first, "Z5 = #{code}")
+        first = false
+        indent
+        note METHOD_NAMES.fetch(code)
+        method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
+        dedent
+      end
+      line "ELSE"
+      indent
+      note "未対応のメソッド (ブロックを取るメソッドをブロック無しで呼んだ場合も含む)"
+      vm_error(unknown_code)
+      dedent
+      line "END IF"
+    end
+
+    # メソッド番号からレシーバに要求される型を検査する
+    #
+    # 番号もタグも連続した区分に並べてあるので、範囲比較だけで済みます。
+    # 区分の並びは METHOD_RECEIVER_GROUPS。**最後の区分は上限が要りません。**
+    def check_receiver_type(recv, type_code)
+      note "メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)"
+      note "#{METHOD_NUMERIC_MIN} 未満 (!= と !) はどの型でも呼べる"
+      if_("Z5 >= #{METHOD_NUMERIC_MIN}") do
+        first = true
+        METHOD_RECEIVER_GROUPS.each do |max_code, tag_min, tag_max, label|
+          if max_code
+            chain_head(first, "Z5 <= #{max_code}")
+          else
+            line "ELSE"
+          end
+          first = false
+          indent
+          note "#{label} (タグ #{tag_min}#{tag_min == tag_max ? '' : "-#{tag_max}"})"
+          if tag_min == tag_max
+            if_("#{recv.tag} <> #{tag_min}") { vm_error(type_code) }
+          else
+            if_("#{recv.tag} < #{tag_min}") { vm_error(type_code) }
+            if_("#{recv.tag} > #{tag_max}") { vm_error(type_code) }
+          end
+          dedent
+        end
+        line "END IF"
+      end
     end
 
     # --- 真偽判定 ---
@@ -428,15 +2230,24 @@ module FaRuby
     def if_nil(name, &block)    = if_("#{reg_tag(name)} = #{TT_NIL}", &block)
 
     # 16ビットオペランドを符号付きとして解釈する
-    # EM は16ビット符号なしのため引き算しても同じビット列だが、
-    # PC への加算が16ビットの剰余演算になることで後方ジャンプが成立する
+    #
+    # **やり方は機種によります。** KV のデバイスは符号なしなので引いて
+    # 直します。ビット列は同じですが、PC への加算が 16 ビットの剰余演算に
+    # なることで後方ジャンプが成立します。
     def normalize_signed16(name)
-      var = operand(name)
-      if_("#{var} >= 32768") { line "#{var} = #{var} - 65536" }
+      devices.normalize_signed16(operand(name))
     end
 
     def jump_relative(name)
       line "#{pc} = #{pc} + #{operand(name)}"
+    end
+
+    # 累計実行命令数を 1 増やす
+    #
+    # 命令ごとに走るので、費用がそのままスキャンタイムに乗ります。
+    # `EM3.L:Z9 = EM3.L:Z9 + 1` と書かず INC を使うのはこのためです。
+    def count_step
+      line "INC(#{state_long(layout.step_count_addr)})   ' 累計実行命令数"
     end
 
     def vm_finish
@@ -463,65 +2274,117 @@ module FaRuby
     def scratch32_b = state_long(layout.temp32_b_addr)
 
     # 2つ目のスクラッチを実数として見たもの (デバイス書き込みの型合わせ用)
-    def scratch_float = "#{layout.device_name}#{layout.offset_of(layout.temp32_b_addr)}.F:Z#{Z_INSTANCE}"
+    def scratch_float = devices.state_float(layout.temp32_b_addr)
 
     # --- オペランドフェッチ (命令形式から生成) ---
 
     def fetch_operands(sizes)
       sizes.each_with_index do |bytes, i|
         target = operand(OPERAND_NAMES[i])
-        bytes == 1 ? fetch_byte(target) : fetch_u16(target)
+        case bytes
+        when 1 then fetch_byte(target)
+        when 2 then fetch_u16(target)
+        else        fetch_u24(target)
+        end
       end
     end
 
     # --- デバイスアクセス ---
 
-    # デバイスマッピングテーブルから type / address / access_type を読む
+    # デバイスマッピングテーブルから type / address / access_type / 族フラグを読む
+    #
+    # Z5 = 種別, Z6 = アドレス, Z8 = アクセス幅, Z1 = デバイス族フラグ
     def device_table_lookup(name)
-      note "デバイスマッピングテーブル参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
-      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{block_offset(layout.device_table_base)}"
+      note "シンボル表参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
       line "Z4 = Z3 + 1"
-      line "Z5 = #{indexed_base}:Z3"
-      line "Z6 = #{indexed_base}:Z4"
+      line "Z5 = #{fixed_at(3)}"
+      line "Z6 = #{fixed_at(4)}"
       line "Z7 = Z3 + 2"
-      line "Z8 = #{indexed_base}:Z7"
+      line "Z8 = #{fixed_at(7)}"
+      line "Z7 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z1 = #{fixed_at(7)}   ' シンボル種別"
+    end
+
+    # デバイス族の参照値をスロットに置く ($DM を読んだとき)
+    #
+    # 種別と幅を1ワードに詰める。予備ワードを使うと OP_MOVE が
+    # 4ワード目まで複製する必要が出るため。
+    def assign_device_ref(slot)
+      note "デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分)"
+      line "#{slot.word(0)} = Z6   ' ベースアドレス"
+      line "#{slot.word(1)} = Z5 + Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' 種別 + 幅"
+      line "#{slot.tag} = #{TT_DEVICE}"
+    end
+
+    # デバイス参照 + 添字から Z5 / Z6 / Z8 を組み立てる
+    #
+    # device_table_lookup と同じ役割を、テーブルではなくレジスタの値から行う。
+    # これで device_dispatch をそのまま使い回せる。
+    def device_ref_lookup(ref, index_value, error_code)
+      note "デバイス参照から種別・幅・アドレスを取り出す"
+      line "Z8 = #{ref.word(1)} / #{DEVICE_REF_ACCESS_SCALE}   ' アクセス幅"
+      line "Z5 = #{ref.word(1)} - Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' デバイス種別"
+      note "アドレス = ベース + 添字。範囲外は黙って別の場所を読み書きしてしまうため弾く"
+      line "#{scratch32} = #{ref.word(0)} + #{index_value}"
+      if_else_block("#{scratch32} >= 0") do
+        if_else_block("#{scratch32} <= 65535") { line "Z6 = #{scratch32}" }
+        vm_error(error_code)
+        end_block
+      end
+      vm_error(error_code)
+      end_block
     end
 
     # デバイス種別 × アクセス幅の分岐を生成する
-    def device_dispatch(mode, slot:, error_code:)
+    # checked を true にすると、知らない種別の ELSE で `BREAK` を出しません。
+    # **`FOR` の中から呼ぶときに使います。** 中の `BREAK` は `FOR` を抜ける
+    # だけで命令ループから出られないためです。呼ぶ側が先に種別を確かめます。
+    def device_dispatch(mode, slot:, error_code:, checked: false)
       note "デバイスタイプ別#{mode == :read ? '読み取り' : '書き込み'}"
       note "ワードデバイス (EM, DM, ZF): Z8 (access_type) で幅を選ぶ"
       ACCESS_BRANCHES.each { |value, sfx| note "  #{value}=.#{sfx}(#{ACCESS_NAMES.fetch(value)})" }
       note "  それ以外=.#{ACCESS_DEFAULT_SUFFIX}(#{ACCESS_NAMES.fetch(ACCESS_S)}/既定)"
+      bit_names = bit_devices.map { |_type, name, _writable| name }.join(", ")
       if mode == :read
-        note "ビットデバイス (R, MR, B, L, T, C): ON→true, OFF→false"
+        note "ビットデバイス (#{bit_names}): ON→true, OFF→false"
         note "  整数の 1/0 ではなく真偽値。0 は Ruby では真なので、"
         note "  整数にすると if $MR10 が常に成立してしまう"
       else
-        note "ビットデバイス (R, MR, B, L, T, C): 非0→ON, 0→OFF"
+        note "ビットデバイス (#{bit_names}): 非0→ON, 0→OFF"
         note "  true=1 / false=nil=0 なので値だけで判定できる"
       end
 
       first = true
-      WORD_DEVICES.each do |type, name|
-        chain_head(first, "Z5 = #{type}")
+      device_set.word_devices.each do |device|
+        chain_head(first, "Z5 = #{device.type}")
         first = false
         indent
-        word_device_body(mode, name, slot)
+        word_device_body(mode, device, slot)
         dedent
       end
 
-      BIT_DEVICES.each do |type, name, set_res|
-        chain_head(first, "Z5 = #{type}")
+      # ビットデバイスは幅サフィックスの有無で意味が変わる。
+      # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T/C は現在値)。
+      device_set.bit_devices.each do |device|
+        chain_head(first, "Z5 = #{device.type}")
         first = false
         indent
-        bit_device_body(mode, name, slot, set_res)
+        if_else_block("Z8 = #{ACCESS_BIT}") do
+          bit_device_body(mode, device, slot, error_code: error_code, checked: checked)
+        end
+        word_device_body(mode, device, slot)
+        end_block
         dedent
       end
 
       line "ELSE"
       indent
-      vm_error(error_code)
+      if checked
+        note "呼ぶ側が種別を確かめている。ここへは来ない"
+      else
+        vm_error(error_code)
+      end
       dedent
       line "END IF"
     end
@@ -529,7 +2392,18 @@ module FaRuby
     private
 
     # タグが数値 (整数か実数) かどうかの条件式
-    def numeric?(tag) = "#{tag} >= #{TT_INTEGER}"
+    # 型タグが数値かどうかを Z に 0/1 で置く
+    #
+    # 数値は #{TT_INTEGER} と #{TT_FLOAT} の 2 つだけです。「#{TT_INTEGER} 以上」で
+    # 済ませていたころは、その後ろのタグ (シンボル・配列など) まで数値として
+    # 通っていました。KV スクリプトに AND が無いため入れ子の IF で判定します。
+    def numeric_flag_into(z, tag)
+      line "Z#{z} = 0"
+      if_("#{tag} >= #{TT_INTEGER}") do
+        if_("#{tag} <= #{TT_FLOAT}") { line "Z#{z} = 1" }
+      end
+      "Z#{z} = 1"
+    end
 
     # 整数どうしの除算 (Ruby と同じ切り下げ、0除算はエラー停止)
     #
@@ -579,6 +2453,462 @@ module FaRuby
       line "#{dest.tag} = #{TT_FLOAT}"
     end
 
+    # --- 組み込みメソッドの本体 ---
+
+    # シンボル表からメソッド番号・引数の数・種別を読む
+    #
+    # Z5 = メソッド番号, Z8 = 引数の数, Z4 = 種別
+    # Z1 / Z2 は使わない。この後レジスタスロットの参照に使うため。
+    def method_table_lookup(name)
+      note "シンボル表参照 (#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
+      line "Z3 = #{operand(name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
+      line "Z5 = #{fixed_at(3)}   ' メソッド番号"
+      line "Z7 = Z3 + 2"
+      line "Z8 = #{fixed_at(7)}   ' 引数の数"
+      line "Z7 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
+      line "Z4 = #{fixed_at(7)}   ' シンボル種別"
+    end
+
+    def method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
+      case code
+      when METHOD_NE    then eq_into(dest, rhs, negate: true)
+      when METHOD_NOT   then not_into(dest)
+      when METHOD_MOD   then mod_into(dest, rhs, type_code, zero_code)
+      when METHOD_ABS   then abs_into(dest)
+      when METHOD_NEG   then neg_into(dest)
+      when METHOD_UPLUS then note "+x は何もしない (Ruby と同じ)"
+      when METHOD_TO_I  then to_i_into(dest)
+      when METHOD_TO_F  then to_f_into(dest)
+      when METHOD_FLOOR then floor_into(dest)
+      when METHOD_ROUND then round_into(dest)
+      when METHOD_BIT_AND then bit_op_into(dest, rhs, "AND", type_code)
+      when METHOD_BIT_OR  then bit_op_into(dest, rhs, "OR", type_code)
+      when METHOD_BIT_XOR then bit_op_into(dest, rhs, "XOR", type_code)
+      when METHOD_BIT_NOT then bit_not_into(dest, type_code)
+      when METHOD_SHIFT_R then shift_into(dest, rhs, false, type_code)
+      when METHOD_LENGTH then length_into(dest)
+      when METHOD_EMPTY_P then empty_into(dest)
+      when METHOD_CONCAT then concat_into(dest, rhs, type_code, heap_code)
+      when METHOD_PUSH   then push_into(dest, rhs, heap_code)
+      when METHOD_KEY_P  then key_p_into(dest, rhs)
+      when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
+      when METHOD_VALUES then hash_column_into(dest, Z_HASH_VALUES, heap_code)
+      when METHOD_SLICE  then slice_into(dest, rhs, reg_third_slot(name), type_code, heap_code)
+      else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
+      end
+    end
+
+    # R[a].length / R[a].size。レシーバの型が区分に合うことは検査済み
+    #
+    # ハッシュの組の数は鍵の配列の見出しにあります。値スロットの読み方が
+    # 配列と違う (下位ワードだけがスロット番号) ため、型で分けます。
+    #
+    # **文字列だけは見出しの数 (バイト数) をそのまま返しません。** Ruby の
+    # `length` は文字数なので、切れ目を数えます。
+    def length_into(dest)
+      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_keys_into_z(dest) }
+      array_slot_into_z(dest)
+      if_("#{dest.tag} = #{TT_STRING}") do
+        note "文字列は文字数を返す。バイト数ではない"
+        line "#{str_target} = #{str_no_target}   ' 数えるだけ"
+        scan_string_characters
+        line "#{scratch32_b} = #{str_count}"
+      end
+      end_block
+      line "#{dest.value} = #{scratch32_b}"
+      line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a].empty?
+    #
+    # 長さが 0 かどうかだけなので、**文字列でも切れ目を数える必要はありません。**
+    # バイト数が 0 なら文字数も 0 です。
+    def empty_into(dest)
+      if_else_block("#{dest.tag} = #{TT_HASH}") { hash_keys_into_z(dest) }
+      array_slot_into_z(dest)
+      end_block
+      if_else_block("#{scratch32_b} = 0") { assign_bool(dest, true) }
+      assign_bool(dest, false)
+      end_block
+    end
+
+    # R[a] << R[a+1]
+    #
+    # **整数なら左シフト、文字列なら中身を継ぎ足し、配列なら末尾に足します。**
+    # Ruby と同じです。文字列と配列はレシーバ自身を返すので R[a] はそのまま。
+    #
+    # 区分の検査はタグ #{'%d'} から #{'%d'} までしか見ていません (整数と配列が
+    # 離れているため)。実数とシンボルはここで弾きます。
+    def concat_into(dest, rhs, type_code, heap_code)
+      line "IF #{dest.tag} = #{TT_INTEGER} THEN"
+      indent
+      shift_into(dest, rhs, true, type_code)
+      dedent
+      line "ELSE IF #{dest.tag} = #{TT_STRING} THEN"
+      indent
+      note "文字列は中身を継ぎ足す"
+      append_string_slots(dest, rhs, type_code, heap_code)
+      dedent
+      line "ELSE IF #{dest.tag} = #{TT_ARRAY} THEN"
+      indent
+      push_into(dest, rhs, heap_code)
+      dedent
+      line "ELSE"
+      indent
+      note "実数とシンボルは区分の範囲に入ってしまうのでここで弾く"
+      vm_error(type_code)
+      end_block
+    end
+
+    # R[a].key?(R[a+1])。鍵があるかどうかだけを返す
+    def key_p_into(dest, rhs)
+      hash_keys_into_z(dest)
+      find_hash_key(rhs)
+      if_else_block("#{scratch32} < 0") { assign_bool(dest, false) }
+      assign_bool(dest, true)
+      end_block
+    end
+
+    # R[a].keys / R[a].values
+    #
+    # Ruby と同じく新しい配列を返します。**プールを 1 スロット使う**ので、
+    # ループの中で呼び続けると使い切ります。配列リテラルと同じ制約です。
+    #
+    # source_z は写す元の見出しが載っている Z (鍵か値のどちらか)。
+    def hash_column_into(dest, source_z, heap_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      hash_slots_into_z(dest)
+      note "新しいスロットの見出し。組の数がそのまま要素数になる"
+      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{scratch32_b}"
+      note "写す。組の数 0 (空ハッシュ) では引き算もしない"
+      if_("#{scratch32_b} > 0") do
+        line "Z8 = #{scratch32_b}"
+        line "Z8 = Z8 - 1"
+        line "FOR Z6 = 0 TO Z8"
+        indent
+        line "Z7 = Z6 * #{SLOT_WORDS} + Z#{source_z} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        line "Z3 = Z6 * #{SLOT_WORDS} + Z2 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: slot_on(7), to: slot_on(3))
+        dedent
+        line "NEXT"
+      end
+      note "R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので"
+      note "上位に入っていた値の配列のスロット番号も消える"
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+    end
+
+    # R[a] << R[a+1] / R[a].push(R[a+1])
+    #
+    # Ruby はレシーバ自身を返すので、R[a] は配列のままにします。
+    def push_into(dest, rhs, heap_code)
+      array_slot_into_z(dest)
+      if_("#{scratch32_b} >= #{layout.max_array_len}") do
+        note "1 スロットの容量がいっぱい"
+        vm_error(heap_code)
+      end
+      note "末尾に足して要素数を 1 増やす"
+      line "#{scratch32} = #{scratch32_b}"
+      element = array_element_into_z
+      line "#{element.value} = #{rhs.value}"
+      line "#{element.tag} = #{rhs.tag}"
+      line "Z6 = #{scratch32_b}"
+      line "#{word_at(Z_ARRAY_SLOT, MemoryLayout::ARRAY_LENGTH)} = Z6 + 1"
+    end
+
+    # --- ビット演算 ---
+    #
+    # KV スクリプトは `AND` / `OR` / `XOR` / `NOT` をワードの演算子として書けます。
+    # **条件式の連結には使えません** (そちらは入れ子の IF にしています)。
+    # シフトは `SLA(元, 桁数, 先)` / `SRA(元, 桁数, 先)` の文です。
+    #
+    # 整数だけです。実数を渡すと止まります。ビット列に意味を持たせるのは
+    # 整数のときだけで、実数のビット列を触っても使い道がありません。
+
+    # R[a] = R[a] <演算> R[a+1] (& | ^)
+    def bit_op_into(dest, rhs, operator, type_code)
+      both_integers(dest, rhs, type_code) do
+        devices.bit_op(dest.value, dest.value, operator, rhs.value)
+      end
+    end
+
+    # R[a] = ~R[a]
+    #
+    # **KV にワードの `NOT` はありません。** 2 の補数から作ります。
+    # `~x` は `-x - 1` なので、`NEG` で符号を反転してから 1 引きます。
+    def bit_not_into(dest, type_code)
+      if_("#{dest.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      emit_bit_not(dest.value, dest.value)
+    end
+
+    # target = ~source (`~x` = `-x - 1`)
+    def emit_bit_not(target, source)
+      line "#{target} = NEG(#{source})"
+      line "#{target} = #{target} - 1   ' ~x = -x - 1"
+    end
+
+    # R[a] = R[a] << R[a+1] / R[a] >> R[a+1]
+    #
+    # **Ruby は桁数が負なら向きが逆になります** (`a << -1` は `a >> 1`)。
+    # 32 桁以上ずらすと左は 0、右は符号で埋まります。そこまで合わせます。
+    # 合わせないと `SLA` / `SRA` に範囲外の桁数が渡り、何が返るか分かりません。
+    def shift_into(dest, rhs, left, type_code)
+      both_integers(dest, rhs, type_code) do
+        line "#{scratch32_b} = #{rhs.value}   ' 桁数"
+        if_else_block("#{scratch32_b} < 0") do
+          note "桁数が負なら向きが逆 (Ruby と同じ)"
+          line "#{scratch32_b} = 0 - #{scratch32_b}"
+          emit_shift(dest, !left)
+        end
+        emit_shift(dest, left)
+        end_block
+      end
+    end
+
+    # 桁数は scratch32_b。`SLA` / `SRA` は `結果 = SLA(元, 桁数)` の形
+    #
+    # 右シフトは**負の値をビット反転で挟みます**。**`SRA` / `SHR` は論理
+    # シフト**で、負の値をそのままずらすと 0 で埋まって大きな正の数になり
+    # ます。Ruby の `>>` は符号を保つので、これでは合いません。
+    #
+    # `~((~v) >> n)` なら符号が保たれます。正の値では論理と算術が一致する
+    # ので、反転して正にしてからずらせばよいためです。**この挟み込みは
+    # 省けません。**
+    #
+    # 左シフトは論理と算術で結果が同じなのでそのままです。
+    def emit_shift(dest, left)
+      if_else_block("#{scratch32_b} >= 32") do
+        note "全部ずれる。左は 0、右は符号で埋まる"
+        if left
+          line "#{dest.value} = 0"
+        else
+          if_else_block("#{dest.value} < 0") { line "#{dest.value} = -1" }
+          line "#{dest.value} = 0"
+          end_block
+        end
+      end
+      if left
+        devices.shift(dest.value, scratch32_b, left: true)
+      else
+        if_else_block("#{dest.value} < 0") do
+          note "負は反転して正にしてからずらし、戻す。符号が保たれる"
+          emit_bit_not(scratch32, dest.value)
+          devices.shift(scratch32, scratch32_b, left: false)
+          emit_bit_not(dest.value, scratch32)
+        end
+        devices.shift(dest.value, scratch32_b, left: false)
+        end_block
+      end
+      end_block
+    end
+
+    # 両方が整数のときだけ本体を出す。片方でも違えば止まる
+    def both_integers(dest, rhs, type_code)
+      if_("#{dest.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      if_("#{rhs.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      yield
+      line "#{dest.tag} = #{TT_INTEGER}"
+    end
+
+    # R[a] = R[a][R[a+1], R[a+2]] (デバイス参照から配列を作る)
+    #
+    # `$DML[100, 3]` は DM100・DM102・DM104 を読んで 3 要素の配列にします。
+    # **刻みは幅で決まります。** 書く向き (`$DM100 = a`) と同じ規則です。
+    #
+    # Ruby の `a[i, n]` に合わせて、個数が負なら `nil` を返します。0 なら
+    # 空の配列です。**プールを 1 スロット使います。**
+    #
+    # 書く向きの `$DML[100, 3] = a` は入れていません。Ruby は範囲を置き換えて
+    # 長さを変えますが、デバイスは長さが固定なので同じ意味になりません。
+    # 並べて書くだけなら `$DM100 = a` があります。
+    def slice_into(dest, rhs, count, type_code, heap_code)
+      if_("#{count.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      if_("#{rhs.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+
+      note "デバイス参照から種別と幅を取り出す"
+      line "Z8 = #{dest.word(1)} / #{DEVICE_REF_ACCESS_SCALE}   ' アクセス幅"
+      line "Z5 = #{dest.word(1)} - Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' デバイス種別"
+      note "個別ビットは読めない。1 要素が何ビットか決まらない"
+      if_("Z8 = #{ACCESS_BIT}") { vm_error(type_code) }
+      check_known_device(type_code)
+
+      note "刻み。幅のワード数、ビットデバイスならその 16 倍"
+      line "#{str_limit} = 1"
+      ACCESS_WORDS.select { |_, words| words > 1 }.each_key do |access|
+        if_("Z8 = #{access}") { line "#{str_limit} = #{ACCESS_WORDS.fetch(access)}" }
+      end
+      if_("Z5 > #{last_word_type}") { line "#{str_limit} = #{str_limit} * 16" }
+
+      line "#{scratch32_b} = #{count.value}   ' 個数"
+      line "#{str_temp} = #{dest.word(0)} + #{rhs.value}   ' 読み始め"
+
+      if_else_block("#{scratch32_b} < 0") do
+        note "個数が負なら nil (Ruby と同じ)"
+        set_slot_nil(dest)
+      end
+      if_("#{scratch32_b} > #{layout.max_array_len}") do
+        note "1 スロットの容量を超える個数"
+        vm_error(heap_code)
+      end
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+
+      line "Z4 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      line "#{word_at(4, MemoryLayout::ARRAY_LENGTH)} = #{scratch32_b}"
+      if_("#{scratch32_b} > 0") do
+        line "Z7 = #{scratch32_b}"
+        line "Z7 = Z7 - 1"
+        line "FOR #{str_index} = 0 TO Z7"
+        indent
+        line "Z6 = #{str_index} * #{str_limit} + #{str_temp}   ' 読み先"
+        line "Z3 = #{str_index} * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        device_dispatch(:read, slot: slot_on(3), error_code: type_code, checked: true)
+        dedent
+        line "NEXT"
+      end
+      note "R[a] はデバイス参照から配列に変わる"
+      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+      line "#{dest.tag} = #{TT_ARRAY}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      end_block
+    end
+
+    # !R[a]。偽なら true、それ以外は false
+    def not_into(dest)
+      if_else_block("#{dest.tag} > #{TT_FALSY_MAX}") { assign_bool(dest, false) }
+      assign_bool(dest, true)
+      end_block
+    end
+
+    # R[a] % R[a+1]。整数どうしのみ
+    #
+    # Ruby の % は商を切り下げた余りで、符号は除数に合います (-7 % 3 = 2)。
+    # KV の / は 0 方向へ切り捨てるため、符号が違うときに除数を足して補正します。
+    def mod_into(dest, rhs, type_code, zero_code)
+      note "整数どうしのみ。実数の % は未対応"
+      if_else_block("#{rhs.tag} = #{TT_INTEGER}") do
+        if_else_block("#{dest.tag} = #{TT_INTEGER}") do
+          integer_mod(dest, rhs, zero_code)
+        end
+        vm_error(type_code)
+        end_block
+      end
+      vm_error(type_code)
+      end_block
+    end
+
+    def integer_mod(dest, rhs, zero_code)
+      if_else_block(cmp(:ne, rhs.value, const(0))) do
+        line "#{scratch32} = #{dest.value}       ' 被除数を退避"
+        line "#{dest.value} = #{binop(:div, dest.value, rhs.value)}   ' 0方向へ切り捨てた商"
+        line "#{scratch32_b} = #{scratch32} - #{dest.value} * #{rhs.value}   ' 余り"
+        if_("#{scratch32_b} <> 0") do
+          note "符号が違うときだけ除数を足して符号を合わせる"
+          if_else_block("#{scratch32} < 0") do
+            if_("#{rhs.value} > 0") { line "#{scratch32_b} = #{scratch32_b} + #{rhs.value}" }
+          end
+          if_("#{rhs.value} < 0") { line "#{scratch32_b} = #{scratch32_b} + #{rhs.value}" }
+          end_block
+        end
+        line "#{dest.value} = #{scratch32_b}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+      vm_error(zero_code)
+      end_block
+    end
+
+    # 絶対値。型は変わらない
+    # R[a] = -R[a]
+    #
+    # **mruby は `-x` を `x.-@()` にします。** リテラルは畳み込まれるので、
+    # ここへ来るのは変数や式に付けたときだけです。整数と実数の両方を受けます。
+    def neg_into(dest)
+      if_else_block("#{dest.tag} = #{TT_FLOAT}") do
+        line "#{dest.float} = 0 - #{dest.float}"
+      end
+      line "#{dest.value} = 0 - #{dest.value}"
+      end_block
+    end
+
+    def abs_into(dest)
+      if_else_block("#{dest.tag} = #{TT_FLOAT}") do
+        if_("#{dest.float} < 0") { line "#{dest.float} = 0 - #{dest.float}" }
+      end
+      if_("#{dest.value} < 0") { line "#{dest.value} = 0 - #{dest.value}" }
+      end_block
+    end
+
+    # 実数を整数へ写す。**0 方向へ切り捨てます**
+    #
+    # KV スクリプトの代入はそのまま切り捨てますが、**ST は四捨五入します**
+    # (実機で確認済み: 3.7 が 4、-2.7 が -3 になりました)。丸めた向きを見て
+    # 1 だけ戻します。`to_i` も `floor` も `round` もデバイスへの書き込みも
+    # この切り捨てを当てにしているので、直すのはここ 1 箇所で足ります。
+    def truncate_float_into(target, source, comment = nil)
+      line "#{target} = #{source}#{comment ? "      ' #{comment}" : ''}"
+      return unless dialect.rounds_float_to_int?
+
+      note "この機種の実数→整数は四捨五入。0 方向へ 1 だけ戻す"
+      if_else_block("#{source} >= 0") do
+        if_("#{target} > #{source}") { line "#{target} = #{target} - 1" }
+      end
+      if_("#{target} < #{source}") { line "#{target} = #{target} + 1" }
+      end_block
+    end
+
+    # 実数→整数。整数はそのまま
+    #
+    # 同じスロットを .F で読んで .L で書くため、一度スクラッチに移します。
+    def to_i_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "0 方向へ切り捨て (Ruby の Float#to_i と同じ)"
+        truncate_float_into(scratch32, dest.float)
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+    end
+
+    # 整数→実数。実数はそのまま
+    def to_f_into(dest)
+      if_("#{dest.tag} = #{TT_INTEGER}") do
+        note "整数→実数。同じスロットを .L で読んで .F で書くためスクラッチを挟む"
+        line "#{scratch_float} = #{dest.value}"
+        line "#{dest.float} = #{scratch_float}"
+        line "#{dest.tag} = #{TT_FLOAT}"
+      end
+    end
+
+    # 切り下げ。整数はそのまま
+    def floor_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "KV の実数→整数は 0 方向へ切り捨て。負で端数があるときだけ 1 引く"
+        truncate_float_into(scratch32, dest.float)
+        if_("#{dest.float} < 0") do
+          if_("#{scratch32} <> #{dest.float}") { line "#{scratch32} = #{scratch32} - 1" }
+        end
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+    end
+
+    # 四捨五入。整数はそのまま
+    def round_into(dest)
+      if_("#{dest.tag} = #{TT_FLOAT}") do
+        note "Ruby の round は 0 から遠い方へ丸める (2.5→3, -2.5→-3)"
+        if_else_block("#{dest.float} >= 0") { line "#{scratch_float} = #{dest.float} + 0.5" }
+        line "#{scratch_float} = #{dest.float} - 0.5"
+        end_block
+        truncate_float_into(scratch32, scratch_float)
+        line "#{dest.value} = #{scratch32}"
+        line "#{dest.tag} = #{TT_INTEGER}"
+      end
+    end
+
     # スロットに true / false を書く
     def assign_bool(slot, value)
       tag = value ? TT_TRUE : TT_FALSE
@@ -589,7 +2919,7 @@ module FaRuby
     # GETGV/SETGV はデバイステーブルが Z3-Z8 を占有するため、
     # レジスタアドレスには副オペランド用の Z を使う
     def global_reg_slot(name)
-      slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", layout.reg_file_base, z: Z_SECONDARY)
+      devices.reg_slot([:reg, name], operand(name), z: Z_SECONDARY)
     end
 
     # 値スロットの先頭アドレスを Z に設定し、タグと値の参照を返す
@@ -598,21 +2928,6 @@ module FaRuby
     # 型サフィックスはデバイス側に付ける (EM1.L:Z1)。
     # EM1:Z1.L と書くと .L がインデックスレジスタに結合し、
     # エラーにならないまま16ビットアクセスに退化する。
-    def slot_ref(key, index_expr, base, z: nil)
-      return @slot_cache[key] if @slot_cache.key?(key)
-
-      z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
-      line "Z#{z} = #{index_expr} + #{block_offset(base)}"
-      @slot_cache[key] = Slot.new("#{layout.device_name}#{SLOT_TYPE_OFFSET}:Z#{z}",
-                                  z, layout.device_name)
-    end
-
-    # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
-    def read_bytecode_into(dest)
-      line "Z1 = #{pc} + #{block_offset(layout.bytecode_base)}"
-      line "#{dest} = #{indexed_base}:Z1"
-      line "#{pc} = #{pc} + 1"
-    end
 
     def fetch_byte(target) = read_bytecode_into(target)
 
@@ -624,22 +2939,38 @@ module FaRuby
       line "#{target} = Z3 * 256 + Z4"
     end
 
+    # 24ビットビッグエンディアン (OP_ENTER の aspec)
+    #
+    # #{layout.device_name} は16ビットなので 1 ワードに収まりません。上位バイトを
+    # そのオペランドに、下位 2 バイトを次のオペランドに分けて置きます。
+    # 使う側 (enter_method) はこの分け方を前提にしています。
+    def fetch_u24(target)
+      note "24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける"
+      read_bytecode_into(target)
+      read_bytecode_into("Z3")
+      read_bytecode_into("Z4")
+      line "#{operand(:b)} = Z3 * 256 + Z4   ' aspec の下位2バイト"
+    end
+
     def chain_head(first, cond)
       line(first ? "IF #{cond} THEN" : "ELSE IF #{cond} THEN")
     end
 
-    def word_device_body(mode, name, slot)
+    def word_device_body(mode, device, slot)
+      branches = ACCESS_BRANCHES
+      branches = branches.reject { |value, _| value == ACCESS_F } if device_set.no_float_types.include?(device.type)
+
       first = true
-      ACCESS_BRANCHES.each do |value, suffix|
+      branches.each do |value, _suffix|
         chain_head(first, "Z8 = #{value}")
         first = false
         indent
-        word_access(mode, name, suffix, slot)
+        word_access(mode, device, value, slot)
         dedent
       end
       line "ELSE"
       indent
-      word_access(mode, name, ACCESS_DEFAULT_SUFFIX, slot)
+      word_access(mode, device, ACCESS_S, slot)
       dedent
       line "END IF"
     end
@@ -648,17 +2979,47 @@ module FaRuby
     #
     # 読み取りは幅に応じた型タグも書く。書き込みはあらかじめ用意した
     # 整数・実数のスクラッチを使うため、レジスタの型を再び見なくてよい。
-    def word_access(mode, name, suffix, slot)
-      device = "#{name}0.#{suffix}:Z6"
-      float = suffix == "F"
+    #
+    # **デバイスの指し方は機種によります** (tools/devices.rb)。KV は幅を
+    # サフィックスで選ぶので 1 つの式で済みますが、三菱にその綴りが無く、
+    # 32 ビットは 16 ビット 2 回に開きます。
+    def word_access(mode, device, access, slot)
+      float = access == ACCESS_F
 
       if mode == :read
-        line "#{float ? slot.float : slot.value} = #{device}"
+        line "#{float ? slot.float : slot.value} = #{devices.device_read(device, access, Z_DEVICE)}"
         line "#{slot.tag} = #{float ? TT_FLOAT : TT_INTEGER}"
       else
-        line "#{device} = #{float ? scratch_float : scratch32}"
+        devices.device_write(device, access, Z_DEVICE, write_source(float))
       end
     end
+
+    # 書き込む値の見え方
+    #
+    # **同じ場所を 3 通りで渡します。** KV は幅の付いた 1 つの式で書けますが、
+    # 三菱は 32 ビットを 16 ビット 2 回に開くので、上位・下位が要ります。
+    def write_source(float)
+      base = float ? layout.temp32_b_addr : layout.temp32_addr
+      scratch_source(base).tap { |s| s.value = scratch_float if float }
+    end
+
+    # スクラッチの中身を書き込む値として渡す
+    def scratch_source(base = layout.temp32_addr)
+      WriteSource.new(value: devices.state_long(base), long: devices.state_long(base),
+                      lo: state(base), hi: state(base + 1))
+    end
+
+    # Z に載せたアドレスの 32 ビットを読む。**値の式を返します**
+    #
+    # **KV は 1 つの式ですが、三菱に 32 ビットの綴りがありません。** 16 ビット
+    # 2 回に開いてスクラッチへ載せるので、どちらのスクラッチを使うかを
+    # 指定します。2 つを同時に見比べるところ (ループの添字と上限) があります。
+    def long_at(z, offset, secondary: false)
+      devices.long_at(z, offset, secondary ? layout.temp32_b_addr : layout.temp32_addr)
+    end
+
+    # Z に載せたアドレスへ 32 ビットを書く
+    def write_long_at(z, offset, source) = devices.write_long_at(z, offset, source)
 
     # 書き込み用に、レジスタの値を必要な形へ変換する
     #
@@ -679,84 +3040,189 @@ module FaRuby
         end_block
       end
       if_else_block("#{slot.tag} = #{TT_FLOAT}") do
-        line "#{scratch32} = #{slot.float}      ' 実数→整数 (0方向へ切り捨て)"
+        truncate_float_into(scratch32, slot.float, "実数→整数 (0方向へ切り捨て)")
       end
       line "#{scratch32} = #{slot.value}"
       end_block
       end_block
     end
 
-    def bit_device_body(mode, name, slot, set_res)
-      bit = "#{name}0:Z6"
+    def bit_device_body(mode, device, slot, error_code:, checked: false)
+      bit = devices.bit_ref(device, Z_DEVICE)
+      writable = device.writable
       if mode == :read
         if_else_block(bit) { assign_bool(slot, true) }
         assign_bool(slot, false)
         end_block
-      elsif set_res
-        if_else_block("#{scratch32} <> 0") { line "SET(#{bit})" }
-        line "RES(#{bit})"
+      elsif writable
+        if_else_block("#{scratch32} <> 0") { line dialect.write_bit(bit, true) }
+        line dialect.write_bit(bit, false)
         end_block
+      elsif checked
+        note "接点は書けない。呼ぶ側が個別ビットを弾いている。ここへは来ない"
       else
-        if_else_block("#{scratch32} <> 0") { line "#{bit} = 1" }
-        line "#{bit} = 0"
-        end_block
+        note "接点は書けない。タイムアップ・カウントアップで決まる"
+        vm_error(error_code)
       end
     end
   end
 
-  # vm_core.kvs を生成する
+  # VM のスクリプトを生成する
   #
-  # generate は { ファイル名 => 内容 } を返します。現在は 1 ファイルですが、
-  # KV Studio がスクリプトの大きさで変換できなくなった場合に分割できるよう
-  # 複数ファイルを返せる形にしてあります。
+  # generate は { ファイル名 => 内容 } を返します。**1 本にまとめると
+  # KV Studio の上限 (スクリプト 1 本あたり 264,144 文字、対のない
+  # LABEL / CJ / GOTO が 200) に収まらないため、複数に分けます。**
+  # 上限はスクリプトごとなので、分けた分だけ余裕が増えます。
+  #
+  # 2 つのループはラダーに置きます。**ラダーの FOR は回数しか指定できず、
+  # 途中で抜けられません。**回数はスクリプトが決めてデバイスに置き、
+  # 走らないインスタンスは 0 にして内側ごと飛ばします。
+  #
+  #   [前口上]                  Z 退避 / バンク選択 / 外側の回数
+  #   FOR 外側 (インスタンス)
+  #     [頭出し]                Z9 を進める / 内側の回数
+  #     FOR 内側 (ステップ)
+  #       [取り込み]            範囲検査 / fetch / PC 進め
+  #       [群 1] … [群 n]       自分の担当番号だけ実行する
+  #     NEXT
+  #   NEXT
+  #   [後始末]                  バンク復帰 / Z 復元
   class KvsGenerator
     include VmConstants
 
-    OUTPUT_NAME = "vm_core.kvs"
-    INIT_NAME   = "vm_init.kvs"
-    OUTPUT_DIR  = File.expand_path("../plc/keyence", __dir__)
+    # 生成物の親。**書き出し先は dialect.directory で決まります** (メーカー/機種)
+    PLC_DIR = File.expand_path("../plc", __dir__)
+
+    # ファイル名の通し番号
+    #
+    # **ラダーに置く順に並びます。**取り込むときに順番を間違えないよう、
+    # 名前で並べ替えれば置く順になるようにしてあります。群の数を変えると
+    # 番号がずれますが、生成しなくなった名前は `write!` が消します。
+    #
+    # `init` はリセットハンドラで、Z の退避もバンクの選択も自分で行う
+    # 独立したスクリプトです。**本体より先に置きます。**後ろだと、要求の
+    # あったスキャンで古い状態のまま命令が進んでしまいます。
+    def self.file_name(index, stem, extension = "kvs")
+      format("vm_%02d_%s.%s", index + 1, stem, extension)
+    end
+
+    # どの群の範囲にも入らない番号
+    #
+    # 走っていないときに取り込みがこれを置きます。**群のスクリプトは
+    # ラダーの FOR の中で必ず呼ばれるため、実行してよいかどうかを
+    # オペコード番号だけで判断できるようにしています。**
+    UNREACHABLE_OPCODE = 65_535
+
+    # **この機種で使う番号。** 三菱の INT は符号付きなので上限が違います
+    def unreachable_opcode = dialect.word_sentinel
 
     attr_reader :layout
 
-    def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default)
-      @opcodes = opcodes
+    attr_reader :dialect
+
+    def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default,
+                   dialect: KvsDialect.new)
       @layout = layout
+      @dialect = dialect
+      @opcodes = dialect.select_opcodes(opcodes)
     end
 
     # デコード対象のオペコードを保持するデバイス
     def opcode_var = query.opcode
 
-    # 行を出さずにデバイス式だけを尋ねるための emitter
-    def query = @query ||= KvsEmitter.new(layout: layout)
+    # 振り分けに使う写し。担当の群が実行したら空き番号で潰す
+    def dispatch_var = query.state(layout.dispatch_addr)
 
-    def generate
-      { OUTPUT_NAME => build_source, INIT_NAME => build_init_source }
+    # 行を出さずにデバイス式だけを尋ねるための emitter
+    def query = @query ||= KvsEmitter.new(layout: layout, dialect: dialect)
+
+    # ラダーに置く順のファイル名 (番号付き)
+    #
+    # **リセットハンドラが先頭です。**本体より後ろに置くと、要求のあった
+    # スキャンで古い状態のまま STEPS_PER_CYCLE 命令だけ進んでしまいます。
+    # 書き出すファイルの役割
+    #
+    # **分けない機種は本体 1 本です** (tools/dialect.rb)。ステップのループも
+    # 命令の振り分けもその中に入るので、ラダーは頭出しも群も知りません。
+    def stems
+      return %w[init body] unless dialect.splits_scripts?
+
+      %w[init prologue instance fetch] +
+        Array.new(dispatch_groups.size) { |i| "group#{i + 1}" } +
+        %w[epilogue]
     end
 
+    # 役割からファイル名を引く
+    def file_name(stem) = self.class.file_name(stems.index(stem), stem, dialect.extension)
+
+    def generate
+      builders = { "body" => -> { build_body_source },
+                   "prologue" => -> { build_prologue_source },
+                   "instance" => -> { build_instance_source },
+                   "fetch" => -> { build_fetch_source },
+                   "epilogue" => -> { build_epilogue_source },
+                   "init" => -> { build_init_source } }
+      dispatch_groups.each_with_index do |group, i|
+        builders["group#{i + 1}"] = -> { build_group_source(group, i) }
+      end
+      files = stems.to_h { |stem| [file_name(stem), dialect.finish(builders.fetch(stem).call, query.devices)] }
+
+      # **付き物は本体を組み立てた後です。** 三菱のラベル一覧は生成コードが
+      # 指したものを集めたものなので、指し終わるまで揃いません。
+      files.merge(dialect.companion_files(query.devices))
+    end
+
+    # ラダーに並べる順のスクリプト名 (リセットハンドラを除く)
+    def script_names = stems.reject { |stem| stem == "init" }.map { |stem| file_name(stem) }
+
+    # 実行に関わるスクリプトを並び順につないだもの
+    #
+    # 生成結果を通しで検査するために使います。**ラダーはこの順に呼びます**が、
+    # つないだものがそのまま動くわけではありません (ループはラダー側)。
     def source
-      generate.fetch(OUTPUT_NAME)
+      files = generate
+      script_names.map { |name| files.fetch(name) }.join("\n")
     end
 
     def init_source
-      generate.fetch(INIT_NAME)
+      generate.fetch(file_name("init"))
     end
 
     # 生成結果をファイルに書き出す。書き換わったファイル名を返す
-    def write!(dir = OUTPUT_DIR)
-      generate.filter_map do |name, content|
-        path = File.join(dir, name)
-        next if File.exist?(path) && File.binread(path) == content.b
+    #
+    # **生成しなくなったファイルは消します。**群の数を変えると余りが出ますが、
+    # 残っていると KV Studio に古い中身を取り込むことになります。
+    # 既定の書き出し先 (KV Studio のプロジェクトと同じ場所)
+    def output_dir = File.join(PLC_DIR, dialect.directory)
 
-        File.binwrite(path, content)
+    # **CSV は UTF-16LE です。** GX Works3 が書き出す形に合わせます
+    def encoded(name, content)
+      return content.b unless name.end_with?(".csv")
+
+      ("\uFEFF" + content).encode("utf-16le").b
+    end
+
+    def write!(dir = output_dir)
+      files = generate
+      written = files.filter_map do |name, content|
+        path = File.join(dir, name)
+        bytes = encoded(name, content)
+        next if File.exist?(path) && File.binread(path) == bytes
+
+        File.binwrite(path, bytes)
         name
       end
+      pattern = File.join(dir, "vm_*.#{dialect.extension}")
+      removed = Dir[pattern].reject { |p| files.key?(File.basename(p)) }
+      removed.each { |path| File.delete(path) }
+      written + removed.map { |path| "#{File.basename(path)} (削除)" }
     end
 
     private
 
     # リセットハンドラ (毎スキャン実行、RESET_REQ = 1 のインスタンスだけ動く)
     def build_init_source
-      e = KvsEmitter.new(layout: layout)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       z = KvsEmitter::Z_PRIMARY
 
       e.note "======================================="
@@ -770,6 +3236,7 @@ module FaRuby
       e.blank
 
       e.save_z_registers
+      e.select_fixed_bank
       e.blank
 
       e.each_instance do
@@ -782,16 +3249,9 @@ module FaRuby
         e.line "#{e.error} = 0      ' ERROR = none"
         e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
         e.blank
-        e.note "レジスタファイルクリア " \
-               "(ブロック先頭 +#{layout.offset_of(layout.reg_file_base)} から " \
-               "#{layout.max_regs}スロット × #{SLOT_WORDS}ワード)"
-        e.note "スロット先頭の型タグも 0 (TT_EMPTY) になる"
-        e.line "FOR Z#{z} = #{e.block_offset(layout.reg_file_base)} " \
-               "TO #{e.block_offset(layout.reg_slot_addr(layout.max_regs) - 1)}"
-        e.indent
-        e.line "#{e.indexed_base}:Z#{z} = 0"
-        e.dedent
-        e.line "NEXT"
+        e.reset_to_top_irep
+        e.blank
+        e.clear_register_file(z)
         e.blank
         e.line "#{e.state(layout.reset_req_addr)} = 0     ' リセット要求クリア"
         e.dedent
@@ -801,49 +3261,235 @@ module FaRuby
       end
 
       e.blank
+      e.restore_fixed_bank
       e.restore_z_registers
       "#{e.lines.join("\n")}\n"
     end
 
-    def build_source
-      e = KvsEmitter.new(layout: layout)
+    # [前口上] ラダーの外側 FOR の前に 1 回だけ動く
+    def build_prologue_source
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_header(e)
       e.blank
       e.save_z_registers
+      e.select_fixed_bank
       e.blank
-
-      e.each_instance do
-        e.blank
-        e.line "IF #{e.status} = #{VM_RUNNING} THEN"
-        e.blank
-        e.indent
-        e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO #{e.state(layout.steps_per_cycle_addr)}"
-        e.blank
-        e.indent
-        emit_fetch(e)
-        emit_dispatch(e)
-        emit_range_check(e)
-        e.dedent
-        e.line "NEXT"
-        e.dedent
-        e.blank
-        e.line "END IF"
-        e.blank
-      end
-
+      e.note "外側 (インスタンス) の回数をラダーへ渡す"
+      e.line "#{layout.device(layout.ladder_instances_addr)} = #{layout.instances}"
       e.blank
-      e.restore_z_registers
-      "#{e.lines.join("\n")}\n"
+      e.note "頭出しが最初に足すので、1 つ手前から始める"
+      e.line "Z#{KvsEmitter::Z_INSTANCE} = #{layout.base - layout.instance_size}"
+      finish(e)
     end
 
-    def emit_header(e)
+    # [本体] 1 本にまとめた VM。ラダーは 1 スキャンに 1 回呼ぶだけ
+    #
+    # **ステップのループがこの中にあります。** 分ける機種はラダーの FOR に
+    # 出していますが、それだと途中で抜けられず、命令を打ち切る `BREAK` の
+    # 相手も失います。ここでは `BREAK` がそのままステップのループを抜けます。
+    #
+    # **インスタンスは 1 つです。** VM 状態を型付きラベルで指すので、
+    # 先頭をずらして使い回すことができません (tools/devices.rb)。
+    def build_body_source
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      emit_header(e)
+      e.blank
+      e.save_z_registers
+      e.select_fixed_bank
+      e.blank
+      e.note "ブロックの先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
+      e.line "Z#{KvsEmitter::Z_INSTANCE} = #{layout.base}"
+      e.blank
+      e.note "1 スキャンぶんのステップ。**#{"BREAK"} はこのループを抜ける**"
+      e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO " \
+             "#{e.state(layout.steps_per_cycle_addr)}"
+      e.indent
+      e.blank
+      e.note "止まっていたら残りは回らない"
+      e.if_("#{e.status} <> #{VM_RUNNING}") { e.line "BREAK" }
+      e.blank
+      emit_fetch(e)
+      e.blank
+      emit_dispatch(e)
+      e.blank
+      emit_range_check(e)
+      e.dedent
+      e.line "NEXT"
+      e.blank
+      e.restore_fixed_bank
+      e.restore_z_registers
+      finish(e)
+    end
+
+    # [頭出し] 外側 FOR の中、内側 FOR の前
+    def build_instance_source
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      emit_box_header(e, "インスタンスの頭出し", "外側 FOR の中、内側 FOR の前")
+      e.blank
+      e.note "次のインスタンスのブロック先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
+      e.line "Z#{KvsEmitter::Z_INSTANCE} = Z#{KvsEmitter::Z_INSTANCE} + #{layout.instance_size}"
+      e.blank
+      e.note "内側 (ステップ) の回数をラダーへ渡す"
+      e.note "**走らないインスタンスは 0 にして内側のループごと飛ばす。**"
+      e.note "ラダーの FOR は途中で抜けられないため、ここで決めるしかない"
+      steps = layout.device(layout.ladder_steps_addr)
+      e.line "IF #{e.status} = #{VM_RUNNING} THEN"
+      e.indent
+      e.line "#{steps} = #{e.state(layout.steps_per_cycle_addr)}"
+      e.dedent
+      e.line "ELSE"
+      e.indent
+      e.line "#{steps} = 0"
+      e.dedent
+      e.line "END IF"
+      finish(e)
+    end
+
+    # [取り込み] 内側 FOR の中、群のスクリプトの前
+    def build_fetch_source
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      emit_box_header(e, "命令の取り込み", "内側 FOR の中、群のスクリプトの前")
+      e.blank
+      e.note "**止まっていたら、どの群の範囲にも入らない番号を置く。**"
+      e.note "ラダーの FOR は途中で抜けられないので、残りのステップは"
+      e.note "群のスクリプトが範囲判定で素通りすることで空回りにする"
+      e.line "IF #{e.status} <> #{VM_RUNNING} THEN"
+      e.indent
+      e.line "#{dispatch_var} = #{unreachable_opcode}"
+      e.dedent
+      e.line "ELSE"
+      e.indent
+      emit_fetch(e)
+      e.dedent
+      e.line "END IF"
+      finish(e)
+    end
+
+    # [群 n] 内側 FOR の中。自分の担当番号だけ実行する
+    def build_group_source(group, index)
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      range = group_range(index)
+      emit_box_header(e, format("オペコード 0x%02X - 0x%02X", range.first, range.last),
+                      "内側 FOR の中 (#{index + 1} 番目の群)")
+      e.blank
+      e.note "担当外の番号はここで素通りする。**判定はループの外に置く。**"
+      e.note "見るのは上限だけ。#{range.first} 未満は手前の群が実行して"
+      e.note "#{unreachable_opcode} で潰しているので、ここには届かない"
+      e.line "IF #{dispatch_var} <= #{range.last} THEN"
+      e.indent
+      e.blank
+      e.note "後ろの群がもう一度実行しないように潰す。**本体より先に置く。**"
+      e.note "本体は途中で BREAK することがあり、後ろに置くと通らない"
+      e.line "#{dispatch_var} = #{unreachable_opcode}"
+      e.blank
+      emit_break_frame(e) do
+        emit_opcode_chain(e, group)
+        e.blank
+        emit_range_check(e)
+      end
+      e.dedent
+      e.line "END IF"
+      finish(e)
+    end
+
+    # [後始末] ラダーの外側 FOR の後に 1 回だけ動く
+    def build_epilogue_source
+      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      emit_box_header(e, "後始末", "外側 FOR の後")
+      e.blank
+      e.restore_fixed_bank
+      e.restore_z_registers
+      finish(e)
+    end
+
+    # BREAK の相手になる空回りのループ
+    #
+    # **BREAK はスクリプトの中で FOR と対になっていなければなりません。**
+    # ステップのループはラダーへ出したので、命令の途中で処理を打ち切る
+    # BREAK は相手を失います。1 回だけ回るループで包み、抜けたら
+    # スクリプトが終わるようにします。
+    #
+    # 打ち切る側はどれも直前に STATUS を実行中以外にしています。次の
+    # ステップでは取り込みが範囲外の番号を置くので、残りは空回りになります。
+    def emit_break_frame(e)
+      e.note "BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる"
+      e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO 1"
+      e.indent
+      e.blank
+      yield
+      e.dedent
+      e.line "NEXT"
+    end
+
+    def finish(e) = "#{e.lines.join("\n")}\n"
+
+    # 前口上以外のスクリプトの見出し
+    #
+    # オフセットの一覧やデバイスの使い方は前口上にまとめてあります。
+    # ここには置き場所と役割だけを書きます。
+    def emit_box_header(e, title, place)
       e.note "======================================="
-      e.note "faRuby VM Core - Fetch/Decode/Execute"
+      e.note "faRuby VM - #{title}"
       e.note "======================================="
       e.note "【自動生成】このファイルを直接編集しないでください。"
       e.note "  定義: tools/opcode_table.rb"
       e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
       e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
+      e.note ""
+      e.note "ラダーでの置き場所: #{place}"
+      e.note "並び順と役割は #{file_name('prologue')} の先頭にあります。"
+    end
+
+    # ラダーへの並べ方
+    #
+    # **分ける機種はラダーが順に呼び、回数も持ちます。** まとめる機種は
+    # 1 回呼ぶだけで、ステップのループは本体の中にあります。
+    def emit_placement(e)
+      unless dialect.splits_scripts?
+        e.note "【ラダーへの置き方】1 スキャンに 1 回呼ぶだけです"
+        e.note "  #{file_name('init')}   リセットハンドラ (本体より先)"
+        e.note "  #{file_name('body')}   ← このファイル"
+        e.note ""
+        e.note "**ステップのループはこの中にあります。** ラダーの FOR は回数しか"
+        e.note "指定できず途中で抜けられませんが、ST の FOR は抜けられます。"
+        e.note "命令を打ち切る BREAK もそのままステップのループを抜けます。"
+        return
+      end
+
+      e.note "【ラダーに並べる順】ファイル名の番号が置く順です"
+      e.note "  #{file_name('init')}       リセットハンドラ (本体より先)"
+      e.note "  #{file_name('prologue')}   ← このファイル"
+      e.note "  FOR #{layout.device(layout.ladder_instances_addr)} 回          " \
+             "(外側 / インスタンス)"
+      e.note "    #{file_name('instance')}"
+      e.note "    FOR #{layout.device(layout.ladder_steps_addr)} 回        " \
+             "(内側 / ステップ)"
+      e.note "      #{file_name('fetch')}"
+      dispatch_groups.each_index { |i| e.note "      #{file_name("group#{i + 1}")}" }
+      e.note "    NEXT"
+      e.note "  NEXT"
+      e.note "  #{file_name('epilogue')}"
+      e.note ""
+      e.note "**ラダーの FOR は回数しか指定できず、途中で抜けられません。**"
+      e.note "回数はスクリプトが決めて上の 2 つのデバイスに置きます。"
+      e.note "走らないインスタンスは 0、止まった後のステップは空回りです。"
+      e.note ""
+      e.note "1 本にまとめないのは KV Studio の上限のためです。"
+      e.note "  スクリプト 1 本あたり 264,144 文字"
+      e.note "  対のない LABEL / CJ / GOTO が 200"
+      e.note "**どちらもスクリプトごとに数えるため、分けた分だけ余裕が増えます。**"
+    end
+
+    def emit_header(e)
+      e.note "======================================="
+      e.note "faRuby VM#{dialect.splits_scripts? ? " - 前口上 (ラダーの外側 FOR の前)" : ""}"
+      e.note "======================================="
+      e.note "【自動生成】このファイルを直接編集しないでください。"
+      e.note "  定義: tools/opcode_table.rb"
+      e.note "  生成: tools/kvs_generator.rb  (rake vm_core)"
+      e.note "  編集した場合 test_kvs_generator.rb が失敗します。"
+      e.note ""
+      emit_placement(e)
       e.note ""
       e.note "#{layout.device_name} デバイスを使用。"
       e.note ""
@@ -871,14 +3517,48 @@ module FaRuby
       e.note "  #{e.scratch_hi} = 32ビット合成スクラッチ 上位ワード"
       e.note "         #{layout.device_name} は無サフィックスだと16ビット符号なしのため、負値や"
       e.note "         65535 超の即値は一旦この2ワードに置いてから .L で読む"
-      e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタファイル (値スロット #{SLOT_WORDS}ワード/レジスタ)"
-      e.note "  +#{layout.offset_of(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
-      e.note "  +#{layout.offset_of(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
-      e.note "  +#{layout.offset_of(layout.device_table_base)}~ = デバイスマッピングテーブル " \
+      e.note "  #{e.state(layout.reg_base_addr)} = REG_BASE (レジスタ窓の先頭。呼び出しでずれる)"
+      e.note "  #{e.state(layout.cur_bytecode_addr)} = 実行中の irep のバイトコード先頭"
+      e.note "  #{e.state(layout.cur_pool_addr)} = 実行中の irep の定数プール先頭"
+      e.note "  #{e.state(layout.cur_symbols_addr)} = 実行中の irep のシンボル表先頭"
+      e.note "  #{e.state(layout.array_sp_addr)} = ARRAY_SP (次に渡す配列スロット。返さないので減らない)"
+      e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタスタック (値スロット #{SLOT_WORDS}ワード/レジスタ)"
+      e.note "  +#{layout.offset_of(layout.frame_stack_base)}~ = 呼び出しスタック " \
+             "(#{MemoryLayout::FRAME_WORDS}ワード/段)"
+      e.note "  +#{layout.offset_of(layout.method_table_base)}~ = メソッド表 (1ワード/メソッド)"
+      e.note "  +#{layout.offset_of(layout.general_global_base)}~ = 汎用グローバル変数 " \
+             "(値スロット #{SLOT_WORDS}ワード/変数)"
+      e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
+             "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
+      e.note ""
+      bank = e.dialect.select_bank(layout.fixed_bank)
+      e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
+             "(#{layout.fixed_host_device} をバンク #{layout.fixed_bank} に分けたもの) に置く。"
+      if bank
+        e.note "スクリプトの先頭で #{bank} を実行済みのため、" \
+               "#{layout.fixed_device_name} のアドレスで直接指せる。"
+      else
+        e.note "**バンクを選ぶ手立てが無く常に 0 です。** ホスト側も同じ " \
+               "バンクへ書くので食い違いません (memory.fixed_bank)。"
+      end
+      e.note "インスタンス#{layout.instance_index}のブロックは " \
+             "#{layout.fixed_device(layout.fixed_origin)}-" \
+             "#{layout.fixed_device(layout.fixed_origin + layout.fixed_instance_size - 1)}:"
+      e.note "  #{layout.fixed_device(layout.irep_table_base)}~ = IREPテーブル " \
+             "(#{MemoryLayout::IREP_TABLE_STRIDE}ワード/irep)"
+      e.note "  #{layout.fixed_device(layout.bytecode_base)}~ = バイトコード (1バイト/1ワード)"
+      e.note "  #{layout.fixed_device(layout.pool_base)}~ = 定数プール (値スロット #{SLOT_WORDS}ワード/エントリ)"
+      e.note "  #{layout.fixed_device(layout.device_table_base)}~ = シンボル表 " \
              "(#{DEVICE_TABLE_STRIDE}ワード/エントリ)"
       e.note ""
+      e.note "バイトコード・定数プール・シンボル表は全 irep で 1 つの領域を分け合う。"
+      e.note "irep ごとの位置は IREP テーブルにあり、切り替え時に VM 状態へ写す。"
+      e.note "そのため上のアドレスは領域の先頭であって、実行中の位置ではない。"
+      e.note "**インスタンスごとに位置が違うため、EM#{layout.offset_of(layout.irep_table_addr_addr)}:Z9 " \
+             "から引く。**"
+      e.note ""
       e.note "Z#{KvsEmitter::USED_Z.first}-Z#{KvsEmitter::USED_Z.last} を使用 " \
-             "(Z11/Z12 は特別な用途があり使用不可、Z10 はラダー用に残す)"
+             "(Z11/Z12 は特別な用途があり使用不可、Z10 は未使用)"
       e.note "  Z はラダーと共有する資源のため、スクリプトの先頭で退避し末尾で復元する。"
       e.note "  faRuby の実行前後で Z の内容は変わらない。"
       e.note "  退避先 #{layout.device(layout.z_save_addr(KvsEmitter::USED_Z.first))}-" \
@@ -894,17 +3574,115 @@ module FaRuby
 
     def emit_fetch(e)
       e.note "=== FETCH OPCODE ==="
-      e.line "Z1 = #{e.pc} + #{e.block_offset(layout.bytecode_base)}"
-      e.line "#{e.opcode} = #{e.indexed_base}:Z1"
-      e.line "#{e.pc} = #{e.pc} + 1"
+      e.read_bytecode_into(e.opcode)
+      e.prepare_instruction
+      e.count_step
+      emit_prologues(e)
+      return unless dialect.splits_scripts?
+
       e.blank
+      e.note "振り分け用の写し。担当の群が実行したら空き番号で潰す"
+      e.line "#{dispatch_var} = #{e.opcode}"
+      e.blank
+      e.note "どの群の担当でもない番号。群の中の抜けはそれぞれの群が見る"
+      e.if_("#{e.opcode} > #{max_opcode}") do
+        e.line "#{e.status} = #{VM_ERROR}"
+        e.line "#{e.error} = #{e.opcode}"
+        e.line "#{dispatch_var} = #{unreachable_opcode}"
+      end
     end
 
-    def emit_dispatch(e)
-      e.note "=== DECODE & EXECUTE ==="
-      e.blank
+    # 前置きだけの命令。**枝を持たず、別の命令の枝へ落ちます**
+    #
+    # mruby の vm.c と同じ形です (`OP_SSEND` は self をレシーバ位置に置いてから
+    # `OP_SEND` へ)。別々に書いていたころは組み込みメソッドの振り分けが生成
+    # コードに 2 度展開され、KV 全体の 14% を占めていました。
+    #
+    # **オペランドはまだ読めません。** 枝の中で読み直すので、ここでは覗くだけで
+    # PC を進めません。
+    def emit_prologues(e)
+      @opcodes.reject(&:branch?).each do |op|
+        e.blank
+        e.note "#{op.name}: #{op.summary}"
+        e.if_("#{e.opcode} = #{op.code}") do
+          e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
+          e.peek_bytecode_into(e.operand(:a))
+          op.body.call(e)
+          e.line "#{e.opcode} = #{op.enters}"
+        end
+      end
+    end
 
-      @opcodes.each_with_index do |op, i|
+    # 命令の振り分け。**組を入れ子にします**
+    #
+    # 1 本の長い連なりにすると、後ろの命令ほど手前の枝を全部通ることになり
+    # ます。組で 1 度ふるっておけば、担当外の組は比較 1 回で飛ばせます。
+    # **分ける機種と同じ形を、スクリプトを分けずに作っています。**
+    #
+    # 実行済みの目印 (振り分け用の写し) は要りません。連なりが 1 本なので、
+    # 当たった枝だけが通ります。
+    def emit_dispatch(e)
+      dispatch_groups.each_with_index do |group, index|
+        range = group_range(index)
+        e.line(index.zero? ? "IF #{opcode_var} <= #{range.last} THEN" \
+                           : "ELSE IF #{opcode_var} <= #{range.last} THEN")
+        e.indent
+        e.note format("オペコード 0x%02X - 0x%02X", range.first, range.last)
+        emit_opcode_chain(e, group)
+        e.dedent
+      end
+      e.line "ELSE"
+      e.indent
+      e.note "どの組の担当でもない番号"
+      e.line "#{e.status} = #{VM_ERROR}"
+      e.line "#{e.error} = #{e.opcode}"
+      e.line "BREAK"
+      e.dedent
+      e.line "END IF"
+    end
+
+    # 命令の振り分けを何組に分けるか
+    #
+    # **KV Studio は「対のない LABEL / CJ / GOTO」を 200 までしか許しません。**
+    # `IF` / `ELSE IF` はラダーの条件ジャンプになり、連なりの各枝は連なりの
+    # 終わりへ飛ぶので `END IF` が出るまで対になりません。**1 本の連なりに
+    # 枝を並べるほど溜まります。**
+    #
+    # 番号の範囲で組に分け、**組ごとに別のスクリプトにします。**溜まりは
+    # 組の中の枝の数だけで済み、文字数の上限もスクリプトごとに別々に
+    # 数えられます。組を増やしても両方の上限から遠ざかります。
+    #
+    # 速度にも効きます。1 本に並べていたときは後ろの命令ほど手前の枝を
+    # 全部通っていましたが、担当外の組は比較 1-2 回で終わります。
+    # **手前にある比較の数だけが効く**というこれまでの測定と合います。
+    #
+    # 振り分けをラダーに置かないのは、置くと組の切り方を変えるたびに
+    # ラダーを描き直すことになるためです。**ラダーは組の数だけスクリプトを
+    # 順に呼ぶだけで、境界を知りません。**
+    DISPATCH_GROUPS = 8
+
+    # 番号の範囲で分けた組。1 組が 1 スクリプトになる
+    def dispatch_groups
+      @dispatch_groups ||= @opcodes.each_slice((@opcodes.size.to_f / DISPATCH_GROUPS).ceil).to_a
+    end
+
+    # 組が担当する番号の範囲
+    #
+    # **下限は前の組の続きにします。**実装していない番号が組と組の間に
+    # 落ちると、どのスクリプトも拾わずに素通りしてしまうためです。
+    # 1 本の連なりだったころは次の組の `ELSE` が拾っていました。
+    def group_range(index)
+      groups = dispatch_groups
+      low = index.zero? ? 0 : groups[index - 1].last.code + 1
+      low..groups[index].last.code
+    end
+
+    # 実装しているオペコードの最大番号
+    def max_opcode = @opcodes.map(&:code).max
+
+    # 組の中の連なり。当たらなければ未知のオペコード
+    def emit_opcode_chain(e, group)
+      group.select(&:branch?).each_with_index do |op, i|
         e.line(i.zero? ? "IF #{opcode_var} = #{op.code} THEN" : "ELSE IF #{opcode_var} = #{op.code} THEN")
         e.indent
         e.begin_instruction
@@ -924,7 +3702,6 @@ module FaRuby
       e.dedent
       e.blank
       e.line "END IF"
-      e.blank
     end
 
     def emit_range_check(e)

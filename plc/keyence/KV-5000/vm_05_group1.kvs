@@ -1,0 +1,125 @@
+' =======================================
+' faRuby VM - オペコード 0x00 - 0x07
+' =======================================
+' 【自動生成】このファイルを直接編集しないでください。
+'   定義: tools/opcode_table.rb
+'   生成: tools/kvs_generator.rb  (rake vm_core)
+'   編集した場合 test_kvs_generator.rb が失敗します。
+'
+' ラダーでの置き場所: 内側 FOR の中 (1 番目の群)
+' 並び順と役割は vm_02_prologue.kvs の先頭にあります。
+
+' 担当外の番号はここで素通りする。**判定はループの外に置く。**
+' 見るのは上限だけ。0 未満は手前の群が実行して
+' 65535 で潰しているので、ここには届かない
+IF EM54:Z9 <= 7 THEN
+
+  ' 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
+  ' 本体は途中で BREAK することがあり、後ろに置くと通らない
+  EM54:Z9 = 65535
+
+  ' BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
+  FOR EM20:Z9 = 1 TO 1
+
+    IF EM6:Z9 = 0 THEN
+      ' OP_NOP (Z): 何もしない
+
+    ELSE IF EM6:Z9 = 1 THEN
+      ' OP_MOVE (BB): R[a] = R[b]
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      Z2 = EM8:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = EM1.L:Z2
+      EM0:Z1 = EM0:Z2
+
+    ELSE IF EM6:Z9 = 2 THEN
+      ' OP_LOADL (BB): R[a] = Pool[b]
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      Z2 = EM8:Z9 * 4 + EM34:Z9
+      EM1.L:Z1 = FM1.L:Z2
+      EM0:Z1 = FM0:Z2
+
+    ELSE IF EM6:Z9 = 3 THEN
+      ' OP_LOADI (BB): R[a] = b (符号なし)
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = EM8:Z9
+      EM0:Z1 = 4
+
+    ELSE IF EM6:Z9 = 4 THEN
+      ' OP_LOADINEG (BB): R[a] = -b
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' 2の補数を32ビットで組み立てる
+      EM16:Z9 = 0 - EM8:Z9
+      EM17:Z9 = 0
+      IF EM8:Z9 <> 0 THEN
+        EM17:Z9 = 65535
+      END IF
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = EM16.L:Z9
+      EM0:Z1 = 4
+
+    ELSE IF EM6:Z9 = 5 THEN
+      ' OP_LOADI__1 (B): R[a] = -1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = -1
+      EM0:Z1 = 4
+
+    ELSE IF EM6:Z9 = 6 THEN
+      ' OP_LOADI_0 (B): R[a] = 0
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = 0
+      EM0:Z1 = 4
+
+    ELSE IF EM6:Z9 = 7 THEN
+      ' OP_LOADI_1 (B): R[a] = 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = 1
+      EM0:Z1 = 4
+
+    ELSE
+      ' 未知のオペコード: エラー
+      EM1:Z9 = 3
+      EM2:Z9 = EM6:Z9
+      BREAK
+
+    END IF
+
+    ' バイトコード範囲チェック
+    IF EM0:Z9 >= EM10:Z9 THEN
+      EM1:Z9 = 2
+      BREAK
+    END IF
+
+  NEXT
+END IF

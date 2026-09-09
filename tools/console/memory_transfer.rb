@@ -31,10 +31,21 @@ module FaRuby
       # memory_image Hash を PLC に書き込む
       # 連続アドレスをグループ化して一括転送する
       def write_image(image)
-        runs = group_consecutive(normalize_image(image))
+        write_runs(@adapter.device_name, normalize_image(image))
+      end
+
+      # fixed_image Hash (FM アドレス) を PLC に書き込む
+      #
+      # ホストにはバンクを選ぶ手段が無いため、FM のアドレスを ZF の絶対
+      # アドレスに直して書きます。スクリプト側は FRSET でバンクを選びます。
+      def write_fixed_image(image)
+        write_runs(layout.fixed_host_device, to_host_addresses(image))
+      end
+
+      def write_runs(device, image)
         total = 0
-        runs.each do |start_addr, values|
-          @adapter.write_words(start_addr, values)
+        group_consecutive(image).each do |start_addr, values|
+          @adapter.write_device_words(device, start_addr, values)
           total += values.size
         end
         total
@@ -130,16 +141,22 @@ module FaRuby
       def verify_image(image)
         # write_image と同じ正規化を通してから比較する
         # (正規化しないと STATUS が必ず不一致になる)
-        image = normalize_image(image)
-        mismatches = []
-        runs = group_consecutive(image)
+        verify_runs(@adapter.device_name, normalize_image(image))
+      end
 
-        runs.each do |start_addr, expected_values|
-          actual_values = @adapter.read_words(start_addr, expected_values.size)
+      def verify_fixed_image(image)
+        verify_runs(layout.fixed_host_device, to_host_addresses(image))
+      end
+
+      def verify_runs(device, image)
+        mismatches = []
+        group_consecutive(image).each do |start_addr, expected_values|
+          actual_values = @adapter.read_device_words(device, start_addr, expected_values.size)
           expected_values.each_with_index do |expected, i|
             actual = actual_values[i]
             if actual != expected
-              mismatches << { addr: start_addr + i, expected: expected, actual: actual }
+              mismatches << { device: device, addr: start_addr + i,
+                              expected: expected, actual: actual }
             end
           end
         end
@@ -160,6 +177,11 @@ module FaRuby
         image = image.dup
         image[layout.status_addr] = VM_STOPPED
         image
+      end
+
+      # FM のアドレスを ZF の絶対アドレスに直す
+      def to_host_addresses(image)
+        image.transform_keys { |addr| layout.fixed_host_addr(addr) }
       end
 
       # {addr => val} を連続するアドレスのグループに分割

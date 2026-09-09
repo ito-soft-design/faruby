@@ -43,6 +43,21 @@ module FaRuby
     TT_ARRAY   = 8
     TT_HASH    = 9
     TT_OBJECT  = 10
+    TT_DEVICE  = 11    # デバイス族への参照 ($DM など)
+    TT_PROC    = 12    # メソッドの本体への参照。値は irep 番号
+
+    # --- デバイス参照 (TT_DEVICE) の表現 ---
+    #
+    # `$DM[100 + i]` のように実行時に決まるアドレスへアクセスするための値です。
+    # `$DM` を読むとこの型の値になり、添字を付けると実際の読み書きになります。
+    #
+    #   値 下位ワード : ベースアドレス (裸の $DM なら 0)
+    #   値 上位ワード : デバイス種別 + アクセス幅 * DEVICE_REF_ACCESS_SCALE
+    #
+    # 種別と幅を1ワードに詰めるのは、スロットの予備ワードを使うと OP_MOVE が
+    # 4 ワード目まで複製する必要が出て、複製のたびに費用がかかるためです。
+    # 種別は 0-9、幅は 0-4 なので 16 倍で分離できます。
+    DEVICE_REF_ACCESS_SCALE = 16
 
     # これ以下のタグが偽。Ruby で偽なのは nil と false だけ (0 も真)。
     TT_FALSY_MAX = TT_FALSE
@@ -80,6 +95,12 @@ module FaRuby
     DEVICE_TYPE_T  = 8
     DEVICE_TYPE_C  = 9
 
+    # 文字列を書けるデバイス
+    #
+    # ビットデバイスに文字列を書く意味は無く、書けたとしてもビット単位の
+    # 読み書きになって表示器から読めません。
+    STRING_DEVICE_TYPES = [DEVICE_TYPE_EM, DEVICE_TYPE_DM, DEVICE_TYPE_ZF].freeze
+
     # --- ワードデバイスのアクセス幅 ---
     #
     #   $DM100   → ACCESS_S  (.S)  16ビット符号付き ※既定
@@ -92,6 +113,22 @@ module FaRuby
     ACCESS_L = 2
     ACCESS_D = 3
     ACCESS_F = 4
+
+    # 文字列をデバイスへ書く
+    #
+    # 幅ではなく「文字列として書く」という指定です。長さ (ASCII での文字数) は
+    # 同じワードに `ACCESS_STR + 長さ * ACCESS_STR_LENGTH_SCALE` で詰めます。
+    # 長さ 0 は終端付き、1 以上は固定長です。
+    #
+    # 既存の幅は 0-5 なので、**6 以上なら文字列**と 1 比較で分かります。
+    ACCESS_STR = 6
+    ACCESS_STR_LENGTH_SCALE = 16
+
+    # 個別ビット。ビットデバイスをサフィックス無しで書いたとき
+    #
+    # 0 (ACCESS_S) と区別する必要があります。ビットデバイスに幅を付けると
+    # 整数として扱われるため、「幅の指定が無い」ことを表す値が要ります。
+    ACCESS_BIT = 5
 
     # Ruby シンボルのサフィックス文字 → ACCESS_*
     ACCESS_SUFFIXES = {
@@ -112,7 +149,7 @@ module FaRuby
     ACCESS_NAMES = {
       ACCESS_S => "16bit符号付き", ACCESS_U => "16bit符号なし",
       ACCESS_L => "32bit符号付き", ACCESS_D => "32bit符号なし",
-      ACCESS_F => "実数",
+      ACCESS_F => "実数", ACCESS_BIT => "ビット",
     }.freeze
 
     # --- VM 状態 ---
@@ -122,7 +159,224 @@ module FaRuby
     VM_ERROR    = 3
 
     # デバイスマッピングテーブル 1 エントリのワード数
-    #   +0 device_type / +1 device_address / +2 access_type / +3 予備
+    #
+    # シンボル 1 つにつき 1 エントリで、+3 の種別によって意味が変わります。
+    #
+    #   種別 0 (値)         +0 device_type / +1 device_address / +2 access_type
+    #   種別 1 (デバイス族) 同上。アドレスを持たず、添字で決める
+    #   種別 2 (メソッド)   +0 METHOD_* / +1 ユーザー定義メソッドID / +2 引数の数
     DEVICE_TABLE_STRIDE = 4
+    DEVICE_TABLE_KIND_OFFSET = 3
+
+    # シンボルの種別
+    #
+    # `$` で始まるシンボルはグローバル変数 (デバイスか汎用グローバル)、
+    # それ以外はメソッド名です。同じシンボル表を OP_GETGV / OP_SETGV と
+    # OP_SEND が共有するため、種別で振り分けます。
+    SYMBOL_KIND_VALUE   = 0
+    SYMBOL_KIND_FAMILY  = 1
+    SYMBOL_KIND_METHOD  = 2
+    SYMBOL_KIND_SETTING = 3   # FARUBY_ で始まる定数 (OP_SETCONST が使う)
+    # 桁付きのデバイス ($DM100T6)。**読むときに文字列になる**
+    #
+    # 幅ワードを見れば分かりますが、種別に持たせると `OP_GETGV` が種別を
+    # 1 回見るだけで 3 つに分けられます。普通の読み取りが 1 比較で済むように
+    # するための区別で、**命令の本体に置いた比較はその命令が走るたびに効く**
+    # ためです。詳細は [文字列の計画](../doc/string.md)。
+    SYMBOL_KIND_STR_DEVICE = 4
+    # 汎用グローバル変数 ($foo)。**値スロットをそのまま持ちます**
+    #
+    # デバイスと違って幅がありません。Ruby の値をそのまま置く場所なので、
+    # 型タグごと写せば実数も配列もハッシュも文字列も持てます。
+    SYMBOL_KIND_GLOBAL = 5
+
+    # --- faRuby の設定定数 ---
+    #
+    # `FARUBY_STR_FILL = 0x20` のように書くと OP_SETCONST になります。
+    # ホストが名前に番号を振り、VM は起動時に 1 回 VM 状態へ書くだけです。
+    # 走るのは起動時だけなので、使う側の経路には何も足しません。
+    #
+    # `FARUBY_` で始まって表に無い名前は転送前に止めます。実行時に気づくより
+    # 早く、書き間違いがそのまま動いてしまうこともありません。
+    SETTING_NONE     = 0
+    SETTING_STR_FILL = 1
+
+    SETTING_NAMES = {
+      "FARUBY_STR_FILL" => SETTING_STR_FILL,
+    }.freeze
+
+    # 設定定数の接頭辞。これで始まる定数だけを faRuby のものとして扱います
+    SETTING_PREFIX = "FARUBY_"
+
+    # --- ソースの文字コード ---
+    #
+    # バイト列は変換しません。覚えておくのは種別だけで、`length` と `[]` が
+    # 文字の切れ目を見つけるのに使います。
+    ENCODING_UTF8  = 0   # 既定
+    ENCODING_SJIS  = 1
+    ENCODING_ASCII = 2
+
+    # マジックコメントの綴り => ENCODING_*
+    #
+    # mrbc はマジックコメントを見ていないため、読むのは faRuby の仕事です。
+    ENCODING_NAMES = {
+      "utf-8" => ENCODING_UTF8, "utf8" => ENCODING_UTF8,
+      "shift_jis" => ENCODING_SJIS, "sjis" => ENCODING_SJIS,
+      "windows-31j" => ENCODING_SJIS, "cp932" => ENCODING_SJIS,
+      "ascii" => ENCODING_ASCII, "us-ascii" => ENCODING_ASCII,
+      "binary" => ENCODING_ASCII, "ascii-8bit" => ENCODING_ASCII,
+    }.freeze
+
+    # --- 組み込みメソッド ---
+    #
+    # メソッド名はホスト側で番号に解決してテーブルに載せます。VM は文字列を
+    # 持たず、整数の分岐だけで振り分けます。
+    #
+    # 【重要】並び順に意味があります。**レシーバの型ごとに連続した番号**に
+    # 並べ、型検査を範囲比較で済ませています。並べ替えないでください。
+    #
+    # 受け付ける型もタグの範囲で表せます。TT_STRING (7)・TT_ARRAY (8)・
+    # TT_HASH (9) が隣り合っているため、「文字列と配列」「配列とハッシュ」の
+    # ような組も 1 つの範囲になります。並びは METHOD_RECEIVER_GROUPS を参照。
+    METHOD_NONE    = 0   # 未対応 (実行時エラー)
+    METHOD_NE      = 1   # !=
+    METHOD_NOT     = 2   # !
+    METHOD_MOD     = 3   # %
+    METHOD_ABS     = 4
+    METHOD_TO_I    = 5
+    METHOD_TO_F    = 6
+    METHOD_FLOOR   = 7
+    METHOD_ROUND   = 8
+    # 単項の符号。**mruby は -x を x.-@() にします** (リテラルは畳み込むので
+    # `-1` は届きません)。整数と実数の両方を受けます
+    METHOD_NEG     = 9    # -@
+    METHOD_UPLUS   = 10   # +@。何もしない
+    METHOD_TIMES   = 11   # ブロックを取る
+    METHOD_UPTO    = 12   # ブロックを取る
+    # ビット演算。整数だけ。実数を渡すと止まる
+    METHOD_BIT_AND = 13   # &
+    METHOD_BIT_OR  = 14   # |
+    METHOD_BIT_XOR = 15   # ^
+    METHOD_BIT_NOT = 16   # ~
+    METHOD_SHIFT_R = 17   # >>
+    METHOD_LENGTH  = 18   # length / size。文字列・配列・ハッシュ
+    METHOD_EMPTY_P = 19   # empty?。文字列・配列・ハッシュ
+    # << は整数なら左シフト、文字列と配列なら継ぎ足し。Ruby と同じ
+    METHOD_CONCAT  = 20
+    METHOD_EACH    = 21   # 配列とハッシュ。ブロックを取る
+    METHOD_PUSH    = 22   # push。配列だけ (Ruby の String に push は無い)
+    METHOD_KEY_P   = 23   # key?
+    METHOD_KEYS    = 24
+    METHOD_VALUES  = 25
+    # $DML[100, 3]。デバイス参照から連続した値を配列にする
+    METHOD_SLICE   = 26
+
+    # レシーバが数値でなければならない範囲 (区分の先頭)
+    METHOD_NUMERIC_MIN = METHOD_MOD
+    METHOD_NUMERIC_MAX = METHOD_SHIFT_R
+
+    # メソッド番号の区分 => 受け付けるレシーバのタグ
+    #
+    # [番号の上限, タグの下限, タグの上限, 名前] を上から順に見ます。**上限 nil
+    # は末尾の区分**で、それ以上の番号がすべて入ります。生成コードもシミュレータも
+    # この表から作るので、メソッドを足すときはここだけを直します。
+    #
+    # METHOD_NUMERIC_MIN 未満 (!= と !) はどの型でも呼べるため区分がありません。
+    METHOD_RECEIVER_GROUPS = [
+      [METHOD_SHIFT_R, TT_INTEGER, TT_FLOAT, "数値"],
+      [METHOD_EMPTY_P, TT_STRING,  TT_HASH,  "文字列・配列・ハッシュ"],
+      # << だけはタグが飛ぶ (整数 4、文字列 7、配列 8)。範囲では実数と
+      # シンボルも通ってしまうため、**本体で型ごとに分けて弾きます**
+      [METHOD_CONCAT,  TT_INTEGER, TT_ARRAY, "整数・文字列・配列"],
+      [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
+      [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
+      [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
+      [nil,            TT_DEVICE,  TT_DEVICE, "デバイス参照"],
+    ].freeze
+
+    # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
+    #
+    # 型を問わないメソッド (!= と !) は nil。生成コード・シミュレータ・
+    # テストがこの 1 か所を見るので、区分を足しても答えがずれません。
+    def method_receiver_tags(code)
+      return nil if code < METHOD_NUMERIC_MIN
+
+      METHOD_RECEIVER_GROUPS.each do |max_code, tag_min, tag_max, _label|
+        return [tag_min, tag_max] if max_code.nil? || code <= max_code
+      end
+      nil
+    end
+    module_function :method_receiver_tags
+
+    # メソッド名 => [番号, 引数の数]
+    BUILTIN_METHODS = {
+      "!="     => [METHOD_NE,     1],
+      "!"      => [METHOD_NOT,    0],
+      "%"      => [METHOD_MOD,    1],
+      "abs"    => [METHOD_ABS,    0],
+      "to_i"   => [METHOD_TO_I,   0],
+      "to_f"   => [METHOD_TO_F,   0],
+      "floor"  => [METHOD_FLOOR,  0],
+      "round"  => [METHOD_ROUND,  0],
+      "-@"     => [METHOD_NEG,    0],
+      "+@"     => [METHOD_UPLUS,  0],
+      "&"      => [METHOD_BIT_AND, 1],
+      "|"      => [METHOD_BIT_OR,  1],
+      "^"      => [METHOD_BIT_XOR, 1],
+      "~"      => [METHOD_BIT_NOT, 0],
+      ">>"     => [METHOD_SHIFT_R, 1],
+      "times"  => [METHOD_TIMES,  0],
+      "upto"   => [METHOD_UPTO,   1],
+      "length" => [METHOD_LENGTH, 0],
+      "size"   => [METHOD_LENGTH, 0],
+      "empty?" => [METHOD_EMPTY_P, 0],
+      "each"   => [METHOD_EACH,   0],
+      "<<"     => [METHOD_CONCAT, 1],
+      "push"   => [METHOD_PUSH,   1],
+      "key?"   => [METHOD_KEY_P,  1],
+      "keys"   => [METHOD_KEYS,   0],
+      "values" => [METHOD_VALUES, 0],
+      "[]"     => [METHOD_SLICE,  2],
+    }.freeze
+
+    # ブロックを取るメソッド。OP_SENDB でしか呼べない
+    #
+    # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
+    # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH].freeze
+
+    # 番号 => 生成コードのコメントに使う名前
+    #
+    # size は length と同じ番号なので、先に現れた方が残ります。
+    METHOD_NAMES = BUILTIN_METHODS.each_with_object({}) do |(name, (code, _argc)), names|
+      names[code] ||= name
+    end.freeze
+
+    # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
+    BUILTIN_PLAIN_METHODS =
+      METHOD_NAMES.reject { |code, _| BLOCK_METHODS.include?(code) }.freeze
+
+    # --- ユーザー定義メソッド ---
+    #
+    # 組み込みに無い名前にはホスト側で 1 から通し番号を振ります。シンボル表は
+    # irep ごとに別なので、同じ名前が複数のエントリに現れます。番号を挟むことで
+    # どのエントリから呼んでも同じメソッドに行き着きます。
+    #
+    # `OP_DEF` が「メソッド表[番号] = irep 番号」を書き、`OP_SSEND` が引きます。
+    # 0 は「ユーザー定義メソッドではない」印なので、番号は 1 から始めます。
+    METHOD_ID_NONE = 0
+
+    # メソッド表に入っている irep 番号 0 は「まだ定義されていない」を表します。
+    # irep 0 はトップレベルでメソッドの本体にはならないため、印として使えます。
+    METHOD_UNDEFINED = 0
+
+    # OP_ENTER のオペランド (aspec) から必須引数の数を取り出すシフト量
+    #
+    #   引数 1 個 → 0x040000 (262144)
+    #   引数 2 個 → 0x080000 (524288)
+    #
+    # 残りのビットが立っていれば省略可能引数・可変長・キーワードのいずれかで、
+    # faRuby はいずれも未対応です。
+    ASPEC_REQ_SHIFT = 18
   end
 end

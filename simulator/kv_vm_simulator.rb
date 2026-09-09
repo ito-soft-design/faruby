@@ -5,7 +5,7 @@
 # PLC 上の KV スクリプト VM と同一ロジックで動作する PC 側シミュレータです。
 # 命令の意味は tools/opcode_table.rb の定義表に一本化されており、
 # ここではフェッチとディスパッチだけを行います。実際の解釈は SimVm が担います。
-# PLC 側 (vm_core.kvs) も同じ定義表から生成されるため、片方にだけ命令がある
+# PLC 側のスクリプトも同じ定義表から生成されるため、片方にだけ命令がある
 # といった食い違いは構造的に起きません。
 
 require_relative "em_memory"
@@ -29,23 +29,53 @@ module FaRuby
     def initialize(layout: MemoryLayout.default)
       @layout = layout
       @em = EmMemory.new
+      # 固定領域 (実機では FM = バンク 3 の ZF)。
+      # 利用者が $ZF500 を使う場合とアドレスが重ならないよう別のメモリにする
+      @fixed = EmMemory.new
       @devices = Array.new(10) { EmMemory.new }
       @devices[0] = @em  # EM はメインメモリを共用
-      @vm = SimVm.new(@em, @devices, layout: layout)
+      @vm = SimVm.new(@em, @devices, layout: layout, fixed: @fixed)
       @irep = nil
+      point_at_top_irep
+    end
+
+    attr_reader :fixed
+
+    # 実行中の irep とレジスタ窓を既定の位置に向ける
+    #
+    # irep が複数になってから、バイトコード・定数プール・シンボル表・レジスタの
+    # 位置は VM 状態から引くようになりました。メモリイメージを読まずにバイト
+    # コードを直接置いて動かす場合 (テスト) もここで既定値が入ります。
+    def point_at_top_irep
+      # レジスタ窓は可変領域なのでブロック先頭からのオフセット。
+      # 残りは固定領域 (FM) の絶対アドレス
+      @em.write_u16(layout.reg_base_addr, layout.offset_of(layout.reg_file_base))
+      { layout.cur_bytecode_addr => layout.bytecode_base,
+        layout.cur_pool_addr     => layout.pool_base,
+        layout.cur_symbols_addr  => layout.device_table_base,
+        layout.irep_table_addr_addr => layout.irep_table_base }.each do |addr, target|
+        @em.write_u16(addr, target)
+      end
+      @em.write_u16(layout.cur_irep_addr, 0)
+      @em.write_u16(layout.frame_sp_addr, 0)
+      @em.write_u16(layout.array_sp_addr, 0)
     end
 
     # メモリイメージをロードして実行
-    def load_and_run(image, max_steps: 10000)
+    def load_and_run(image, fixed_image = nil, max_steps: 10000)
       @em.load_image(image)
+      @fixed.load_image(fixed_image) if fixed_image
       run(max_steps: max_steps)
     end
 
     # IREP から直接ロードして実行
-    def load_irep_and_run(irep, max_steps: 10000)
+    # encoding はソースの文字コード (ENCODING_*)。バイト列の変換には使わず、
+    # length が文字の切れ目を数えるときの規則になる
+    def load_irep_and_run(irep, max_steps: 10000, encoding: ENCODING_UTF8)
       @irep = irep
-      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout)
-      load_and_run(codegen.memory_image, max_steps: max_steps)
+      codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout,
+                               encoding: encoding)
+      load_and_run(codegen.memory_image, codegen.fixed_image, max_steps: max_steps)
     end
 
     # グローバル変数の値をシンボル名で取得 (テスト用)
@@ -55,9 +85,14 @@ module FaRuby
       idx = @irep.symbols.index(sym_name)
       return nil unless idx
 
-      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type]
+      @vm.send(:device_entry, idx) => [device_type, device_addr, access_type, kind]
       dev = @vm.send(:device_memory, device_type)
       return nil unless dev
+
+      # 汎用グローバルは値スロット。幅ではなく型タグで読み方が決まる
+      if kind == FaRuby::VmConstants::SYMBOL_KIND_GLOBAL
+        return em.read_s32(device_addr + FaRuby::MemoryLayout::SLOT_VALUE_OFFSET)
+      end
 
       if @vm.send(:bit_device?, device_type)
         dev.read_u16(device_addr)
@@ -113,14 +148,15 @@ module FaRuby
 
     # 1命令を実行する
     # フェッチ → 定義表を引く → SimVm で本体を実行、という流れは
-    # vm_core.kvs の FETCH / DECODE / EXECUTE と同じ構造
+    # 生成スクリプトの FETCH / DECODE / EXECUTE と同じ構造
     def execute_one_instruction
       opcode = @vm.fetch_byte
       @em.write_u16(layout.current_opcode_addr, opcode)
+      @vm.count_step
 
       op = OpcodeTable.lookup[opcode]
       unless op
-        # 未実装オペコード (vm_core.kvs 側の ELSE 節に対応)
+        # 未実装オペコード (生成スクリプト側の ELSE 節に対応)
         @em.write_u16(layout.status_addr, VM_ERROR)
         @em.write_u16(layout.error_addr, opcode)
         return
@@ -128,6 +164,14 @@ module FaRuby
 
       @vm.begin_instruction(@vm.fetch_operands(op.operand_sizes))
       op.body&.call(@vm)
+
+      # **前置きだけの命令は、続けて落ちる先の本体を実行する。**
+      # mruby の vm.c と同じで、生成コードでは取り込みが前置きを実行してから
+      # オペコードを書き替え、落ちる先の枝がそのまま拾う (tools/opcode_table.rb)。
+      return if op.branch?
+
+      target = OpcodeTable.lookup.fetch(op.enters)
+      target.body&.call(@vm)
     end
   end
 end

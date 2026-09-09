@@ -28,8 +28,7 @@ class TestKvsGenerator < Minitest::Test
     body.scan(/#{Regexp.escape("#{pc} = #{pc} + 1")}/).size
   end
 
-  VM_CORE_PATH = File.expand_path("../plc/keyence/vm_core.kvs", __dir__)
-  VM_INIT_PATH = File.expand_path("../plc/keyence/vm_init.kvs", __dir__)
+  PLC_DIR = File.expand_path("../plc/keyence/KV-5000", __dir__)
 
   def setup
     @source = FaRuby::KvsGenerator.new.source
@@ -46,24 +45,45 @@ class TestKvsGenerator < Minitest::Test
 
   # 生成物は手で編集しない。編集された場合はここで検出する。
   # 直し方: tools/opcode_table.rb を修正して `rake vm_core` を実行する。
-  def test_committed_file_matches_generated_output
-    committed = File.binread(VM_CORE_PATH)
-    assert_equal @source.b, committed,
-                 "plc/keyence/vm_core.kvs が生成結果と一致しません。" \
-                 "手で編集した場合は tools/opcode_table.rb に反映して `rake vm_core` を実行してください。"
+  def test_committed_files_match_generated_output
+    FaRuby::KvsGenerator.new.generate.each do |name, content|
+      path = File.join(PLC_DIR, name)
+      assert_path_exists path, "plc/keyence/#{name} がありません。`rake vm_core` を実行してください。"
+      assert_equal content.b, File.binread(path),
+                   "plc/keyence/#{name} が生成結果と一致しません。" \
+                   "手で編集した場合は tools/opcode_table.rb に反映して `rake vm_core` を実行してください。"
+    end
   end
 
-  def test_generate_returns_named_files
+  # 群の数を変えると余りが出る。取り残しは KV Studio に古い中身を取り込む元になる
+  def test_no_stale_scripts_are_left_behind
+    generated = FaRuby::KvsGenerator.new.generate.keys
+    on_disk = Dir[File.join(PLC_DIR, "vm_*.kvs")].map { |p| File.basename(p) }
+    assert_empty on_disk - generated,
+                 "生成しなくなったスクリプトが残っています。`rake vm_core` を実行してください。"
+  end
+
+  # ラダーに並べる順。**前口上と後始末はループの外、取り込みと群は内側**
+  #
+  # 名前で並べ替えれば置く順になること。取り込むときの取り違えを避けるため。
+  def test_generate_returns_the_scripts_in_ladder_order
     files = FaRuby::KvsGenerator.new.generate
-    assert_equal ["vm_core.kvs", "vm_init.kvs"], files.keys.sort
+    groups = (1..FaRuby::KvsGenerator::DISPATCH_GROUPS).map { |i| "group#{i}" }
+    # リセットハンドラが先頭。後ろだと要求のあったスキャンで命令が先に進む
+    stems = ["init", "prologue", "instance", "fetch", *groups, "epilogue"]
+    expected = stems.each_with_index.map { |stem, i| format("vm_%02d_%s.kvs", i + 1, stem) }
+
+    assert_equal expected, files.keys
+    assert_equal expected, files.keys.sort, "名前の順とラダーに置く順が食い違っている"
     files.each_value { |content| refute_empty content }
   end
 
   # リセットハンドラも生成物。配置に追従しないまま取り残されると
   # 無関係な領域をクリアしてしまう。
   def test_committed_init_matches_generated_output
-    assert_equal init_source.b, File.binread(VM_INIT_PATH),
-                 "plc/keyence/vm_init.kvs が生成結果と一致しません。`rake vm_core` を実行してください。"
+    name = FaRuby::KvsGenerator.new.file_name("init")
+    assert_equal init_source.b, File.binread(File.join(PLC_DIR, name)),
+                 "plc/keyence/#{name} が生成結果と一致しません。`rake vm_core` を実行してください。"
   end
 
   def test_init_clears_the_register_file_of_the_current_layout
@@ -80,12 +100,19 @@ class TestKvsGenerator < Minitest::Test
 
   # === インスタンスループ ===
 
-  # 本体は1つで、ブロック先頭を Z9 に載せ替えて全インスタンスを回す
-  def test_both_scripts_loop_over_instances
-    header = "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} " \
-             "TO #{layout.last_origin} STEP #{layout.instance_size}"
-    assert_includes @source, header
-    assert_includes init_source, header
+  # リセットハンドラは1本なので、自分でインスタンスを回す
+  def test_the_reset_handler_loops_over_instances
+    assert_includes init_source, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout.base} " \
+                                 "TO #{layout.last_origin} STEP #{layout.instance_size}"
+  end
+
+  # 本体のインスタンスループはラダーにある。**回数はスクリプトが渡し、
+  # ブロック先頭は頭出しが 1 つずつ進める。**
+  def test_the_ladder_is_told_how_many_instances_to_run
+    z = "Z#{FaRuby::KvsEmitter::Z_INSTANCE}"
+    assert_includes @source, "#{layout.device(layout.ladder_instances_addr)} = #{layout.instances}"
+    assert_includes @source, "#{z} = #{layout.base - layout.instance_size}"
+    assert_includes @source, "#{z} = #{z} + #{layout.instance_size}"
   end
 
   # 命令本体は1回だけ生成される (インスタンス数だけ複製しない)
@@ -95,16 +122,17 @@ class TestKvsGenerator < Minitest::Test
     emitter3 = FaRuby::KvsEmitter.new(layout: layout3)
 
     assert_equal 1, source3.scan("IF #{emitter3.opcode} = 105 THEN").size
-    assert_includes source3, "FOR Z#{FaRuby::KvsEmitter::Z_INSTANCE} = #{layout3.base} " \
-                             "TO #{layout3.last_origin} STEP #{layout3.instance_size}"
+    assert_includes source3, "#{layout3.device(layout3.ladder_instances_addr)} = 3"
   end
 
   # ブロック内の位置は絶対アドレスではなくオフセット + Z9 で指す。
   # 絶対アドレスが残っていると instances > 1 でインスタンス0しか動かない。
   #
-  # 例外は Z の退避・復元だけ。これはインスタンスループの外で1回だけ動く。
+  # 例外は Z の退避・復元と、ラダーへ渡す回数だけ。どちらもインスタンス
+  # ループの外から触るため、絶対アドレスで指す。
   def test_state_is_addressed_relative_to_the_block
-    allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) }
+    allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) } +
+              [layout.ladder_instances_addr, layout.ladder_steps_addr]
     offenders = code_lines(@source).select do |l|
       l.scan(/\b#{layout.device_name}(\d+)/).flatten.map(&:to_i)
        .any? { |n| n >= layout.base && !allowed.include?(n) }
@@ -119,10 +147,110 @@ class TestKvsGenerator < Minitest::Test
     assert_includes @source, "IF #{emitter.status} = #{VM_RUNNING} THEN"
   end
 
-  # 命令ループの回数も各インスタンスの設定に従う
+  # 命令ループの回数も各インスタンスの設定に従う。**ラダーの FOR は途中で
+  # 抜けられないため、走らないインスタンスは 0 を渡して丸ごと飛ばす。**
   def test_step_loop_uses_the_instance_own_settings
-    assert_includes @source, "FOR #{emitter.state(layout.loop_counter_addr)} = 1 " \
-                             "TO #{emitter.state(layout.steps_per_cycle_addr)}"
+    steps = layout.device(layout.ladder_steps_addr)
+    assert_includes @source, "#{steps} = #{emitter.state(layout.steps_per_cycle_addr)}"
+    assert_includes @source, "#{steps} = 0"
+  end
+
+  # 止まった後は残りのステップを空回りさせる。**群のスクリプトは
+  # ラダーの FOR の中で必ず呼ばれるため、番号で素通りさせるしかない。**
+  def test_a_stopped_vm_parks_the_opcode_outside_every_group
+    sentinel = FaRuby::KvsGenerator::UNREACHABLE_OPCODE
+    dispatch = emitter.state(layout.dispatch_addr)
+    assert_includes @source, "IF #{emitter.status} <> #{VM_RUNNING} THEN"
+    assert_includes @source, "#{dispatch} = #{sentinel}"
+
+    generator = FaRuby::KvsGenerator.new
+    generator.send(:dispatch_groups).each_index do |i|
+      assert_operator generator.send(:group_range, i).last, :<, sentinel,
+                      "群の範囲が空き番号に届いている"
+    end
+  end
+
+  # 群は上限だけを見る。**手前の群が実行したら番号を潰す**ので、
+  # 後ろの群は比較 1 回で素通りできる。潰すのは本体より先でなければ
+  # ならない (本体は BREAK することがあり、後ろに置くと通らない)。
+  def test_a_group_clears_the_number_before_running_its_body
+    dispatch = emitter.state(layout.dispatch_addr)
+    generator = FaRuby::KvsGenerator.new
+    files = generator.generate
+
+    generator.send(:dispatch_groups).each_index do |i|
+      body = files.fetch(generator.file_name("group#{i + 1}"))
+      range = generator.send(:group_range, i)
+
+      assert_includes body, "IF #{dispatch} <= #{range.last} THEN"
+      refute_includes body, "IF #{dispatch} >= ", "下限まで見ている (比較が 1 回で済まない)"
+
+      clear = body.index("#{dispatch} = #{FaRuby::KvsGenerator::UNREACHABLE_OPCODE}")
+      first_opcode = body.index("IF #{opcode_var} = ")
+      refute_nil clear, "群 #{i + 1} が番号を潰していない"
+      assert_operator clear, :<, first_opcode, "群 #{i + 1} は本体より先に潰すこと"
+    end
+  end
+
+  # **実装していない番号が群と群の間に落ちると、どのスクリプトも拾わずに
+  # 素通りする。**1 本の連なりだったころは次の組の ELSE が拾っていた。
+  # 番号は 0 から最大まで途切れなく、どこかの群が担当していなければならない。
+  def test_every_opcode_number_belongs_to_exactly_one_group
+    generator = FaRuby::KvsGenerator.new
+    ranges = generator.send(:dispatch_groups).each_index.map { |i| generator.send(:group_range, i) }
+
+    assert_equal 0, ranges.first.first, "0 番から始まっていない"
+    ranges.each_cons(2) do |a, b|
+      assert_equal a.last + 1, b.first, "#{a.last} と #{b.first} の間に抜けがある"
+    end
+    assert_equal generator.send(:max_opcode), ranges.last.last, "最大の番号まで届いていない"
+  end
+
+  # 範囲から外れた番号は取り込みがエラーにする。素通りさせない
+  def test_numbers_beyond_the_last_group_are_reported
+    max = FaRuby::KvsGenerator.new.send(:max_opcode)
+    assert_includes @source, "IF #{emitter.opcode} > #{max} THEN"
+    assert_includes @source, "#{emitter.status} = #{VM_ERROR}"
+  end
+
+  # 命令を打ち切る BREAK が、本体の中の FOR に捕まっていないこと
+  #
+  # **中の BREAK はその FOR を抜けるだけで、命令を打ち切れません。**
+  # エラーを書いてもそのまま走り続けます。これまでに 2 度踏んでいます
+  # (文字列のデバイス書き込みと、配列のデバイス書き込み)。
+  #
+  # 群のスクリプトは本体全体を `FOR ... TO 1` で包んでいるので、打ち切りの
+  # BREAK は深さ 1 に現れます。深さ 2 以上は本体の中のループに捕まっています。
+  def test_no_break_is_trapped_inside_a_loop
+    offenders = FaRuby::KvsGenerator.new.generate.flat_map do |name, content|
+      next [] unless name.include?("group")
+
+      depth = 0
+      content.split("\n").each_with_index.filter_map do |line, i|
+        text = line.strip
+        depth += 1 if text.start_with?("FOR ")
+        depth -= 1 if text == "NEXT"
+        "#{name}:#{i + 1} (深さ #{depth})" if text == "BREAK" && depth > 1
+      end
+    end
+    assert_empty offenders.first(5),
+                 "本体の中の FOR に捕まった BREAK があります。検査を FOR の外に出すか、" \
+                 "呼ぶ側が確かめていることにして BREAK を出さないでください"
+  end
+
+  # BREAK はスクリプトの中で FOR と対になっていなければならない。
+  # ステップのループはラダーにあるので、命令を打ち切る BREAK は
+  # 1 回だけ回るループで受ける。
+  def test_every_group_wraps_its_body_so_break_has_a_partner
+    files = FaRuby::KvsGenerator.new.generate
+    files.each do |name, content|
+      next unless name.start_with?("vm_group")
+
+      next unless content.include?("BREAK")
+
+      assert_includes content, "FOR #{emitter.state(layout.loop_counter_addr)} = 1 TO 1",
+                               "#{name} の BREAK に相手がいない"
+    end
   end
 
   # === Z レジスタの退避・復元 ===
@@ -191,14 +319,15 @@ class TestKvsGenerator < Minitest::Test
   # === 値スロットのアドレス計算 ===
 
   # Z はスロット先頭を指し、タグと値の両方を1本で扱う
+  #
+  # 先頭は定数ではなく VM 状態から引く。irep が複数になり、呼び出しごとに
+  # レジスタ窓もずれるため、アドレスを焼き込めなくなった。
   def test_register_address_points_at_the_slot_head
-    base = emitter.block_offset(layout.reg_file_base)
-    assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{base}"
+    assert_includes @source, "Z1 = #{operand(:a)} * #{SLOT_WORDS} + #{emitter.reg_offset}"
   end
 
   def test_pool_address_points_at_the_slot_head
-    base = emitter.block_offset(layout.pool_base)
-    assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{base}"
+    assert_includes @source, "Z2 = #{operand(:b)} * #{SLOT_WORDS} + #{emitter.pool_offset}"
   end
 
   # 1本の Z でタグ (先頭) と値 (先頭+1) を指す
@@ -209,8 +338,7 @@ class TestKvsGenerator < Minitest::Test
   end
 
   def test_device_table_stride
-    base = emitter.block_offset(layout.device_table_base)
-    assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{base}"
+    assert_includes @source, "Z3 = #{operand(:b)} * #{DEVICE_TABLE_STRIDE} + #{emitter.symbols_offset}"
   end
 
   # 実数の 0 除算では、代入先を書き換える前に符号を確定させる。
@@ -260,8 +388,10 @@ class TestKvsGenerator < Minitest::Test
   def test_bb_format_fetches_two_bytes
     body = opcode_body(0x01)
     assert_equal 2, count_pc_increments(body)
-    assert_includes body, "#{operand(:a)} = #{indexed_base}:Z1"
-    assert_includes body, "#{operand(:b)} = #{indexed_base}:Z1"
+    # バイトコードは固定領域 (FM) から読む
+    fixed = emitter.fixed_indexed_base
+    assert_includes body, "#{operand(:a)} = #{fixed}:Z1"
+    assert_includes body, "#{operand(:b)} = #{fixed}:Z1"
   end
 
   # OP_LOADI32 (BSS) は 1 バイト + 16ビット × 2 を読む
@@ -290,18 +420,43 @@ class TestKvsGenerator < Minitest::Test
     end
   end
 
-  def test_setgv_uses_set_res_for_timer_and_counter
+  # ビットデバイスへの書き込みは TRUE / FALSE の代入
+  #
+  # 以前は `SET` / `RES` と 1 / 0 に分かれていましたが、代入に揃えました。
+  # ST も同じ形で書けます。
+  def test_writing_a_bit_device_assigns_true_or_false
     body = opcode_body(0x16) # OP_SETGV
-    assert_includes body, "SET(T0:Z6)"
-    assert_includes body, "RES(T0:Z6)"
-    assert_includes body, "SET(C0:Z6)"
-    assert_includes body, "RES(C0:Z6)"
+    %w[R MR B LR].each do |dev|
+      assert_includes body, "#{dev}0:Z6 = TRUE", "#{dev} を ON にする代入"
+      assert_includes body, "#{dev}0:Z6 = FALSE", "#{dev} を OFF にする代入"
+    end
+    refute_includes body, "SET(", "SET / RES は使わない"
   end
 
-  # ビットデバイスに幅サフィックスを付けてはいけない (16飛びになる)
-  def test_bit_devices_have_no_width_suffix
-    bad = code_lines(@source).grep(/\b(R|MR|B|L|T|C)0\.[SULDF]:Z/)
-    assert_empty bad, "ビットデバイスに幅サフィックスが付いています: #{bad.first(3).inspect}"
+  # **タイマ・カウンタの接点は書けません。** タイムアップ・カウントアップで
+  # 決まるものなので、代入しようとすると KV Studio の変換が通りません。
+  # 読み取りはできます。
+  def test_a_timer_or_counter_contact_cannot_be_written
+    write = opcode_body(0x16) # OP_SETGV
+    read = opcode_body(0x15)  # OP_GETGV
+    %w[T C].each do |dev|
+      refute_includes write, "#{dev}0:Z6 = ", "#{dev} の接点に書こうとしている"
+      assert_includes read, "IF #{dev}0:Z6 THEN", "#{dev} の接点は読める"
+    end
+    assert_includes write, "接点は書けない"
+  end
+
+  # ビットデバイスは幅の有無で経路が分かれる。
+  # 無しなら個別ビット、有りなら整数 (MR 等はビット列、T / C は現在値)。
+  def test_bit_devices_have_both_paths
+    %w[MR R B LR T C].each do |dev|
+      assert_includes @source, "#{dev}0:Z6", "#{dev} の個別ビットアクセス"
+      assert_includes @source, "#{dev}0.L:Z6", "#{dev} の幅付きアクセス"
+    end
+  end
+
+  def test_bit_access_is_selected_by_the_width
+    assert_includes @source, "IF Z8 = #{ACCESS_BIT} THEN"
   end
 
   # === 定義表とエミッタの境界 ===
@@ -325,12 +480,21 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # 逆に、デバイス構文はエミッタに集約されている
+  #
+  # **種別の表だけは別です** (tools/device_set.rb)。メーカーごとに違うもの
+  # なので、生成器に書くと機種を増やすたびに生成器を触ることになります。
   def test_emitter_owns_device_syntax
     path = File.expand_path("../tools/kvs_generator.rb", __dir__)
     src = File.read(path, encoding: "UTF-8")
     assert_includes src, "OPERAND_NAMES"
-    assert_includes src, "WORD_DEVICES"
-    assert_includes src, "BIT_DEVICES"
+    assert_includes src, "def word_devices"
+    assert_includes src, "def bit_devices"
+
+    code = src.split("\n").reject { |l| l.strip.start_with?("#") }
+    offenders = code.each_with_index.filter_map do |line, i|
+      "#{i + 1}: #{line.strip}" if line =~ /"(EM|DM|ZF|MR|LR)"/
+    end
+    assert_empty offenders.first(5), "種別の名前は tools/device_set.rb に置いてください"
   end
 
   # === 構造の健全性 ===
@@ -348,27 +512,47 @@ class TestKvsGenerator < Minitest::Test
                  lines.count { |l| l.strip == "NEXT" }
   end
 
+  # === KV Studio の上限 ===
+
+  # 1 スクリプトの文字数。**取り込むまで分からないので、ここで見る**
+  #
+  # 超えると KV Studio が変換を拒む。字下げが全体の 4 割を占めるので、
+  # 詰まってきたら刻みを狭めるのがいちばん安い。詳細は
+  # doc/architecture.md の「KV Studio の変換上限」。
+  SCRIPT_LIMIT = 264_144
+
+  def test_the_scripts_fit_in_one_script
+    FaRuby::KvsGenerator.new.generate.each do |name, source|
+      assert_operator source.bytesize, :<=, SCRIPT_LIMIT,
+                      "#{name} が 1 スクリプトの上限を超えている"
+    end
+  end
+
+  # 余裕がどれくらい残っているかを目に見えるようにしておく
+  #
+  # **上限はスクリプトごとなので、いちばん大きいものだけを見る。**
+  # 近づいたら群を増やして分け直せる (ラダーは箱を足すだけ)。
+  def test_every_script_has_room_left
+    largest = FaRuby::KvsGenerator.new.generate.max_by { |_, source| source.bytesize }
+
+    assert_operator largest.last.bytesize, :<, SCRIPT_LIMIT * 95 / 100,
+                    "#{largest.first} が上限の 95% を超えた。DISPATCH_GROUPS を増やすころ合い"
+  end
+
   private
 
   # 指定オペコードの分岐本体を切り出す
   #
-  # オペコードの分岐はすべて同じ深さに並ぶ。デバイス分岐の中の
-  # ネストした ELSE で切れないよう、インデント幅で判定する。
-  # 幅は生成物から読む (入れ子が変わっても追従する)。
-  def opcode_indent
-    @opcode_indent ||= begin
-      head = @source.lines.find { |l| l =~ /\A\s*IF #{Regexp.escape(opcode_var)} = \d+ THEN\s*\z/ }
-      refute_nil head, "オペコードの分岐が1つも見つからない"
-      head[/\A */]
-    end
-  end
-
+  # デバイス分岐の中のネストした ELSE で切れないよう、インデント幅で
+  # 判定する。**幅は見つけた分岐そのものから読みます。**群ごとに
+  # スクリプトが分かれ、包む IF の数が群によって違うためです
+  # (0 番から始まる群だけ下限の判定が要らない)。
   def opcode_body(code)
-    indent = opcode_indent
     lines = @source.lines
-    start = lines.index { |l| l.rstrip == "#{indent}IF #{opcode_var} = #{code} THEN" ||
-                              l.rstrip == "#{indent}ELSE IF #{opcode_var} = #{code} THEN" }
+    head = /\A( *)(ELSE )?IF #{Regexp.escape(opcode_var)} = #{code} THEN\z/
+    start = lines.index { |l| l.rstrip =~ head }
     refute_nil start, "オペコード #{code} の分岐が見つからない"
+    indent = lines[start].rstrip[head, 1]
 
     rest = lines[(start + 1)..]
     stop = rest.index do |l|

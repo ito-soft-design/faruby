@@ -33,9 +33,9 @@ end
     em.write_u16(layout.nregs_addr, nregs)
     em.write_u16(layout.nlocals_addr, nlocals)
 
-    # バイトコード
+    # バイトコードは固定領域 (FM) にある
     bytecode.each_with_index do |b, i|
-      em.write_u16(layout.bytecode_base + i, b)
+      @sim.fixed.write_u16(layout.bytecode_base + i, b)
     end
 
     # レジスタクリア
@@ -162,8 +162,8 @@ end
       0x02, 0x01, 0x00, # OP_LOADL R[1], Pool[0]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(0), 123456)
+    @sim.fixed.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(0), 123456)
     @sim.run
     assert_equal 123456, @sim.reg(1)
   end
@@ -175,15 +175,15 @@ end
       0x02, 0x02, 0x01, # OP_LOADL R[2], Pool[1]
       0x69,             # OP_STOP
     ])
-    @sim.em.write_u16(layout.pool_type_addr(0), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(0), -1)
-    @sim.em.write_u16(layout.pool_type_addr(1), TT_INTEGER)
-    @sim.em.write_s32(layout.pool_addr(1), 222)
+    @sim.fixed.write_u16(layout.pool_type_addr(0), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(0), -1)
+    @sim.fixed.write_u16(layout.pool_type_addr(1), TT_INTEGER)
+    @sim.fixed.write_s32(layout.pool_addr(1), 222)
     @sim.run
     assert_equal(-1, @sim.reg(1))
     assert_equal 222, @sim.reg(2)
     # 型タグが -1 の上位ワードで潰されていないこと
-    assert_equal TT_INTEGER, @sim.em.read_u16(layout.pool_type_addr(1))
+    assert_equal TT_INTEGER, @sim.fixed.read_u16(layout.pool_type_addr(1))
   end
 
   # === 値スロットのレイアウト (ストライド 4) ===
@@ -634,10 +634,15 @@ end
   # === OP_GETGV / OP_SETGV ===
 
   # デバイスマッピングテーブルにエントリを設定するヘルパー
-  def setup_device_mapping(sym_index, device_type, device_addr)
+  #
+  # access は既定でワードの16ビット符号付き。ビットデバイスを個別ビットとして
+  # 扱いたい場合は ACCESS_BIT を渡す (幅を付けると整数として扱われるため)。
+  def setup_device_mapping(sym_index, device_type, device_addr, access = ACCESS_S)
+    # シンボル表は固定領域 (FM) にある
     table_addr = layout.device_table_base + sym_index * DEVICE_TABLE_STRIDE
-    @sim.em.write_u16(table_addr, device_type)
-    @sim.em.write_u16(table_addr + 1, device_addr)
+    @sim.fixed.write_u16(table_addr, device_type)
+    @sim.fixed.write_u16(table_addr + 1, device_addr)
+    @sim.fixed.write_u16(table_addr + 2, access)
   end
 
   def test_setgv_em
@@ -729,7 +734,7 @@ end
       0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_MR, 10)
+    setup_device_mapping(0, DEVICE_TYPE_MR, 10, ACCESS_BIT)
     @sim.run
     assert_equal VM_FINISHED, @sim.status
     assert_equal 1, @sim.devices[DEVICE_TYPE_MR].read_u16(10)
@@ -742,7 +747,7 @@ end
       0x16, 0x01, 0x00, # OP_SETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_R, 200)
+    setup_device_mapping(0, DEVICE_TYPE_R, 200, ACCESS_BIT)
     @sim.run
     assert_equal VM_FINISHED, @sim.status
     assert_equal 0, @sim.devices[DEVICE_TYPE_R].read_u16(200)
@@ -754,7 +759,7 @@ end
       0x15, 0x01, 0x00, # OP_GETGV R[1], sym[0]
       0x69,             # OP_STOP
     ])
-    setup_device_mapping(0, DEVICE_TYPE_MR, 5)
+    setup_device_mapping(0, DEVICE_TYPE_MR, 5, ACCESS_BIT)
     @sim.devices[DEVICE_TYPE_MR].write_u16(5, 1)
     @sim.run
     assert_equal VM_FINISHED, @sim.status
@@ -768,5 +773,50 @@ end
     ])
     @sim.run
     assert_equal VM_ERROR, @sim.status
+  end
+
+  # === 累計実行命令数 (STEP_COUNT) ===
+
+  def step_count = @sim.em.read_u32(layout.step_count_addr)
+
+  def test_step_count_counts_executed_instructions
+    load_bytecode([
+      0x09, 0x01,       # OP_LOADI_3 R[1]
+      0x00,             # OP_NOP
+      0x69,             # OP_STOP
+    ])
+    @sim.em.write_u32(layout.step_count_addr, 0)
+    @sim.run
+
+    assert_equal 3, step_count
+  end
+
+  # 未知のオペコードも 1 命令として数える (フェッチした後に判定するため)
+  def test_step_count_includes_the_instruction_that_failed
+    load_bytecode([0xFF])
+    @sim.em.write_u32(layout.step_count_addr, 0)
+    @sim.run
+
+    assert_equal 1, step_count
+  end
+
+  # 32ビット。長く動かせば必ず 65535 を超えるので上位ワードが要る
+  def test_step_count_carries_past_16_bits
+    load_bytecode([0x00, 0x69])
+    @sim.em.write_u32(layout.step_count_addr, 65_535)
+    @sim.run
+
+    assert_equal 65_537, step_count
+    assert_equal 1, @sim.em.read_u16(layout.step_count_addr + 1), "上位ワードへ桁上がりする"
+  end
+
+  # 生成コードは命令ごとに走るため、加算式ではなく INC を使う
+  def test_generated_code_counts_with_inc
+    source = FaRuby::KvsGenerator.new.source
+    emitter = FaRuby::KvsEmitter.new(layout: layout)
+    counter = emitter.state_long(layout.step_count_addr)
+
+    assert_includes source, "INC(#{counter})"
+    refute_includes source, "#{counter} = #{counter} + 1"
   end
 end
