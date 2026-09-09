@@ -419,6 +419,7 @@ module FaRuby
     # 固定領域にも同じ形をかぶせます。定数プールがスロットの並びだからです
     FIXED_SLOT  = "VMFSLOT"
     FIXED_SLOTF = "VMFSLOTF"
+    FIXED_SLOTW = "VMFSLOTW"   # 同じ場所を 16 ビット 2 つで
     # 値を 16 ビット 2 つとして見る形。デバイス参照が種別・幅・アドレスを
     # 2 ワードに詰めるので、そこだけこちらで触ります
     SLOTW  = "VMSLOTW"
@@ -738,7 +739,7 @@ module FaRuby
     # 位置が違うため、割り算は実行時になります。
     def pool_slot(_key, index_expr, z: nil)
       base = "(#{pool_offset}) / #{VmConstants::SLOT_WORDS}"
-      slot_at("#{base} + #{index_expr}", FIXED_SLOT, FIXED_SLOTF)
+      slot_at("#{base} + #{index_expr}", FIXED_SLOT, FIXED_SLOTF, FIXED_SLOTW)
     end
 
     # 別のフレームのレジスタ
@@ -920,6 +921,8 @@ module FaRuby
       remember(SLOTW, "#{SLOT_WORD_TYPE}(0..#{slots - 1})", variable, "同じ場所を 16 ビット 2 つで")
       remember(FIXED_SLOT,  "#{SLOT_TYPE}(0..#{fixed_slots - 1})",  fixed, "定数プール")
       remember(FIXED_SLOTF, "#{SLOT_FLOAT_TYPE}(0..#{fixed_slots - 1})", fixed, "同じ場所を実数で")
+      remember(FIXED_SLOTW, "#{SLOT_WORD_TYPE}(0..#{fixed_slots - 1})", fixed,
+               "同じ場所を 16 ビット 2 つで")
       remember(FIXED_WORD, "ワード[符号付き](0..#{layout.fixed_instance_size - 1})", fixed,
                "バイトコードと表")
       remember(Z_SAVE, "ワード[符号付き](0..8)",
@@ -927,12 +930,12 @@ module FaRuby
       noop_statement
     end
 
-    def slot_at(index_expr, array = SLOT, float_array = SLOTF)
+    def slot_at(index_expr, array = SLOT, float_array = SLOTF, word_array = SLOTW)
 
       KvDevices::Slot.new("#{array}[#{index_expr}].#{TAG}",
                           "#{array}[#{index_expr}].#{NUM}",
                           "#{float_array}[#{index_expr}].#{NUM}",
-                          ->(offset) { word_of(index_expr, offset) })
+                          ->(offset) { word_of(index_expr, offset, word_array) })
     end
 
     # 値ワードを 16 ビット単位で指す
@@ -940,11 +943,11 @@ module FaRuby
     # **構造体のメンバの一部だけを取り出す綴りがありません。** そこで、値を
     # 16 ビット 2 つとして見る形を同じアドレスに重ねてあります。デバイス参照が
     # 種別・幅・アドレスを 2 ワードに詰めるので、そこで通ります。
-    def word_of(index_expr, offset)
+    def word_of(index_expr, offset, word_array = SLOTW)
       name = WORDS[offset] or
         raise ArgumentError, "値ワードは 2 つまでです (offset: #{offset})"
 
-      "#{SLOTW}[#{index_expr}].#{name}"
+      "#{word_array}[#{index_expr}].#{name}"
     end
   end
 end

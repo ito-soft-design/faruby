@@ -303,11 +303,21 @@ module FaRuby
       OP_GETUPVAR OP_SETUPVAR
     ].freeze
 
+    # ステージ 3 — 配列・ハッシュ・文字列
+    #
+    # **作る側の命令だけです。** `push` や `length` や `keys` といったメソッドは
+    # ステージ 2 で `OP_SEND` を入れた時点で乗っています (組み込みメソッドの
+    # 振り分けが丸ごと出るため)。だから 6 個で足ります。
+    STAGE3 = %i[OP_SETCONST OP_ARRAY OP_ARRAY2 OP_STRING OP_STRCAT OP_HASH].freeze
+
     # この機種に載せる命令
     #
-    # **段を追って増やします** ([ロードマップ](../doc/roadmap.md))。一度に
-    # 全部書き上げてから初めて動かすと、機種差がまとめて降ってきます。
-    STAGES = (STAGE1 + STAGE2).freeze
+    # **段を追って増やしてきました** ([ロードマップ](../doc/roadmap.md))。一度に
+    # 全部書き上げてから初めて動かすと、機種差がまとめて降ってきます。実際
+    # ステージ 2 で、KV との指し方の違いに由来する穴が 2 つ出ました。
+    #
+    # いまは全部載っています。**段の区切りは記録として残します。**
+    STAGES = (STAGE1 + STAGE2 + STAGE3).freeze
 
     def select_opcodes(opcodes)
       opcodes.select { |op| STAGES.include?(OpcodeTable::MRUBY_OPCODES[op.code]&.first) }
@@ -385,7 +395,7 @@ module FaRuby
 
         1. 下の構造体を「構造体設定」に登録します
         2. `faruby_labels.tsv` をグローバルラベルの表に貼り付けます
-        3. **構造体の配列 5 つに先頭デバイスを設定します** (下の表)
+        3. **構造体の配列 #{devices.structure_labels.size} つに先頭デバイスを設定します** (下の表)
 
         **構造体を先に登録します。** ラベルの型の欄が構造体名を指すためです。
 

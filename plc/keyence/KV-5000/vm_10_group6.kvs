@@ -244,10 +244,10 @@ IF EM54:Z9 <= 69 THEN
             EM46:Z9 = Z3
             EM43:Z9 = 0
             Z3 = EM1.L:Z1
-            Z3 = Z3 * 50 + 1000 + Z9
+            Z3 = Z3 * 52 + 1000 + Z9
             EM44:Z9 = EM0:Z3   ' バイト数
             Z3 = EM1.L:Z2
-            Z3 = Z3 * 50 + 1000 + Z9
+            Z3 = Z3 * 52 + 1000 + Z9
             IF EM44:Z9 = EM0:Z3 THEN
               ' バイト数が同じ。ここから中身を見る
               EM43:Z9 = 1
@@ -257,12 +257,12 @@ IF EM54:Z9 <= 69 THEN
                 EM45:Z9 = EM45:Z9 - 1
                 FOR EM42:Z9 = 0 TO EM45:Z9
                   Z3 = EM1.L:Z1
-                  Z3 = Z3 * 50 + 1000 + Z9
-                  Z3 = EM42:Z9 + Z3 + 2
+                  Z3 = Z3 * 52 + 1000 + Z9
+                  Z3 = EM42:Z9 + Z3 + 4
                   EM44:Z9 = EM0:Z3
                   Z3 = EM1.L:Z2
-                  Z3 = Z3 * 50 + 1000 + Z9
-                  Z3 = EM42:Z9 + Z3 + 2
+                  Z3 = Z3 * 52 + 1000 + Z9
+                  Z3 = EM42:Z9 + Z3 + 4
                   IF EM44:Z9 <> EM0:Z3 THEN
                     EM43:Z9 = 0
                   END IF
