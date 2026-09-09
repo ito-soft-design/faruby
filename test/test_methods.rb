@@ -83,6 +83,7 @@ class TestMethods < Minitest::Test
     "%" => [TT_INTEGER, TT_FLOAT], "abs" => [TT_INTEGER, TT_FLOAT],
     "to_i" => [TT_INTEGER, TT_FLOAT], "to_f" => [TT_INTEGER, TT_FLOAT],
     "floor" => [TT_INTEGER, TT_FLOAT], "round" => [TT_INTEGER, TT_FLOAT],
+    "-@" => [TT_INTEGER, TT_FLOAT], "+@" => [TT_INTEGER, TT_FLOAT],
     "times" => [TT_INTEGER, TT_FLOAT], "upto" => [TT_INTEGER, TT_FLOAT],
     "&" => [TT_INTEGER, TT_FLOAT], "|" => [TT_INTEGER, TT_FLOAT],
     "^" => [TT_INTEGER, TT_FLOAT], "~" => [TT_INTEGER, TT_FLOAT],

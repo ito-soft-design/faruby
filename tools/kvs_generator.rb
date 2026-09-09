@@ -2475,6 +2475,8 @@ module FaRuby
       when METHOD_NOT   then not_into(dest)
       when METHOD_MOD   then mod_into(dest, rhs, type_code, zero_code)
       when METHOD_ABS   then abs_into(dest)
+      when METHOD_NEG   then neg_into(dest)
+      when METHOD_UPLUS then note "+x は何もしない (Ruby と同じ)"
       when METHOD_TO_I  then to_i_into(dest)
       when METHOD_TO_F  then to_f_into(dest)
       when METHOD_FLOOR then floor_into(dest)
@@ -2821,6 +2823,18 @@ module FaRuby
     end
 
     # 絶対値。型は変わらない
+    # R[a] = -R[a]
+    #
+    # **mruby は `-x` を `x.-@()` にします。** リテラルは畳み込まれるので、
+    # ここへ来るのは変数や式に付けたときだけです。整数と実数の両方を受けます。
+    def neg_into(dest)
+      if_else_block("#{dest.tag} = #{TT_FLOAT}") do
+        line "#{dest.float} = 0 - #{dest.float}"
+      end
+      line "#{dest.value} = 0 - #{dest.value}"
+      end_block
+    end
+
     def abs_into(dest)
       if_else_block("#{dest.tag} = #{TT_FLOAT}") do
         if_("#{dest.float} < 0") { line "#{dest.float} = 0 - #{dest.float}" }

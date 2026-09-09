@@ -62,7 +62,7 @@ IF EM54:Z9 <= 61 THEN
         // メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)
         // 3 未満 (!= と !) はどの型でも呼べる
         IF Z5 >= 3 THEN
-          IF Z5 <= 15 THEN
+          IF Z5 <= 17 THEN
             // 数値 (タグ 4-5)
             IF EM0:Z1 < 4 THEN
               EM1:Z9 := 3;
@@ -74,7 +74,7 @@ IF EM54:Z9 <= 61 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 17 THEN
+          ELSIF Z5 <= 19 THEN
             // 文字列・配列・ハッシュ (タグ 7-9)
             IF EM0:Z1 < 7 THEN
               EM1:Z9 := 3;
@@ -86,7 +86,7 @@ IF EM54:Z9 <= 61 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 18 THEN
+          ELSIF Z5 <= 20 THEN
             // 整数・文字列・配列 (タグ 4-8)
             IF EM0:Z1 < 4 THEN
               EM1:Z9 := 3;
@@ -98,7 +98,7 @@ IF EM54:Z9 <= 61 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 19 THEN
+          ELSIF Z5 <= 21 THEN
             // 配列・ハッシュ (タグ 8-9)
             IF EM0:Z1 < 8 THEN
               EM1:Z9 := 3;
@@ -110,14 +110,14 @@ IF EM54:Z9 <= 61 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 20 THEN
+          ELSIF Z5 <= 22 THEN
             // 配列 (タグ 8)
             IF EM0:Z1 <> 8 THEN
               EM1:Z9 := 3;
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 23 THEN
+          ELSIF Z5 <= 25 THEN
             // ハッシュ (タグ 9)
             IF EM0:Z1 <> 9 THEN
               EM1:Z9 := 3;
@@ -361,7 +361,17 @@ IF EM54:Z9 <= 61 THEN
             EM1.L:Z1 := EM16.L:Z9;
             EM0:Z1 := 4;
           END_IF;
-        ELSIF Z5 = 11 THEN
+        ELSIF Z5 = 9 THEN
+          // -@
+          IF EM0:Z1 = 5 THEN
+            EM1.F:Z1 := 0 - EM1.F:Z1;
+          ELSE
+            EM1.L:Z1 := 0 - EM1.L:Z1;
+          END_IF;
+        ELSIF Z5 = 10 THEN
+          // +@
+          // +x は何もしない (Ruby と同じ)
+        ELSIF Z5 = 13 THEN
           // &
           IF EM0:Z1 <> 4 THEN
             EM1:Z9 := 3;
@@ -375,7 +385,7 @@ IF EM54:Z9 <= 61 THEN
           END_IF;
           EM1.L:Z1 := EM1.L:Z1 AND EM1.L:Z2;
           EM0:Z1 := 4;
-        ELSIF Z5 = 12 THEN
+        ELSIF Z5 = 14 THEN
           // |
           IF EM0:Z1 <> 4 THEN
             EM1:Z9 := 3;
@@ -389,7 +399,7 @@ IF EM54:Z9 <= 61 THEN
           END_IF;
           EM1.L:Z1 := EM1.L:Z1 OR EM1.L:Z2;
           EM0:Z1 := 4;
-        ELSIF Z5 = 13 THEN
+        ELSIF Z5 = 15 THEN
           // ^
           IF EM0:Z1 <> 4 THEN
             EM1:Z9 := 3;
@@ -403,7 +413,7 @@ IF EM54:Z9 <= 61 THEN
           END_IF;
           EM1.L:Z1 := EM1.L:Z1 XOR EM1.L:Z2;
           EM0:Z1 := 4;
-        ELSIF Z5 = 14 THEN
+        ELSIF Z5 = 16 THEN
           // ~
           IF EM0:Z1 <> 4 THEN
             EM1:Z9 := 3;
@@ -412,7 +422,7 @@ IF EM54:Z9 <= 61 THEN
           END_IF;
           EM1.L:Z1 := -(EM1.L:Z1);
           EM1.L:Z1 := EM1.L:Z1 - 1;   // ~x = -x - 1
-        ELSIF Z5 = 15 THEN
+        ELSIF Z5 = 17 THEN
           // >>
           IF EM0:Z1 <> 4 THEN
             EM1:Z9 := 3;
@@ -456,7 +466,7 @@ IF EM54:Z9 <= 61 THEN
             END_IF;
           END_IF;
           EM0:Z1 := 4;
-        ELSIF Z5 = 16 THEN
+        ELSIF Z5 = 18 THEN
           // length
           IF EM0:Z1 = 9 THEN
             // 鍵の配列の見出し。R[a] を書き換える前に読む
@@ -538,7 +548,7 @@ IF EM54:Z9 <= 61 THEN
           END_IF;
           EM1.L:Z1 := EM18.L:Z9;
           EM0:Z1 := 4;
-        ELSIF Z5 = 17 THEN
+        ELSIF Z5 = 19 THEN
           // empty?
           IF EM0:Z1 = 9 THEN
             // 鍵の配列の見出し。R[a] を書き換える前に読む
@@ -558,7 +568,7 @@ IF EM54:Z9 <= 61 THEN
             EM1.L:Z1 := 0;
             EM0:Z1 := 2;
           END_IF;
-        ELSIF Z5 = 18 THEN
+        ELSIF Z5 = 20 THEN
           // <<
           IF EM0:Z1 = 4 THEN
             IF EM0:Z1 <> 4 THEN
@@ -686,7 +696,7 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 = 20 THEN
+        ELSIF Z5 = 22 THEN
           // push
           // スロットの見出し。R[a] を書き換える前に読む
           Z4 := EM1.L:Z1;
@@ -706,7 +716,7 @@ IF EM54:Z9 <= 61 THEN
           EM0:Z5 := EM0:Z2;
           Z6 := EM18.L:Z9;
           EM0:Z4 := Z6 + 1;
-        ELSIF Z5 = 21 THEN
+        ELSIF Z5 = 23 THEN
           // key?
           // 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 := EM1:Z1;
@@ -775,7 +785,7 @@ IF EM54:Z9 <= 61 THEN
             EM1.L:Z1 := 1;
             EM0:Z1 := 3;
           END_IF;
-        ELSIF Z5 = 22 THEN
+        ELSIF Z5 = 24 THEN
           // keys
           // プールの空きスロットを取る。返さないので使い切ったら止まる
           IF EM39:Z9 >= 16 THEN
@@ -808,7 +818,7 @@ IF EM54:Z9 <= 61 THEN
           EM1.L:Z1 := EM39:Z9;   // スロット番号
           EM0:Z1 := 8;
           EM39:Z9 := EM39:Z9 + 1;
-        ELSIF Z5 = 23 THEN
+        ELSIF Z5 = 25 THEN
           // values
           // プールの空きスロットを取る。返さないので使い切ったら止まる
           IF EM39:Z9 >= 16 THEN
@@ -841,7 +851,7 @@ IF EM54:Z9 <= 61 THEN
           EM1.L:Z1 := EM39:Z9;   // スロット番号
           EM0:Z1 := 8;
           EM39:Z9 := EM39:Z9 + 1;
-        ELSIF Z5 = 24 THEN
+        ELSIF Z5 = 26 THEN
           // []
           Z3 := (EM7:Z9 + 2) * 4 + EM32:Z9 + Z9;
           IF EM0:Z3 <> 4 THEN
@@ -1193,13 +1203,13 @@ IF EM54:Z9 <= 61 THEN
       END_IF;
       // ブロックを取るメソッドはレシーバの型で並んでいるため連続していない
       Z6 := 0;
-      IF Z5 = 9 THEN
+      IF Z5 = 11 THEN
         Z6 := 1;
       END_IF;
-      IF Z5 = 10 THEN
+      IF Z5 = 12 THEN
         Z6 := 1;
       END_IF;
-      IF Z5 = 19 THEN
+      IF Z5 = 21 THEN
         Z6 := 1;
       END_IF;
       IF Z6 = 0 THEN
@@ -1217,7 +1227,7 @@ IF EM54:Z9 <= 61 THEN
       // メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS)
       // 3 未満 (!= と !) はどの型でも呼べる
       IF Z5 >= 3 THEN
-        IF Z5 <= 15 THEN
+        IF Z5 <= 17 THEN
           // 数値 (タグ 4-5)
           IF EM0:Z1 < 4 THEN
             EM1:Z9 := 3;
@@ -1229,7 +1239,7 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 17 THEN
+        ELSIF Z5 <= 19 THEN
           // 文字列・配列・ハッシュ (タグ 7-9)
           IF EM0:Z1 < 7 THEN
             EM1:Z9 := 3;
@@ -1241,7 +1251,7 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 18 THEN
+        ELSIF Z5 <= 20 THEN
           // 整数・文字列・配列 (タグ 4-8)
           IF EM0:Z1 < 4 THEN
             EM1:Z9 := 3;
@@ -1253,7 +1263,7 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 19 THEN
+        ELSIF Z5 <= 21 THEN
           // 配列・ハッシュ (タグ 8-9)
           IF EM0:Z1 < 8 THEN
             EM1:Z9 := 3;
@@ -1265,14 +1275,14 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 20 THEN
+        ELSIF Z5 <= 22 THEN
           // 配列 (タグ 8)
           IF EM0:Z1 <> 8 THEN
             EM1:Z9 := 3;
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 23 THEN
+        ELSIF Z5 <= 25 THEN
           // ハッシュ (タグ 9)
           IF EM0:Z1 <> 9 THEN
             EM1:Z9 := 3;
@@ -1295,11 +1305,11 @@ IF EM54:Z9 <= 61 THEN
         EM2:Z9 := 9;
         EXIT;
       END_IF;
-      IF Z5 = 9 THEN
+      IF Z5 = 11 THEN
         // n.times は 0 から n-1 まで
         EM16.L:Z9 := 0;
         EM18.L:Z9 := EM1.L:Z1 - 1;
-      ELSIF Z5 = 19 THEN
+      ELSIF Z5 = 21 THEN
         // a.each / h.each は 0 から要素数-1 まで
         // ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む
         IF EM0:Z1 = 9 THEN
@@ -1344,7 +1354,7 @@ IF EM54:Z9 <= 61 THEN
         EM32:Z9 := EM32:Z9 + EM7:Z9 * 4;
         EM3:Z3 := EM32:Z9;   // このフレームの窓 (OP_GETUPVAR が見る)
         EM31:Z9 := EM31:Z9 + 1;
-        IF Z5 = 19 THEN
+        IF Z5 = 21 THEN
           // each はブロックに添字ではなく要素を渡す
           // ハッシュは鍵と値の 2 つを渡すので種別を分ける
           Z4 := 0 + EM32:Z9 + Z9;   // 窓をずらした後の R[0] がレシーバ

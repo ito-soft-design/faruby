@@ -1283,6 +1283,8 @@ module FaRuby
       when METHOD_NOT   then write_bool(index, read_reg_tag(index) <= TT_FALSY_MAX)
       when METHOD_MOD   then send_mod(index, type_code, zero_code)
       when METHOD_ABS   then send_numeric(index) { |v| v.abs }
+      when METHOD_NEG   then send_numeric(index) { |v| -v }
+      when METHOD_UPLUS then nil   # +x は何もしない (Ruby と同じ)
       when METHOD_TO_I  then write_slot(index, TT_INTEGER, numeric_value(index).to_i)
       when METHOD_TO_F  then write_float(index, numeric_value(index).to_f)
       when METHOD_FLOOR then write_slot(index, TT_INTEGER, numeric_value(index).floor)

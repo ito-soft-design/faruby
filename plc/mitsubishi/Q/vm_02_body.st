@@ -3059,7 +3059,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         (* メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS) *)
         (* 3 未満 (!= と !) はどの型でも呼べる *)
         IF Z5 >= 3 THEN
-          IF Z5 <= 15 THEN
+          IF Z5 <= 17 THEN
             (* 数値 (タグ 4-5) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
               VMSTATUS := 3;
@@ -3071,7 +3071,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 17 THEN
+          ELSIF Z5 <= 19 THEN
             (* 文字列・配列・ハッシュ (タグ 7-9) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7 THEN
               VMSTATUS := 3;
@@ -3083,7 +3083,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 18 THEN
+          ELSIF Z5 <= 20 THEN
             (* 整数・文字列・配列 (タグ 4-8) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
               VMSTATUS := 3;
@@ -3095,7 +3095,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 19 THEN
+          ELSIF Z5 <= 21 THEN
             (* 配列・ハッシュ (タグ 8-9) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
               VMSTATUS := 3;
@@ -3107,14 +3107,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 20 THEN
+          ELSIF Z5 <= 22 THEN
             (* 配列 (タグ 8) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 8 THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSIF Z5 <= 23 THEN
+          ELSIF Z5 <= 25 THEN
             (* ハッシュ (タグ 9) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 9 THEN
               VMSTATUS := 3;
@@ -3359,7 +3359,18 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMTEMP32L;
             VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
           END_IF;
-        ELSIF Z5 = 11 THEN
+        ELSIF Z5 = 9 THEN
+          (* -@ *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 5 THEN
+            VMSLOTF[VMREGSLOT + VMOPERANDA].SLNUM := 0.0 - VMSLOTF[VMREGSLOT + VMOPERANDA].SLNUM;
+          ELSE
+            VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 0 - VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+          END_IF;
+        ELSIF Z5 = 10 THEN
+          (* +@ *)
+          (* +x は何もしない (Ruby と同じ) *)
+          VMDISPATCH := 0;
+        ELSIF Z5 = 13 THEN
           (* & *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -3373,7 +3384,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := DWORD_TO_DINT(DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM) AND DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
-        ELSIF Z5 = 12 THEN
+        ELSIF Z5 = 14 THEN
           (* | *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -3387,7 +3398,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := DWORD_TO_DINT(DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM) OR DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
-        ELSIF Z5 = 13 THEN
+        ELSIF Z5 = 15 THEN
           (* ^ *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -3401,7 +3412,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := DWORD_TO_DINT(DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM) XOR DINT_TO_DWORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
-        ELSIF Z5 = 14 THEN
+        ELSIF Z5 = 16 THEN
           (* ~ *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -3410,7 +3421,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := -(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM);
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM - 1;   (* ~x = -x - 1 *)
-        ELSIF Z5 = 15 THEN
+        ELSIF Z5 = 17 THEN
           (* >> *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -3508,7 +3519,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             END_IF;
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
-        ELSIF Z5 = 16 THEN
+        ELSIF Z5 = 18 THEN
           (* length *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
             (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
@@ -3597,7 +3608,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMTEMP32BL;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
-        ELSIF Z5 = 17 THEN
+        ELSIF Z5 = 19 THEN
           (* empty? *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
             (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
@@ -3617,7 +3628,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 0;
             VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 2;
           END_IF;
-        ELSIF Z5 = 18 THEN
+        ELSIF Z5 = 20 THEN
           (* << *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 4 THEN
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 4 THEN
@@ -3818,7 +3829,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 = 20 THEN
+        ELSIF Z5 = 22 THEN
           (* push *)
           (* スロットの見出し。R[a] を書き換える前に読む *)
           Z4 := DINT_TO_INT(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM);
@@ -3838,7 +3849,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMSLOT[(Z5 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG;
           Z6 := DINT_TO_INT(VMTEMP32BL);
           D0Z4 := Z6 + 1;
-        ELSIF Z5 = 21 THEN
+        ELSIF Z5 = 23 THEN
           (* key? *)
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
           Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
@@ -3907,7 +3918,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 1;
             VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 3;
           END_IF;
-        ELSIF Z5 = 22 THEN
+        ELSIF Z5 = 24 THEN
           (* keys *)
           (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
           IF VMARRAYSP >= 16 THEN
@@ -3940,7 +3951,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP);   (* スロット番号 *)
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 8;
           VMARRAYSP := VMARRAYSP + 1;
-        ELSIF Z5 = 23 THEN
+        ELSIF Z5 = 25 THEN
           (* values *)
           (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
           IF VMARRAYSP >= 16 THEN
@@ -3973,7 +3984,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP);   (* スロット番号 *)
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 8;
           VMARRAYSP := VMARRAYSP + 1;
-        ELSIF Z5 = 24 THEN
+        ELSIF Z5 = 26 THEN
           (* [] *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA + 2].SLTAG <> 4 THEN
             VMSTATUS := 3;
@@ -4437,13 +4448,13 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       END_IF;
       (* ブロックを取るメソッドはレシーバの型で並んでいるため連続していない *)
       Z6 := 0;
-      IF Z5 = 9 THEN
+      IF Z5 = 11 THEN
         Z6 := 1;
       END_IF;
-      IF Z5 = 10 THEN
+      IF Z5 = 12 THEN
         Z6 := 1;
       END_IF;
-      IF Z5 = 19 THEN
+      IF Z5 = 21 THEN
         Z6 := 1;
       END_IF;
       IF Z6 = 0 THEN
@@ -4460,7 +4471,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       (* メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS) *)
       (* 3 未満 (!= と !) はどの型でも呼べる *)
       IF Z5 >= 3 THEN
-        IF Z5 <= 15 THEN
+        IF Z5 <= 17 THEN
           (* 数値 (タグ 4-5) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
             VMSTATUS := 3;
@@ -4472,7 +4483,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 17 THEN
+        ELSIF Z5 <= 19 THEN
           (* 文字列・配列・ハッシュ (タグ 7-9) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7 THEN
             VMSTATUS := 3;
@@ -4484,7 +4495,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 18 THEN
+        ELSIF Z5 <= 20 THEN
           (* 整数・文字列・配列 (タグ 4-8) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
             VMSTATUS := 3;
@@ -4496,7 +4507,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 19 THEN
+        ELSIF Z5 <= 21 THEN
           (* 配列・ハッシュ (タグ 8-9) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
             VMSTATUS := 3;
@@ -4508,14 +4519,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 20 THEN
+        ELSIF Z5 <= 22 THEN
           (* 配列 (タグ 8) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 8 THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSIF Z5 <= 23 THEN
+        ELSIF Z5 <= 25 THEN
           (* ハッシュ (タグ 9) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 9 THEN
             VMSTATUS := 3;
@@ -4537,11 +4548,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMERROR := 9;
         EXIT;
       END_IF;
-      IF Z5 = 9 THEN
+      IF Z5 = 11 THEN
         (* n.times は 0 から n-1 まで *)
         VMTEMP32L := 0;
         VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM - 1;
-      ELSIF Z5 = 19 THEN
+      ELSIF Z5 = 21 THEN
         (* a.each / h.each は 0 から要素数-1 まで *)
         (* ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む *)
         IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
@@ -4585,7 +4596,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMREGBASE := VMREGBASE + VMOPERANDA * 4;
         D3Z3 := VMREGBASE;   (* このフレームの窓 (OP_GETUPVAR が見る) *)
         VMFRAMESP := VMFRAMESP + 1;
-        IF Z5 = 19 THEN
+        IF Z5 = 21 THEN
           (* each はブロックに添字ではなく要素を渡す *)
           (* ハッシュは鍵と値の 2 つを渡すので種別を分ける *)
           Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] がレシーバ *)

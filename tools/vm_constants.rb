@@ -247,25 +247,29 @@ module FaRuby
     METHOD_TO_F    = 6
     METHOD_FLOOR   = 7
     METHOD_ROUND   = 8
-    METHOD_TIMES   = 9    # ブロックを取る
-    METHOD_UPTO    = 10   # ブロックを取る
+    # 単項の符号。**mruby は -x を x.-@() にします** (リテラルは畳み込むので
+    # `-1` は届きません)。整数と実数の両方を受けます
+    METHOD_NEG     = 9    # -@
+    METHOD_UPLUS   = 10   # +@。何もしない
+    METHOD_TIMES   = 11   # ブロックを取る
+    METHOD_UPTO    = 12   # ブロックを取る
     # ビット演算。整数だけ。実数を渡すと止まる
-    METHOD_BIT_AND = 11   # &
-    METHOD_BIT_OR  = 12   # |
-    METHOD_BIT_XOR = 13   # ^
-    METHOD_BIT_NOT = 14   # ~
-    METHOD_SHIFT_R = 15   # >>
-    METHOD_LENGTH  = 16   # length / size。文字列・配列・ハッシュ
-    METHOD_EMPTY_P = 17   # empty?。文字列・配列・ハッシュ
+    METHOD_BIT_AND = 13   # &
+    METHOD_BIT_OR  = 14   # |
+    METHOD_BIT_XOR = 15   # ^
+    METHOD_BIT_NOT = 16   # ~
+    METHOD_SHIFT_R = 17   # >>
+    METHOD_LENGTH  = 18   # length / size。文字列・配列・ハッシュ
+    METHOD_EMPTY_P = 19   # empty?。文字列・配列・ハッシュ
     # << は整数なら左シフト、文字列と配列なら継ぎ足し。Ruby と同じ
-    METHOD_CONCAT  = 18
-    METHOD_EACH    = 19   # 配列とハッシュ。ブロックを取る
-    METHOD_PUSH    = 20   # push。配列だけ (Ruby の String に push は無い)
-    METHOD_KEY_P   = 21   # key?
-    METHOD_KEYS    = 22
-    METHOD_VALUES  = 23
+    METHOD_CONCAT  = 20
+    METHOD_EACH    = 21   # 配列とハッシュ。ブロックを取る
+    METHOD_PUSH    = 22   # push。配列だけ (Ruby の String に push は無い)
+    METHOD_KEY_P   = 23   # key?
+    METHOD_KEYS    = 24
+    METHOD_VALUES  = 25
     # $DML[100, 3]。デバイス参照から連続した値を配列にする
-    METHOD_SLICE   = 24
+    METHOD_SLICE   = 26
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -314,6 +318,8 @@ module FaRuby
       "to_f"   => [METHOD_TO_F,   0],
       "floor"  => [METHOD_FLOOR,  0],
       "round"  => [METHOD_ROUND,  0],
+      "-@"     => [METHOD_NEG,    0],
+      "+@"     => [METHOD_UPLUS,  0],
       "&"      => [METHOD_BIT_AND, 1],
       "|"      => [METHOD_BIT_OR,  1],
       "^"      => [METHOD_BIT_XOR, 1],
