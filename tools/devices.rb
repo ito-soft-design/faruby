@@ -121,32 +121,29 @@ module FaRuby
 
     # --- 値スロット ---
 
-    # スロットの先頭アドレスを Z に載せ、その Z を指す Slot を返す
+    # レジスタ窓の index_expr 番目のスロット
     #
-    # **同じスロットを 2 度指すときは行を出しません** (key で覚えます)。
-    # 命令 1 つの中で R[a] を何度も触るため、毎回 Z を組み直すと無駄が出ます。
-    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
-      return @slot_cache[key] if @slot_cache.key?(key)
+    # **呼ぶ側は「何番目のレジスタか」だけを言います。** ワード数を掛けて
+    # 基点を足すのは KV がアドレスを作る手順で、MELSEC は添字で直接指します。
+    def reg_slot(key, index_expr, z: nil)
+      slot_ref(key, index_expr, reg_offset, z: z)
+    end
 
-      z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
-      @emitter.line "Z#{z} = #{index_expr} + #{base_expr}"
-      @slot_cache[key] = build_slot(z, device)
+    # 定数プールの index_expr 番目。**固定領域 (FM) にあります**
+    def pool_slot(key, index_expr, z: nil)
+      slot_ref(key, index_expr, pool_offset, z: z, device: layout.fixed_device_name)
+    end
+
+    # 別のフレームのレジスタ。base_expr はそのフレームの窓の先頭
+    def frame_slot(key, index_expr, base_expr, z: nil)
+      slot_ref(key, index_expr, base_expr, z: z)
     end
 
     # 既に Z に載っている先頭アドレスを値スロットとして扱う
     #
-    # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
-    # 自分で載せた場合に使います。
+    # 呼ぶ側が FOR の中などで自分で載せた場合に使います。**KV の作り方に
+    # 踏み込む口**なので、MELSEC ではこれを使う経路そのものが変わります。
     def slot_on(z) = build_slot(z, layout.device_name)
-
-    # Z 1 本でタグと値の両方を指す。**型サフィックスはデバイス側**に付ける
-    def build_slot(z, device)
-      value = VmConstants::SLOT_VALUE_OFFSET
-      Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}",
-               "#{device}#{value}.L:Z#{z}",
-               "#{device}#{value}.F:Z#{z}",
-               ->(offset) { "#{device}#{value + offset}:Z#{z}" })
-    end
 
     # 命令 1 つを出し終えたら忘れる。次の命令では Z を組み直す
     def forget_slots = @slot_cache.clear
@@ -163,5 +160,42 @@ module FaRuby
       @emitter.line "#{dest} = #{fixed_indexed_base}:Z1"
       @emitter.line "#{pc} = #{pc} + 1"
     end
+
+    private
+
+    # スロットの先頭アドレスを Z に載せ、その Z を指す Slot を返す
+    #
+    # **同じスロットを 2 度指すときは行を出しません** (key で覚えます)。
+    # 命令 1 つの中で R[a] を何度も触るため、毎回 Z を組み直すと無駄が出ます。
+    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
+      return @slot_cache[key] if @slot_cache.key?(key)
+
+      z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
+      @emitter.line "Z#{z} = #{words_of(index_expr)} + #{base_expr}"
+      @slot_cache[key] = build_slot(z, device)
+    end
+
+# 添字をワード単位に直す
+#
+# **足し算を含む添字は括弧で囲みます。** `a + 1 * 4` は `a + 4` になって
+# しまい、隣ではなく 4 つ先のスロットを指します。
+#
+# 0 番目は掛けても 0 なので、掛け算そのものを出しません。
+def words_of(index_expr)
+  return "0" if index_expr == "0"
+
+  expr = index_expr.include?(" ") ? "(#{index_expr})" : index_expr
+  "#{expr} * #{VmConstants::SLOT_WORDS}"
+end
+
+    # Z 1 本でタグと値の両方を指す。**型サフィックスはデバイス側**に付ける
+    def build_slot(z, device)
+      value = VmConstants::SLOT_VALUE_OFFSET
+      Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}",
+               "#{device}#{value}.L:Z#{z}",
+               "#{device}#{value}.F:Z#{z}",
+               ->(offset) { "#{device}#{value + offset}:Z#{z}" })
+    end
+
   end
 end

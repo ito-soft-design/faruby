@@ -239,16 +239,15 @@ module FaRuby
     # 出しておいて IF で選びます。
     Slot = KvDevices::Slot
 
-    def reg_slot(name)      = slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset)
-    def reg_next_slot(name) = slot_ref([:reg_next, name], "(#{operand(name)} + 1) * #{SLOT_WORDS}", reg_offset)
+    def reg_slot(name)      = devices.reg_slot([:reg, name], operand(name))
+    def reg_next_slot(name) = devices.reg_slot([:reg_next, name], "#{operand(name)} + 1")
     # 引数 2 個のメソッド (`[]`) の 2 つ目
     def reg_third_slot(name)
-      slot_ref([:reg_third, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}", reg_offset, z: Z_VALUE)
+      devices.reg_slot([:reg_third, name], "#{operand(name)} + 2", z: Z_VALUE)
     end
     # 定数プールは固定領域 (FM) にある
     def pool_slot(name)
-      slot_ref([:pool, name], "#{operand(name)} * #{SLOT_WORDS}", pool_offset,
-               device: layout.fixed_device_name)
+      devices.pool_slot([:pool, name], operand(name))
     end
 
     def reg(name)      = reg_slot(name).value
@@ -315,8 +314,7 @@ module FaRuby
     # R[a] = R[b] (タグごと複製)
     def move_reg(dest_name, src_name)
       dest = reg_slot(dest_name)
-      src = slot_ref([:reg_src, src_name], "#{operand(src_name)} * #{SLOT_WORDS}",
-                     reg_offset, z: Z_SECONDARY)
+      src = devices.reg_slot([:reg_src, src_name], operand(src_name), z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
     end
@@ -774,8 +772,7 @@ module FaRuby
     def store_device_index(name, error_code, heap_code)
       ref = reg_slot(name)
       index = reg_next_slot(name)
-      value = slot_ref([:reg_value, name], "(#{operand(name)} + 2) * #{SLOT_WORDS}",
-                       reg_offset, z: Z_VALUE)
+      value = devices.reg_slot([:reg_value, name], "#{operand(name)} + 2", z: Z_VALUE)
 
       line "IF #{ref.tag} = #{TT_DEVICE} THEN"
       indent
@@ -1062,7 +1059,7 @@ module FaRuby
     def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
                          zero_code, heap_code, depth_code)
       note "self をレシーバ位置に置く (mruby の regs[a] = regs[0])"
-      self_slot = slot_ref([:reg_self, name], "0", reg_offset, z: Z_VALUE)
+      self_slot = devices.reg_slot([:reg_self, name], "0", z: Z_VALUE)
       dest = reg_slot(name)
       line "#{dest.value} = #{self_slot.value}"
       line "#{dest.tag} = #{self_slot.tag}"
@@ -1186,7 +1183,7 @@ module FaRuby
 
     # 既に Z に載っている先頭アドレスを値スロットとして扱う
     #
-    # slot_ref と違い Z を計算する行は出しません。呼ぶ側が FOR の中などで
+    # レジスタ番号から作るのと違い、Z を計算する行は出しません。呼ぶ側が FOR の中などで
     # 自分で載せた場合に使います。
     def slot_on(z) = devices.slot_on(z)
 
@@ -1828,7 +1825,7 @@ module FaRuby
     # R[a] = 外側の R[b] (OP_GETUPVAR)
     def load_upvar(name, index_name, level_name, error_code)
       upvar_base(level_name, error_code)
-      src = slot_ref([:upvar, name], "#{operand(index_name)} * #{SLOT_WORDS}",
+      src = devices.frame_slot([:upvar, name], operand(index_name),
                      "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
       dest = reg_slot(name)
       line "#{dest.value} = #{src.value}"
@@ -1839,7 +1836,7 @@ module FaRuby
     def store_upvar(name, index_name, level_name, error_code)
       src = reg_slot(name)
       upvar_base(level_name, error_code)
-      dest = slot_ref([:upvar, name], "#{operand(index_name)} * #{SLOT_WORDS}",
+      dest = devices.frame_slot([:upvar, name], operand(index_name),
                       "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
@@ -1924,7 +1921,7 @@ module FaRuby
       note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
       note "これで戻り値が呼び出し元から見える位置に入る"
       src = reg_slot(name)
-      dest = slot_ref([:reg_self, name], "0", reg_offset, z: Z_SECONDARY)
+      dest = devices.reg_slot([:reg_self, name], "0", z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
       pop_frame
@@ -2054,9 +2051,8 @@ module FaRuby
       check_receiver_type(recv, type_code)
 
       note "ブロックは引数の後ろ R[a + 引数の数 + 1] にある"
-      block = slot_ref([:block, name],
-                       "(#{operand(name)} + #{operand(argc_name)} + 1) * #{SLOT_WORDS}",
-                       reg_offset, z: Z_VALUE)
+      block = devices.reg_slot([:block, name],
+                                   "#{operand(name)} + #{operand(argc_name)} + 1", z: Z_VALUE)
       if_("#{block.tag} <> #{TT_PROC}") { vm_error(block_code) }
 
       iteration_range(name, recv, type_code)
@@ -2136,7 +2132,7 @@ module FaRuby
       end
       note "break の値を R[0] へ。R[0] は呼んだ側の R[a] と同じ場所"
       src = reg_slot(name)
-      dest = slot_ref([:reg_self, name], "0", reg_offset, z: Z_SECONDARY)
+      dest = devices.reg_slot([:reg_self, name], "0", z: Z_SECONDARY)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
       pop_frame
@@ -2906,7 +2902,7 @@ module FaRuby
     # GETGV/SETGV はデバイステーブルが Z3-Z8 を占有するため、
     # レジスタアドレスには副オペランド用の Z を使う
     def global_reg_slot(name)
-      slot_ref([:reg, name], "#{operand(name)} * #{SLOT_WORDS}", reg_offset, z: Z_SECONDARY)
+      devices.reg_slot([:reg, name], operand(name), z: Z_SECONDARY)
     end
 
     # 値スロットの先頭アドレスを Z に設定し、タグと値の参照を返す
@@ -2915,9 +2911,6 @@ module FaRuby
     # 型サフィックスはデバイス側に付ける (EM1.L:Z1)。
     # EM1:Z1.L と書くと .L がインデックスレジスタに結合し、
     # エラーにならないまま16ビットアクセスに退化する。
-    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
-      devices.slot_ref(key, index_expr, base_expr, z: z, device: device)
-    end
 
     # バイトコードの現在位置を Z1 経由で読み、PC を1つ進める
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
