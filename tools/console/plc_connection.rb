@@ -4,6 +4,7 @@
 # コンフィグの protocol 設定に基づき、適切なアダプターを生成します。
 
 require_relative "plc_adapters/keyence_kv"
+require_relative "plc_adapters/mitsubishi_mc"
 
 module FaRuby
   module Console
@@ -12,8 +13,11 @@ module FaRuby
         "keyence_kv" => ->(cfg) {
           PlcAdapters::KeyenceKv.new(host: cfg.plc_host, port: cfg.plc_port)
         },
+        "mitsubishi_mc" => ->(cfg) {
+          PlcAdapters::MitsubishiMc.new(host: cfg.plc_host, port: cfg.plc_port,
+                                        device_name: cfg.layout.device_name)
+        },
         # 将来追加:
-        # "mitsubishi_mc" => ->(cfg) { PlcAdapters::MitsubishiMc.new(...) },
         # "omron_fins"    => ->(cfg) { PlcAdapters::OmronFins.new(...) },
       }.freeze
 

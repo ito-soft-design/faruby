@@ -25,6 +25,8 @@
 require_relative "config"
 require_relative "mrb_parser"
 require_relative "plc_codegen"
+require_relative "device_syntax"
+require_relative "dialect"
 require_relative "vm_constants"
 require_relative "console/plc_connection"
 require_relative "console/memory_transfer"
@@ -75,6 +77,7 @@ module FaRuby
       @config = config
       @adapter = adapter || Console::PlcConnection.create(config)
       @layout = config.layout.for_instance(0)
+      @syntax = DeviceSyntax.for_dialect(Dialect.for(config.model))
       @transfer = Console::MemoryTransfer.new(@adapter, layout: @layout)
       @dir = dir
     end
@@ -142,7 +145,8 @@ module FaRuby
     # 転送して走らせ、終わるまで待つ
     def execute(irep)
       @transfer.write_status(VM_STOPPED)
-      codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout)
+      codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
+                               device_syntax: @syntax)
       @transfer.write_image(codegen.memory_image)
       @transfer.write_fixed_image(codegen.fixed_image)
       @transfer.write_status(VM_RUNNING)
@@ -181,7 +185,7 @@ module FaRuby
 
     # コンソールの `dev` と同じ経路で 1 つ読む
     def read_device(spec)
-      ref = PlcCodegen.parse_device_name(spec)
+      ref = PlcCodegen.parse_device_name(spec, @syntax)
       return nil unless ref
       return @adapter.read_device(ref[:device_name], ref[:address]) if ref[:bit]
 

@@ -20,12 +20,17 @@
 #
 # ## 触るデバイス
 #
-# ループの周回数を `$DM660L` (DM660-DM661) に置きます。ラダーが使っていない
-# ことを確かめてください。
+# ループの周回数を 1 つのワードデバイスに置きます。**置き場はメーカーで違い
+# ますが、測るループは同じ**です。ラダーが使っていないことを確かめてください。
+#
+#   キーエンス  `$DM660L` (DM660-DM661)
+#   三菱        `$D3660L` (D3660-D3661)
 
 require_relative "config"
 require_relative "mrb_parser"
 require_relative "plc_codegen"
+require_relative "device_syntax"
+require_relative "dialect"
 require_relative "vm_constants"
 require_relative "console/plc_connection"
 require_relative "console/memory_transfer"
@@ -35,7 +40,10 @@ module FaRuby
     include VmConstants
 
     # 周回数を置くデバイス
-    COUNTER = "DM660"
+    #
+    # **置き場だけがメーカーで違います。** ループそのものは同じなので、
+    # 機種をまたいで数字を並べられます。
+    COUNTERS = { "keyence_kv" => %w[DM 660], "mitsubishi_mc" => %w[D 3660] }.freeze
 
     DEFAULT_SECONDS = 5.0
     DEFAULT_ROUNDS  = 3
@@ -43,6 +51,7 @@ module FaRuby
     # 走り出しを待つ
     WARMUP = 0.5
 
+    # source は周回数の置き場を受け取って組み立てます
     Loop = Struct.new(:name, :note, :steps_per_loop, :source, keyword_init: true)
 
     # **測るループ。変えないこと。**
@@ -51,10 +60,10 @@ module FaRuby
         name: "OP_ADDI",
         note: "従来の計測ループ",
         steps_per_loop: 4,   # OP_GETGV / OP_ADDI / OP_SETGV / OP_JMP
-        source: <<~RUBY
-          $#{COUNTER}L = 0
+        source: ->(counter) { <<~RUBY }
+          $#{counter}L = 0
           while true
-            $#{COUNTER}L = $#{COUNTER}L + 1
+            $#{counter}L = $#{counter}L + 1
           end
         RUBY
       ),
@@ -62,11 +71,11 @@ module FaRuby
         name: "OP_ADD",
         note: "足し算を通す",
         steps_per_loop: 5,   # OP_GETGV / OP_MOVE / OP_ADD / OP_SETGV / OP_JMP
-        source: <<~RUBY
+        source: ->(counter) { <<~RUBY }
           one = 1
-          $#{COUNTER}L = 0
+          $#{counter}L = 0
           while true
-            $#{COUNTER}L = $#{COUNTER}L + one
+            $#{counter}L = $#{counter}L + one
           end
         RUBY
       ),
@@ -111,7 +120,7 @@ module FaRuby
     private
 
     def measure(target, seconds, rounds)
-      load_program(target.source)
+      load_program(target.source.call(counter_name))
 
       steps_total = 0
       loops_total = 0
@@ -130,9 +139,21 @@ module FaRuby
                  target.steps_per_loop, @config.steps_per_cycle)
     end
 
+    # この機種の周回数の置き場
+    def counter
+      COUNTERS.fetch(@config.plc_protocol) do
+        raise ArgumentError, "周回数の置き場が決まっていません (#{@config.plc_protocol})"
+      end
+    end
+
+    def counter_device = counter[0]
+    def counter_addr   = counter[1]
+    def counter_name   = counter.join
+
     # 周回数と命令数を同じ時点で読む
+
     def sample
-      { loops: @adapter.read_device_width("DM", COUNTER.sub("DM", ""), ACCESS_L),
+      { loops: @adapter.read_device_width(counter_device, counter_addr, ACCESS_L),
         steps: @transfer.read_vm_state[:step_count],
         time: Process.clock_gettime(Process::CLOCK_MONOTONIC) }
     end
@@ -140,7 +161,8 @@ module FaRuby
     def load_program(source)
       irep = compile(source)
       @transfer.write_status(VM_STOPPED)
-      codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout)
+      codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
+                               device_syntax: DeviceSyntax.for_dialect(Dialect.for(@config.model)))
       @transfer.write_image(codegen.memory_image)
       @transfer.write_fixed_image(codegen.fixed_image)
       @transfer.write_status(VM_RUNNING)

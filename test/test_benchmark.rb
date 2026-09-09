@@ -49,12 +49,25 @@ class TestBenchmark < Minitest::Test
   # === 測るループ ===
 
   # 変えないためのもの。**うっかり足すときに目に入る**ように数だけ見る
+  #
+  # **ループはどの機種でも同じで、周回数の置き場だけが違います。**
+  # 置き場を渡すと本文が組み上がります。
   def test_the_loops_are_fixed_and_declare_what_they_cost
     assert_equal %w[OP_ADDI OP_ADD], Bench::LOOPS.map(&:name)
     Bench::LOOPS.each do |target|
       assert_operator target.steps_per_loop, :>, 0, target.name
-      assert_includes target.source, "while true", target.name
-      assert_includes target.source, Bench::COUNTER, target.name
+      source = target.source.call("DM660")
+      assert_includes source, "while true", target.name
+      assert_includes source, "DM660", target.name
+    end
+  end
+
+  # 置き場はメーカーごと。**接続の設定と綴りが揃っていること**
+  def test_every_protocol_has_a_counter
+    assert_equal %w[keyence_kv mitsubishi_mc], Bench::COUNTERS.keys
+    Bench::COUNTERS.each_value do |device, addr|
+      refute_empty device
+      assert_match(/\A\d+\z/, addr)
     end
   end
 end
