@@ -587,18 +587,11 @@ module FaRuby
     end
 
     # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
-    def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
-                         zero_code, heap_code, depth_code)
-      index = operand(name)
-      write_slot(index, read_reg_tag(0), read_reg(0))   # regs[a] = self
-
-      code, method_id, argc, kind = device_entry(operand(sym_name))
-      return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
-      return dispatch_builtin(code, index, operand(argc_name), argc,
-                              unknown_code, type_code, zero_code,
-                              heap_code) unless code == METHOD_NONE
-
-      call_user_method(index, method_id, operand(argc_name), unknown_code, depth_code)
+    # self をレシーバ位置に置く (mruby の regs[a] = regs[0])
+    #
+    # **これだけが OP_SSEND の中身です。** あとは OP_SEND と同じ経路に入ります。
+    def move_self_to_receiver(name)
+      write_slot(operand(name), read_reg_tag(0), read_reg(0))
     end
 
     # ユーザー定義メソッドへ移る
@@ -801,12 +794,21 @@ module FaRuby
     #
     # 呼び出しフレームは作らない。引数は R[a+1] から連続して並び、
     # 結果は R[a] に返る。生成コードと同じ規則で計算する。
-    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code, heap_code)
-      code, _id, argc, kind = device_entry(operand(sym_name))
+    # **組み込みとユーザー定義の両方をここで振り分けます。**
+    #
+    # レシーバを書かない呼び出し (OP_SSEND) も、self をレシーバ位置に置いて
+    # からここへ来ます。
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code,
+                    heap_code, depth_code)
+      index = operand(name)
+      code, method_id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
+      unless code == METHOD_NONE
+        return dispatch_builtin(code, index, operand(argc_name), argc,
+                                unknown_code, type_code, zero_code, heap_code)
+      end
 
-      dispatch_builtin(code, operand(name), operand(argc_name), argc,
-                       unknown_code, type_code, zero_code, heap_code)
+      call_user_method(index, method_id, operand(argc_name), unknown_code, depth_code)
     end
 
     def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code,

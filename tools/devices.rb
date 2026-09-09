@@ -325,6 +325,15 @@ module FaRuby
       @emitter.line "#{pc} = #{pc} + 1"
     end
 
+    # 次の 1 バイトを覗く。**PC は進めません**
+    #
+    # 命令の取り込みで前置きを実行する命令 (`OP_SSEND`) が使います。枝の中で
+    # もう一度読み直すので、ここで進めると 1 バイトずれます。
+    def peek_bytecode_into(dest)
+      @emitter.line "Z1 = #{state(layout.pc_addr)} + #{bytecode_offset}"
+      @emitter.line "#{dest} = #{fixed_indexed_base}:Z1"
+    end
+
     private
 
     # スロットの先頭アドレスを Z に載せ、その Z を指す Slot を返す
@@ -748,6 +757,11 @@ module FaRuby
       pc = state(layout.pc_addr)
       @emitter.line "#{dest} = #{FIXED_WORD}[#{pc} + #{bytecode_offset}]"
       @emitter.line "#{pc} = #{pc} + 1"
+    end
+
+    # 次の 1 バイトを覗く。**PC は進めません**
+    def peek_bytecode_into(dest)
+      @emitter.line "#{dest} = #{FIXED_WORD}[#{state(layout.pc_addr)} + #{bytecode_offset}]"
     end
 
     # --- 書き出し ---

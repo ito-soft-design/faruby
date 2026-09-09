@@ -121,6 +121,7 @@ module FaRuby
 
     # バイトコードの現在位置を読み、PC を 1 つ進める
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
+    def peek_bytecode_into(dest) = devices.peek_bytecode_into(dest)
 
     # 命令ごとの下ごしらえ。**要るかどうかは機種が決めます**
     def prepare_instruction = devices.prepare_instruction
@@ -1045,25 +1046,16 @@ module FaRuby
     #
     # mruby は R[a] に self を置いてから OP_SEND と同じ経路に入ります。
     # 組み込みならその場で計算し、ユーザー定義ならフレームを積んで移ります。
-    def send_self_method(name, sym_name, argc_name, unknown_code, type_code,
-                         zero_code, heap_code, depth_code)
+    # self をレシーバ位置に置く (mruby の regs[a] = regs[0])
+    #
+    # **これだけが OP_SSEND の中身です。** あとは OP_SEND と同じ経路に入ります。
+    # 呼ぶのは命令の取り込みで、オペランドはまだ読めないので覗くだけです。
+    def move_self_to_receiver(name)
       note "self をレシーバ位置に置く (mruby の regs[a] = regs[0])"
       self_slot = devices.reg_slot([:reg_self, name], "0", z: Z_VALUE)
       dest = reg_slot(name)
       line "#{dest.value} = #{self_slot.value}"
       line "#{dest.tag} = #{self_slot.tag}"
-
-      method_table_lookup(sym_name)
-      if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
-      line "Z3 = Z3 + 1"
-      line "Z6 = #{fixed_at(3)}   ' ユーザー定義メソッドID"
-
-      if_else_block("Z5 <> #{METHOD_NONE}") do
-        note "組み込みメソッド。フレームを積まずその場で計算する"
-        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
-      end
-      call_user_method(name, argc_name, unknown_code, depth_code)
-      end_block
     end
 
     # ユーザー定義メソッドへ移る
@@ -2139,13 +2131,27 @@ module FaRuby
     # VM は文字列を持たず、整数の分岐だけで振り分けます。
 
     # R[a] = R[a].メソッド(R[a+1])
-    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code, heap_code)
+    # **組み込みとユーザー定義の両方をここで振り分けます。**
+    #
+    # レシーバを書かない呼び出し (OP_SSEND) も、self をレシーバ位置に置いて
+    # からここへ来ます。分けて書いていたころは振り分けが 2 度展開され、
+    # KV 全体の 14% を占めていました。
+    def send_method(name, sym_name, argc_name, unknown_code, type_code, zero_code,
+                    heap_code, depth_code)
       method_table_lookup(sym_name)
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") do
         note "メソッド名でないシンボルへの呼び出し"
         vm_error(unknown_code)
       end
-      builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
+      line "Z3 = Z3 + 1"
+      line "Z6 = #{fixed_at(3)}   ' ユーザー定義メソッドID"
+
+      if_else_block("Z5 <> #{METHOD_NONE}") do
+        note "組み込みメソッド。フレームを積まずその場で計算する"
+        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
+      end
+      call_user_method(name, argc_name, unknown_code, depth_code)
+      end_block
     end
 
     # Z5 (メソッド番号) と Z8 (引数の数) を読んだ後の共通部分
@@ -3544,6 +3550,7 @@ module FaRuby
       e.read_bytecode_into(e.opcode)
       e.prepare_instruction
       e.count_step
+      emit_prologues(e)
       return unless dialect.splits_scripts?
 
       e.blank
@@ -3555,6 +3562,27 @@ module FaRuby
         e.line "#{e.status} = #{VM_ERROR}"
         e.line "#{e.error} = #{e.opcode}"
         e.line "#{dispatch_var} = #{unreachable_opcode}"
+      end
+    end
+
+    # 前置きだけの命令。**枝を持たず、別の命令の枝へ落ちます**
+    #
+    # mruby の vm.c と同じ形です (`OP_SSEND` は self をレシーバ位置に置いてから
+    # `OP_SEND` へ)。別々に書いていたころは組み込みメソッドの振り分けが生成
+    # コードに 2 度展開され、KV 全体の 14% を占めていました。
+    #
+    # **オペランドはまだ読めません。** 枝の中で読み直すので、ここでは覗くだけで
+    # PC を進めません。
+    def emit_prologues(e)
+      @opcodes.reject(&:branch?).each do |op|
+        e.blank
+        e.note "#{op.name}: #{op.summary}"
+        e.if_("#{e.opcode} = #{op.code}") do
+          e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
+          e.peek_bytecode_into(e.operand(:a))
+          op.body.call(e)
+          e.line "#{e.opcode} = #{op.enters}"
+        end
       end
     end
 
@@ -3627,7 +3655,7 @@ module FaRuby
 
     # 組の中の連なり。当たらなければ未知のオペコード
     def emit_opcode_chain(e, group)
-      group.each_with_index do |op, i|
+      group.select(&:branch?).each_with_index do |op, i|
         e.line(i.zero? ? "IF #{opcode_var} = #{op.code} THEN" : "ELSE IF #{opcode_var} = #{op.code} THEN")
         e.indent
         e.begin_instruction

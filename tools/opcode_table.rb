@@ -176,17 +176,30 @@ module FaRuby
 
   # 1 命令の定義。name / format は MRUBY_OPCODES から引くので取り違えが起きない。
   class OpcodeDef
-    attr_reader :code, :name, :format, :summary, :body
+    attr_reader :code, :name, :format, :summary, :body, :enters
 
-    def initialize(code, summary, &body)
+    # enters: 前置きだけ実行して、別の命令の枝へ入る
+    #
+    # **mruby の vm.c と同じ形です。** `OP_SSEND` は `regs[a] = regs[0]` で
+    # self をレシーバ位置に置いてから `OP_SEND` へ落ちます。そこを真似ず
+    # 別々に書いていたころは、組み込みメソッドの振り分けが**生成コードに
+    # 2 度展開**され、KV 全体の 14% を占めていました。
+    #
+    # 前置きは命令の取り込みで実行します。**オペランドはまだ読めない**ので、
+    # 覗くだけで PC は進めません。
+    def initialize(code, summary, enters: nil, &body)
       info = OpcodeTable::MRUBY_OPCODES[code]
       raise ArgumentError, format("未知のオペコード 0x%02X", code) unless info
 
       @code = code
       @name, @format = info
       @summary = summary
+      @enters = enters
       @body = body
     end
+
+    # 枝を持つか。前置きだけの命令は持たない
+    def branch? = enters.nil?
 
     def operand_sizes
       OpcodeTable::FORMAT_OPERANDS.fetch(format)
@@ -418,11 +431,13 @@ module FaRuby
       end
 
       # レシーバを書かない呼び出し (foo(1) や再帰) はこちら。
-      # mruby の vm.c は regs[a] = regs[0] で self をレシーバ位置に置いてから
-      # OP_SEND と同じ経路へ入る。
-      defs << OpcodeDef.new(0x2D, "R[a] = self.symbols[b](R[a+1]..)") do |vm|
-        vm.send_self_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
-                            DIVIDE_BY_ZERO_ERROR, HEAP_ERROR, CALL_DEPTH_ERROR)
+      #
+      # **mruby と同じく、self をレシーバ位置に置いてから OP_SEND へ落ちます。**
+      # 別々に書いていたころは組み込みメソッドの振り分けが 2 度展開され、
+      # KV 全体の 14% を占めていました。
+      defs << OpcodeDef.new(0x2D, "self をレシーバ位置に置いて OP_SEND へ",
+                            enters: 0x2F) do |vm|
+        vm.move_self_to_receiver(:a)
       end
 
       # メソッド本体の入口。引数の数を定義と突き合わせる
@@ -430,7 +445,8 @@ module FaRuby
         vm.enter_method(:a, ARGUMENT_ERROR)
       end
 
-      # 組み込みメソッドの呼び出し。呼び出しフレームは作らない。
+      # メソッドの呼び出し。組み込みならフレームを積まずその場で計算し、
+      # ユーザー定義ならフレームを積んで本体へ移ります。
       # 引数は R[a+1] から連続して並び、結果は R[a] に返る。
       # メソッド名はホスト側で番号に解決してシンボル表に載せてある。
       #
@@ -438,9 +454,9 @@ module FaRuby
       # 上位4ビットがキーワード引数の数で、15 は配列やハッシュにまとめて
       # 渡す印 (mruby の CALL_MAXARGS)。普通の呼び出しでは引数の数と一致
       # するためそのまま比べており、スプラットやキーワード付きは弾かれる。
-      defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..) (組み込みのみ)") do |vm|
+      defs << OpcodeDef.new(0x2F, "R[a] = R[a].symbols[b](R[a+1]..)") do |vm|
         vm.send_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
-                       DIVIDE_BY_ZERO_ERROR, HEAP_ERROR)
+                       DIVIDE_BY_ZERO_ERROR, HEAP_ERROR, CALL_DEPTH_ERROR)
       end
 
       # メソッドの中なら呼び出し元へ戻り、トップレベルなら VM 停止。
