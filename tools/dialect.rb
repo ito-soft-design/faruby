@@ -290,8 +290,27 @@ module FaRuby
       OP_RETURN OP_STOP
     ].freeze
 
+    # ステージ 2 — メソッドとブロック
+    #
+    # `def` と `10.times { }` が動くようになります。**配列・ハッシュ・文字列は
+    # まだ**なので、それらを触ると「未知のオペコード」で止まります。
+    #
+    # `OP_TCLASS` と `OP_LOADSYM` と `OP_DEF` は `def` の出力に混ざります。
+    # `OP_GETUPVAR` / `OP_SETUPVAR` はブロックの外側の変数を触ります。
+    STAGE2 = %i[
+      OP_SSEND OP_SEND OP_SENDB OP_ENTER OP_BREAK
+      OP_BLOCK OP_METHOD OP_DEF OP_TCLASS OP_LOADSYM
+      OP_GETUPVAR OP_SETUPVAR
+    ].freeze
+
+    # この機種に載せる命令
+    #
+    # **段を追って増やします** ([ロードマップ](../doc/roadmap.md))。一度に
+    # 全部書き上げてから初めて動かすと、機種差がまとめて降ってきます。
+    STAGES = (STAGE1 + STAGE2).freeze
+
     def select_opcodes(opcodes)
-      opcodes.select { |op| STAGE1.include?(OpcodeTable::MRUBY_OPCODES[op.code]&.first) }
+      opcodes.select { |op| STAGES.include?(OpcodeTable::MRUBY_OPCODES[op.code]&.first) }
     end
 
     # ラベルと構造体の一覧

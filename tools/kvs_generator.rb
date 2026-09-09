@@ -1810,7 +1810,7 @@ module FaRuby
     def load_upvar(name, index_name, level_name, error_code)
       upvar_base(level_name, error_code)
       src = devices.frame_slot([:upvar, name], operand(index_name),
-                     "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
+                     "Z6", z: Z_VALUE)
       dest = reg_slot(name)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
@@ -1821,7 +1821,7 @@ module FaRuby
       src = reg_slot(name)
       upvar_base(level_name, error_code)
       dest = devices.frame_slot([:upvar, name], operand(index_name),
-                      "Z6 + Z#{Z_INSTANCE}", z: Z_VALUE)
+                      "Z6", z: Z_VALUE)
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
     end

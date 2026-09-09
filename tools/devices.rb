@@ -298,9 +298,13 @@ module FaRuby
       slot_ref(key, index_expr, pool_offset, z: z, device: layout.fixed_device_name)
     end
 
-    # 別のフレームのレジスタ。base_expr はそのフレームの窓の先頭
+    # 別のフレームのレジスタ
+    #
+    # **base_expr はブロック先頭からの語数**です。デバイスを絶対アドレスで
+    # 指すので、ここでブロック先頭を足します。足す側を機種に任せているのは、
+    # 型付きラベルの配列は先頭からの添字で指すためです。
     def frame_slot(key, index_expr, base_expr, z: nil)
-      slot_ref(key, index_expr, base_expr, z: z)
+      slot_ref(key, index_expr, "#{base_expr} + Z#{Z_INSTANCE}", z: z)
     end
 
     # 既に Z に載っている先頭アドレスを値スロットとして扱う
@@ -737,6 +741,10 @@ module FaRuby
       slot_at("#{base} + #{index_expr}", FIXED_SLOT, FIXED_SLOTF)
     end
 
+    # 別のフレームのレジスタ
+    #
+    # **base_expr はブロック先頭からの語数**なので、そのまま添字に直せます。
+    # 配列がブロックの先頭に割り付けてあるためです (KV は絶対アドレスを作ります)。
     def frame_slot(_key, index_expr, base_expr, z: nil)
       slot_at("(#{base_expr}) / #{VmConstants::SLOT_WORDS} + #{index_expr}")
     end
@@ -745,7 +753,14 @@ module FaRuby
     #
     # **4 で割って添字にします。** シンボル表が持っているのはワードアドレス
     # なので、汎用グローバル変数の経路がここを通ります。
-    def slot_on(z) = slot_at("Z#{z} / #{VmConstants::SLOT_WORDS}")
+    # Z に載せた**絶対アドレス**のスロット
+    #
+    # **配列はブロックの先頭から始まります。** Z が持つのは絶対アドレスなので、
+    # 先頭を引いてから添字に直します。KV はデバイスを絶対アドレスで指すので
+    # 引く必要がありませんでした。
+    def slot_on(z)
+      slot_at("(Z#{z} - #{layout.origin}) / #{VmConstants::SLOT_WORDS}")
+    end
 
     # 覚えておく必要がありません (行を出さないため)
     def forget_slots = nil
