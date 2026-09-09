@@ -6,11 +6,12 @@
 require_relative "mrb_parser"
 require_relative "vm_constants"
 require_relative "memory_layout"
+require_relative "device_syntax"
 require "plc_access"
 
 module FaRuby
   # 生成対象がメモリ配置に収まらない場合に発生
-  class CodegenError < StandardError; end
+  # CodegenError は tools/device_syntax.rb で定義しています
 
   class PlcCodegen
     include VmConstants
@@ -20,12 +21,19 @@ module FaRuby
     # encoding はソースの文字コード (ENCODING_*)。バイト列の変換には使わず、
     # `length` と `[]` が文字の切れ目を見つけるために VM へ渡すだけです。
     def initialize(irep, steps_per_cycle: 50, layout: MemoryLayout.default,
-                   encoding: ENCODING_UTF8)
+                   encoding: ENCODING_UTF8, device_syntax: DeviceSyntax.keyence)
       @irep = irep
       @steps_per_cycle = steps_per_cycle
       @layout = layout
       @encoding = encoding
+      @device_syntax = device_syntax
     end
+
+    # Ruby プログラムに書いたデバイスの読み方
+    #
+    # **メーカーごとに違います** (tools/device_syntax.rb)。名前も、アドレスの
+    # 数え方も違うので、機種の表から引きます。
+    attr_reader :device_syntax
 
     attr_reader :encoding
 
@@ -331,7 +339,7 @@ module FaRuby
     #   slots      汎用グローバルの名前 => アドレス
     #   method_ids ユーザー定義メソッド名 => ID
     def symbol_mapping(sym, table_addr, idx, slots, method_ids)
-      parsed = parse_device_symbol(sym) || self.class.parse_device_family(sym)
+      parsed = parse_device_symbol(sym) || device_syntax.parse_family(sym)
       if parsed
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: device_symbol_kind(parsed),
@@ -564,7 +572,7 @@ module FaRuby
           lines << "#{layout.fixed_device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
           lines << "#{layout.fixed_device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} -> #{layout.device(m[:z_offset])}"
         else
-          lines << "#{layout.fixed_device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{DEVICE_TYPE_NAMES[m[:device_type]]}"
+          lines << "#{layout.fixed_device(table_addr)} = #{m[:device_type]}    ' #{m[:symbol]} type=#{device_syntax.type_name(m[:device_type])}"
           lines << "#{layout.fixed_device(table_addr + 1)} = #{m[:z_offset]}    ' #{m[:symbol]} Z offset"
         end
         lines << "#{layout.fixed_device(table_addr + 2)} = #{m[:access_type] || ACCESS_BIT}    ' #{m[:symbol]} access=#{kind}"
@@ -614,199 +622,19 @@ module FaRuby
        "    EM0:Z1 = 0",
        "NEXT"]
     end
-
-    # アクセス幅サフィックス。アンダースコアで区切ってもよい
-    #
-    # 16進アドレスを持つ B では `$B1F` が「0x1F」なのか「0x1 を実数で」なのか
-    # 区別できないため、区切りたいときに `$B1_F` と書けるようにしています。
-    # 10進アドレスのデバイスでは元々曖昧さがなく、読みやすさのためだけです。
-    # T は文字列。後ろに長さ (ASCII での文字数) を付けられます。
-    #   $DM100    値が文字列なら終端付きで書く
-    #   $DM100T   同上。文字列であることを明示する
-    #   $DM100T6  6 文字ぶんの固定長
-    SUFFIX = "_?([SULDF]|T\\d*)?"
-
-    # ワードデバイス: 10進アドレス + アクセス幅 (省略時は16ビット符号付き)
-    #   $DM100 / $DM100L / $DM100_L
-    #
-    # 略記 (E, D, M) は正式名より後ろに置く。正規表現の選択肢は左から順に
-    # 試されるため、$EM100 が E + "M100" と読まれないようにするため
-    WORD_DEVICE_PATTERN      = /^\$(EM|DM|ZF|E|D)(\d+)#{SUFFIX}$/i
-    WORD_DEVICE_PATTERN_BARE = /^(EM|DM|ZF|E|D)(\d+)#{SUFFIX}$/i
-
-    # ビットデバイス: サフィックス無しなら個別ビット、付ければ整数
-    #   $MR100 は接点、$MR100L はそこから32ビット、$T0D はタイマ現在値
-    #
-    # アドレスの基数がデバイスで違うためパターンを分けます。
-    #   B      16進。D と F は数字でもありサフィックスでもあるため、
-    #          アドレスを貪欲に取る ($B1F は 0x1F)。区切るなら $B1_F
-    #   その他 10進。D や F はアドレスに現れないので曖昧さなし ($T0D は T0 + D)
-    #
-    # CR はインデックス扱い不可のため非対応
-    # MR を R と M より、LR を L より先にマッチさせる
-    HEX_BIT_DEVICE_PATTERN       = /^\$(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
-    HEX_BIT_DEVICE_PATTERN_BARE  = /^(B)([0-9A-Fa-f]+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN           = /^\$(MR|R|LR|L|M|T|C)(\d+)#{SUFFIX}$/i
-    BIT_DEVICE_PATTERN_BARE      = /^(MR|R|LR|L|M|T|C)(\d+)#{SUFFIX}$/i
-
-    # デバイス族: アドレスを持たない形。添字を付けて実行時にアドレスを決める
-    #   $DM[100 + i]    16ビット符号付き (既定)
-    #   $DML[100 + i]   32ビット符号付き
-    #   $MR[64 + i]     ビットデバイス
-    #
-    # 略記の D / E / M があるため、正式名を先に試して一意に解析します。
-    # $DML は DM + L、$DL は D (= DM) + L です。
-    #
-    # 添字は「デバイス番号」です。ワードデバイスは表示上のアドレスと一致
-    # しますが、MR / R / B は一致しません (MR400 は番号 64、B10 は 16)。
-    # 番号空間では線形で、MR415 の次は MR500 になります。
-    WORD_FAMILY_PATTERN = /^\$(EM|DM|ZF|E|D)#{SUFFIX}$/i
-    BIT_FAMILY_PATTERN  = /^\$(MR|R|B|LR|L|M|T|C)#{SUFFIX}$/i
-
-    # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)
-    NO_FLOAT_DEVICE_TYPES = [DEVICE_TYPE_T, DEVICE_TYPE_C].freeze
-    # KV が受け付ける略記。正式名に正規化してから先へ渡します。
-    #
-    # ラダーでは略記で入力すると正式名に変換されます。plc_access は略記を
-    # 知らないため、正規化しないと **別のデバイスになります**。
-    # たとえば LR100 は番号 16 (MR や R と同じチャンネル・ビット形式) ですが、
-    # plc_access は "L100" も受け付けてしまい番号 100 を返します。
-    PROTOCOL_DEVICE_NAME = {
-      "L" => "LR", "M" => "MR", "D" => "DM", "E" => "EM",
-    }.freeze
-
-    def self.protocol_name(device_name)
-      PROTOCOL_DEVICE_NAME.fetch(device_name, device_name)
-    end
-
-    # 正式名のみ。略記は protocol_name を通してから引くこと
-    DEVICE_NAME_TO_TYPE = {
-      "EM" => DEVICE_TYPE_EM, "DM" => DEVICE_TYPE_DM, "ZF" => DEVICE_TYPE_ZF,
-      "R" => DEVICE_TYPE_R, "MR" => DEVICE_TYPE_MR, "B" => DEVICE_TYPE_B,
-      "LR" => DEVICE_TYPE_L,
-      "T" => DEVICE_TYPE_T, "C" => DEVICE_TYPE_C,
-    }.freeze
-    DEVICE_TYPE_NAMES = DEVICE_NAME_TO_TYPE.invert.freeze
-
-    # KvDevice を使ってデバイスアドレスの Z レジスタ用オフセットを取得
-    # HEXDEC (R, MR, LR 等): MR200 → 32, R100 → 16, LR100 → 16
-    # HEX (B): B10 → 16
-    # DEC (EM, DM 等): そのまま
-    #
-    # 名前は必ず protocol_name を通したものを渡すこと。plc_access は略記を
-    # 知らず、"L100" を受け付けても番号 100 を返して LR100 (番号 16) と食い違う。
-    def self.device_z_offset(device_name, addr_str)
-      PlcAccess::Protocol::Keyence::KvDevice.new("#{protocol_name(device_name)}#{addr_str}").number
-    end
-
-    def parse_device_symbol(sym)
-      self.class.parse_device_symbol(sym)
-    end
+    def parse_device_symbol(sym) = device_syntax.parse_symbol(sym)
 
     # シンボル名 ($DM100, $DM100L) からデバイス情報をパース
     # address:     元のアドレス (PLC アダプタ通信用)
     # z_offset:    Z レジスタ用オフセット (マッピングテーブル・シミュレータ用)
     # access_type: ACCESS_* (ビットデバイスは nil)
-    def self.parse_device_symbol(sym)
-      parse_device(sym, WORD_DEVICE_PATTERN, HEX_BIT_DEVICE_PATTERN, BIT_DEVICE_PATTERN)
-    end
+    def self.parse_device_symbol(sym, syntax = DeviceSyntax.keyence) = syntax.parse_symbol(sym)
 
     # デバイス名 (DM100, DM100L, $ なし) からデバイス情報をパース
-    def self.parse_device_name(name)
-      parse_device(name, WORD_DEVICE_PATTERN_BARE,
-                   HEX_BIT_DEVICE_PATTERN_BARE, BIT_DEVICE_PATTERN_BARE)
-    end
+    def self.parse_device_name(name, syntax = DeviceSyntax.keyence) = syntax.parse_name(name)
 
     # デバイス族 ($DM, $DML, $MR 等) をパースする。該当しなければ nil
-    #
-    # アドレスを持たないため z_offset は 0 で、添字を足して実行時に決めます。
-    def self.parse_device_family(sym)
-      return nil unless sym
-
-      if (m = sym.match(WORD_FAMILY_PATTERN))
-        device_name = protocol_name(m[1].upcase)
-        return { device_type: DEVICE_NAME_TO_TYPE[device_name], address: "0",
-                 z_offset: 0, device_name: device_name, family: true,
-                 access_type: access_from_suffix(m[2]), bit: false }
-      end
-
-      return nil unless (m = sym.match(BIT_FAMILY_PATTERN))
-
-      device_name = protocol_name(m[1].upcase)
-      device_type = DEVICE_NAME_TO_TYPE[device_name]
-      bit = m[2].to_s.empty?
-      access_type = bit ? nil : access_from_suffix(m[2])
-      check_float_support(device_name, device_type, access_type)
-      check_string_support(device_name, device_type, access_type)
-
-      { device_type: device_type, address: "0", z_offset: 0,
-        device_name: device_name, family: true, bit: bit, access_type: access_type }
-    end
-
-    # ワードデバイス → ビットデバイス (16進 → 10進) の順にマッチを試みる
-    #
-    # ビットデバイスは幅サフィックスの有無で意味が変わります。
-    #   無し  個別ビット (true / false)
-    #   有り  そのビットから連続したビット列を整数として (MR, R, B, L)
-    #         タイマ・カウンタの現在値 (T, C)
-    def self.parse_device(str, word_pattern, hex_bit_pattern, bit_pattern)
-      return nil unless str
-
-      if (m = str.match(word_pattern))
-        return build_device(m, bit: false)
-      end
-
-      m = str.match(hex_bit_pattern) || str.match(bit_pattern)
-      return nil unless m
-
-      # サフィックスが付いていればワードとして扱う
-      build_device(m, bit: m[3].to_s.empty?)
-    end
-
-    def self.build_device(match, bit:)
-      # ホストと通信する名前へ正規化する ($L100 も $LR100 も LR100)
-      device_name = protocol_name(match[1].upcase)
-      addr_str = match[2]
-      device_type = DEVICE_NAME_TO_TYPE[device_name]
-      access_type = bit ? nil : access_from_suffix(match[3])
-      check_float_support(device_name, device_type, access_type)
-      check_string_support(device_name, device_type, access_type)
-
-      { device_type: device_type, address: addr_str,
-        z_offset: device_z_offset(device_name, addr_str),
-        device_name: device_name, bit: bit, access_type: access_type }
-    end
-
-    # 幅サフィックスを ACCESS_* に直す
-    #
-    # 文字列 (T) だけは長さを持つため、同じワードに詰めて返します。
-    # 既存の幅は 0-5 なので、6 以上なら文字列だと 1 比較で分かります。
-    def self.access_from_suffix(suffix)
-      suffix = suffix.to_s.upcase
-      return VmConstants::ACCESS_SUFFIXES.fetch(suffix) unless suffix.start_with?("T")
-
-      length = suffix[1..].to_i
-      unless length <= MAX_STRING_FIELD
-        raise CodegenError, "文字列の桁数が大きすぎます (#{length} > #{MAX_STRING_FIELD})"
-      end
-
-      VmConstants::ACCESS_STR + length * VmConstants::ACCESS_STR_LENGTH_SCALE
-    end
-
-    # access_type に詰められる桁数の上限 (16ビットに収まる範囲)
-    MAX_STRING_FIELD = 4095
-
-    # 文字列を書けるのはワードデバイスだけ
-    #
-    # ビットデバイスに文字列を書く意味は無く、書けたとしてもビット単位の
-    # 読み書きになって表示器から読めません。
-    def self.check_string_support(device_name, device_type, access_type)
-      return unless access_type && access_type >= VmConstants::ACCESS_STR
-      return if VmConstants::STRING_DEVICE_TYPES.include?(device_type)
-
-      raise CodegenError, "#{device_name} には文字列を書けません " \
-                          "(EM / DM / ZF のみ)"
-    end
+    def self.parse_device_family(sym, syntax = DeviceSyntax.keyence) = syntax.parse_family(sym)
 
     # ソースの文字コードを決める (マジックコメント。無ければ UTF-8)
     #
@@ -825,15 +653,6 @@ module FaRuby
     end
 
     # タイマ・カウンタは実数を扱えない (KV Studio の変換が通らない)。
-    # 幅を付けると現在値を返すデバイスなので、実数の出番が無い。
-    def self.check_float_support(device_name, device_type, access_type)
-      return unless access_type == VmConstants::ACCESS_F
-      return unless NO_FLOAT_DEVICE_TYPES.include?(device_type)
-
-      raise CodegenError,
-            "#{device_name} は実数 (F サフィックス) を扱えません。" \
-            "幅を付けると現在値を返すため、整数の幅を指定してください (#{device_name}0D 等)"
-    end
   end
 end
 

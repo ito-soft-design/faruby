@@ -480,12 +480,21 @@ class TestKvsGenerator < Minitest::Test
   end
 
   # 逆に、デバイス構文はエミッタに集約されている
+  #
+  # **種別の表だけは別です** (tools/device_set.rb)。メーカーごとに違うもの
+  # なので、生成器に書くと機種を増やすたびに生成器を触ることになります。
   def test_emitter_owns_device_syntax
     path = File.expand_path("../tools/kvs_generator.rb", __dir__)
     src = File.read(path, encoding: "UTF-8")
     assert_includes src, "OPERAND_NAMES"
-    assert_includes src, "WORD_DEVICES"
-    assert_includes src, "BIT_DEVICES"
+    assert_includes src, "def word_devices"
+    assert_includes src, "def bit_devices"
+
+    code = src.split("\n").reject { |l| l.strip.start_with?("#") }
+    offenders = code.each_with_index.filter_map do |line, i|
+      "#{i + 1}: #{line.strip}" if line =~ /"(EM|DM|ZF|MR|LR)"/
+    end
+    assert_empty offenders.first(5), "種別の名前は tools/device_set.rb に置いてください"
   end
 
   # === 構造の健全性 ===
