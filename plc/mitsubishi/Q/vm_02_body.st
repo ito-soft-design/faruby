@@ -697,7 +697,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         IF VMSTRTEMP <> VMSTRFLAG THEN
           Z4 := VMSTRLIMIT + Z3 + 4;
           Z7 := D0Z4;
-          Z7 := Z7 / 256;
+          VMDISPATCH := Z7 / 256;
+          Z7 := Z7 - VMDISPATCH * 256;
+          IF Z7 < 0 THEN
+            VMDISPATCH := VMDISPATCH - 1;
+          END_IF;
+          IF VMDISPATCH < 0 THEN
+            VMDISPATCH := VMDISPATCH + 256;
+          END_IF;
+          Z7 := VMDISPATCH;
           D0Z4 := Z7 * 256;
         END_IF;
         VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP);   (* スロット番号 *)
@@ -778,7 +786,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               IF INT_TO_DINT(Z1) < VMTEMP32BL THEN
                 Z7 := Z3 + Z4 + 4;
                 Z7 := D0Z7;
-                Z7 := Z7 / 256;   (* 上位バイトだけ中身 *)
+                (* 上位バイトだけ中身 *)
+                VMDISPATCH := Z7 / 256;
+                Z7 := Z7 - VMDISPATCH * 256;
+                IF Z7 < 0 THEN
+                  VMDISPATCH := VMDISPATCH - 1;
+                END_IF;
+                IF VMDISPATCH < 0 THEN
+                  VMDISPATCH := VMDISPATCH + 256;
+                END_IF;
+                Z7 := VMDISPATCH;
               ELSE
                 IF INT_TO_DINT(Z1) < VMTEMP32L THEN
                   Z7 := Z8;
@@ -1497,7 +1514,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           IF VMSTRTEMP <> VMSTRFLAG THEN
             Z4 := VMSTRLIMIT + Z3 + 4;
             Z7 := D0Z4;
-            Z7 := Z7 / 256;
+            VMDISPATCH := Z7 / 256;
+            Z7 := Z7 - VMDISPATCH * 256;
+            IF Z7 < 0 THEN
+              VMDISPATCH := VMDISPATCH - 1;
+            END_IF;
+            IF VMDISPATCH < 0 THEN
+              VMDISPATCH := VMDISPATCH + 256;
+            END_IF;
+            Z7 := VMDISPATCH;
             D0Z4 := Z7 * 256;
           END_IF;
           VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP);   (* スロット番号 *)
@@ -1904,12 +1929,17 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               Z8 := VMSTRINDEX / 2;
               Z7 := Z8 + Z4 + 4;
               Z7 := D0Z7;
-              Z8 := Z8 * 2;
-              IF VMSTRINDEX = Z8 THEN
-                Z7 := Z7 / 256;   (* 偶数の位置は上位バイト *)
-              ELSE
-                Z8 := Z7 / 256;
-                Z7 := Z7 - Z8 * 256;   (* 奇数の位置は下位バイト *)
+              Z8 := Z7 / 256;
+              Z7 := Z7 - Z8 * 256;
+              IF Z7 < 0 THEN
+                Z7 := Z7 + 256;
+                Z8 := Z8 - 1;
+              END_IF;
+              IF Z8 < 0 THEN
+                Z8 := Z8 + 256;
+              END_IF;
+              IF VMSTRINDEX - (VMSTRINDEX / 2) * 2 = 0 THEN
+                Z7 := Z8;   (* 偶数の位置は上位バイト *)
               END_IF;
               (* この位置が文字の先頭かどうか *)
               VMSTRFLAG := 1;
@@ -1980,12 +2010,17 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               Z8 := VMSTRINDEX / 2;
               Z7 := Z8 + Z4 + 4;
               Z7 := D0Z7;
-              Z8 := Z8 * 2;
-              IF VMSTRINDEX = Z8 THEN
-                Z7 := Z7 / 256;   (* 偶数の位置は上位バイト *)
-              ELSE
-                Z8 := Z7 / 256;
-                Z7 := Z7 - Z8 * 256;   (* 奇数の位置は下位バイト *)
+              Z8 := Z7 / 256;
+              Z7 := Z7 - Z8 * 256;
+              IF Z7 < 0 THEN
+                Z7 := Z7 + 256;
+                Z8 := Z8 - 1;
+              END_IF;
+              IF Z8 < 0 THEN
+                Z8 := Z8 + 256;
+              END_IF;
+              IF VMSTRINDEX - (VMSTRINDEX / 2) * 2 = 0 THEN
+                Z7 := Z8;   (* 偶数の位置は上位バイト *)
               END_IF;
               (* この位置が文字の先頭かどうか *)
               VMSTRFLAG := 1;
@@ -2057,10 +2092,23 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 Z8 := D0Z8;
                 Z7 := Z7 * 2;
                 IF VMSTRSKIP = Z7 THEN
-                  Z8 := Z8 / 256;   (* 偶数の位置は上位バイト *)
+                  (* 偶数の位置は上位バイト *)
+                  VMDISPATCH := Z8 / 256;
+                  Z8 := Z8 - VMDISPATCH * 256;
+                  IF Z8 < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  Z8 := VMDISPATCH;
                 ELSE
+                  (* 奇数の位置は下位バイト *)
                   Z7 := Z8 / 256;
-                  Z8 := Z8 - Z7 * 256;   (* 奇数の位置は下位バイト *)
+                  Z8 := Z8 - Z7 * 256;
+                  IF Z8 < 0 THEN
+                    Z8 := Z8 + 256;
+                  END_IF;
                 END_IF;
                 (* 書き先の位置 (継ぎ足す先の長さ + 何バイト目か) *)
                 VMSTRTEMP := DINT_TO_INT(VMTEMP32L) + Z5;
@@ -2075,7 +2123,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 ELSE
                   (* 奇数。上位バイトを残して下位に入れる *)
                   VMSTRLIMIT := D0Z7;
-                  VMSTRLIMIT := VMSTRLIMIT / 256;
+                  VMDISPATCH := VMSTRLIMIT / 256;
+                  VMSTRLIMIT := VMSTRLIMIT - VMDISPATCH * 256;
+                  IF VMSTRLIMIT < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  VMSTRLIMIT := VMDISPATCH;
                   D0Z7 := VMSTRLIMIT * 256 + Z8;
                 END_IF;
               END_FOR;
@@ -2234,7 +2290,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 IF INT_TO_DINT(Z1) < VMTEMP32BL THEN
                   Z7 := Z3 + Z4 + 4;
                   Z7 := D0Z7;
-                  Z7 := Z7 / 256;   (* 上位バイトだけ中身 *)
+                  (* 上位バイトだけ中身 *)
+                  VMDISPATCH := Z7 / 256;
+                  Z7 := Z7 - VMDISPATCH * 256;
+                  IF Z7 < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  Z7 := VMDISPATCH;
                 ELSE
                   IF INT_TO_DINT(Z1) < VMTEMP32L THEN
                     Z7 := Z8;
@@ -3471,12 +3536,17 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   Z8 := VMSTRINDEX / 2;
                   Z7 := Z8 + Z4 + 4;
                   Z7 := D0Z7;
-                  Z8 := Z8 * 2;
-                  IF VMSTRINDEX = Z8 THEN
-                    Z7 := Z7 / 256;   (* 偶数の位置は上位バイト *)
-                  ELSE
-                    Z8 := Z7 / 256;
-                    Z7 := Z7 - Z8 * 256;   (* 奇数の位置は下位バイト *)
+                  Z8 := Z7 / 256;
+                  Z7 := Z7 - Z8 * 256;
+                  IF Z7 < 0 THEN
+                    Z7 := Z7 + 256;
+                    Z8 := Z8 - 1;
+                  END_IF;
+                  IF Z8 < 0 THEN
+                    Z8 := Z8 + 256;
+                  END_IF;
+                  IF VMSTRINDEX - (VMSTRINDEX / 2) * 2 = 0 THEN
+                    Z7 := Z8;   (* 偶数の位置は上位バイト *)
                   END_IF;
                   (* この位置が文字の先頭かどうか *)
                   VMSTRFLAG := 1;
@@ -3676,10 +3746,23 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 Z8 := D0Z8;
                 Z7 := Z7 * 2;
                 IF Z5 = Z7 THEN
-                  Z8 := Z8 / 256;   (* 偶数の位置は上位バイト *)
+                  (* 偶数の位置は上位バイト *)
+                  VMDISPATCH := Z8 / 256;
+                  Z8 := Z8 - VMDISPATCH * 256;
+                  IF Z8 < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  Z8 := VMDISPATCH;
                 ELSE
+                  (* 奇数の位置は下位バイト *)
                   Z7 := Z8 / 256;
-                  Z8 := Z8 - Z7 * 256;   (* 奇数の位置は下位バイト *)
+                  Z8 := Z8 - Z7 * 256;
+                  IF Z8 < 0 THEN
+                    Z8 := Z8 + 256;
+                  END_IF;
                 END_IF;
                 (* 書き先の位置 (継ぎ足す先の長さ + 何バイト目か) *)
                 VMSTRTEMP := DINT_TO_INT(VMTEMP32L) + Z5;
@@ -3694,7 +3777,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 ELSE
                   (* 奇数。上位バイトを残して下位に入れる *)
                   VMSTRLIMIT := D0Z7;
-                  VMSTRLIMIT := VMSTRLIMIT / 256;
+                  VMDISPATCH := VMSTRLIMIT / 256;
+                  VMSTRLIMIT := VMSTRLIMIT - VMDISPATCH * 256;
+                  IF VMSTRLIMIT < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  VMSTRLIMIT := VMDISPATCH;
                   D0Z7 := VMSTRLIMIT * 256 + Z8;
                 END_IF;
               END_FOR;
@@ -4536,9 +4627,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         ELSIF D5Z3 = 2 THEN
           (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
           Z4 := 0 + VMREGBASE + 4000;
-          VMTEMP32 := D1Z4;
-          VMTEMP32HI := D2Z4;
-          Z7 := DINT_TO_INT(VMTEMP32L);   (* スロット番号 *)
+          (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+          (* 載っていて、これから要素の位置を出すのに使う *)
+          VMTEMP32B := D1Z4;
+          VMTEMP32BHI := D2Z4;
+          Z7 := DINT_TO_INT(VMTEMP32BL);   (* スロット番号 *)
           Z7 := Z7 * 52 + 5000;
           Z5 := DINT_TO_INT(VMTEMP32L);
           Z5 := Z5 * 4 + Z7 + 4;
@@ -4665,9 +4758,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             ELSIF D5Z3 = 2 THEN
               (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
               Z4 := 0 + VMREGBASE + 4000;
-              VMTEMP32 := D1Z4;
-              VMTEMP32HI := D2Z4;
-              Z7 := DINT_TO_INT(VMTEMP32L);   (* スロット番号 *)
+              (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+              (* 載っていて、これから要素の位置を出すのに使う *)
+              VMTEMP32B := D1Z4;
+              VMTEMP32BHI := D2Z4;
+              Z7 := DINT_TO_INT(VMTEMP32BL);   (* スロット番号 *)
               Z7 := Z7 * 52 + 5000;
               Z5 := DINT_TO_INT(VMTEMP32L);
               Z5 := Z5 * 4 + Z7 + 4;
@@ -4816,10 +4911,23 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 Z8 := D0Z8;
                 Z7 := Z7 * 2;
                 IF Z5 = Z7 THEN
-                  Z8 := Z8 / 256;   (* 偶数の位置は上位バイト *)
+                  (* 偶数の位置は上位バイト *)
+                  VMDISPATCH := Z8 / 256;
+                  Z8 := Z8 - VMDISPATCH * 256;
+                  IF Z8 < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  Z8 := VMDISPATCH;
                 ELSE
+                  (* 奇数の位置は下位バイト *)
                   Z7 := Z8 / 256;
-                  Z8 := Z8 - Z7 * 256;   (* 奇数の位置は下位バイト *)
+                  Z8 := Z8 - Z7 * 256;
+                  IF Z8 < 0 THEN
+                    Z8 := Z8 + 256;
+                  END_IF;
                 END_IF;
                 (* 書き先の位置 (継ぎ足す先の長さ + 何バイト目か) *)
                 VMSTRTEMP := DINT_TO_INT(VMTEMP32L) + Z5;
@@ -4834,7 +4942,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 ELSE
                   (* 奇数。上位バイトを残して下位に入れる *)
                   VMSTRLIMIT := D0Z7;
-                  VMSTRLIMIT := VMSTRLIMIT / 256;
+                  VMDISPATCH := VMSTRLIMIT / 256;
+                  VMSTRLIMIT := VMSTRLIMIT - VMDISPATCH * 256;
+                  IF VMSTRLIMIT < 0 THEN
+                    VMDISPATCH := VMDISPATCH - 1;
+                  END_IF;
+                  IF VMDISPATCH < 0 THEN
+                    VMDISPATCH := VMDISPATCH + 256;
+                  END_IF;
+                  VMSTRLIMIT := VMDISPATCH;
                   D0Z7 := VMSTRLIMIT * 256 + Z8;
                 END_IF;
               END_FOR;
@@ -5456,10 +5572,23 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           Z8 := D0Z8;
           Z7 := Z7 * 2;
           IF Z5 = Z7 THEN
-            Z8 := Z8 / 256;   (* 偶数の位置は上位バイト *)
+            (* 偶数の位置は上位バイト *)
+            VMDISPATCH := Z8 / 256;
+            Z8 := Z8 - VMDISPATCH * 256;
+            IF Z8 < 0 THEN
+              VMDISPATCH := VMDISPATCH - 1;
+            END_IF;
+            IF VMDISPATCH < 0 THEN
+              VMDISPATCH := VMDISPATCH + 256;
+            END_IF;
+            Z8 := VMDISPATCH;
           ELSE
+            (* 奇数の位置は下位バイト *)
             Z7 := Z8 / 256;
-            Z8 := Z8 - Z7 * 256;   (* 奇数の位置は下位バイト *)
+            Z8 := Z8 - Z7 * 256;
+            IF Z8 < 0 THEN
+              Z8 := Z8 + 256;
+            END_IF;
           END_IF;
           (* 書き先の位置 (継ぎ足す先の長さ + 何バイト目か) *)
           VMSTRTEMP := DINT_TO_INT(VMTEMP32L) + Z5;
@@ -5474,7 +5603,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           ELSE
             (* 奇数。上位バイトを残して下位に入れる *)
             VMSTRLIMIT := D0Z7;
-            VMSTRLIMIT := VMSTRLIMIT / 256;
+            VMDISPATCH := VMSTRLIMIT / 256;
+            VMSTRLIMIT := VMSTRLIMIT - VMDISPATCH * 256;
+            IF VMSTRLIMIT < 0 THEN
+              VMDISPATCH := VMDISPATCH - 1;
+            END_IF;
+            IF VMDISPATCH < 0 THEN
+              VMDISPATCH := VMDISPATCH + 256;
+            END_IF;
+            VMSTRLIMIT := VMDISPATCH;
             D0Z7 := VMSTRLIMIT * 256 + Z8;
           END_IF;
         END_FOR;

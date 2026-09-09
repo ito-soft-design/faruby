@@ -477,7 +477,8 @@ IF EM54:Z9 <= 30 THEN
               IF Z1 < EM18.L:Z9 THEN
                 Z7 = Z3 + Z4 + 4
                 Z7 = EM0:Z7
-                Z7 = Z7 / 256   ' 上位バイトだけ中身
+                ' 上位バイトだけ中身
+                Z7 = Z7 / 256
               ELSE
                 IF Z1 < EM16.L:Z9 THEN
                   Z7 = Z8

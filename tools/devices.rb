@@ -181,6 +181,23 @@ module FaRuby
     # 保てれば符号は問いません。EM は既定が符号なしなので `.U` を付けます。
     def raw_word(device, z) = "#{device.name}0.U:Z#{z}"
 
+    # 1 ワードを上位・下位のバイトに分ける
+    #
+    # **EM は符号なしなので割るだけです。**
+    def split_word_bytes(low:, high:)
+      @emitter.line "Z#{high} = Z#{low} / 256"
+      @emitter.line "Z#{low} = Z#{low} - Z#{high} * 256"
+    end
+
+    # その場で上位バイトだけにする
+    def high_byte_of(target) = @emitter.line "#{target} = #{target} / 256"
+
+    # その場で下位バイトだけにする。temp は空いている Z
+    def low_byte_of(target, temp)
+      @emitter.line "Z#{temp} = #{target} / 256"
+      @emitter.line "#{target} = #{target} - Z#{temp} * 256"
+    end
+
     # --- ビットをずらす・重ねる ---
 
     # 桁数だけずらす。**桁数は変数で構いません**
@@ -628,6 +645,47 @@ module FaRuby
     # **中身を解釈しません。** 文字列のバイト列を運ぶだけなので、ビット列が
     # 保てれば符号は問いません。運び先の Z も 16 ビット符号付きです。
     def raw_word(device, z) = "#{device.name}0Z#{z}"
+
+    # 1 ワードを上位・下位のバイトに分ける
+    #
+    # **Z は符号付きです。** 0x80 以上のバイトを上位に持つワードは負になり、
+    # 0 方向へ切り捨てる割り算では正しいバイトが出ません (日本語は 1 文字
+    # 3 バイトで必ず該当します)。商と余りを求めてから符号ぶんを戻します。
+    #
+    #   0xE382 → 商 -28 余り -126
+    #          → 余りに 256 を足して 130 (0x82)、商を 1 減らして -29
+    #          → 商に 256 を足して 227 (0xE3)
+    def split_word_bytes(low:, high:)
+      lo = "Z#{low}"
+      hi = "Z#{high}"
+      @emitter.line "#{hi} = #{lo} / 256"
+      @emitter.line "#{lo} = #{lo} - #{hi} * 256"
+      @emitter.if_("#{lo} < 0") do
+        @emitter.line "#{lo} = #{lo} + 256"
+        @emitter.line "#{hi} = #{hi} - 1"
+      end
+      @emitter.if_("#{hi} < 0") { @emitter.line "#{hi} = #{hi} + 256" }
+    end
+
+    # その場で上位バイトだけにする
+    #
+    # **空いている Z がありません。** 振り分け用の写しを一時置きに使います。
+    # 1 本にまとめた三菱ではこの 1 語を誰も読みません。
+    def high_byte_of(target)
+      spare = state(layout.dispatch_addr)
+      @emitter.line "#{spare} = #{target} / 256"
+      @emitter.line "#{target} = #{target} - #{spare} * 256"
+      @emitter.if_("#{target} < 0") { @emitter.line "#{spare} = #{spare} - 1" }
+      @emitter.if_("#{spare} < 0") { @emitter.line "#{spare} = #{spare} + 256" }
+      @emitter.line "#{target} = #{spare}"
+    end
+
+    # その場で下位バイトだけにする。**余りが負なら 256 を足します**
+    def low_byte_of(target, temp)
+      @emitter.line "Z#{temp} = #{target} / 256"
+      @emitter.line "#{target} = #{target} - Z#{temp} * 256"
+      @emitter.if_("#{target} < 0") { @emitter.line "#{target} = #{target} + 256" }
+    end
 
     # --- ビットをずらす・重ねる ---
 

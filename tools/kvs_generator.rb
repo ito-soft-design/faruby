@@ -563,7 +563,7 @@ module FaRuby
       if_("#{str_temp} <> #{str_flag}") do
         line "Z4 = #{str_limit} + Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
         line "Z7 = #{word_at(4, 0)}"
-        line "Z7 = Z7 / 256"
+        devices.high_byte_of("Z7")
         line "#{word_at(4, 0)} = Z7 * 256"
       end
       line "#{slot.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
@@ -667,7 +667,8 @@ module FaRuby
         if_else_block("Z1 < #{scratch32_b}") do
           line "Z7 = Z3 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
           line "Z7 = #{word_at(7, 0)}"
-          line "Z7 = Z7 / 256   ' 上位バイトだけ中身"
+          note "上位バイトだけ中身"
+          devices.high_byte_of("Z7")
         end
         if_("Z1 < #{scratch32}") { line "Z7 = Z8" }
         end_block
@@ -1250,11 +1251,10 @@ module FaRuby
       line "Z8 = #{position} / 2"
       line "Z7 = Z8 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
       line "Z7 = #{word_at(7, 0)}"
-      line "Z8 = Z8 * 2"
-      if_else_block("#{position} = Z8") { line "Z7 = Z7 / 256   ' 偶数の位置は上位バイト" }
-      line "Z8 = Z7 / 256"
-      line "Z7 = Z7 - Z8 * 256   ' 奇数の位置は下位バイト"
-      end_block
+      devices.split_word_bytes(low: 7, high: 8)
+      if_("#{position} - (#{position} / 2) * 2 = 0") do
+        line "Z7 = Z8   ' 偶数の位置は上位バイト"
+      end
     end
 
     # 文字の切れ目を先頭から数える
@@ -1401,9 +1401,12 @@ module FaRuby
         line "Z8 = Z7 + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
         line "Z8 = #{word_at(8, 0)}"
         line "Z7 = Z7 * 2"
-        if_else_block("#{from} = Z7") { line "Z8 = Z8 / 256   ' 偶数の位置は上位バイト" }
-        line "Z7 = Z8 / 256"
-        line "Z8 = Z8 - Z7 * 256   ' 奇数の位置は下位バイト"
+        if_else_block("#{from} = Z7") do
+          note "偶数の位置は上位バイト"
+          devices.high_byte_of("Z8")
+        end
+        note "奇数の位置は下位バイト"
+        devices.low_byte_of("Z8", 7)
         end_block
         note "書き先の位置 (継ぎ足す先の長さ + 何バイト目か)"
         line "#{str_temp} = #{scratch32} + Z5"
@@ -1418,7 +1421,7 @@ module FaRuby
         end
         note "奇数。上位バイトを残して下位に入れる"
         line "#{str_limit} = #{word_at(7, 0)}"
-        line "#{str_limit} = #{str_limit} / 256"
+        devices.high_byte_of(str_limit)
         line "#{word_at(7, 0)} = #{str_limit} * 256 + Z8"
         end_block
         dedent
@@ -1962,7 +1965,9 @@ module FaRuby
       indent
       note "a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
       line "Z4 = 0 + #{reg_offset}"
-      pool_element_into_z(long_at(4, SLOT_VALUE_OFFSET))
+      note "**スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が"
+      note "載っていて、これから要素の位置を出すのに使う"
+      pool_element_into_z(long_at(4, SLOT_VALUE_OFFSET, secondary: true))
       line "#{argument.value} = #{element.value}"
       line "#{argument.tag} = #{element.tag}"
       line "#{state(layout.call_argc_addr)} = 1"
