@@ -1,6 +1,10 @@
 # frozen_string_literal: true
 
 require_relative "vm_constants"
+require_relative "devices"
+require_relative "device_set"
+require_relative "melsec_types"
+require_relative "opcode_table"
 
 module FaRuby
   # 生成コードの綴り方
@@ -33,6 +37,9 @@ module FaRuby
     #   mitsubishi/Q       GX Works2 のプロジェクト
     def directory = "#{vendor}/#{model}"
 
+    # デバイスの指し方。**綴り方と対で決まります**
+    def devices_for(layout, emitter) = KvDevices.new(layout, emitter)
+
     # 1 文を綴り直す
     def statement(text) = text
 
@@ -64,6 +71,45 @@ module FaRuby
     # 綴り方の違いではなく、その機種で書けない文です。外した種別は VM が
     # 知らない種別として扱い、使おうとしたプログラムは実行時に止まります。
     def unsupported_devices = []
+
+    # Ruby プログラムから触れるラダーのデバイス
+    #
+    # **メーカーごとの表から、この機種が指せないものを外したもの**です。
+    # 外した番号は空けたまま残します (tools/device_set.rb)。
+    def device_set = @device_set ||= base_device_set.without(*unsupported_devices)
+
+    def base_device_set = DeviceSet.keyence
+
+    # 1 ワードに置ける、本物の値とぶつからない番号
+    #
+    # 「どの群でもない」「探している文字が無い」を表すのに使います。
+    # **三菱の INT は符号付きなので 65535 が入りません。** 上限が違うだけで
+    # 意味は同じです。
+    def word_sentinel = 65_535
+
+    # スクリプトと一緒に出す付き物。名前 => 中身
+    #
+    # **KV は変数を宣言しません。** デバイスを直に指すので、生成物は
+    # スクリプトだけです。三菱はラベルを先に登録する必要があるため、
+    # ここでその一覧を出します。
+    def companion_files(_devices) = {}
+
+    # 出来上がったスクリプトに最後に手を入れる
+    #
+    # **1 文ずつでは直せないものだけです。** 前後の行を見ないと分からない
+    # ものがここに来ます。
+    def finish(source, _devices) = source
+
+    # スクリプトを分けるか
+    #
+    # **KV Studio には 1 スクリプトの上限があります** (文字数と、対のない
+    # LABEL / CJ / GOTO の数)。ステップのループもラダーに置くしかないので、
+    # 命令の振り分けを組ごとの別スクリプトに分け、ラダーが順に呼びます。
+    #
+    # **三菱にはその上限がありません。** 1 本にまとめると、組ごとの関門
+    # (「自分の担当か」の判定と、実行済みの目印) がまるごと要らなくなり、
+    # ステップのループも ST の中に置けます。
+    def splits_scripts? = true
 
     # ビットデバイスに真偽を書く
     #
@@ -123,12 +169,16 @@ module FaRuby
     # 分岐ごと外します。
     def unsupported_devices = [DEVICE_TYPE_T, DEVICE_TYPE_C]
 
-    def comment(text) = text.empty? ? "//" : "// #{text}"
+    # コメントの綴り。**GX Works2 は (* *) なので機種で差し替えます**
+    def comment(text) = wrap_comment(text)
 
     def statement(text)
       code, note = split_comment(text)
-      "#{render(code)}#{note ? "   // #{note}" : ""}"
+      "#{render(code)}#{note ? "   #{wrap_comment(note)}" : ""}"
     end
+
+    # 行コメント 1 つ分。IEC の // が使えるならそちら
+    def wrap_comment(text) = text.empty? ? "//" : "// #{text}"
 
     private
 
@@ -183,9 +233,170 @@ module FaRuby
     end
   end
 
+  # MELSEC Q の ST (GX Works2)
+  #
+  # **綴りは KV-X500 の ST とほぼ同じで、違うのはコメントとデバイスの指し方**
+  # です。指し方は tools/devices.rb の MelsecDevices が持ちます。
+  #
+  # 実機で確かめた性質は doc/melsec.md にあります。KV と同じだったもの
+  # (整数除算の丸め・入れ子 EXIT・実数の丸め・ビット指定の制約) が多く、
+  # 判断をやり直さずに済みました。
+  class MelsecDialect < StDialect
+    def vendor = "mitsubishi"
+    def model = "Q"
+    def name = "ST (GX Works2)"
+
+    # GX Works2 のコメントは (* *)。// は使いません
+    def wrap_comment(text) = text.empty? ? "(* *)" : "(* #{text} *)"
+
+    # **ラベルの控えは綴り方が持ちます。** 生成はファイルごとに別の emitter で
+    # 行うので、デバイス層に持たせると 1 ファイルぶんしか集まりません。
+    # 綴り方は 1 回の生成で 1 つなので、ここが全体の受け皿になります。
+    def devices_for(layout, emitter) = MelsecDevices.new(layout, emitter, labels)
+
+    def labels = @labels ||= {}
+
+    # 型を合わせてから出す
+    #
+    # **GX Works2 は型をまたぐ代入も比較も通しません。** KV は黙って広げて
+    # くれたので、命令の定義には整数と実数を直に比べる箇所も、16 ビットを
+    # 32 ビットへそのまま入れる箇所もあります。1 か所ずつ書き足すのは無理が
+    # あるので、出来上がった文の両辺を見て狭いほうを広げます
+    # (tools/melsec_types.rb)。
+    def statement(text)
+      types.coerce(super)
+    end
+
+    def types = @types ||= MelsecTypes.new(labels, device_set)
+
+    # タイマ・カウンタは MELSEC にもありますが、**段階 1 では扱いません**。
+    # 命令を絞っているうちはデバイスも絞ります
+    def unsupported_devices = [DEVICE_TYPE_T, DEVICE_TYPE_C]
+
+    # 段階 1 — 整数・分岐・ループ・デバイスの読み書き
+    #
+    # **新しい機種は段階を追って育てます** (doc/melsec.md)。メソッド・ブロック・
+    # 配列・ハッシュ・文字列は段階 2 以降です。外した命令は「未知のオペコード」で
+    # 止まるので、使ったプログラムが静かに壊れることはありません。
+    STAGE1 = %i[
+      OP_NOP OP_MOVE OP_LOADL OP_LOADI OP_LOADINEG OP_LOADI__1
+      OP_LOADI_0 OP_LOADI_1 OP_LOADI_2 OP_LOADI_3 OP_LOADI_4 OP_LOADI_5
+      OP_LOADI_6 OP_LOADI_7 OP_LOADI16 OP_LOADI32
+      OP_LOADNIL OP_LOADSELF OP_LOADT OP_LOADF
+      OP_GETGV OP_SETGV OP_GETIDX OP_SETIDX
+      OP_JMP OP_JMPIF OP_JMPNOT OP_JMPNIL
+      OP_ADD OP_ADDI OP_SUB OP_SUBI OP_MUL OP_DIV
+      OP_EQ OP_LT OP_LE OP_GT OP_GE
+      OP_RETURN OP_STOP
+    ].freeze
+
+    def select_opcodes(opcodes)
+      opcodes.select { |op| STAGE1.include?(OpcodeTable::MRUBY_OPCODES[op.code]&.first) }
+    end
+
+    # ラベルと構造体の一覧
+    #
+    # **三菱はデバイスを直に指せない場所があります。** 添字を付けた
+    # 構造体の配列で書くので、その定義を先に登録しておく必要があります。
+    # 生成コードが指したものをそのまま出すので、手で写す手間も食い違いも
+    # ありません。
+    # **三菱の INT は符号付きです** (-32768〜32767)。65535 は入りません
+    def word_sentinel = 32_767
+
+    # **上限が無いので 1 本にまとめます。** 組分けは入れ子にして残します
+    # (担当外の組を比較 1 回で飛ばせるのは速度に効くため)
+    def splits_scripts? = false
+
+    # **キーエンスの種別は三菱にありません。** 名前も番号の数え方も違います
+    def base_device_set = DeviceSet.melsec
+
+    # 三菱の表に T / C は無いので、外すものもありません
+    def unsupported_devices = []
+
+    # 中身の無い分岐を埋める
+    #
+    # **GX Works2 は文の無い分岐を通しません。** KV スクリプトでも KV-X500 の
+    # ST でも通るので、生成器は `OP_NOP` や「ここへは来ない」の分岐を注釈だけで
+    # 閉じています。そこに何もしない代入を 1 つ置きます。
+    #
+    # 置く文は tools/devices.rb が決めます (誰も読まない 1 語への代入)。
+    def finish(source, devices)
+      noop = statement(devices.noop_statement)
+      lines = source.split("\n")
+      opened = nil
+      filled = []
+      lines.each do |line|
+        code = line.split("(*").first.to_s.strip
+        if opened && closes_block?(code)
+          filled << "#{opened}#{noop}"
+        end
+        opened = nil if !code.empty? && !opens_block?(code)
+        opened = "#{line[/\A */]}  " if opens_block?(code)
+        filled << line
+      end
+      filled.join("\n")
+    end
+
+    def companion_files(devices)
+      { "faruby_labels.tsv" => devices.label_table,
+        "faruby_labels.md" => label_document(devices) }
+    end
+
+    private
+
+    # 先頭デバイスを手で設定するラベル
+    def structure_label_rows(devices)
+      devices.structure_labels.map { |name, device| "| `#{name}` | `#{device}` |" }.join("\n")
+    end
+
+    def opens_block?(code) = code.end_with?("THEN") || code.end_with?("DO") || code == "ELSE"
+    def closes_block?(code) = code.start_with?("ELSIF", "END_") || code == "ELSE"
+
+    def label_document(devices)
+      structures = devices.structure_definitions.map { |name, members|
+        rows = members.map { |member, type| "| #{member} | #{type} |" }
+        "### #{name}\n\n| メンバ | データ型 |\n|---|---|\n#{rows.join("\n")}\n"
+      }
+      <<~TEXT
+        # faRuby のラベル (#{model})
+
+        `rake vm_core` が生成します。手で編集しないでください。
+
+        ## 手順
+
+        1. 下の構造体を「構造体設定」に登録します
+        2. `faruby_labels.tsv` をグローバルラベルの表に貼り付けます
+        3. **構造体の配列 5 つに先頭デバイスを設定します** (下の表)
+
+        **構造体を先に登録します。** ラベルの型の欄が構造体名を指すためです。
+
+        ## 構造体の配列に先頭デバイスを設定する
+
+        **ここだけ手作業です。** GX Works2 は構造体の先頭デバイスを別画面で
+        持っていて、表には「詳細設定」の押しボタンが出るだけなので、
+        貼り付けでは渡せません。
+
+        | ラベル | 先頭デバイス |
+        |-------|------------|
+        #{structure_label_rows(devices)}
+
+        **同じデバイスに重ねます。** 値が 32 ビット整数か実数か 16 ビット 2 つかは
+        実行時にしか決まらないためです。重なっているのは意図したとおりです。
+
+        ## 構造体
+
+        faRuby のスロットは 4 ワード (タグ 1 + 値 2 + 予備 1) です。**同じ
+        4 ワードを 3 通りに見ます。** 値が 32 ビット整数か実数か 16 ビット
+        2 つかは実行時にしか決まらないので、重ねて割り付けます。
+
+        #{structures.join("\n")}
+      TEXT
+    end
+  end
+
   class Dialect
     # 対応している機種。**増やすときはここに足すだけ**で、生成 (`rake vm_core`)
     # も設定の `models:` もこの一覧から決まります。
-    CLASSES = [KvsDialect, StDialect].freeze
+    CLASSES = [KvsDialect, StDialect, MelsecDialect].freeze
   end
 end

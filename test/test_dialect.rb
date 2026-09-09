@@ -22,9 +22,21 @@ class TestDialect < Minitest::Test
   # 書き出し先はメーカー名を挟みます。エンジニアリングツールが違えば
   # プロジェクトの置き場所も分かれるためです。
   def test_the_model_names_the_output_directory
-    assert_equal %w[KV-5000 KV-X500], FaRuby::Dialect.models
+    assert_equal %w[KV-5000 KV-X500 Q], FaRuby::Dialect.models
     assert_equal "keyence/KV-5000", kvs.directory
     assert_equal "keyence/KV-X500", st.directory
+    assert_equal "mitsubishi/Q", FaRuby::MelsecDialect.new.directory
+  end
+
+  # **Z はラダーと共有する資源です。** どの機種も退避して戻します。
+  # 三菱は当初「Z が無い」と誤って判断し、退避を省いていました
+  def test_every_model_saves_the_index_registers
+    FaRuby::Dialect.all.each do |dialect|
+      devices = dialect.devices_for(FaRuby::MemoryLayout.default, nil)
+
+      assert_respond_to devices, :z_save, dialect.model
+      refute_nil devices.z_save(1), dialect.model
+    end
   end
 
   # 機種を増やすときに書き出し先が衝突しないこと

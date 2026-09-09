@@ -71,10 +71,13 @@ module FaRuby
     FIXED_BANK_SIZE = 32_768
     FIXED_BANK      = 3   # 既定 (KV スクリプト)
 
-    # スクリプトから見たデバイス名 (バンク切り替え後)
+    # スクリプトから見たデバイス名 (バンク切り替え後)。既定はキーエンス
     FIXED_DEVICE_NAME = "FM"
 
     # ホストから見たデバイス名。バンクを跨いだ絶対アドレスで触る
+    #
+    # **三菱はどちらも ZR です。** バンクが無いので、スクリプトとホストで
+    # 名前もアドレスも同じになります (doc/melsec.md)。
     FIXED_HOST_DEVICE = "ZF"
 
     # IREP テーブル 1 エントリのワード数
@@ -254,9 +257,18 @@ module FaRuby
     # 止まったときに何の命令だったかを残すためです。
     OFFSET_DISPATCH         = 54
 
+    # レジスタ窓の先頭をスロット単位で持つ写し
+    #
+    # **添字でスロットを指す機種のためのものです。** REG_BASE はワード単位
+    # なので、4 で割らないと添字になりません。命令ごとに 1 回だけ割って
+    # ここに置き、レジスタを触るたびの割り算を避けます。
+    # KV は Z にアドレスを組み立てるので使いません。
+    OFFSET_REG_SLOT         = 55
+
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "fixed_base" => 0, "fixed_align" => 1000, "fixed_bank" => FIXED_BANK,
+      "fixed_device" => FIXED_DEVICE_NAME, "fixed_host_device" => FIXED_HOST_DEVICE,
       "max_regs" => 80, "max_bytecode" => 3000,
       "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
@@ -297,7 +309,8 @@ module FaRuby
         max_arrays: c["max_arrays"], max_array_len: c["max_array_len"],
         max_string_words: c["max_string_words"],
         fixed_base: c["fixed_base"], fixed_align: c["fixed_align"],
-        fixed_bank: c["fixed_bank"]
+        fixed_bank: c["fixed_bank"],
+        fixed_device_name: c["fixed_device"], fixed_host_device: c["fixed_host_device"]
       )
     end
 
@@ -306,7 +319,8 @@ module FaRuby
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 64,
                    max_arrays: 16, max_array_len: 12, max_string_words: 500,
-                   fixed_base: 0, fixed_align: 1000, fixed_bank: FIXED_BANK)
+                   fixed_base: 0, fixed_align: 1000, fixed_bank: FIXED_BANK,
+                   fixed_device_name: FIXED_DEVICE_NAME, fixed_host_device: FIXED_HOST_DEVICE)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
@@ -315,6 +329,8 @@ module FaRuby
       @fixed_base     = Integer(fixed_base)
       @fixed_align    = Integer(fixed_align)
       @fixed_bank     = Integer(fixed_bank)
+      @fixed_device_name = fixed_device_name || FIXED_DEVICE_NAME
+      @fixed_host_device = fixed_host_device || FIXED_HOST_DEVICE
       @max_regs       = Integer(max_regs)
       @max_bytecode   = Integer(max_bytecode)
       @max_pool       = Integer(max_pool)
@@ -340,7 +356,8 @@ module FaRuby
         max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
         max_arrays: max_arrays, max_array_len: max_array_len,
         max_string_words: max_string_words,
-        fixed_base: fixed_base, fixed_align: fixed_align, fixed_bank: fixed_bank
+        fixed_base: fixed_base, fixed_align: fixed_align, fixed_bank: fixed_bank,
+        fixed_device_name: fixed_device_name, fixed_host_device: fixed_host_device
       )
     end
 
@@ -401,8 +418,7 @@ module FaRuby
     # 同じ `fixed_bank` から出しているので、食い違いません。**
     def fixed_host_base = fixed_bank * FIXED_BANK_SIZE
     def fixed_host_addr(fm_addr) = fixed_host_base + fm_addr
-    def fixed_host_device = FIXED_HOST_DEVICE
-    def fixed_device_name = FIXED_DEVICE_NAME
+    attr_reader :fixed_device_name, :fixed_host_device
 
     # 可変領域の合計 (パディングを含まない)
     def content_size
@@ -480,6 +496,7 @@ module FaRuby
     def str_target_addr      = vm_state_base + OFFSET_STR_TARGET
     def str_found_addr       = vm_state_base + OFFSET_STR_FOUND
     def str_found_end_addr   = vm_state_base + OFFSET_STR_FOUND_END
+    def reg_slot_base_addr   = vm_state_base + OFFSET_REG_SLOT
 
     # Z レジスタ n (1始まり) の退避先アドレス
     #
@@ -546,8 +563,8 @@ module FaRuby
     def device_long(addr) = "#{device_name}#{addr}.L"
 
     # 固定領域はスクリプトからは FM で触る (FRSET でバンクを選んだ後)
-    def fixed_device(addr)      = "#{FIXED_DEVICE_NAME}#{addr}"
-    def fixed_device_long(addr) = "#{FIXED_DEVICE_NAME}#{addr}.L"
+    def fixed_device(addr)      = "#{fixed_device_name}#{addr}"
+    def fixed_device_long(addr) = "#{fixed_device_name}#{addr}.L"
 
     # --- 表示用 ---
 
@@ -582,7 +599,7 @@ module FaRuby
 
     def to_s
       "#{device_name}#{base}-#{device_name}#{last_addr} / " \
-        "#{FIXED_DEVICE_NAME}#{fixed_base}-#{FIXED_DEVICE_NAME}#{fixed_last_addr} " \
+        "#{fixed_device_name}#{fixed_base}-#{fixed_device_name}#{fixed_last_addr} " \
         "(#{instances}インスタンス × #{instance_size}+#{fixed_instance_size}ワード)"
     end
 
@@ -610,7 +627,7 @@ module FaRuby
       return if fixed_last_addr < FIXED_BANK_SIZE
 
       raise LayoutError, "固定領域がバンクに収まりません " \
-                         "(#{FIXED_DEVICE_NAME}#{fixed_last_addr} > #{FIXED_BANK_SIZE - 1})"
+                         "(#{fixed_device_name}#{fixed_last_addr} > #{FIXED_BANK_SIZE - 1})"
     end
   end
 end
