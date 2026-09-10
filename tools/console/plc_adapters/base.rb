@@ -9,7 +9,24 @@ require_relative "../../memory_layout"
 module FaRuby
   module Console
     module PlcAdapters
+      # PLC に届かないとき
+      #
+      # **plc_access は繋がらないまま先へ進みます。** `open` が失敗しても
+      # 握りつぶし、次の行で `@socket.puts` が nil に対して呼ばれるため、
+      # 「private method 'puts' called for nil」という無関係に見える形で
+      # 出ます (doc/plc_access_issues.md)。
+      class UnreachableError < StandardError; end
+
       class Base
+        # 繋がらなかったことが分かる形にして投げ直す
+        #
+        # **どこから使っても効くよう、アダプタに置きます。** コンソールにも
+        # 転送にも同じ罠があります。
+        def unreachable(error)
+          raise UnreachableError,
+                "#{host}:#{port} に繋がりません (#{error.class}: #{error.message})"
+        end
+
         def connect
           raise NotImplementedError
         end
