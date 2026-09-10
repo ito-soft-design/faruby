@@ -76,6 +76,26 @@ faruby/
 - mruby 3.3.0 (mrbc コンパイラを使用)
 - [plc_access](https://github.com/ito-soft-design/plc_access) gem (PLC 通信用)
 
+### Windows は先に C コンパイラを用意する
+
+**素の Windows には入っていません。** `plc_access` が依存する `serialport`
+gem がネイティブ拡張なので、無いと `bundle install` の時点で止まります。
+
+**[RubyInstaller](https://rubyinstaller.org/) は Devkit 同梱版**
+(`rubyinstaller-devkit-x.x.x-x64.exe`) を選んでください。入れた後、MSYS2 と
+MinGW のツールチェーンを導入します。
+
+```
+ridk install 1 3
+```
+
+**bison は別に足します。** mruby のビルドに要りますが、Devkit の標準構成には
+含まれていません。
+
+```
+ridk exec pacman -S --noconfirm --needed bison
+```
+
 ### mruby のビルド
 
 ```bash
@@ -86,6 +106,19 @@ rake
 
 ビルド後、`mruby/build/host/bin/mrbc` が使用できるようになります。
 
+**Windows は先に `ridk enable` を同じシェルで実行します。** MSYS2 の
+ツールチェーンが PATH に入り、`gcc` と `bison` が見えるようになります。
+**要るのはこのビルドのときだけ**で、できた `mrbc.exe` は単体で動きます。
+
+```
+ridk enable
+git clone https://github.com/mruby/mruby.git -b 3.3.0
+cd mruby
+rake
+```
+
+できあがるのは `mruby/build/host/bin/mrbc.exe` です。
+
 ### 依存 gem のインストール
 
 ```bash
@@ -95,6 +128,10 @@ bundle install
 ### 設定ファイル
 
 `faruby.yml.example` をコピーして、環境に合わせて編集してください。
+
+**BOM なしで保存してください。** BOM 付きだと YAML の解析が先頭の BOM を
+制御文字と見なし、`control characters are not allowed at line 1 column 1` で
+読み込みに失敗します。Windows のエディタは既定で BOM を付けることがあります。
 
 ```bash
 cp faruby.yml.example faruby.yml
@@ -109,6 +146,13 @@ connections:
 
 mrbc:
   path: /path/to/mrbc    # mrbc コンパイラのパス
+```
+
+**Windows でもスラッシュ区切りで書けます。**
+
+```yaml
+mrbc:
+  path: C:/path/to/mruby/build/host/bin/mrbc.exe
 ```
 
 設定は 2 層になっています。`faruby.yml` に書いた項目だけが `faruby_default.yml`
