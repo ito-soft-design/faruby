@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
+require "minitest/mock"   # autorun だけでは読み込まれない
 require "tmpdir"
 
 require_relative "../tools/transfer_check"
