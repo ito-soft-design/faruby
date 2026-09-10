@@ -18,55 +18,19 @@ mruby/c の仮想マシン (VM) を PLC のスクリプト言語でゼロから�
 
 **4 機種で実機確認しています。**
 
-| メーカー | 機種 | 生成するもの | 実機で一致した値 |
-|---------|------|------------|----------------|
-| キーエンス | KV-5000 | KV スクリプト 13 本 | 225 |
-| キーエンス | KV-X500 | ST 13 本 | 223 |
-| 三菱電機 | MELSEC Q | ST 1 本 | 223 |
-| 三菱電機 | MELSEC iQ-R | ST 1 本 | 223 |
+| メーカー | 機種 | プロジェクト |
+|---------|------|------------|
+| キーエンス | KV-5000 | [plc/keyence/KV-5000/](plc/keyence/KV-5000/) |
+| キーエンス | KV-X500 | [plc/keyence/KV-X500/](plc/keyence/KV-X500/) |
+| 三菱電機 | MELSEC Q | [plc/mitsubishi/Q/](plc/mitsubishi/Q/) |
+| 三菱電機 | MELSEC iQ-R | [plc/mitsubishi/iQ-R/](plc/mitsubishi/iQ-R/) |
+
+**機種ごとに PLC プロジェクトが入っています。** KV Studio や GX Works で
+開けば、VM も設定も入った状態から試せます。接続先を自分の PLC に合わせて
+転送すれば動きます。
 
 **命令の意味は機種によらず同じで、違うのは文の書き方とデバイスの指し方だけ**
-です。定義は `tools/opcode_table.rb` の 1 つで、そこから全機種ぶんを出します。
-
-三菱は 1 本にまとめられるので**ラダーが要りません**。プログラム設定に 2 本
-登録するだけです。キーエンスは KV Studio の上限があるため分けており、
-ステップのループもラダーに置きます。
-
-三菱で実機から分かったことは [doc/melsec.md](doc/melsec.md) にあります。
-
-## システム構成
-
-```
-[PC側]                              [PLC側]
-Ruby ソース (.rb)
-  | mrbc (mruby コンパイラ)
-  v
-バイトコード (.mrb, RITE形式)
-  | mrb_parser.rb (解析)
-  | plc_codegen.rb (変換)
-  v
-EM レジスタ値リスト ──通信──>  EM メモリに格納
-                                  |
-                                  v
-                                KV スクリプト VM
-                                (fetch-decode-execute)
-                                  |
-                                  v
-                                実行結果 (EM レジスタ)
-```
-
-## ディレクトリ構成
-
-```
-faruby/
-├── tools/               PC側ツール (Ruby)
-├── simulator/           PC側 VM シミュレータ
-├── plc/keyence/         KV スクリプト VM (生成物)
-├── test/                テスト
-├── doc/                 ドキュメント
-├── faruby_default.yml   既定設定 (リポジトリに含む)
-└── faruby.yml           環境ごとの設定 (git 管理外)
-```
+です。
 
 ## セットアップ
 
@@ -487,39 +451,6 @@ rake transfer
 スクリプトが 13 本あるので、どれを入れ替えたか覚えておくのは当てになりません。
 実際にこれで 1 本だけ古いまま残っているのが見つかっています。
 
-### テストの実行
-
-```bash
-rake test
-```
-
-PC 上で完結するテストです。16 ビット丸めやアクセス幅サフィックスの解釈は
-KV スクリプトでしか起きないため、実機でも確認します。
-
-```bash
-rake hw
-```
-
-**[test/ruby_programs/](test/ruby_programs/) を順に PLC で走らせ、見出しに
-書いた期待値と突き合わせます。** 相手は `connections.current` の PLC で、
-`rake hw CONNECTION=KV_X500` のように選べます。1 本だけなら
-`rake hw ONLY=test_16` です。
-
-期待値はプログラムの見出しに書きます。別に表を持つと、片方だけ直して
-気づかない形になります。
-
-```ruby
-# 対象機種: KV-5000        省略するとどの機種でも走らせる
-#
-# 期待値:
-#   $DM520F = 3.0    実数の加算 2.5 + 0.5
-#   $DM526  = 3      実数をワードデバイスへ書くと0方向へ切り捨て
-```
-
-**シミュレータでは再現できない不具合が何度も出ています。** 16 ビット符号なしの
-回り込み、`INC` が 32 ビットかどうか、機種ごとの実数→整数の丸め方など、
-実機だけで壊れた例があります。VM を直したら通してから完了にします。
-
 ### 実行速度の計測
 
 ```bash
@@ -717,7 +648,7 @@ h["n"] += 2
 
 | 文書 | 内容 |
 |------|------|
-| [doc/architecture.md](doc/architecture.md) | VM の仕組み、メモリ配置、コード生成 |
+| [doc/architecture.md](doc/architecture.md) | 実行までの流れ、VM の仕組み、メモリ配置、コード生成 |
 | [doc/roadmap.md](doc/roadmap.md) | 何を作るかと、なぜその順序なのか |
 | [doc/method_calls.md](doc/method_calls.md) | メソッド定義・呼び出しの設計と実装の記録 |
 | [doc/blocks.md](doc/blocks.md) | ブロックの設計と実装の記録 |
@@ -727,6 +658,8 @@ h["n"] += 2
 | [doc/differences.md](doc/differences.md) | Ruby との違い。第 1 部は書くときに引く一覧、第 2 部は決めた理由と機種ごとの確認項目 |
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅 |
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
+| [doc/testing.md](doc/testing.md) | PC 上のテストと実機での確認の進め方 |
+| [doc/melsec.md](doc/melsec.md) | 三菱 (Q / iQ-R) で実機から分かったこと |
 | [doc/plc_access_issues.md](doc/plc_access_issues.md) | plc_access で見つかった問題の控え |
 
 ## ライセンス
