@@ -4,6 +4,7 @@ require "minitest/autorun"
 require "tempfile"
 
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # mrbc を使った end-to-end テスト
 # mrbc がインストールされていない場合はスキップされます
@@ -324,7 +325,7 @@ end
 
   # F サフィックスは実数として扱われる。整数を代入すると実数に変換される
   def test_device_suffix_float_is_mapped
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write("$DM460F = 1.5\n")
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
@@ -527,7 +528,7 @@ end
 
   # 止まることを確かめる用。compile_and_run は完走を前提にしている
   def run_until_it_stops(source)
-    rb_file = Tempfile.new(["stop", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["stop", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
     mrb_path = rb_file.path.sub(/.rb$/, ".mrb")
@@ -816,7 +817,7 @@ end
 
   # エラー停止することを期待して実行する (compile_and_run は完了を要求する)
   def run_expecting_error(source)
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
@@ -843,7 +844,7 @@ end
   # Ruby ソースをコンパイル・パース・シミュレーション実行し、ローカル変数の値を返す
   def compile_and_run(source)
     # 一時ファイルに書き出し
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
 

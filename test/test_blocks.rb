@@ -7,6 +7,7 @@ require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/kvs_generator"
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # ブロックと上位の変数
 #
@@ -216,8 +217,7 @@ class TestBlocks < Minitest::Test
   def run_source(source)
     skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
 
-    dir = File.expand_path("../tmp", __dir__)
-    Dir.mkdir(dir) unless Dir.exist?(dir)
+    dir = FaRuby::TempDir.path
     src = File.join(dir, "blocks_test.rb")
     mrb = File.join(dir, "blocks_test.mrb")
     File.binwrite(src, source)

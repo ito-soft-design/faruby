@@ -8,6 +8,7 @@ require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/kvs_generator"
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # 整数のビット演算
 #
@@ -35,8 +36,7 @@ class TestBitOps < Minitest::Test
   def run_source(source)
     skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
 
-    dir = File.expand_path("../tmp", __dir__)
-    Dir.mkdir(dir) unless Dir.exist?(dir)
+    dir = FaRuby::TempDir.path
     src = File.join(dir, "strings_test.rb")
     mrb = File.join(dir, "strings_test.mrb")
     File.binwrite(src, source)
@@ -309,8 +309,7 @@ class TestBitOps < Minitest::Test
 
   # 置き換えた跡。長さを変えないため OP_NOP で埋める
   def test_the_send_is_replaced_in_place
-    dir = File.expand_path("../tmp", __dir__)
-    Dir.mkdir(dir) unless Dir.exist?(dir)
+    dir = FaRuby::TempDir.path
     skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
 
     src = File.join(dir, "index_assign.rb")
