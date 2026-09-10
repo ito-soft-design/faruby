@@ -3,6 +3,7 @@
 # コンソールコマンド定義
 # 各コマンドの実行ロジックを定義します。
 
+require_relative "../config"
 require_relative "../mrb_parser"
 require_relative "../disasm"
 require_relative "../plc_codegen"
@@ -14,6 +15,9 @@ module FaRuby
   module Console
     class Commands
       include VmConstants
+
+      # 利用者が書いた Ruby プログラムの置き場 (git の管理外)
+      PROGRAM_DIR = "programs"
 
       # 操作対象のインスタンス番号
       #
@@ -79,10 +83,13 @@ module FaRuby
           return
         end
 
-        unless File.exist?(source)
+        found = find_source(source)
+        unless found
           puts "ERROR: ファイルが見つかりません: #{source}"
+          puts "  探した場所: #{source_candidates(source).join(', ')}"
           return
         end
+        source = found
 
         # mrbc でコンパイル
         mrb_path = source.sub(/\.rb$/, ".mrb")
@@ -363,7 +370,7 @@ module FaRuby
       def cmd_help(args)
         puts <<~HELP
           === faRuby Console ===
-          compile <file.rb>  Ruby ソースをコンパイル
+          compile <file.rb>  Ruby ソースをコンパイル (programs/ から探します)
           load               コンパイル済みプログラムを PLC に書き込み
           run                VM を開始 (STATUS=1)
           instance [n]       操作対象のインスタンスを表示 / 切り替え
@@ -385,6 +392,24 @@ module FaRuby
       end
 
       private
+
+      # compile がソースを探す場所
+      #
+      # **ファイル名だけで書けるようにします。** プログラムは programs/ に
+      # 置くので、毎回そこを打たせる必要はありません。
+      #
+      # 探す順は「書かれたそのまま」→「作業フォルダの programs/」→
+      # 「リポジトリの programs/」。そのままを先にするのは、パスで書いたときに
+      # それを優先するためです。設定ファイルの探し方と同じ順で、リポジトリの
+      # 外で作業していても手元の programs/ が先に見つかります。
+      def source_candidates(name)
+        dirs = [Dir.pwd, Config::PROJECT_ROOT].uniq
+        [name] + dirs.map { |dir| File.join(dir, PROGRAM_DIR, name) }
+      end
+
+      def find_source(name)
+        source_candidates(name).find { |path| File.file?(path) }
+      end
 
       # グローバル変数の値を読む (vars コマンド用)
       # dev_addr: 元のアドレス文字列 (PLC 通信用)

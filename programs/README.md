@@ -3,10 +3,12 @@
 **PLC で動かす Ruby プログラムの置き場です。**
 
 ```
-faruby> compile programs/blink.rb
+faruby> compile blink.rb
 faruby> load
 faruby> run
 ```
+
+**コンソールはここを探すので、ファイル名だけで足ります。**
 
 **この中身は git の管理外です。** 設備ごとに書くもので、faRuby 本体の
 履歴に混ぜたくないためです。管理したいときは、このフォルダを別のリポジトリに
