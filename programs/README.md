@@ -1,0 +1,16 @@
+# programs
+
+**PLC で動かす Ruby プログラムの置き場です。**
+
+```
+faruby> compile programs/blink.rb
+faruby> load
+faruby> run
+```
+
+**この中身は git の管理外です。** 設備ごとに書くもので、faRuby 本体の
+履歴に混ぜたくないためです。管理したいときは、このフォルダを別のリポジトリに
+するか、`.gitignore` の `/programs/*` を外してください。
+
+このファイルだけは追跡しています。git は空のフォルダを持てないので、
+clone した直後にフォルダごと消えてしまうためです。

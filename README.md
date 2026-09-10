@@ -249,6 +249,11 @@ KV-5000 はバンク 3 (スクリプトが `FRSET` で選びます)。**KV-X500 
 
 ## 使い方
 
+### プログラムの置き場
+
+PLC で動かす Ruby プログラムは `programs/` に置きます。**この中身は git の
+管理外です。** 設備ごとに書くもので、faRuby 本体の履歴に混ぜないためです。
+
 ### コンソールの起動
 
 ```bash
@@ -282,7 +287,7 @@ rake console
 ### 使用例
 
 ```
-faruby> compile test.rb
+faruby> compile programs/test.rb
 faruby> load
 faruby> verify
 faruby> run
@@ -295,11 +300,11 @@ faruby> regs
 インスタンスごとに独立した VM が動き、それぞれ別の Ruby プログラムを実行します。
 
 ```
-faruby[0]> compile a.rb
+faruby[0]> compile programs/a.rb
 faruby[0]> load
 faruby[0]> run
 faruby[0]> instance 1
-faruby[1]> compile b.rb
+faruby[1]> compile programs/b.rb
 faruby[1]> load
 faruby[1]> run
 ```
