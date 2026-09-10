@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require "minitest/autorun"
-require "minitest/mock"   # autorun だけでは読み込まれない
 require "tmpdir"
 
 require_relative "../tools/transfer_check"
@@ -28,9 +27,15 @@ class TestTransferCheck < Minitest::Test
     (["DEVICE:52"] + body).join("\r\n")
   end
 
+  # 生成器の代わり。**中身を返すだけです**
+  #
+  # `Minitest::Mock` は minitest の版によって読み込めないことがあり、
+  # ここで見たいのは呼ばれ方ではなく突き合わせの結果なので、素の Ruby で
+  # 足ります。
+  Generator = Struct.new(:generate)
+
   def check_with(scripts, generated)
-    generator = Minitest::Mock.new
-    2.times { generator.expect(:generate, generated) }
+    generator = Generator.new(generated)
     Dir.mktmpdir do |dir|
       path = File.join(dir, "faruby_vm.mnm")
       File.binwrite(path, mnemonic(scripts).encode("windows-31j"))
@@ -83,8 +88,7 @@ class TestTransferCheck < Minitest::Test
   end
 
   def check_st(scripts, generated)
-    generator = Minitest::Mock.new
-    2.times { generator.expect(:generate, generated) }
+    generator = Generator.new(generated)
     Dir.mktmpdir do |dir|
       path = File.join(dir, "faruby.mnm")
       File.binwrite(path, "\xFF\xFE".b + st_mnemonic(scripts).encode("UTF-16LE").b)
