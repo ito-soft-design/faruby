@@ -275,10 +275,6 @@ module FaRuby
 
     def types = @types ||= MelsecTypes.new(labels, device_set)
 
-    # タイマ・カウンタは MELSEC にもありますが、**段階 1 では扱いません**。
-    # 命令を絞っているうちはデバイスも絞ります
-    def unsupported_devices = [DEVICE_TYPE_T, DEVICE_TYPE_C]
-
     # 段階 1 — 整数・分岐・ループ・デバイスの読み書き
     #
     # **新しい機種は段階を追って育てます** (doc/melsec.md)。メソッド・ブロック・

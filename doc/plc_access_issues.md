@@ -97,3 +97,33 @@ plc["TC0", 2]       # => [10, 30]  TC0 と TC1
 `TC` を 32 ビットで読む場面は無いはずなので注意点として残します。
 **実際、これで一度読み違えました。** KV スクリプトの `T0.D` が返す 10 と
 食い違って見え、原因の切り分けを誤らせました。
+
+## 5. 繋がらないまま先へ進み、無関係に見えるエラーで落ちる
+
+`open` が失敗しても握りつぶすため、`@socket` が nil のまま次の行へ進みます。
+
+```ruby
+# kv_protocol.rb#set_words_to_device
+open                    # 失敗しても nil を返すだけ
+@socket.puts(packet)    # ここで初めて落ちる
+```
+
+出るのはこれで、**接続の話に見えません。**
+
+```
+private method 'puts' called for nil
+  plc_access/protocol/keyence/kv_protocol.rb:102
+```
+
+三菱も同じ形です (`undefined method 'write' for nil`)。
+
+**アダプタで包んで元の話に戻します** (`tools/console/plc_adapters/base.rb`)。
+nil に対する呼び出しだけを拾い、接続先を添えて投げ直します。元の例外は
+理由として残します。
+
+```
+10.0.1.201:8501 に繋がりません (NoMethodError: private method 'puts' called for nil)
+```
+
+`rake hw` は実行前に 1 度読んで確かめており (`reachable!`)、この罠を先に
+避けていました。コンソールには備えが無く、そちらで踏みました。

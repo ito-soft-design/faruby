@@ -8,6 +8,7 @@ require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/kvs_generator"
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # メソッドの定義と呼び出し
 #
@@ -35,8 +36,7 @@ class TestMethodCalls < Minitest::Test
   def run_source(source)
     skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
 
-    dir = File.expand_path("../tmp", __dir__)
-    Dir.mkdir(dir) unless Dir.exist?(dir)
+    dir = FaRuby::TempDir.path
     src = File.join(dir, "method_calls_test.rb")
     mrb = File.join(dir, "method_calls_test.mrb")
     File.binwrite(src, source)
