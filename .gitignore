@@ -27,8 +27,21 @@ Gemfile.lock
 *.bak
 *.old
 
+# KV Studio のローカル環境ファイル (PC ごとに変わるもの)
+*.kmu
+DocumentWindowInfo.xml
+WsTreeEnv.xml
+KvsMon.ini
+LbkMdm.ini
+operand-history.txt
+PlcSended.dky
+
 # User config (use faruby.yml.example as template)
 faruby.yml
+
+# 利用者が書く Ruby プログラム (置き場の説明だけ残す)
+/programs/*
+!/programs/README.md
 
 # OS
 .DS_Store
