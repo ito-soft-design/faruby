@@ -39,7 +39,7 @@ PlcSended.dky
 # User config (use faruby.yml.example as template)
 faruby.yml
 
-# 利用者が書く Ruby プログラム (置き場の説明だけ残す)
+# 利用者が書く Ruby プログラム
 /programs/*
 !/programs/README.md
 
