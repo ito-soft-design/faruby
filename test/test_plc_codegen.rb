@@ -530,6 +530,76 @@ end
 
   # === デバイスマッピング ===
 
+  # === 時間 ===
+  #
+  # **読み出しに枝を足していません。** ticks は VM 状態の中の 2 ワードを
+  # 普通のデバイス読みで、パルスは値スロットなので汎用グローバルの経路で
+  # 読みます。どちらも `OP_GETGV` の振り分けに比較を増やしません。
+
+  def test_ticks_is_a_plain_32bit_device_read
+    mapping = FaRuby::PlcCodegen.new(build_irep(symbols: [TICKS_SYMBOL]))
+                                .device_mappings.first
+
+    assert_equal SYMBOL_KIND_VALUE, mapping[:kind]
+    assert_equal ACCESS_L, mapping[:access_type], "32 ビット符号付き"
+    assert_equal layout.ticks_addr, mapping[:z_offset]
+    refute mapping[:general], "汎用グローバルの枠は使わない"
+  end
+
+  def test_every_clock_pulse_is_a_value_slot
+    CLOCK_SYMBOLS.each do |period, sym|
+      mapping = FaRuby::PlcCodegen.new(build_irep(symbols: [sym])).device_mappings.first
+
+      assert_equal SYMBOL_KIND_GLOBAL, mapping[:kind], sym
+      assert_equal layout.clock_slot_addr(period), mapping[:z_offset], sym
+      refute mapping[:general], "#{sym} は汎用グローバルの枠を使わない"
+    end
+  end
+
+  # 混ざっても汎用グローバルの採番は詰めて行われる
+  def test_time_symbols_do_not_consume_general_global_slots
+    symbols = [TICKS_SYMBOL, "$foo", *CLOCK_SYMBOLS.values]
+    mappings = FaRuby::PlcCodegen.new(build_irep(symbols: symbols)).device_mappings
+    foo = mappings.find { |m| m[:symbol] == "$foo" }
+
+    assert_equal layout.general_global_slot_addr(0), foo[:z_offset]
+  end
+
+  # **`$FARUBY_` で始まる名前は予約。** 表に無いものは転送前に止める。
+  # 通すと普通のグローバル変数になり、いつまでも 0 を返す変数ができるだけで
+  # 書き間違いに気づけない
+  def test_an_unknown_faruby_global_is_rejected
+    irep = build_irep(symbols: ["$FARUBY_TIKS"])
+    err = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).device_mappings }
+
+    assert_match(/\$FARUBY_TIKS/, err.message)
+    assert_match(/\$FARUBY_TICKS/, err.message, "正しい名前を挙げる")
+  end
+
+  # 予約の接頭辞が付かない名前は今までどおり通る
+  def test_an_ordinary_global_is_untouched
+    mapping = FaRuby::PlcCodegen.new(build_irep(symbols: ["$faruby_ticks"]))
+                                .device_mappings.first
+
+    assert mapping[:general]
+  end
+
+  def test_every_reserved_global_is_accepted
+    RESERVED_GLOBALS.each do |sym|
+      mapping = FaRuby::PlcCodegen.new(build_irep(symbols: [sym])).device_mappings.first
+
+      refute mapping[:general], sym
+    end
+  end
+
+  # 置き場所は VM 状態の中。**レジスタ領域を侵さない**
+  def test_the_time_area_fits_inside_the_vm_state
+    last = layout.clock_slot_addr(CLOCK_SYMBOLS.keys.max) + SLOT_WORDS - 1
+
+    assert_operator layout.ticks_addr, :>=, layout.vm_state_base
+    assert_operator last, :<, layout.reg_file_base
+  end
+
   def test_device_mappings_general_globals
     irep = build_irep(symbols: ["$foo", "$bar"])
     mappings = FaRuby::PlcCodegen.new(irep).device_mappings

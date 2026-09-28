@@ -56,7 +56,7 @@ IF EM54:Z9 <= 105 THEN
         EXIT;
       END_IF;
       // メソッド表 (ID => 本体の irep 番号)
-      Z3 := Z5 + 536 + Z9;
+      Z3 := Z5 + 552 + Z9;
       EM0:Z3 := EM1:Z2;
       // OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;

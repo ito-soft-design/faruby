@@ -57,7 +57,13 @@ module FaRuby
     include VmConstants
 
     # VM 状態領域のワード数 (将来の追加に備えて余裕を持たせている)
-    VM_STATE_WORDS = 56
+    #
+    # **必ず SLOT_WORDS の倍数にします。** この後ろに並ぶレジスタ領域から
+    # 先はすべて値スロットで、三菱は `VMSLOT[添字]` の配列で指します。添字は
+    # 「ブロック先頭からのワード数 / SLOT_WORDS」で求めるため、4 の倍数から
+    # ずれると指す先が手前のスロットに落ちます。KV はアドレスで直に指すので
+    # 気づけません (実機で 1 度やりました。doc/melsec.md)。
+    VM_STATE_WORDS = 72
 
     # --- 固定領域 (FM) ---
     #
@@ -272,6 +278,50 @@ module FaRuby
     # ここに置き、レジスタを触るたびの割り算を避けます。
     # KV は Z にアドレスを組み立てるので使いません。
     OFFSET_REG_SLOT         = 55
+
+    # 経過時間 (ミリ秒)。**単調増加で、止めも巻き戻しもしません**
+    #
+    # 生成スクリプトがスキャンごとにクロックパルスの立ち上がりを数え、1 回に
+    # つきパルスの周期ぶんのミリ秒を足します。Ruby からは `$FARUBY_TICKS` で
+    # 読み、`いま - 控えた値` の差で時間を判断します。
+    #
+    # **32 ビットで一周しても差は正しく出ます。** 2 の補数の引き算がそのまま
+    # 経過ミリ秒になるためで、約 24.8 日ごとの回り込みを気にせず書けます。
+    # ただし差が 2^31 ミリ秒を超えるほど間を空けると意味を失います。
+    #
+    # **インスタンスをまたいで 1 つです。** 時間は VM ごとに違うものでは
+    # ないので、インスタンス 0 のブロックに置いて絶対アドレスで指します
+    # (LADDER_INSTANCES と同じ扱い)。
+    OFFSET_TICKS            = 56  # 32ビット (2ワード)
+
+    # クロックパルスの前回の状態。立ち上がりだけを数えるために要ります
+    OFFSET_TICK_PREV        = 58
+
+    # クロックパルスそのものを持つ値スロット (1 つ 4 ワード)
+    #
+    # **真偽値として読めるように、値スロットの形で置きます。** 生成スクリプトが
+    # スキャンごとにタグへ `TT_TRUE` / `TT_FALSE` を書き、Ruby からは汎用
+    # グローバルと同じ経路で読みます。`OP_GETGV` の振り分けに枝を足さずに
+    # 真偽値を返せるのはこのためです。
+    #
+    # 1 / 0 の整数で持つ手もありましたが、**Ruby では 0 も真**なので
+    # `if $FARUBY_CLOCK_1S` が常に成り立ってしまいます。
+    #
+    # **先頭は SLOT_WORDS の倍数に置きます。** 三菱は値スロットを
+    # `VMSLOT[添字]` の配列で指し、添字を「ワード数 / SLOT_WORDS」で求めます。
+    # ずれていると手前のスロットを読み、タグが別のワードになります。+59 に
+    # 置いたときは 10ms の値ワードをタグとして読み、常に偽になりました
+    # (実機で確認)。+59 は空けたままにします。
+    OFFSET_CLOCK_10MS       = 60  # 値スロット (60-63)
+    OFFSET_CLOCK_100MS      = 64  # 値スロット (64-67)
+    OFFSET_CLOCK_1S         = 68  # 値スロット (68-71)
+
+    # 周期 (ミリ秒) => VM 状態の中の位置
+    #
+    # **周期が鍵です。** 綴り方 (dialect) が機種ごとのデバイス番号を同じ鍵で
+    # 返すので、どの機種でも同じ並びになります。
+    CLOCK_OFFSETS = { 10 => OFFSET_CLOCK_10MS, 100 => OFFSET_CLOCK_100MS,
+                      1000 => OFFSET_CLOCK_1S }.freeze
 
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
@@ -516,6 +566,20 @@ module FaRuby
     # Z の退避先と同じく全インスタンスで共有するため、絶対アドレスを返す。
     def ladder_instances_addr = base + OFFSET_LADDER_INSTANCES
     def ladder_steps_addr     = base + OFFSET_LADDER_STEPS
+
+    # 経過時間とクロックパルスの前回の状態
+    #
+    # 時間はインスタンスごとに違うものではないので、Z の退避先と同じく
+    # インスタンス 0 のブロックに置いて全インスタンスで共有する。
+    def ticks_addr     = base + OFFSET_TICKS
+    def tick_prev_addr = base + OFFSET_TICK_PREV
+
+    # クロックパルスの値スロットの先頭 (周期はミリ秒)
+    def clock_slot_addr(period_ms) = base + CLOCK_OFFSETS.fetch(period_ms)
+
+    # そのスロットのタグと値
+    def clock_tag_addr(period_ms)   = clock_slot_addr(period_ms)
+    def clock_value_addr(period_ms) = clock_slot_addr(period_ms) + SLOT_VALUE_OFFSET
 
     # 振り分け用のオペコード番号 (インスタンスごと)
     def dispatch_addr = vm_state_base + OFFSET_DISPATCH

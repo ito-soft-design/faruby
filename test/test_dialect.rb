@@ -40,6 +40,25 @@ class TestDialect < Minitest::Test
     end
   end
 
+  # **時間は機種に付いて回ります。** どの番号が何ミリ秒かは PLC が決めており、
+  # 利用者に選ぶ余地がありません。周期を鍵にしてあるので、機種が違っても
+  # `$FARUBY_CLOCK_1S` は同じ意味になります。
+  def test_every_model_has_the_same_three_clock_periods
+    FaRuby::Dialect.all.each do |dialect|
+      assert_equal FaRuby::VmConstants::CLOCK_SYMBOLS.keys.sort,
+                   dialect.clock_pulses.keys.sort, dialect.model
+    end
+  end
+
+  # 経過時間はいちばん細かいパルスで数える
+  def test_ticks_use_the_finest_pulse
+    assert_equal ["CR2004", 10], [kvs.tick_pulse, kvs.tick_ms]
+    assert_equal ["CR2004", 10], [st.tick_pulse, st.tick_ms]
+    assert_equal ["SM409", 10], [FaRuby::MelsecDialect.new.tick_pulse,
+                                 FaRuby::MelsecDialect.new.tick_ms]
+    assert_equal "SM409", FaRuby::MelsecIqrDialect.new.tick_pulse
+  end
+
   # 機種を増やすときに書き出し先が衝突しないこと
   def test_every_model_writes_somewhere_of_its_own
     directories = FaRuby::Dialect.all.map(&:directory)

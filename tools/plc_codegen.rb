@@ -340,7 +340,31 @@ module FaRuby
     #   method_ids ユーザー定義メソッド名 => ID
     def symbol_mapping(sym, table_addr, idx, slots, method_ids)
       parsed = parse_device_symbol(sym) || device_syntax.parse_family(sym)
-      if parsed
+      if sym == TICKS_SYMBOL
+        # 経過時間。**普通のデバイス読みに落とします**
+        #
+        # 置き場所は VM 状態の中ですが、そこも可変領域のデバイスなので、
+        # 32 ビット符号付きで読む指定を付ければ既存の経路がそのまま通ります。
+        # 種別を増やすと `OP_GETGV` の振り分けに 1 比較増えるため、命令の
+        # 費用を上げずに済むこちらを採りました。
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_VALUE,
+          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+          address: layout.ticks_addr.to_s, z_offset: layout.ticks_addr,
+          access_type: ACCESS_L, bit: false, family: false }
+      elsif (period = CLOCK_SYMBOLS.key(sym))
+        # クロックパルス。**汎用グローバルと同じ値スロットです**
+        #
+        # 生成スクリプトがスキャンごとにタグごと書いているので、読み出しは
+        # 既存の `SYMBOL_KIND_GLOBAL` の経路に任せれば真偽値になります。
+        # 場所だけが汎用グローバルの領域ではなく VM 状態の中です。
+        slot_addr = layout.clock_slot_addr(period)
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_GLOBAL,
+          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+          address: slot_addr.to_s, z_offset: slot_addr,
+          access_type: ACCESS_L, bit: false, family: false }
+      elsif parsed
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: device_symbol_kind(parsed),
           device_type: parsed[:device_type], device_name: parsed[:device_name],
@@ -348,6 +372,16 @@ module FaRuby
           access_type: parsed[:access_type], bit: parsed[:bit],
           family: parsed[:family] || false }
       elsif sym.start_with?("$")
+        # **`$FARUBY_` で始まる名前は faRuby の予約です。** 表に無いものは
+        # 書き間違いなので、ここで止めます。通してしまうと普通のグローバル
+        # 変数になり、いつまでも 0 を返す変数ができるだけで気づけません。
+        # 設定定数 (`FARUBY_` で始まる定数) と同じ扱いです
+        if sym.start_with?("$#{SETTING_PREFIX}") && !RESERVED_GLOBALS.include?(sym)
+          raise CodegenError,
+                "#{sym} は faRuby のグローバル変数ではありません " \
+                "(#{RESERVED_GLOBALS.join(', ')})"
+        end
+
         # 汎用グローバル変数は Ruby の値をそのまま持つ。**アドレスは値スロットの
         # 先頭**で、VM が型タグごと写す。幅は使わない
         slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))

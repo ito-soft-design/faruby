@@ -52,6 +52,57 @@ class TestMemoryLayout < Minitest::Test
     assert_equal l.instance_size, l.regions.sum { |_, _, _, words| words }
   end
 
+  # === 値スロットの整列 ===
+  #
+  # **三菱は値スロットを `VMSLOT[添字]` の配列で指します。** 添字は
+  # 「ブロック先頭からのワード数 / SLOT_WORDS」で求めるため、4 の倍数から
+  # ずれると指す先が手前のスロットに落ち、タグが別のワードになります。
+  # KV はアドレスで直に指すので、ずれていても気づけません。
+  #
+  # 実際に踏みました。VM 状態を 56 から 71 ワードに増やしたとき、後ろに
+  # 並ぶ領域がすべてずれ、クロックパルスが常に偽になりました。
+
+  def test_the_vm_state_ends_on_a_slot_boundary
+    assert_equal 0, Layout::VM_STATE_WORDS % Layout::SLOT_WORDS,
+                 "VM 状態の大きさが値スロットの倍数でないと、後ろの領域が全部ずれます"
+  end
+
+  def test_every_slot_region_starts_on_a_slot_boundary
+    l = Layout.default
+    { "レジスタ" => l.reg_file_base,
+      "汎用グローバル" => l.general_global_base,
+      "配列プール" => l.array_pool_base }.each do |name, base|
+      assert_equal 0, l.offset_of(base) % Layout::SLOT_WORDS, name
+    end
+  end
+
+  def test_every_clock_slot_starts_on_a_slot_boundary
+    l = Layout.default
+    Layout::CLOCK_OFFSETS.each_key do |period|
+      assert_equal 0, l.offset_of(l.clock_slot_addr(period)) % Layout::SLOT_WORDS,
+                   "#{period}ms"
+    end
+  end
+
+  # スロットどうしが重ならないこと (1 つ 4 ワード)
+  def test_clock_slots_do_not_overlap
+    l = Layout.default
+    starts = Layout::CLOCK_OFFSETS.keys.map { |p| l.offset_of(l.clock_slot_addr(p)) }.sort
+    starts.each_cons(2) do |a, b|
+      assert_operator b - a, :>=, Layout::SLOT_WORDS
+    end
+    assert_operator starts.last + Layout::SLOT_WORDS, :<=, Layout::VM_STATE_WORDS
+  end
+
+  # 経過時間 (32 ビット 2 ワード) がクロックのスロットと重ならないこと
+  def test_ticks_do_not_overlap_the_clock_slots
+    l = Layout.default
+    first_clock = Layout::CLOCK_OFFSETS.values.min
+
+    assert_operator Layout::OFFSET_TICKS + 2, :<=, first_clock
+    assert_operator Layout::OFFSET_TICK_PREV, :<, first_clock
+  end
+
   # === 端数の切り上げ ===
 
   # ブロックサイズは align の倍数に切り上げられる
