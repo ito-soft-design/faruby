@@ -154,6 +154,7 @@ module FaRuby
         puts "  PC       : #{state[:pc]}"
         puts "  ERROR    : #{state[:error]}"
         puts "  STEPS    : #{state[:step_count]}"
+        puts "  TICKS    : #{state[:ticks]} ms (電源投入から。全インスタンス共通)"
         puts "  OPCODE   : #{state[:current_opcode]}"
         puts "  ARGS     : a=#{state[:operand_a]} b=#{state[:operand_b]} c=#{state[:operand_c]}"
         puts "  BCLEN    : #{state[:bytecode_len]}"

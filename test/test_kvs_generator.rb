@@ -128,11 +128,16 @@ class TestKvsGenerator < Minitest::Test
   # ブロック内の位置は絶対アドレスではなくオフセット + Z9 で指す。
   # 絶対アドレスが残っていると instances > 1 でインスタンス0しか動かない。
   #
-  # 例外は Z の退避・復元と、ラダーへ渡す回数だけ。どちらもインスタンス
-  # ループの外から触るため、絶対アドレスで指す。
+  # 例外は Z の退避・復元、ラダーへ渡す回数、そして経過時間とクロック
+  # パルス。いずれもインスタンスループの外から触るため、絶対アドレスで指す。
+  # 時間は VM ごとに違うものではないので、インスタンス 0 の場所を共有する。
   def test_state_is_addressed_relative_to_the_block
+    clocks = FaRuby::MemoryLayout::CLOCK_OFFSETS.keys.flat_map do |period|
+      [layout.clock_tag_addr(period), layout.clock_value_addr(period)]
+    end
     allowed = FaRuby::KvsEmitter::USED_Z.map { |z| layout.z_save_addr(z) } +
-              [layout.ladder_instances_addr, layout.ladder_steps_addr]
+              [layout.ladder_instances_addr, layout.ladder_steps_addr,
+               layout.ticks_addr, layout.tick_prev_addr] + clocks
     offenders = code_lines(@source).select do |l|
       l.scan(/\b#{layout.device_name}(\d+)/).flatten.map(&:to_i)
        .any? { |n| n >= layout.base && !allowed.include?(n) }
@@ -140,6 +145,41 @@ class TestKvsGenerator < Minitest::Test
     assert_empty offenders,
                  "ブロック内を絶対アドレスで指している行があります " \
                  "(instances > 1 でインスタンス0しか動きません): #{offenders.first(3).inspect}"
+  end
+
+  # === 経過時間とクロックパルス ===
+  #
+  # **1 スキャンに 1 回だけ進めます。** ステップのループの中に置くと、
+  # スキャンあたりの足し込みが命令数ぶんになってしまう。
+
+  # 立ち上がりだけを数える。上がっている間ずっと足すと時間にならない
+  def test_ticks_count_the_rising_edge_of_the_clock_pulse
+    dialect = FaRuby::KvsDialect.new
+
+    assert_equal "CR2004", dialect.tick_pulse, "いちばん細かいパルスを使う"
+    assert_equal 10, dialect.tick_ms
+    assert_includes @source, "IF #{dialect.tick_pulse} THEN"
+    assert_includes @source, "IF #{emitter.tick_prev} = 0 THEN"
+    assert_includes @source,
+                    "#{emitter.ticks} = #{emitter.ticks} + #{dialect.tick_ms}"
+  end
+
+  # 進めるのはステップのループの外。**前口上は 1 スキャンに 1 回しか動かない**
+  def test_ticks_advance_once_per_scan
+    prologue = FaRuby::KvsGenerator.new.generate
+                                   .fetch(FaRuby::KvsGenerator.file_name(1, "prologue", "kvs"))
+
+    assert_includes prologue, "#{emitter.ticks} = #{emitter.ticks} + 10"
+    assert_equal 1, @source.scan("#{emitter.ticks} = #{emitter.ticks} + 10").size
+  end
+
+  # パルスは値スロットに写す。**真偽値で読めるのはタグごと書くから**
+  def test_every_clock_pulse_is_written_as_a_value_slot
+    FaRuby::KvsDialect.new.clock_pulses.each do |period, device|
+      assert_includes @source, "IF #{device} THEN", "#{period}ms"
+      assert_includes @source, "#{emitter.clock_tag(period)} = #{TT_TRUE}", "#{period}ms"
+      assert_includes @source, "#{emitter.clock_tag(period)} = #{TT_FALSE}", "#{period}ms"
+    end
   end
 
   # 実行判定は各インスタンスの STATUS を見る

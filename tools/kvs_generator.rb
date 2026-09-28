@@ -118,6 +118,11 @@ module FaRuby
     def irep_table_offset  = devices.irep_table_offset
     def fixed_offset(base) = devices.fixed_offset(base)
     def reg_offset         = devices.reg_offset
+    def ticks                       = devices.ticks_ref
+    def tick_prev                   = devices.tick_prev_ref
+    def clock_tag(period)           = devices.clock_tag_ref(period)
+    def clock_value(period)         = devices.clock_value_ref(period)
+    def tick_pulse(device, period)  = devices.tick_pulse_ref(device, period)
 
     # バイトコードの現在位置を読み、PC を 1 つ進める
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
@@ -3266,6 +3271,47 @@ module FaRuby
       "#{e.lines.join("\n")}\n"
     end
 
+    # 経過時間を進める
+    #
+    # **1 スキャンに 1 回だけ走る場所に置きます。** 分ける機種は前口上、
+    # 1 本にまとめる機種は本体の頭で、どちらもステップのループの外です。
+    # ループの中に置くと 1 スキャンで何度も数えてしまいます。
+    #
+    # **立ち上がりだけを数えます。** 上がっている間ずっと足すと、スキャン
+    # タイムによって足す回数が変わり、時間になりません。前回の状態を控えて
+    # おき、0 から 1 に変わったときだけ周期ぶんのミリ秒を足します。
+    #
+    # **止まっているインスタンスがあっても進みます。** 時間は VM の実行とは
+    # 別物で、`run` していない間も経つためです。
+    def emit_tick_update(e)
+      pulses = dialect.clock_pulses
+      return if pulses.empty?
+
+      tick_ms = dialect.tick_ms
+      e.note "=== 経過時間とクロックパルス ==="
+      e.note "パルスを値スロットに写すので、Ruby からは真偽値として読める"
+      e.note "**#{dialect.tick_pulse} だけは立ち上がりも数え、#{tick_ms}ms ずつ足す**"
+      e.note "**スキャンタイムが周期の半分を超えると取りこぼす**"
+      pulses.each do |period, device|
+        bit = e.tick_pulse(device, period)
+        e.if_else_block(bit) do
+          if period == tick_ms
+            e.if_("#{e.tick_prev} = 0") do
+              e.line "#{e.ticks} = #{e.ticks} + #{tick_ms}"
+            end
+            e.line "#{e.tick_prev} = 1"
+          end
+          e.line "#{e.clock_value(period)} = #{TT_CANONICAL_VALUE.fetch(TT_TRUE)}"
+          e.line "#{e.clock_tag(period)} = #{TT_TRUE}"
+        end
+        e.line "#{e.tick_prev} = 0" if period == tick_ms
+        e.line "#{e.clock_value(period)} = #{TT_CANONICAL_VALUE.fetch(TT_FALSE)}"
+        e.line "#{e.clock_tag(period)} = #{TT_FALSE}"
+        e.end_block
+      end
+      e.blank
+    end
+
     # [前口上] ラダーの外側 FOR の前に 1 回だけ動く
     def build_prologue_source
       e = KvsEmitter.new(layout: layout, dialect: dialect)
@@ -3274,6 +3320,7 @@ module FaRuby
       e.save_z_registers
       e.select_fixed_bank
       e.blank
+      emit_tick_update(e)
       e.note "外側 (インスタンス) の回数をラダーへ渡す"
       e.line "#{layout.device(layout.ladder_instances_addr)} = #{layout.instances}"
       e.blank
@@ -3300,6 +3347,7 @@ module FaRuby
       e.note "ブロックの先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
       e.line "Z#{KvsEmitter::Z_INSTANCE} = #{layout.base}"
       e.blank
+      emit_tick_update(e)
       e.note "1 スキャンぶんのステップ。**#{"BREAK"} はこのループを抜ける**"
       e.line "FOR #{e.state(layout.loop_counter_addr)} = 1 TO " \
              "#{e.state(layout.steps_per_cycle_addr)}"

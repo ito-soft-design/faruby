@@ -33,7 +33,7 @@ IF VMRESETREQ = 1 THEN
   (* 実行中の irep をトップレベル (0番) に戻す *)
   VMFRAMESP := 0;   (* 呼び出しの深さ *)
   VMARRAYSP := 0;   (* 配列プールの空き先頭 *)
-  VMREGBASE := 56;   (* レジスタ窓の先頭 *)
+  VMREGBASE := 72;   (* レジスタ窓の先頭 *)
   VMCURIREP := 0;
   (* IREP テーブルから実行中の irep の情報を写す *)
   Z1 := VMIREPTABLE;
@@ -44,7 +44,7 @@ IF VMRESETREQ = 1 THEN
   VMNREGS := ZR4Z1;
 
   (* レジスタファイルクリア (型タグを TT_EMPTY に) *)
-  FOR VMLOOPCOUNTER := 14 TO 93 DO
+  FOR VMLOOPCOUNTER := 18 TO 97 DO
     VMSLOT[VMLOOPCOUNTER].SLTAG := 0;
   END_FOR;
 

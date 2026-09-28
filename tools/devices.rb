@@ -139,6 +139,21 @@ module FaRuby
     # Z に絶対アドレスを組み立てる式の末尾に足す項
     def block_offset(base) = "#{layout.offset_of(base)} + Z#{Z_INSTANCE}"
 
+    # --- 経過時間 ---
+    #
+    # **インスタンスをまたいで 1 つなので絶対アドレスで指します。** Z の
+    # 退避先と同じ扱いで、インスタンスループの外 (頭出しの前) から触ります。
+
+    def ticks_ref     = layout.device_long(layout.ticks_addr)
+    def tick_prev_ref = layout.device(layout.tick_prev_addr)
+
+    # クロックパルスを写す値スロットのタグと値
+    def clock_tag_ref(period)   = layout.device(layout.clock_tag_addr(period))
+    def clock_value_ref(period) = layout.device(layout.clock_value_addr(period))
+
+    # クロックパルス。**KV はデバイスをそのまま書けます**
+    def tick_pulse_ref(device, _period) = device
+
     # 実行中の irep の領域を指す項
     #
     # irep が複数になったため、バイトコード・定数プール・シンボル表の位置は
@@ -466,6 +481,12 @@ module FaRuby
     # インデックスレジスタの退避先 (VM 状態の中に 9 語)
     Z_SAVE = "VMZSAVE"
 
+    # クロックパルス。**デバイスを直に書けないのでラベルにします**
+    TICK_PULSE = "VMTICKPULSE"
+
+    # ビットの型名。**`BOOL` ではありません** (GX Works2 が弾きます)
+    BIT_TYPE = "BIT"
+
     attr_reader :layout
 
     def initialize(layout, emitter = nil, labels = {}, retain_fixed: false)
@@ -496,6 +517,28 @@ module FaRuby
     # KV は `.L` の付け外しで幅を選びましたが、こちらは型付きなので要りません。
 
     def state(addr) = state_label(addr)
+
+    # --- 経過時間 ---
+    #
+    # **インスタンスは 1 つなので VM 状態のラベルがそのまま使えます。**
+    # KV は絶対アドレスで指しましたが、三菱はブロックが 1 つしかないため
+    # 置き場所が VM 状態と重なります (`base` = `origin`)。
+    def ticks_ref     = state_long(layout.ticks_addr)
+    def tick_prev_ref = state(layout.tick_prev_addr)
+
+    def clock_tag_ref(period)   = state(layout.clock_tag_addr(period))
+    def clock_value_ref(period) = state(layout.clock_value_addr(period))
+
+    # クロックパルス。**特殊リレーもラベルを通して触ります**
+    #
+    # 周期ごとに別のラベルです。同じ名前に別のデバイスを割り付けられません。
+    #
+    # **型は `BIT` です。** IEC の綴りは `BOOL` ですが、GX Works2 は
+    # 「データ型が不正」で取り込みを弾きます。ワードの側が `INT` / `DINT` /
+    # `REAL` と IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
+    def tick_pulse_ref(device, period)
+      remember("#{TICK_PULSE}#{period}", BIT_TYPE, device, "クロックパルス #{period}ms")
+    end
 
     # **32 ビットは別のラベルです。** 同じ 2 ワードを INT と DINT の両方で
     # 触る場所があり (`TEMP32` を下位ワードだけ書く経路)、ラベルは型が
@@ -870,7 +913,7 @@ module FaRuby
 
     # IEC の型を貼り付けの表の綴りに直す
     JAPANESE_TYPES = { "INT" => "ワード[符号付き]", "DINT" => "ダブルワード[符号付き]",
-                       "REAL" => "単精度実数" }.freeze
+                       "REAL" => "単精度実数", BIT_TYPE => "ビット" }.freeze
 
     def japanese_type(type)
       if (m = type.match(/\AARRAY \[0\.\.(\d+)\] OF (.+)\z/))
@@ -1010,8 +1053,13 @@ module FaRuby
     #
     # 16 ビットは `%MW`、32 ビットと実数は `%MD`。**領域番号は D が 0、
     # ZR が 12** です (実機で確認済み)。
+    #
+    # **ビットには IEC アドレスを付けません。** 割り付け先が特殊リレー (SM)
+    # で、`%M` が指すのは可変領域のデバイスです。デバイス名だけ書けば
+    # GX Works2 が引き受けます。
     def label_device(label)
       return [DETAIL, DETAIL] if structure_label?(label)
+      return [label.device, ""] if label.type == BIT_TYPE
 
       area = label.device.start_with?(fixed_device) ? 12 : 0
       width = label.type.start_with?("INT", "ARRAY [0..") && !label.type.include?("VM") ? "W" : "D"

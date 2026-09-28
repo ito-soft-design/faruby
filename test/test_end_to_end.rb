@@ -471,6 +471,77 @@ end
     assert_equal 1, sim.em.read_u16(layout.array_sp_addr), "配列 1 つぶんだけ使う"
   end
 
+  # === 時間 ===
+  #
+  # **進める側はここでは見ません。** 経過時間もクロックパルスも、生成した
+  # スクリプトがスキャンごとに書き込むものです。シミュレータには 1 スキャンに
+  # あたるものが無いので、書き込まれた後の状態を置いて読み出しだけを確かめます。
+  # 進める側 (パルスの立ち上がりを数える) は test_kvs_generator が見ます。
+
+  def test_ticks_reads_the_elapsed_milliseconds
+    result = compile_and_run("t = $FARUBY_TICKS\n") do |sim|
+      sim.em.write_u32(layout.ticks_addr, 123_456)
+    end
+
+    assert_equal 123_456, result[:locals]["t"]
+  end
+
+  # 32 ビット符号付きで読む。**一周した後も引き算が経過ミリ秒になる**
+  def test_ticks_wraps_around_as_a_signed_32bit_value
+    # 0x7FFFFFFF (上限) の 2 ミリ秒後。回り込んで負になっている
+    result = compile_and_run("t = $FARUBY_TICKS\nd = t - 2147483647\n") do |sim|
+      sim.em.write_u32(layout.ticks_addr, 0x8000_0001)
+    end
+
+    assert_equal(-2_147_483_647, result[:locals]["t"], "回り込むと負になる")
+    assert_equal 2, result[:locals]["d"], "差は回り込んでも正しい"
+  end
+
+  # 汎用グローバルの枠は使わない。**VM 状態の中にある**
+  def test_ticks_does_not_take_a_general_global_slot
+    result = compile_and_run("$foo = 7\nt = $FARUBY_TICKS\n")
+    sim = result[:sim]
+
+    assert_equal 7, sim.em.read_s32(layout.general_global_addr(0)),
+                 "$foo がスロット 0 のまま"
+  end
+
+  # === クロックパルス ===
+  #
+  # **真偽値で返ります。** 1 / 0 の整数だと Ruby では 0 も真になり、
+  # `if $FARUBY_CLOCK_1S` が常に成り立ってしまいます。
+
+  def test_the_clock_globals_are_true_or_false
+    source = <<~RUBY
+      $DM0 = 0
+      $DM1 = 0
+      $DM0 = 1 if $FARUBY_CLOCK_1S
+      $DM1 = 1 if $FARUBY_CLOCK_100MS
+    RUBY
+    sim = compile_and_run(source) do |s|
+      write_clock(s, 1000, true)
+      write_clock(s, 100, false)
+    end[:sim]
+
+    assert_equal 1, sim.devices[1].read_s16(0), "立っているパルスは真"
+    assert_equal 0, sim.devices[1].read_s16(1), "落ちているパルスは偽"
+  end
+
+  # 型タグごと写るので、真偽値のまま他へ渡せる
+  def test_a_clock_keeps_its_type_when_copied
+    sim = compile_and_run("$g = $FARUBY_CLOCK_1S\n") { |s| write_clock(s, 1000, true) }[:sim]
+
+    assert_equal FaRuby::VmConstants::TT_TRUE,
+                 sim.em.read_u16(layout.general_global_slot_addr(0))
+  end
+
+  # 点滅はデバイスへ写すだけで足りる
+  def test_a_clock_can_be_copied_to_a_bit_device
+    sim = compile_and_run("$MR100 = $FARUBY_CLOCK_1S\n") { |s| write_clock(s, 1000, true) }[:sim]
+
+    assert_equal 1, sim.global_value("$MR100")
+  end
+
   # === 同じ変数に違う型を入れ直す ===
   #
   # スロットごと上書きするので前の値は残らない。**ハッシュとデバイス参照は
@@ -842,7 +913,17 @@ end
   end
 
   # Ruby ソースをコンパイル・パース・シミュレーション実行し、ローカル変数の値を返す
-  def compile_and_run(source)
+  # クロックパルスの値スロットを、生成スクリプトが書くのと同じ形で置く
+  def write_clock(sim, period, on)
+    tag = on ? FaRuby::VmConstants::TT_TRUE : FaRuby::VmConstants::TT_FALSE
+    sim.em.write_u16(layout.clock_value_addr(period),
+                     FaRuby::VmConstants::TT_CANONICAL_VALUE.fetch(tag))
+    sim.em.write_u16(layout.clock_tag_addr(period), tag)
+  end
+
+  # ブロックを渡すと、走らせる直前のシミュレータを触れる。
+  # 生成スクリプトが用意する値 (経過時間・クロックパルス) を置くのに使う。
+  def compile_and_run(source, &before_run)
     # 一時ファイルに書き出し
     rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
@@ -859,6 +940,7 @@ end
       data = File.binread(mrb_path)
       parser = FaRuby::MrbParser.new(data).parse
       sim = FaRuby::KvVmSimulator.new
+      before_run&.call(sim)
       sim.load_irep_and_run(parser.irep)
 
       assert_equal 2, sim.status, "VM should finish (status=2)"

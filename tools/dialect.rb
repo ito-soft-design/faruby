@@ -117,6 +117,30 @@ module FaRuby
     # 以前はタイマ・カウンタの接点だけ `SET` / `RES` を使い、他は 1 / 0 を
     # 代入していましたが、種類による違いは要りませんでした。
     def write_bit(device, on) = "#{device} = #{on ? 'TRUE' : 'FALSE'}"
+
+    # クロックパルス。周期 (ミリ秒) => デバイス
+    #
+    # **設定ではなく機種に付いて回るものです。** どの番号が何秒かは PLC が
+    # 決めており、利用者に選ぶ余地がありません。番号は生成スクリプトに
+    # 焼き込まれるため、変えたら `rake vm_core` で出し直す必要もあります。
+    #
+    # **利用者はこのデバイスを直に読めません。** KV の CR はインデックス修飾が
+    # できず faRuby のデバイスアクセスに載らないためですが (doc/plc_devices.md)、
+    # 生成スクリプトは固定アドレスで書くので当てはまりません。スキャンごとに
+    # 値スロットへ写すことで、利用者はラダーを書かずに `$FARUBY_CLOCK_1S` と
+    # して読めます。
+    #
+    # 鍵はどの機種でも 10 / 100 / 1000 です。番号だけが変わります。
+    # 空を返す機種では時間を測れません (`$FARUBY_TICKS` は 0 のまま)。
+    def clock_pulses = {}
+
+    # 経過時間を数えるパルス。**いちばん細かいものを使います**
+    #
+    # **周期の半分よりスキャンタイムが長いと取りこぼします。** 立ち上がりを
+    # 見るには、上がっている間に少なくとも 1 回スキャンが入る必要があります。
+    # 10ms クロックなら 5ms より短いスキャンタイムが要ります。
+    def tick_ms = clock_pulses.keys.min || 10
+    def tick_pulse = clock_pulses[tick_ms]
   end
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの
@@ -125,6 +149,13 @@ module FaRuby
     def model = "KV-5000"
     def name = "KV スクリプト"
     def extension = "kvs"
+
+    # KV のクロックパルス (10ms / 100ms / 1s)。**実機で確認済み**
+    #
+    # `test_37_ticks` が KV-5000 と KV-X500 で 5 値一致。CR2004 の立ち上がりを
+    # 数えた経過時間が実時間で進み、10 の倍数になり、その間に CR2005 が真と偽の
+    # 両方を取りました。
+    def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
   end
 
   # KV-X500 の ST (IEC 61131-3 準拠の構造化テキスト)
@@ -150,6 +181,10 @@ module FaRuby
     def model = "KV-X500"
     def name = "ST"
     def extension = "st"
+
+    # KV-5000 と同じ。**タイマ・カウンタは使えないが CR は読める**
+    # (実機で確認済み。ST でも `IF CR2004 THEN` がそのまま通ります)
+    def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
@@ -245,6 +280,15 @@ module FaRuby
     def vendor = "mitsubishi"
     def model = "Q"
     def name = "ST (GX Works2)"
+
+    # 三菱の特殊リレー (10ms / 100ms / 1s)。**1s だけ番号が飛びます**
+    #
+    # **Q と iQ-R で確認済み** (`test_37_ticks_melsec` が 5 値一致)。
+    #
+    # **ラベルの型は `BIT` です。** IEC の綴りの `BOOL` は GX Works2 が
+    # 「データ型が不正」で弾きました。ワードの側が `INT` / `DINT` / `REAL` と
+    # IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
+    def clock_pulses = { 10 => "SM409", 100 => "SM410", 1000 => "SM412" }
 
     # GX Works2 のコメントは (* *)。// は使いません
     def wrap_comment(text) = text.empty? ? "(* *)" : "(* #{text} *)"
