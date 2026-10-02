@@ -77,6 +77,42 @@ class TestDeviceIndex < Minitest::Test
     assert_equal "MR500", (kv.new("MR415") + 1).name
   end
 
+  # === 番号の数え方はメーカーごと ===
+  #
+  # **キーエンスの MR / R / LR はチャンネルとビットに分かれた表記です**
+  # (`MR400` は番号 64)。三菱の M / L は 10 進そのままです (`M100` は 100)。
+  # 既定のままデバイス名を読むとキーエンスの数え方になるため、三菱に繋いで
+  # いるところで既定を使うと別のビットを指します。
+
+  def test_keyence_bit_devices_split_the_channel_and_the_bit
+    kv = FaRuby::DeviceSyntax.keyence
+
+    assert_equal 64, kv.parse_name("MR400")[:z_offset]
+    assert_equal 16, kv.parse_name("MR100")[:z_offset]
+    assert_equal 10, kv.parse_name("MR10")[:z_offset]
+  end
+
+  def test_melsec_bit_devices_are_plain_decimal
+    melsec = FaRuby::DeviceSyntax.melsec
+
+    assert_equal 100, melsec.parse_name("M100")[:z_offset], "10 進そのまま"
+    assert_equal 400, melsec.parse_name("M400")[:z_offset]
+    assert_equal 100, melsec.parse_name("L100")[:z_offset]
+    # B は 16 進。こちらは両メーカーとも同じ数え方
+    assert_equal 16, melsec.parse_name("B10")[:z_offset]
+  end
+
+  # コンソールとシミュレータは接続先の機種の読み方を使うこと。
+  # 既定 (キーエンス) のままだと三菱で `dev M100` が番号 16 を指す
+  def test_every_dialect_reads_its_own_numbering
+    { "KV-5000" => ["MR100", 16], "KV-X500" => ["MR100", 16],
+      "Q" => ["M100", 100], "iQ-R" => ["M100", 100] }.each do |model, (name, number)|
+      syntax = FaRuby::DeviceSyntax.for_dialect(FaRuby::Dialect.for(model))
+
+      assert_equal number, syntax.parse_name(name)[:z_offset], "#{model} の #{name}"
+    end
+  end
+
   # アドレス付きは従来どおりスカラ。$DM100[i] は成立しない
   # ($DM100 はスカラとしても使われ、どちらも同じ OP_GETGV になるため)
   def test_addressed_symbol_is_not_a_family
