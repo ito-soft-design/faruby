@@ -7,6 +7,8 @@ require_relative "../config"
 require_relative "../mrb_parser"
 require_relative "../disasm"
 require_relative "../plc_codegen"
+require_relative "../device_syntax"
+require_relative "../dialect"
 require_relative "../vm_constants"
 require_relative "../memory_layout"
 require_relative "../../simulator/kv_vm_simulator"
@@ -39,6 +41,20 @@ module FaRuby
 
       # 選択中インスタンスの配置
       def layout = @config.layout.for_instance(@instance)
+
+      # 接続先の機種のデバイスの読み方
+      #
+      # **番号の数え方がメーカーごとに違います。** キーエンスの MR / R / LR は
+      # チャンネルとビットに分かれた表記 (`MR400` は番号 64) ですが、三菱の
+      # M / L は 10 進そのままです (`M100` は番号 100)。既定のまま
+      # `PlcCodegen.parse_device_name` を呼ぶとキーエンスの数え方になり、
+      # 三菱に繋いでいるときに別のビットを指します。
+      def device_syntax = @device_syntax ||= DeviceSyntax.for_dialect(Dialect.for(@config.model))
+
+      # 使える種別の名前。**機種で違うので表から引きます**
+      def supported_device_names
+        device_syntax.device_set.devices.select(&:supported?).map(&:name)
+      end
 
       # 操作対象を切り替える
       def instance=(index)
@@ -127,7 +143,8 @@ module FaRuby
           return
         end
 
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
+                                 device_syntax: device_syntax)
         mutable = @transfer.write_image(codegen.memory_image)
         fixed = @transfer.write_fixed_image(codegen.fixed_image)
         ireps = codegen.irep_entries
@@ -197,7 +214,8 @@ module FaRuby
           return
         end
 
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
+                                 device_syntax: device_syntax)
         results = [@transfer.verify_image(codegen.memory_image),
                    @transfer.verify_fixed_image(codegen.fixed_image)]
         total = results.sum { |r| r[:total] }
@@ -278,7 +296,7 @@ module FaRuby
         end
 
         puts "=== Simulator ==="
-        @last_sim = KvVmSimulator.new(layout: layout)
+        @last_sim = KvVmSimulator.new(layout: layout, device_syntax: device_syntax)
         steps = @last_sim.load_irep_and_run(@last_irep)
         puts "#{steps} 命令実行"
         puts
@@ -301,7 +319,8 @@ module FaRuby
         end
 
         puts "=== Global Variables ==="
-        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout)
+        codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
+                                 device_syntax: device_syntax)
 
         # 割り当ては codegen と同一のロジックを使う (汎用グローバルの採番を含む)
         codegen.device_mappings.each do |m|
@@ -324,10 +343,10 @@ module FaRuby
           return
         end
 
-        parsed = PlcCodegen.parse_device_name(args[0])
+        parsed = PlcCodegen.parse_device_name(args[0], device_syntax)
         unless parsed
           puts "ERROR: 不明なデバイス: #{args[0]}"
-          puts "  対応デバイス: EM, DM, ZF (幅サフィックス可), R, MR, B, L, T, C"
+          puts "  対応デバイス (#{@config.model}): #{supported_device_names.join(', ')}"
           return
         end
 
