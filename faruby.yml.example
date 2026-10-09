@@ -18,6 +18,11 @@
 # デバイスの割り付けもここには書きません。**割り付けは PLC ではなく
 # プログラムのもの**なので、プログラムの隣の Ruby ファイルに置き、プログラムの
 # 先頭に `# devices: line1.devices.rb` と書いて指します (README 参照)。
+#
+#   FaRuby.devices do
+#     map "start",    "R0"
+#     map "iai_regs", "DM100", 8    # $iai_regs[0] が DM100
+#   end
 connections:
   current: target1
 

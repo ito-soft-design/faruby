@@ -102,6 +102,68 @@ class TestDeviceMap < Minitest::Test
     assert_includes error.message, "割り付け表"
   end
 
+  # === 添字で引ける範囲 ===
+
+  # **連続した範囲は添字で引けること。** 基点が 0 でないデバイス族になります
+  #
+  # `$DM[i]` は DM0 からですが、割り付けた名前なら `$regs[0]` を DM1100 から
+  # 始められます。**VM に足すものはありません** — 添字はデバイス番号に
+  # そのまま足されるので、種別と基点をシンボル表に入れるだけで済みます。
+  def test_a_range_is_a_family_with_a_base
+    entry = syntax({ "regs" => ["DM1100", 8] }).parse_symbol("$regs")
+
+    assert entry[:family], "添字で引ける形になっていること"
+    assert_equal 1100, entry[:z_offset]
+    assert_equal 8, entry[:words]
+  end
+
+  # 幅は範囲にも書ける (割り付け先と使う側のどちらでも)
+  def test_a_range_can_carry_a_width
+    from_target = syntax({ "regs" => ["DM1100L", 8] }).parse_symbol("$regs")
+    from_use    = syntax({ "regs" => ["DM1100", 8] }).parse_symbol("$regsL")
+
+    assert_equal ACCESS_L, from_target[:access_type]
+    assert_equal ACCESS_L, from_use[:access_type]
+    assert_equal 8, from_use[:words]
+  end
+
+  # ビットデバイスの範囲も作れる。**番号の数え方はメーカーのもの**
+  #
+  # `MR100` は番号 16 なので、`$bits[15]` は番号 31 = `MR115` です。
+  def test_a_range_of_bits_counts_the_way_its_vendor_counts
+    entry = syntax({ "bits" => ["MR100", 16] }).parse_symbol("$bits")
+
+    assert_equal 16, entry[:z_offset]
+    assert_equal "MR115", "MR#{syntax.address_of('MR', entry[:z_offset] + 15)}"
+  end
+
+  # ワード数を書かなければ今までどおり 1 点 (添字は付かない)
+  def test_without_a_count_it_stays_a_single_point
+    entry = syntax({ "x0" => "MR100" }).parse_symbol("$x0")
+
+    refute entry[:family], "1 点は族にしない"
+    assert_nil entry[:words]
+  end
+
+  # ワード数の誤りは転送前に止める
+  def test_a_bad_count_stops
+    [0, -1, "いくつか", 1.5].each do |bad|
+      assert_raises(FaRuby::CodegenError, "ワード数 #{bad.inspect}") do
+        syntax({ "regs" => ["DM1100", bad] })
+      end
+    end
+  end
+
+  # **範囲の終わりがアドレスの上限を越えたら止める。** デバイス参照は
+  # ベースアドレスを 1 ワードに詰めるので 65535 までです
+  def test_a_range_past_the_end_of_the_address_space_stops
+    syntax({ "regs" => ["DM65000", 536] })   # 65535 までは通る
+
+    error = assert_raises(FaRuby::CodegenError) { syntax({ "regs" => ["DM65000", 537] }) }
+
+    assert_includes error.message, "65536"
+  end
+
   # **実デバイスの名前は割り付けられません。** 通すと `$DM100` の意味が
   # 設備ごとに変わり、読む人が追えなくなります
   def test_a_real_device_name_cannot_be_mapped
@@ -266,6 +328,22 @@ class TestDeviceMapFile < Minitest::Test
     RUBY
     with_program("# devices: line.devices.rb\n", table) do |path|
       assert_equal 2, FaRuby::DeviceMap.for_program(path).size
+    end
+  end
+
+  # **ワード数を渡せば添字で引ける範囲になること**
+  def test_a_table_can_declare_a_range
+    table = <<~'RUBY'
+      FaRuby.devices do
+        map "iai_regs", "D100", 8
+        map "start",    "M0"
+      end
+    RUBY
+    with_program("# devices: line.devices.rb\n", table) do |path|
+      map = FaRuby::DeviceMap.for_program(path)
+
+      assert_equal ["D100", 8], map.mapping["iai_regs"]
+      assert_equal "M0", map.mapping["start"]
     end
   end
 

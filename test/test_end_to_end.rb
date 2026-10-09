@@ -909,6 +909,41 @@ end
     assert_equal 100_000, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s32(1041)
   end
 
+  # **割り付けた名前を添字で引けること。** 基点が 0 でないデバイス族です
+  #
+  # `$DM[i]` は DM0 からですが、`map "regs", "DM1100", 8` と書けば
+  # `$regs[0]` が DM1100 になります。**VM には足すものがありません** —
+  # 添字はデバイス番号にそのまま足され、種別と基点は実行時にシンボル表から
+  # 引いているので、表の項目を変えるだけで済みます。
+  def test_a_mapped_range_is_read_and_written_by_index
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "regs" => ["DM1100", 8] })
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $regs[0] = 11
+      $regs[7] = 77
+      8.times { |i| $regs[i] = $regs[i] + i }
+      $DM1200 = $regs[7]
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [11, 1, 2, 3, 4, 5, 6, 84], (1100..1107).map { |a| dm.read_s16(a) }
+    assert_equal 84, dm.read_s16(1200)
+  end
+
+  # **範囲の外は止まりません。** 今のところ隣のデバイスを書きます
+  #
+  # 添字は実行時に決まり、デバイス参照が持てるのはベースアドレスと種別・幅
+  # だけです。ワード数を実行時に見るには、シンボル表のエントリ (4 ワード、
+  # 予備なし) を広げることになり、固定領域の配置が全部ずれます。
+  # **分かっている穴なので形で留めておきます** (ロードマップに項目がある)。
+  def test_an_index_past_the_range_is_not_stopped_yet
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "regs" => ["DM1100", 8] })
+    result = compile_and_run("$regs[8] = 99\n", device_syntax: syntax)
+
+    assert_equal 99, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1108)
+  end
+
   # **ふつうの変数も実デバイスにできること。** 足すものは何もありません
   #
   # 割り付け表に書けばシンボル表の項目がデバイスになるだけで、汎用グローバルの

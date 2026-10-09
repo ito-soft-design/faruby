@@ -400,6 +400,9 @@ module FaRuby
         bit = parsed[:bit]
         access_type = parsed[:access_type] || ACCESS_S
 
+        # 添字で引ける範囲は、値 1 つではなく中身を並べる
+        return dump_device_range(args[0], parsed) if parsed[:words] && args[1].nil?
+
         if args[1]
           # 書き込み
           value = args[1].to_i
@@ -413,6 +416,24 @@ module FaRuby
           else
             puts "#{dev_name}#{dev_addr} = #{val}"
           end
+        end
+      end
+
+      # 添字で引ける範囲の中身を並べる
+      #
+      # **1 つだけ見せると範囲だと分かりません。** 割り付け表に書いたワード数が
+      # そのまま並ぶので、どこまでが自分のものかが見えます。
+      def dump_device_range(name, parsed)
+        base = parsed[:z_offset]
+        words = parsed[:words]
+        puts "#{name} = #{parsed[:device_name]}#{parsed[:address]} から #{words} ワード"
+        words.times do |i|
+          addr = device_syntax.address_of(parsed[:device_name], base + i)
+          val = read_device_value(parsed[:device_name], addr, base + i,
+                                  parsed[:device_type], parsed[:bit],
+                                  parsed[:access_type] || ACCESS_S)
+          puts format("  [%d] %s%s = %s", i, parsed[:device_name], addr,
+                      val.nil? ? "?" : val.to_s)
         end
       end
 

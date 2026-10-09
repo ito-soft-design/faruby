@@ -30,9 +30,15 @@ module FaRuby
 
     # mapping:        割り付け表 (抽象的な名前 => 実デバイス)
     # warn_unmapped:  表を通らずに実デバイスとして読んだ名前を覚えておくか
+    # 添字で引けるデバイス参照が持てるアドレスの上限
+    #
+    # 値ワードの下位にベースアドレスを詰めるため 16 ビットです
+    # (`DEVICE_REF_ACCESS_SCALE` のところ)。
+    MAX_FAMILY_ADDRESS = 65_535
+
     def initialize(device_set, mapping: {}, warn_unmapped: false)
       @device_set = device_set
-      @mapping = mapping.to_h { |name, target| [name.to_s, target.to_s] }
+      @mapping = mapping.to_h { |name, target| [name.to_s, normalize_target(target)] }
       @warn_unmapped = warn_unmapped
       @unmapped = []
       validate_mapping!
@@ -114,9 +120,32 @@ module FaRuby
 
     def type_name(type) = device_set.find(type)&.name
 
+    # デバイス番号を表示上のアドレスに戻す (`number_of` の逆)
+    #
+    # **添字を足すのは番号の側です。** `MR100` の次は番号 17 で、表示は
+    # `MR101` です。範囲の中身を並べるときに要ります。
+    def address_of(device_name, number)
+      device = device_set.devices.find { |d| d.name == device_name }
+      case device&.numbering
+      when :hex then number.to_s(16).upcase
+      when :hexdec then (number / 16 * 100 + number % 16).to_s
+      else number.to_s
+      end
+    end
+
     private
 
     # --- 割り付け表 ---
+
+    # 割り付け先を `[デバイス, ワード数]` にそろえる
+    #
+    # ワード数を書けば添字で引ける範囲になります (`map "regs", "D100", 8`)。
+    def normalize_target(target)
+      return [target.to_s, nil] unless target.is_a?(Array)
+
+      spec, words = target
+      [spec.to_s, words]
+    end
 
     # 割り付けた名前として読む。表に無ければ nil
     #
@@ -141,6 +170,14 @@ module FaRuby
 
     # 割り付け先を読む。使う側のサフィックスが表のものより優先する
     def mapped_entry(target, suffix, label)
+      spec, words = target
+      parsed = read_target(spec, suffix, label)
+      return parsed if words.nil?
+
+      with_range(parsed, words, spec, label)
+    end
+
+    def read_target(target, suffix, label)
       parsed = parse_name(target)
       raise CodegenError, mapping_error(label, target, "デバイスとして読めません") if parsed.nil?
       return parsed if suffix.nil? || suffix.empty?
@@ -152,6 +189,32 @@ module FaRuby
       rescue CodegenError => e
         raise CodegenError, mapping_error(label, target, e.message)
       end
+    end
+
+    # 添字で引ける範囲にする
+    #
+    # **デバイス族 (`$DM[i]`) と同じ形で、基点だけが 0 でないもの**です。
+    # 添字はデバイス番号にそのまま足されるので、VM の側に足すものはありません
+    # (種別とアドレスはどちらも実行時にシンボル表から引いている)。
+    def with_range(parsed, words, spec, label)
+      # **整数だけを受けます。** `Integer(1.5)` は 1 になるので、通すと
+      # 書いた人の思った範囲と 1 ワードずれます
+      count = case words
+              when Integer then words
+              when String then Integer(words, exception: false)
+              end
+      if count.nil?
+        raise CodegenError, mapping_error(label, spec, "ワード数が整数ではありません (#{words.inspect})")
+      end
+      raise CodegenError, mapping_error(label, spec, "ワード数が 1 未満です (#{count})") if count < 1
+
+      last = parsed[:z_offset] + count - 1
+      if last > MAX_FAMILY_ADDRESS
+        raise CodegenError,
+              mapping_error(label, spec, "範囲の終わり (番号 #{last}) が大きすぎます")
+      end
+
+      parsed.merge(family: true, words: count)
     end
 
     def mapping_error(label, target, reason)

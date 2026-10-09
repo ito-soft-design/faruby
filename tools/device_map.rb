@@ -116,17 +116,24 @@ module FaRuby
 
       # 抽象的な名前を実デバイスに割り付ける
       #
-      # **1 点ずつ書きます。** 範囲で書けないのは、配線が連続している保証が
-      # 無いためです。並んでいるなら繰り返しで書けます。
-      def map(name, target)
+      # **配線は 1 点ずつ書きます。** 範囲を既定にしないのは、配線が連続して
+      # いる保証が無いためです。並んでいるなら繰り返しで書けます。
+      #
+      # **words を渡すと連続した範囲になり、添字で引けます。**
+      #
+      #     map "iai_regs", "D100", 8    # $iai_regs[0] が D100、[7] が D107
+      #
+      # 数えるのはワードです (幅ではなく)。`$DM[i]` と同じ数え方にしてあり、
+      # 添字はデバイス番号にそのまま足されます。
+      def map(name, target, words = nil)
         name = name.to_s
         if @mapping.key?(name)
           raise CodegenError,
                 "#{File.basename(@path)}: #{name} が 2 度出ています " \
-                "(#{@mapping[name]} と #{target})"
+                "(#{describe(@mapping[name])} と #{describe(target)})"
         end
 
-        @mapping[name] = target.to_s
+        @mapping[name] = words.nil? ? target.to_s : [target.to_s, words]
       end
 
       # 表を通らずに実デバイスを直に書いた名前を知らせる
@@ -138,6 +145,10 @@ module FaRuby
       def to_device_map
         DeviceMap.new(@mapping, warn_unmapped: @warn_unmapped, path: @path)
       end
+
+      private
+
+      def describe(entry) = entry.is_a?(Array) ? entry.join(" x ") : entry.to_s
     end
   end
 
