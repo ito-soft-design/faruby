@@ -440,6 +440,13 @@ module FaRuby
         vm.move_self_to_receiver(:a)
       end
 
+      # `loop { }` はこれになります。`3.times` の OP_SENDB とは別命令で、
+      # レシーバを書かない呼び出しだけがここを通ります。
+      defs << OpcodeDef.new(0x2E, "self をレシーバ位置に置いて OP_SENDB へ",
+                            enters: 0x30) do |vm|
+        vm.move_self_to_receiver(:a)
+      end
+
       # メソッド本体の入口。引数の数を定義と突き合わせる
       defs << OpcodeDef.new(0x34, "引数の数を検査し、残りのレジスタを空にする") do |vm|
         vm.enter_method(:a, ARGUMENT_ERROR)

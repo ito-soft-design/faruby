@@ -134,6 +134,15 @@ module FaRuby
         SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
 
+      # **R[0] はトップレベルの self (main)。**
+      #
+      # mruby は `OP_LOADSELF` を書かずに R[0] が self である前提で呼び出します。
+      # 空のままだとタグが `TT_EMPTY` で、レシーバが self の組み込みメソッド
+      # (`loop`) が型検査で弾かれます。自分自身への呼び出しで渡されていくので、
+      # ここを self にすればメソッドの中でも self のままになります。
+      image[layout.reg_slot_addr(0) + SLOT_TYPE_OFFSET] = TT_OBJECT
+      image[layout.reg_slot_addr(0) + SLOT_VALUE_OFFSET] = TT_CANONICAL_VALUE.fetch(TT_OBJECT)
+
       # 汎用グローバル変数のスロットを 0 初期化する
       device_mappings.select { |m| m[:general] }.each do |m|
         SLOT_WORDS.times { |w| image[m[:z_offset] + w] = 0 }

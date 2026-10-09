@@ -418,6 +418,84 @@ class TestBlocks < Minitest::Test
     RUBY
   end
 
+  # === loop ===
+  #
+  # **上限が無く、`break` でしか終わりません。** `OP_SSENDB` (self への
+  # 呼び出し) で来るので、`3.times` の `OP_SENDB` とは別命令です。
+
+  def test_loop_runs_until_break
+    assert_result 5, <<~RUBY
+      n = 0
+      loop do
+        n = n + 1
+        break if n >= 5
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  # 上限を 2147483647 にする手を採らなかったので、数え上げでは終わらない。
+  # **打ち切られずに回り続けていること**を歩数で見る
+  def test_loop_does_not_end_on_its_own
+    sim = run_source(<<~RUBY)
+      n = 0
+      loop do
+        n = n + 1
+      end
+    RUBY
+
+    assert_equal VM_RUNNING, sim.status, "loop が自分で終わってしまった"
+    assert_equal 0, sim.em.read_u16(layout.error_addr)
+  end
+
+  # Ruby の loop { |i| } も i は nil。ここでは未代入のまま (偽)
+  def test_loop_passes_nothing_to_the_block
+    assert_result 1, <<~RUBY
+      got = 1
+      loop do |i|
+        got = 0 if i
+        break
+      end
+      $DM0 = got
+    RUBY
+  end
+
+  def test_loop_inside_a_method
+    assert_result 4, <<~RUBY
+      def count
+        n = 0
+        loop do
+          n = n + 1
+          break if n >= 4
+        end
+        n
+      end
+      $DM0 = count
+    RUBY
+  end
+
+  # ブロックの中の反復も積める。外側のローカルにも届く
+  def test_an_iteration_inside_loop
+    assert_result 3, <<~RUBY
+      total = 0
+      loop do
+        3.times do |i|
+          total = total + i
+        end
+        break
+      end
+      $DM0 = total
+    RUBY
+  end
+
+  # ブロック無しの loop は OP_SSEND で来る。ブロックを取るメソッドなので弾く
+  def test_loop_without_a_block_stops
+    sim = run_source("loop\n$DM0 = 1\n")
+
+    assert_equal VM_ERROR, sim.status
+    assert_equal UNKNOWN_METHOD_ERROR, sim.em.read_u16(layout.error_addr)
+  end
+
   def test_break_out_of_a_hash_each
     assert_result 1, <<~RUBY
       h = { 1 => 10, 2 => 20 }

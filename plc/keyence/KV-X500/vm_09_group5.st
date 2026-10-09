@@ -1,5 +1,5 @@
 // =======================================
-// faRuby VM - オペコード 0x29 - 0x3D
+// faRuby VM - オペコード 0x29 - 0x3C
 // =======================================
 // 【自動生成】このファイルを直接編集しないでください。
 //   定義: tools/opcode_table.rb
@@ -12,7 +12,7 @@
 // 担当外の番号はここで素通りする。**判定はループの外に置く。**
 // 見るのは上限だけ。41 未満は手前の群が実行して
 // 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 61 THEN
+IF EM54:Z9 <= 60 THEN
 
   // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   // 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -124,9 +124,16 @@ IF EM54:Z9 <= 61 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSE
+          ELSIF Z5 <= 26 THEN
             // デバイス参照 (タグ 11)
             IF EM0:Z1 <> 11 THEN
+              EM1:Z9 := 3;
+              EM2:Z9 := 4;
+              EXIT;
+            END_IF;
+          ELSE
+            // self (タグ 10)
+            IF EM0:Z1 <> 10 THEN
               EM1:Z9 := 3;
               EM2:Z9 := 4;
               EXIT;
@@ -1212,6 +1219,9 @@ IF EM54:Z9 <= 61 THEN
       IF Z5 = 21 THEN
         Z6 := 1;
       END_IF;
+      IF Z5 = 27 THEN
+        Z6 := 1;
+      END_IF;
       IF Z6 = 0 THEN
         // ブロックを取らないメソッドにブロックを渡した
         EM1:Z9 := 3;
@@ -1289,9 +1299,16 @@ IF EM54:Z9 <= 61 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSE
+        ELSIF Z5 <= 26 THEN
           // デバイス参照 (タグ 11)
           IF EM0:Z1 <> 11 THEN
+            EM1:Z9 := 3;
+            EM2:Z9 := 4;
+            EXIT;
+          END_IF;
+        ELSE
+          // self (タグ 10)
+          IF EM0:Z1 <> 10 THEN
             EM1:Z9 := 3;
             EM2:Z9 := 4;
             EXIT;
@@ -1305,7 +1322,11 @@ IF EM54:Z9 <= 61 THEN
         EM2:Z9 := 9;
         EXIT;
       END_IF;
-      IF Z5 = 11 THEN
+      IF Z5 = 27 THEN
+        // loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす
+        EM16.L:Z9 := 0;
+        EM18.L:Z9 := 0;
+      ELSIF Z5 = 11 THEN
         // n.times は 0 から n-1 まで
         EM16.L:Z9 := 0;
         EM18.L:Z9 := EM1.L:Z1 - 1;
@@ -1364,6 +1385,10 @@ IF EM54:Z9 <= 61 THEN
             EM5:Z3 := 2;
           END_IF;
         END_IF;
+        IF Z5 = 27 THEN
+          // loop は上限が無く、ブロックに渡す値も無い
+          EM5:Z3 := 4;
+        END_IF;
         // 窓をずらした後、ブロックは R[引数の数 + 1] にある
         Z2 := (EM9:Z9 + 1) * 4 + EM32:Z9 + Z9;
         Z6 := EM1:Z2;   // 本体の irep
@@ -1374,7 +1399,11 @@ IF EM54:Z9 <= 61 THEN
         EM8.L:Z3 := EM18.L:Z9;
         // 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く
         Z2 := 4 + EM32:Z9 + Z9;
-        IF EM5:Z3 = 3 THEN
+        IF EM5:Z3 = 4 THEN
+          // loop はブロックに何も渡さない。**引数の数だけ書く。**
+          // Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
+          EM37:Z9 := 0;
+        ELSIF EM5:Z3 = 3 THEN
           // h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
           Z4 := 0 + EM32:Z9 + Z9;
           Z7 := EM1:Z4;   // スロット番号
@@ -1497,12 +1526,21 @@ IF EM54:Z9 <= 61 THEN
         Z3 := (EM31:Z9 - 1) * 10 + 392 + Z9;
         IF EM5:Z3 >= 1 THEN
           EM16.L:Z9 := EM6.L:Z3 + 1;
+          IF EM5:Z3 = 4 THEN
+            // loop は上限が無い。**break でしか終わらない。**
+            // 上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)
+            EM16.L:Z9 := EM8.L:Z3;
+          END_IF;
           IF EM16.L:Z9 <= EM8.L:Z3 THEN
             // 次の回。PC を 0 に戻し、ブロックの引数を更新するだけ
             // irep もレジスタ窓もそのまま使い回す
             EM6.L:Z3 := EM16.L:Z9;
             Z2 := 4 + EM32:Z9 + Z9;
-            IF EM5:Z3 = 3 THEN
+            IF EM5:Z3 = 4 THEN
+              // loop はブロックに何も渡さない。**引数の数だけ書く。**
+              // Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
+              EM37:Z9 := 0;
+            ELSIF EM5:Z3 = 3 THEN
               // h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
               Z4 := 0 + EM32:Z9 + Z9;
               Z7 := EM1:Z4;   // スロット番号
@@ -1717,23 +1755,6 @@ IF EM54:Z9 <= 61 THEN
             EM0:Z1 := 4;
           END_IF;
         END_IF;
-      END_IF;
-
-    ELSIF EM6:Z9 = 61 THEN
-      // OP_ADDI (BB): R[a] = R[a] + b
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      IF EM0:Z1 = 5 THEN
-        EM1.F:Z1 := EM1.F:Z1 + EM8:Z9;
-        EM0:Z1 := 5;
-      ELSE
-        EM1.L:Z1 := EM1.L:Z1 + EM8:Z9;
-        EM0:Z1 := 4;
       END_IF;
 
     ELSE

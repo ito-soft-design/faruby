@@ -52,6 +52,11 @@ FOR Z9 := 20000 TO 22000 BY 2000 DO
       EM0:Z1 := 0;
     END_FOR;
 
+    // R[0] はトップレベルの self (main)。**mruby は OP_LOADSELF を書かない**
+    Z1 := EM32:Z9 + Z9;
+    EM1.L:Z1 := 0;
+    EM0:Z1 := 10;
+
     EM13:Z9 := 0;   // リセット要求クリア
 
   END_IF;

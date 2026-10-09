@@ -182,6 +182,50 @@ class TestKvsGenerator < Minitest::Test
     end
   end
 
+  # === loop ===
+
+  # `OP_SSENDB` は self をレシーバ位置に置いて `OP_SENDB` の枝へ落ちる前置き。
+  # 別々に書くと組み込みメソッドの振り分けが 2 度展開される
+  def test_ssendb_falls_into_sendb
+    ssendb = FaRuby::OpcodeTable.lookup[0x2E]
+
+    refute_nil ssendb, "OP_SSENDB が定義表に無い"
+    assert_equal :OP_SSENDB, ssendb.name
+    assert_equal 0x30, ssendb.enters, "OP_SENDB の枝へ落ちること"
+  end
+
+  # **前置きは互いに素通りするので、Z の控えを持ち越してはいけない。**
+  #
+  # 1 つ目が組み立てたスロットのアドレスを 2 つ目が使い回すと、組み立てる行が
+  # 出ないまま参照だけが残る。実機で踏んだ — `OP_SSENDB` が self を写さず、
+  # レシーバの型検査で止まった。**三菱では出ない** (添字で指すので行が無い)
+  def test_each_prologue_builds_its_own_slot_addresses
+    generator = FaRuby::KvsGenerator.new
+    fetch = generator.generate.fetch(generator.file_name("fetch"))
+    prologues = FaRuby::OpcodeTable.all.reject(&:branch?)
+
+    assert_operator prologues.size, :>=, 2, "持ち越しが起きる形になっていない"
+    # R[0] (self) のアドレスを組み立てる行が、前置きの数だけ出ていること
+    assert_equal prologues.size, fetch.scan("= 0 + #{emitter.reg_offset}").size,
+                 "前置きごとにスロットのアドレスを組み立てていない"
+  end
+
+  # loop は上限が無い。**break でしか終わらない**
+  def test_loop_skips_the_limit_check
+    kind = emitter.frame_kind
+
+    assert_includes @source, "IF #{kind} = #{FaRuby::MemoryLayout::FRAME_KIND_LOOP} THEN",
+                    "上限の比較を飛ばす枝が無い"
+    assert_includes @source, "#{kind} = #{FaRuby::MemoryLayout::FRAME_KIND_LOOP}",
+                    "反復フレームに loop の種別を書いていない"
+  end
+
+  # R[0] はトップレベルの self。**mruby は OP_LOADSELF を書かない**
+  def test_the_reset_sets_the_top_level_self
+    assert_includes init_source, "= #{TT_OBJECT}",
+                    "リセットで R[0] を self に戻していない"
+  end
+
   # 実行判定は各インスタンスの STATUS を見る
   def test_each_instance_checks_its_own_status
     assert_includes @source, "IF #{emitter.status} = #{VM_RUNNING} THEN"

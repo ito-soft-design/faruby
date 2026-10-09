@@ -1924,6 +1924,11 @@ module FaRuby
     # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
     def advance_iteration
       line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_INDEX)} + 1"
+      if_("#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}") do
+        note "loop は上限が無い。**break でしか終わらない。**"
+        note "上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)"
+        line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}"
+      end
       if_else_block("#{scratch32} <= #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}") do
         note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
         note "irep もレジスタ窓もそのまま使い回す"
@@ -1952,7 +1957,13 @@ module FaRuby
       line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
       argument = slot_on(2)
       element = slot_on(Z_ARRAY_ELEMENT)
-      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}")
+      indent
+      note "loop はブロックに何も渡さない。**引数の数だけ書く。**"
+      note "Ruby の loop { |i| } も i は nil で、ここでは未代入のまま"
+      line "#{state(layout.call_argc_addr)} = 0"
+      dedent
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
       indent
       note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
       line "Z4 = 0 + #{reg_offset}"
@@ -1985,6 +1996,21 @@ module FaRuby
       line "#{state(layout.call_argc_addr)} = 1"
       dedent
       line "END IF"
+    end
+
+    # R[0] をトップレベルの self (main) にする
+    #
+    # **mruby は `OP_LOADSELF` を書きません。** R[0] が self である前提で
+    # 呼び出すので、潰したままにするとタグが `TT_EMPTY` になり、レシーバが
+    # self の組み込みメソッド (`loop`) が型検査で弾かれます。自分自身への
+    # 呼び出しで渡されていくため、ここを self にすればメソッドの中でも
+    # self のままになります。
+    def set_top_level_self
+      note "R[0] はトップレベルの self (main)。**mruby は OP_LOADSELF を書かない**"
+      line "Z1 = #{reg_offset}"
+      slot = slot_on(1)
+      line "#{slot.value} = #{TT_CANONICAL_VALUE.fetch(TT_OBJECT)}"
+      line "#{slot.tag} = #{TT_OBJECT}"
     end
 
     # 実行中のフレームの種別 (Z3 がそのフレームを指していること)
@@ -2058,7 +2084,13 @@ module FaRuby
 
     # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
     def iteration_range(name, recv, type_code)
-      line "IF Z5 = #{METHOD_TIMES} THEN"
+      line "IF Z5 = #{METHOD_LOOP} THEN"
+      indent
+      note "loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = 0"
+      dedent
+      line "ELSE IF Z5 = #{METHOD_TIMES} THEN"
       indent
       note "n.times は 0 から n-1 まで"
       line "#{scratch32} = 0"
@@ -2098,6 +2130,10 @@ module FaRuby
         end
         line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
         end_block
+      end
+      if_("Z5 = #{METHOD_LOOP}") do
+        note "loop は上限が無く、ブロックに渡す値も無い"
+        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
       end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
@@ -3258,6 +3294,8 @@ module FaRuby
         e.blank
         e.clear_register_file(z)
         e.blank
+        e.set_top_level_self
+        e.blank
         e.line "#{e.state(layout.reset_req_addr)} = 0     ' リセット要求クリア"
         e.dedent
         e.blank
@@ -3650,6 +3688,11 @@ module FaRuby
     # PC を進めません。
     def emit_prologues(e)
       @opcodes.reject(&:branch?).each do |op|
+        # **前置きごとに Z の控えを捨てます。** 1 つ目が組み立てたスロットの
+        # アドレスを 2 つ目が使い回すと、組み立てる行が出ないまま参照だけが
+        # 残ります。前置きは互いに素通りするので、持ち越してはいけません
+        # (実機で踏みました。`OP_SSENDB` が self を写さないまま落ちました)
+        e.begin_instruction
         e.blank
         e.note "#{op.name}: #{op.summary}"
         e.if_("#{e.opcode} = #{op.code}") do

@@ -344,7 +344,7 @@ module FaRuby
     # `OP_TCLASS` と `OP_LOADSYM` と `OP_DEF` は `def` の出力に混ざります。
     # `OP_GETUPVAR` / `OP_SETUPVAR` はブロックの外側の変数を触ります。
     STAGE2 = %i[
-      OP_SSEND OP_SEND OP_SENDB OP_ENTER OP_BREAK
+      OP_SSEND OP_SSENDB OP_SEND OP_SENDB OP_ENTER OP_BREAK
       OP_BLOCK OP_METHOD OP_DEF OP_TCLASS OP_LOADSYM
       OP_GETUPVAR OP_SETUPVAR
     ].freeze

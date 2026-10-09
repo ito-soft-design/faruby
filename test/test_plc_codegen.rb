@@ -327,13 +327,28 @@ end
     irep = build_irep(nregs: 3)
     image = mutable_image(irep)
 
-    3.times do |i|
+    # R[0] はトップレベルの self なので 0 ではない (下のテストで見る)
+    (1...3).each do |i|
       slot = layout.reg_slot_addr(i)
       SLOT_WORDS.times do |w|
         assert image.key?(slot + w), "EM#{slot + w} (R[#{i}] slot word #{w}) が初期化されていない"
         assert_equal 0, image[slot + w]
       end
     end
+  end
+
+  # **R[0] はトップレベルの self (main)。**
+  #
+  # mruby は `OP_LOADSELF` を書かずに R[0] が self である前提で呼び出す。
+  # 空のままだとタグが TT_EMPTY で、レシーバが self の組み込みメソッド
+  # (`loop`) が型検査で弾かれる。自分自身への呼び出しで渡されていくので、
+  # ここを self にすればメソッドの中でも self のままになる
+  def test_the_first_register_holds_the_top_level_self
+    image = mutable_image(build_irep(nregs: 3))
+    slot = layout.reg_slot_addr(0)
+
+    assert_equal TT_OBJECT, image[slot + SLOT_TYPE_OFFSET]
+    assert_equal TT_CANONICAL_VALUE.fetch(TT_OBJECT), image[slot + SLOT_VALUE_OFFSET]
   end
 
   # レジスタ領域が呼び出しスタックを侵さないこと

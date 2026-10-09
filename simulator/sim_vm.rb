@@ -661,6 +661,10 @@ module FaRuby
     # 次の回があれば入り直し、無ければ抜ける
     def advance_iteration(addr)
       index = @em.read_s32(addr + MemoryLayout::FRAME_INDEX) + 1
+      # loop は上限が無い。**break でしか終わらない**
+      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_LOOP
+        index = @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
+      end
       # 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
       return pop_frame if index > @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
 
@@ -679,6 +683,9 @@ module FaRuby
     # 再突入 (OP_RETURN) からも呼ばれるので、ここで書けば毎回正しくなる。
     def set_block_argument(addr, index)
       case @em.read_u16(addr + MemoryLayout::FRAME_KIND)
+      when MemoryLayout::FRAME_KIND_LOOP
+        # loop はブロックに何も渡さない。Ruby の loop { |i| } も i は nil
+        @em.write_u16(layout.call_argc_addr, 0)
       when MemoryLayout::FRAME_KIND_HASH_EACH
         # h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
         keys, values = hash_slots(0)
@@ -738,6 +745,8 @@ module FaRuby
 
     # 反復の範囲 [開始, 上限]。扱えない型なら nil
     def iteration_range(code, index, _argc)
+      # loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす
+      return [0, 0] if code == METHOD_LOOP
       return [0, read_reg(index) - 1] if code == METHOD_TIMES
       return [0, collection_length(index) - 1] if code == METHOD_EACH
 
@@ -770,6 +779,7 @@ module FaRuby
 
     # 反復フレームの種別。ブロックに何を渡すかが決まる
     def iteration_frame_kind(code, tag)
+      return MemoryLayout::FRAME_KIND_LOOP if code == METHOD_LOOP
       return MemoryLayout::FRAME_KIND_ITERATE unless code == METHOD_EACH
       return MemoryLayout::FRAME_KIND_HASH_EACH if tag == TT_HASH
 

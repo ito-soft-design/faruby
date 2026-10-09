@@ -303,6 +303,11 @@ module FaRuby
     METHOD_VALUES  = 25
     # $DML[100, 3]。デバイス参照から連続した値を配列にする
     METHOD_SLICE   = 26
+    # レシーバが self (トップレベルの main)。ブロックを取る
+    #
+    # **末尾に置くのは番号を振り直さずに済ませるため**です。番号はレシーバの
+    # 型ごとに連続していればよく、タグの大小とは関係しません。
+    METHOD_LOOP    = 27
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -324,7 +329,8 @@ module FaRuby
       [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
       [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
       [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
-      [nil,            TT_DEVICE,  TT_DEVICE, "デバイス参照"],
+      [METHOD_SLICE,   TT_DEVICE,  TT_DEVICE, "デバイス参照"],
+      [nil,            TT_OBJECT,  TT_OBJECT, "self"],
     ].freeze
 
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
@@ -370,13 +376,14 @@ module FaRuby
       "keys"   => [METHOD_KEYS,   0],
       "values" => [METHOD_VALUES, 0],
       "[]"     => [METHOD_SLICE,  2],
+      "loop"   => [METHOD_LOOP,   0],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない
     #
     # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
     # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
-    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH].freeze
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH, METHOD_LOOP].freeze
 
     # 番号 => 生成コードのコメントに使う名前
     #

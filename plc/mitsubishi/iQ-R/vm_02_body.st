@@ -146,6 +146,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
     VMCURRENTOPCODE := 47;
   END_IF;
 
+  (* OP_SSENDB: self をレシーバ位置に置いて OP_SENDB へ *)
+  IF VMCURRENTOPCODE = 46 THEN
+    (* オペランド a を覗く。枝の中で読み直すので PC は進めない *)
+    VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
+    (* self をレシーバ位置に置く (mruby の regs[a] = regs[0]) *)
+    VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[VMREGSLOT + 0].SLNUM;
+    VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := VMSLOT[VMREGSLOT + 0].SLTAG;
+    VMCURRENTOPCODE := 48;
+  END_IF;
+
   IF VMCURRENTOPCODE <= 7 THEN
     (* オペコード 0x00 - 0x07 *)
     IF VMCURRENTOPCODE = 0 THEN
@@ -3052,8 +3062,8 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       EXIT;
 
     END_IF;
-  ELSIF VMCURRENTOPCODE <= 61 THEN
-    (* オペコード 0x29 - 0x3D *)
+  ELSIF VMCURRENTOPCODE <= 60 THEN
+    (* オペコード 0x29 - 0x3C *)
     IF VMCURRENTOPCODE = 47 THEN
       (* OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
@@ -3152,9 +3162,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSE
+          ELSIF Z5 <= 26 THEN
             (* デバイス参照 (タグ 11) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 11 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
+          ELSE
+            (* self (タグ 10) *)
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 10 THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
@@ -4488,6 +4505,9 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z5 = 21 THEN
         Z6 := 1;
       END_IF;
+      IF Z5 = 27 THEN
+        Z6 := 1;
+      END_IF;
       IF Z6 = 0 THEN
         (* ブロックを取らないメソッドにブロックを渡した *)
         VMSTATUS := 3;
@@ -4564,9 +4584,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSE
+        ELSIF Z5 <= 26 THEN
           (* デバイス参照 (タグ 11) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 11 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
+        ELSE
+          (* self (タグ 10) *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 10 THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
@@ -4579,7 +4606,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMERROR := 9;
         EXIT;
       END_IF;
-      IF Z5 = 11 THEN
+      IF Z5 = 27 THEN
+        (* loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす *)
+        VMTEMP32L := 0;
+        VMTEMP32BL := 0;
+      ELSIF Z5 = 11 THEN
         (* n.times は 0 から n-1 まで *)
         VMTEMP32L := 0;
         VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM - 1;
@@ -4637,6 +4668,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             D5Z3 := 2;
           END_IF;
         END_IF;
+        IF Z5 = 27 THEN
+          (* loop は上限が無く、ブロックに渡す値も無い *)
+          D5Z3 := 4;
+        END_IF;
         (* 窓をずらした後、ブロックは R[引数の数 + 1] にある *)
         Z2 := (VMOPERANDC + 1) * 4 + VMREGBASE + 4000;
         Z6 := D1Z2;   (* 本体の irep *)
@@ -4649,7 +4684,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         D9Z3 := VMTEMP32BHI;
         (* 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く *)
         Z2 := 4 + VMREGBASE + 4000;
-        IF D5Z3 = 3 THEN
+        IF D5Z3 = 4 THEN
+          (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
+          (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
+          VMCALLARGC := 0;
+        ELSIF D5Z3 = 3 THEN
           (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
           Z4 := 0 + VMREGBASE + 4000;
           Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
@@ -4772,6 +4811,13 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMTEMP32 := D6Z3;
           VMTEMP32HI := D7Z3;
           VMTEMP32L := VMTEMP32L + 1;
+          IF D5Z3 = 4 THEN
+            (* loop は上限が無い。**break でしか終わらない。** *)
+            (* 上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま) *)
+            VMTEMP32B := D8Z3;
+            VMTEMP32BHI := D9Z3;
+            VMTEMP32L := VMTEMP32BL;
+          END_IF;
           VMTEMP32B := D8Z3;
           VMTEMP32BHI := D9Z3;
           IF VMTEMP32L <= VMTEMP32BL THEN
@@ -4780,7 +4826,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             D6Z3 := VMTEMP32;
             D7Z3 := VMTEMP32HI;
             Z2 := 4 + VMREGBASE + 4000;
-            IF D5Z3 = 3 THEN
+            IF D5Z3 = 4 THEN
+              (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
+              (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
+              VMCALLARGC := 0;
+            ELSIF D5Z3 = 3 THEN
               (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
               Z4 := 0 + VMREGBASE + 4000;
               Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
@@ -5010,7 +5060,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 61 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 68 THEN
+    (* オペコード 0x3D - 0x44 *)
+    IF VMCURRENTOPCODE = 61 THEN
       (* OP_ADDI (BB): R[a] = R[a] + b *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5024,16 +5083,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 69 THEN
-    (* オペコード 0x3E - 0x45 *)
-    IF VMCURRENTOPCODE = 62 THEN
+    ELSIF VMCURRENTOPCODE = 62 THEN
       (* OP_SUB (B): R[a] = R[a] - R[a+1] *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5371,7 +5421,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 69 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 87 THEN
+    (* オペコード 0x45 - 0x57 *)
+    IF VMCURRENTOPCODE = 69 THEN
       (* OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5413,16 +5472,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 88 THEN
-    (* オペコード 0x46 - 0x58 *)
-    IF VMCURRENTOPCODE = 70 THEN
+    ELSIF VMCURRENTOPCODE = 70 THEN
       (* OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5730,7 +5780,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 := Z4;   (* 定義元のフレーム *)
       VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 12;
 
-    ELSIF VMCURRENTOPCODE = 88 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 105 THEN
+    (* オペコード 0x58 - 0x69 *)
+    IF VMCURRENTOPCODE = 88 THEN
       (* OP_METHOD (BB): R[a] = 子 irep b への参照 *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5750,16 +5809,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 := -1;   (* メソッドは外側を見ない *)
       VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 12;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 105 THEN
-    (* オペコード 0x59 - 0x69 *)
-    IF VMCURRENTOPCODE = 95 THEN
+    ELSIF VMCURRENTOPCODE = 95 THEN
       (* OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録 *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;

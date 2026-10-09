@@ -129,6 +129,12 @@ module FaRuby
     FRAME_KIND_ITERATE  = 1   # 反復。ブロックに渡すのは添字 (times / upto)
     FRAME_KIND_EACH     = 2   # 反復。ブロックに渡すのは要素 (a.each)
     FRAME_KIND_HASH_EACH = 3  # 反復。ブロックに渡すのは鍵と値 (h.each)
+    # 反復。**上限が無く、ブロックには何も渡さない** (loop)
+    #
+    # 上限を 2147483647 にして普通の反復にする手もありましたが、何日か
+    # 回すと終わってしまい、年単位で動く PLC に合いません。`break` でしか
+    # 終わらないので、上限の比較を飛ばす種別を持たせます。
+    FRAME_KIND_LOOP     = 4
 
     # 配列プール 1 スロットの見出し
     #

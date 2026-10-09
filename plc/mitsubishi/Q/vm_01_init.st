@@ -48,6 +48,11 @@ IF VMRESETREQ = 1 THEN
     VMSLOT[VMLOOPCOUNTER].SLTAG := 0;
   END_FOR;
 
+  (* R[0] はトップレベルの self (main)。**mruby は OP_LOADSELF を書かない** *)
+  Z1 := VMREGBASE + 4000;
+  VMSLOT[(Z1 - 4000) / 4].SLNUM := 0;
+  VMSLOT[(Z1 - 4000) / 4].SLTAG := 10;
+
   VMRESETREQ := 0;   (* リセット要求クリア *)
 
 END_IF;

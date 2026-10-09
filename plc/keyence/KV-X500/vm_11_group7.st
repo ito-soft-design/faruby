@@ -1,5 +1,5 @@
 // =======================================
-// faRuby VM - オペコード 0x46 - 0x58
+// faRuby VM - オペコード 0x45 - 0x57
 // =======================================
 // 【自動生成】このファイルを直接編集しないでください。
 //   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 // 並び順と役割は vm_02_prologue.st の先頭にあります。
 
 // 担当外の番号はここで素通りする。**判定はループの外に置く。**
-// 見るのは上限だけ。70 未満は手前の群が実行して
+// 見るのは上限だけ。69 未満は手前の群が実行して
 // 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 88 THEN
+IF EM54:Z9 <= 87 THEN
 
   // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   // 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,7 +21,52 @@ IF EM54:Z9 <= 88 THEN
   // BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 := 1 TO 1 DO
 
-    IF EM6:Z9 = 70 THEN
+    IF EM6:Z9 = 69 THEN
+      // OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := FM0:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
+      IF EM0:Z1 = 5 THEN
+        IF EM0:Z2 = 5 THEN
+          IF EM1.F:Z1 > EM1.F:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        ELSE
+          IF EM1.F:Z1 > EM1.L:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        END_IF;
+      ELSE
+        IF EM0:Z2 = 5 THEN
+          IF EM1.L:Z1 > EM1.F:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        ELSE
+          IF EM1.L:Z1 > EM1.L:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        END_IF;
+      END_IF;
+
+    ELSIF EM6:Z9 = 70 THEN
       // OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
       EM7:Z9 := FM0:Z1;
@@ -331,29 +376,6 @@ IF EM54:Z9 <= 88 THEN
         Z4 := EM31:Z9 - 1;
       END_IF;
       EM2:Z1 := Z4;   // 定義元のフレーム
-      EM0:Z1 := 12;
-
-    ELSIF EM6:Z9 = 88 THEN
-      // OP_METHOD (BB): R[a] = 子 irep b への参照
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      // 実行中の irep の最初の子の番号に、親から見た子の番号を足す
-      Z3 := EM30:Z9 * 8 + EM38:Z9;
-      Z4 := Z3 + 5;
-      EM16:Z9 := FM0:Z4 + EM8:Z9;
-      IF EM16:Z9 >= EM36:Z9 THEN
-        // 指す先の irep が無い
-        EM1:Z9 := 3;
-        EM2:Z9 := 7;
-        EXIT;
-      END_IF;
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      EM1:Z1 := EM16:Z9;   // 本体の irep
-      EM2:Z1 := 65535;   // メソッドは外側を見ない
       EM0:Z1 := 12;
 
     ELSE

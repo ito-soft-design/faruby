@@ -1,6 +1,6 @@
 # 対応オペコード一覧
 
-mruby 3.x 可変長バイトコード形式に基づきます。実装済みは 59 命令です。
+mruby 3.x 可変長バイトコード形式に基づきます。実装済みは 60 命令です。
 
 この一覧は [tools/opcode_table.rb](../tools/opcode_table.rb) の内容を説明する
 ものです。命令の追加・変更はそちらを直し、`rake vm_core` で再生成します。
@@ -217,6 +217,7 @@ R[2]-R[7] を読みます。
 | 0x2F | 47 | OP_SEND | BBB | R[a] = R[a].symbols[b](R[a+1]..) |
 | 0x2D | 45 | OP_SSEND | BBB | R[a] = self.symbols[b](R[a+1]..) |
 | 0x30 | 48 | OP_SENDB | BBB | R[a].symbols[b](R[a+1]..) { ブロック } |
+| 0x2E | 46 | OP_SSENDB | BBB | self.symbols[b](R[a+1]..) { ブロック }。`loop` がこれ |
 | 0x34 | 52 | OP_ENTER | W | 引数の数を検査し、残りのレジスタを空にする |
 | 0x38 | 56 | OP_RETURN | B | R[a] を返して呼び出し元へ |
 | 0x3A | 58 | OP_BREAK | B | 反復を打ち切って R[a] を返す |
@@ -300,7 +301,8 @@ Ruby がそう振る舞うためで、範囲外の桁数を KV の命令へ渡�
 呼ぶと「未対応のメソッド」で止まります。**レシーバの型で並べたため番号が
 連続していない**ので、判定は範囲比較ではなく列挙です。
 
-`loop` は `OP_SSENDB` (self への呼び出し) で別命令のため未対応です。
+`loop` は `OP_SSENDB` (self への呼び出し) で `OP_SENDB` とは別命令です。
+self をレシーバ位置に置いてから `OP_SENDB` の枝へ落とす前置きとして入れました。
 
 利用者向けの一覧は [README](../README.md#組み込みメソッド) にあります。
 この表は番号と実装の対応で、あちらは書き方と意味です。

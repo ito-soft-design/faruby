@@ -1,5 +1,5 @@
 ' =======================================
-' faRuby VM - オペコード 0x3E - 0x45
+' faRuby VM - オペコード 0x3D - 0x44
 ' =======================================
 ' 【自動生成】このファイルを直接編集しないでください。
 '   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 ' 並び順と役割は vm_02_prologue.kvs の先頭にあります。
 
 ' 担当外の番号はここで素通りする。**判定はループの外に置く。**
-' 見るのは上限だけ。62 未満は手前の群が実行して
+' 見るのは上限だけ。61 未満は手前の群が実行して
 ' 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 69 THEN
+IF EM54:Z9 <= 68 THEN
 
   ' 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   ' 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,7 +21,24 @@ IF EM54:Z9 <= 69 THEN
   ' BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 = 1 TO 1
 
-    IF EM6:Z9 = 62 THEN
+    IF EM6:Z9 = 61 THEN
+      ' OP_ADDI (BB): R[a] = R[a] + b
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = FM0:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      IF EM0:Z1 = 5 THEN
+        EM1.F:Z1 = EM1.F:Z1 + EM8:Z9
+        EM0:Z1 = 5
+      ELSE
+        EM1.L:Z1 = EM1.L:Z1 + EM8:Z9
+        EM0:Z1 = 4
+      END IF
+
+    ELSE IF EM6:Z9 = 62 THEN
       ' OP_SUB (B): R[a] = R[a] - R[a+1]
       Z1 = EM0:Z9 + EM33:Z9
       EM7:Z9 = FM0:Z1
@@ -370,51 +387,6 @@ IF EM54:Z9 <= 69 THEN
           END IF
         ELSE
           IF EM1.L:Z1 <= EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      END IF
-
-    ELSE IF EM6:Z9 = 69 THEN
-      ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          IF EM1.F:Z1 > EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.F:Z1 > EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          IF EM1.L:Z1 > EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.L:Z1 > EM1.L:Z2 THEN
             EM1.L:Z1 = 1
             EM0:Z1 = 3
           ELSE

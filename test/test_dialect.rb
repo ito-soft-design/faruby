@@ -59,6 +59,22 @@ class TestDialect < Minitest::Test
     assert_equal "SM409", FaRuby::MelsecIqrDialect.new.tick_pulse
   end
 
+  # **段の区切りは記録で、いまは全部載っています** (MelsecDialect::STAGES)。
+  #
+  # 落ちていると生成コードからその命令が消えます。前置きだけの命令
+  # (`OP_SSENDB`) は枝を持たないため**エラーにも見えず**、実機で
+  # 「未知のオペコード」で止まるまで気づけません。実際に `loop` を入れた
+  # ときに踏みました。
+  def test_every_model_carries_every_opcode
+    all = FaRuby::OpcodeTable.all
+
+    FaRuby::Dialect.all.each do |dialect|
+      missing = all.map(&:code) - dialect.select_opcodes(all).map(&:code)
+
+      assert_empty missing.map { |code| format("0x%02X", code) }, dialect.model
+    end
+  end
+
   # 機種を増やすときに書き出し先が衝突しないこと
   def test_every_model_writes_somewhere_of_its_own
     directories = FaRuby::Dialect.all.map(&:directory)
