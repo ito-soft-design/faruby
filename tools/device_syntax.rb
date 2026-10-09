@@ -6,7 +6,7 @@ require_relative "device_set"
 module FaRuby
   # 生成できない書き方を見つけたとき
   #
-  # **綴りの誤りは転送する前に止めます。** PLC まで持っていってから
+  # **書き間違いは転送する前に止めます。** PLC まで持っていってから
   # 気づくと、何が悪いのか分かりません。
   class CodegenError < StandardError; end
 
@@ -26,16 +26,16 @@ module FaRuby
     # access_type に詰められる桁数の上限 (16ビットに収まる範囲)
     MAX_STRING_FIELD = 4095
 
-    attr_reader :device_set, :mapping
-
-    # mapping:        割り付け表 (抽象的な名前 => 実デバイス)
-    # warn_unmapped:  表を通らずに実デバイスとして読んだ名前を覚えておくか
     # 添字で引けるデバイス参照が持てるアドレスの上限
     #
     # 値ワードの下位にベースアドレスを詰めるため 16 ビットです
     # (`DEVICE_REF_ACCESS_SCALE` のところ)。
     MAX_FAMILY_ADDRESS = 65_535
 
+    attr_reader :device_set, :mapping
+
+    # mapping:        割り付け表 (抽象的な名前 => 実デバイス)
+    # warn_unmapped:  表を通らずに実デバイスとして読んだ名前を覚えておくか
     def initialize(device_set, mapping: {}, warn_unmapped: false)
       @device_set = device_set
       @mapping = mapping.to_h { |name, target| [name.to_s, normalize_target(target)] }
@@ -47,7 +47,7 @@ module FaRuby
     def self.keyence = @keyence ||= new(DeviceSet.keyence)
     def self.melsec  = @melsec  ||= new(DeviceSet.melsec)
 
-    # 機種の綴り方から引く
+    # 機種の方言から引く
     def self.for_dialect(dialect, mapping: {}, warn_unmapped: false)
       new(dialect.device_set, mapping: mapping, warn_unmapped: warn_unmapped)
     end
@@ -221,7 +221,7 @@ module FaRuby
       "#{label} の割り付け先 #{target} は#{reason} (割り付け表)"
     end
 
-    # **表そのものを転送前に検査します。** 使っていない名前の綴り誤りも、
+    # **表そのものを転送前に検査します。** 使っていない名前の書き間違いも、
     # 設定を読んだ時点で止まります。
     def validate_mapping!
       @mapping.each do |name, target|

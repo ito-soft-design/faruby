@@ -209,8 +209,8 @@ module FaRuby
       member ? member_type(name, member) : label_type(name)
     end
 
-    # **型は IEC の綴りで持っています** (tools/devices.rb)。取り込みの CSV が
-    # その綴りで、貼り付けの表の日本語はそこから作ります。
+    # **型は IEC の表記で持っています** (tools/devices.rb)。取り込みの CSV が
+    # その表記で、貼り付けの表の日本語はそこから作ります。
     def label_type(name)
       type = labels[name]&.type or return nil
       element = type[/\AARRAY \[[^\]]*\] OF (.+)\z/, 1] || type

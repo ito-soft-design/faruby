@@ -118,7 +118,7 @@ module FaRuby
         source = found
 
         # **割り付け表はプログラムが指します** (`# devices:` 行)。
-        # 読めなければコンパイルまで進みません。綴りの誤りを転送前に止めます
+        # 読めなければコンパイルまで進みません。書き間違いを転送前に止めます
         begin
           @device_map = DeviceMap.for_program(source)
           @device_syntax = nil

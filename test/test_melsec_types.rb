@@ -28,7 +28,7 @@ class TestMelsecTypes < Minitest::Test
 
   # **GX Works2 は文の無い分岐を通しません。** KV スクリプトでも KV-X500 の
   # ST でも通るので、生成器は `OP_NOP` や「ここへは来ない」の分岐を注釈だけで
-  # 閉じています。綴り方が最後に何もしない代入を置きます。
+  # 閉じています。方言が最後に何もしない代入を置きます。
   def test_no_branch_is_left_empty
     generator = FaRuby::KvsGenerator.new(layout: layout, dialect: FaRuby::MelsecDialect.new)
     offenders = generator.generate.flat_map do |name, content|

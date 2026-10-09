@@ -68,7 +68,7 @@ class TestHardwareCheck < Minitest::Test
 
   # === プログラム ===
 
-  # 見出しの機種名が綴り間違いだと黙って飛ばされ続ける
+  # 見出しの機種名が書き間違いだと黙って飛ばされ続ける
   def test_every_models_line_names_a_model_we_have
     bad = Dir[File.join(Check::PROGRAM_DIR, "*.rb")].filter_map do |path|
       models = Check.models(File.read(path, encoding: "utf-8"))
@@ -83,7 +83,7 @@ class TestHardwareCheck < Minitest::Test
 
   # === 割り付け表 ===
 
-  # `# devices:` 行の綴り誤りと、表の中の誤りをここで見つける
+  # `# devices:` 行の書き間違いと、表の中の誤りをここで見つける
   #
   # **割り付け先が実デバイスとして読めるかは機種で違います** (三菱には X / Y が
   # ある)。プログラムが名乗った機種すべてで読めることを確かめます。実機に

@@ -5,11 +5,11 @@ require "minitest/autorun"
 require_relative "../tools/dialect"
 require_relative "../tools/kvs_generator"
 
-# 生成コードの綴り方
+# 生成コードの方言
 #
 # **命令の意味は機種によらず同じで、違うのは文の書き方だけ**という前提を
 # 守らせるためのテストです。デバイスの指し方 (`EM0:Z9`、`.L`、`.F`) は
-# KV スクリプトでも ST でも同じなので、差し替えるのは文の綴りに限られます。
+# KV スクリプトでも ST でも同じなので、差し替えるのは文の書き方に限られます。
 class TestDialect < Minitest::Test
   def kvs = FaRuby::KvsDialect.new
   def st = FaRuby::StDialect.new
@@ -17,7 +17,7 @@ class TestDialect < Minitest::Test
   # === 機種 ===
 
   # **機種名は書き出し先のフォルダ名で、設定の models: の見出しでもあります。**
-  # 3 つが同じ名前だからこそ、機種を増やすのが綴り方を足すだけで済みます。
+  # 3 つが同じ名前だからこそ、機種を増やすのが方言を足すだけで済みます。
   #
   # 書き出し先はメーカー名を挟みます。エンジニアリングツールが違えば
   # プロジェクトの置き場所も分かれるためです。
@@ -175,7 +175,7 @@ class TestDialect < Minitest::Test
 
   # === 生成結果 ===
 
-  # 綴り替え漏れがあると変換で落ちる。コード行に KV だけの綴りが残らないこと
+  # 書き替え漏れがあると変換で落ちる。コード行に KV だけの書き方が残らないこと
   def test_the_generated_st_keeps_no_kv_only_spelling
     files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
     code = files.values.flat_map { |c| c.split("\n") }
@@ -204,7 +204,7 @@ class TestDialect < Minitest::Test
   end
 
   # **タイマ・カウンタは KV-X500 では読み取りもできません。**
-  # 綴り替えでは直らないので、分岐ごと生成コードから外す
+  # 文の書き替えでは直らないので、分岐ごと生成コードから外す
   def test_the_generated_st_has_no_timer_or_counter
     files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
     offenders = files.flat_map do |name, content|

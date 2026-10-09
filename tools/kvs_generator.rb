@@ -178,7 +178,7 @@ module FaRuby
 
     # --- 行の組み立て ---
 
-    # 1 文を出す。**綴り方は dialect が決める** (KV 向けは素通し)
+    # 1 文を出す。**方言は dialect が決める** (KV 向けは素通し)
     def line(text)
       rendered = dialect.statement(text)
       return if rendered.empty?
@@ -3026,7 +3026,7 @@ module FaRuby
     # 整数・実数のスクラッチを使うため、レジスタの型を再び見なくてよい。
     #
     # **デバイスの指し方は機種によります** (tools/devices.rb)。KV は幅を
-    # サフィックスで選ぶので 1 つの式で済みますが、三菱にその綴りが無く、
+    # サフィックスで選ぶので 1 つの式で済みますが、三菱にその書き方が無く、
     # 32 ビットは 16 ビット 2 回に開きます。
     def word_access(mode, device, access, slot)
       float = access == ACCESS_F
@@ -3056,7 +3056,7 @@ module FaRuby
 
     # Z に載せたアドレスの 32 ビットを読む。**値の式を返します**
     #
-    # **KV は 1 つの式ですが、三菱に 32 ビットの綴りがありません。** 16 ビット
+    # **KV は 1 つの式ですが、三菱に 32 ビットの書き方がありません。** 16 ビット
     # 2 回に開いてスクラッチへ載せるので、どちらのスクラッチを使うかを
     # 指定します。2 つを同時に見比べるところ (ループの添字と上限) があります。
     def long_at(z, offset, secondary: false)

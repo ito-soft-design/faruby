@@ -324,7 +324,7 @@ module FaRuby
 
     # 周期 (ミリ秒) => VM 状態の中の位置
     #
-    # **周期が鍵です。** 綴り方 (dialect) が機種ごとのデバイス番号を同じ鍵で
+    # **周期が鍵です。** 方言 (dialect) が機種ごとのデバイス番号を同じ鍵で
     # 返すので、どの機種でも同じ並びになります。
     CLOCK_OFFSETS = { 10 => OFFSET_CLOCK_10MS, 100 => OFFSET_CLOCK_100MS,
                       1000 => OFFSET_CLOCK_1S }.freeze

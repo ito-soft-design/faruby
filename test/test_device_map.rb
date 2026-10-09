@@ -93,7 +93,7 @@ class TestDeviceMap < Minitest::Test
 
   # === 設定の検査 ===
 
-  # **表そのものを転送前に検査します。** 使っていない名前の綴り誤りも、
+  # **表そのものを転送前に検査します。** 使っていない名前の書き間違いも、
   # 設定を読んだ時点で止まります
   def test_a_typo_in_the_target_stops_at_load_time
     error = assert_raises(FaRuby::CodegenError) { syntax({ "x0" => "ZZZ9" }) }
@@ -423,7 +423,7 @@ class TestDeviceMapFile < Minitest::Test
 
   # === 止める場所 ===
 
-  # ファイル名の綴り誤りは転送前に止める
+  # ファイル名の書き間違いは転送前に止める
   def test_a_missing_table_stops
     with_program("# devices: typo.devices.rb\n") do |path|
       error = assert_raises(FaRuby::CodegenError) { FaRuby::DeviceMap.for_program(path) }

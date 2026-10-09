@@ -19,7 +19,7 @@
 #   MELSEC  VMRV[VMOPA] := VMRV[VMOPB];         型付きラベル配列の添字
 #
 # KV は 1 本の Z でタグと値の両方を指し、MELSEC は配列を型ごとに分けます。
-# **アドレス計算そのものが要らなくなる**ので、綴り替えでは届きません。
+# **アドレス計算そのものが要らなくなる**ので、文の書き替えでは届きません。
 
 require_relative "memory_layout"
 require_relative "vm_constants"
@@ -64,7 +64,7 @@ module FaRuby
 
     # アクセス幅とデバイスに付けるサフィックス
     #
-    # **KV は幅をデバイス側に付けて選びます** (`DM0.L:Z6`)。三菱にこの綴りは
+    # **KV は幅をデバイス側に付けて選びます** (`DM0.L:Z6`)。三菱にこの書き方は
     # 無いので、この対応表も KV だけのものです。
     ACCESS_SUFFIX = { ACCESS_S => "S", ACCESS_U => "U", ACCESS_L => "L",
                       ACCESS_D => "D", ACCESS_F => "F" }.freeze
@@ -552,9 +552,9 @@ module FaRuby
     #
     # 周期ごとに別のラベルです。同じ名前に別のデバイスを割り付けられません。
     #
-    # **型は `BIT` です。** IEC の綴りは `BOOL` ですが、GX Works2 は
+    # **型は `BIT` です。** IEC の表記は `BOOL` ですが、GX Works2 は
     # 「データ型が不正」で取り込みを弾きます。ワードの側が `INT` / `DINT` /
-    # `REAL` と IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
+    # `REAL` と IEC の表記で通るので揃えていましたが、ビットだけ違いました。
     def tick_pulse_ref(device, period)
       remember("#{TICK_PULSE}#{period}", BIT_TYPE, device, "クロックパルス #{period}ms")
     end
@@ -692,7 +692,7 @@ module FaRuby
     # ビットデバイスは桁指定が使えます (`K4M0Z6` で 16 個、`K8M0Z6` で 32 個)。
     # インデックス修飾と併用でき、1 文で読めます (実機で確認済み)。
     #
-    # **ワードデバイスに 32 ビットの綴りはありません。** 16 ビット 2 回に開いて
+    # **ワードデバイスに 32 ビットの書き方はありません。** 16 ビット 2 回に開いて
     # スクラッチの重ね合わせに載せ、そこを指します。実数は同じ場所を REAL で
     # 読み替えるだけで、変換は入りません。
     def device_read(device, access, z)
@@ -816,7 +816,7 @@ module FaRuby
 
     # 読む。**16 ビット 2 回に開いてスクラッチへ載せ、そこを指します**
     #
-    # ラベルは型が固定なので、任意のアドレスを 32 ビットで指す綴りが
+    # ラベルは型が固定なので、任意のアドレスを 32 ビットで指す書き方が
     # ありません。重ね合わせを持っているスクラッチを経由します。
     def long_at(z, offset, scratch)
       @emitter.line "#{state(scratch)} = #{word_at(z, offset)}"
@@ -949,7 +949,7 @@ module FaRuby
             .map { |l| [l.name, l.device] }
     end
 
-    # IEC の型を貼り付けの表の綴りに直す
+    # IEC の型を貼り付けの表の表記に直す
     JAPANESE_TYPES = { "INT" => "ワード[符号付き]", "DINT" => "ダブルワード[符号付き]",
                        "REAL" => "単精度実数", BIT_TYPE => "ビット" }.freeze
 
@@ -970,7 +970,7 @@ module FaRuby
     # 引用符で囲みます**。エンジニアリングツールが書き出すとおりです。
     #
     # **列は版で違います** (GX Works2 は 11、GX Works3 は 28)。並びも違うので、
-    # 見出しの名前で値を置きます。綴り方が見出しを持ちます (tools/dialect.rb)。
+    # 見出しの名前で値を置きます。方言が見出しを持ちます (tools/dialect.rb)。
     CSV_NAME = "faruby"
 
     def label_csv(header)
@@ -1104,9 +1104,9 @@ module FaRuby
       [label.device, "%M#{width}#{area}.#{label.device[/\d+/]}"]
     end
 
-    # 配列の型。**IEC の綴りで持ちます**
+    # 配列の型。**IEC の表記で持ちます**
     #
-    # 取り込みの CSV はこの綴りで、貼り付けの表は日本語です。どちらも
+    # 取り込みの CSV はこの表記で、貼り付けの表は日本語です。どちらも
     # 同じところから作ります。
     def array_of(type, count) = "ARRAY [0..#{count - 1}] OF #{type}"
 
@@ -1153,7 +1153,7 @@ module FaRuby
 
     # 値ワードを 16 ビット単位で指す
     #
-    # **構造体のメンバの一部だけを取り出す綴りがありません。** そこで、値を
+    # **構造体のメンバの一部だけを取り出す書き方がありません。** そこで、値を
     # 16 ビット 2 つとして見る形を同じアドレスに重ねてあります。デバイス参照が
     # 種別・幅・アドレスを 2 ワードに詰めるので、そこで通ります。
     def word_of(index_expr, offset, word_array = SLOTW)
