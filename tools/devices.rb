@@ -154,6 +154,9 @@ module FaRuby
     # クロックパルス。**KV はデバイスをそのまま書けます**
     def tick_pulse_ref(device, _period) = device
 
+    # 初回スキャンの接点も同じ。そのまま書けます
+    def first_scan_ref(device) = device
+
     # 実行中の irep の領域を指す項
     #
     # irep が複数になったため、バイトコード・定数プール・シンボル表の位置は
@@ -301,6 +304,19 @@ module FaRuby
                     "#{layout.max_regs}スロット × #{VmConstants::SLOT_WORDS}ワード)"
       @emitter.note "スロット先頭の型タグも 0 (TT_EMPTY) になる"
       @emitter.line "FOR Z#{z} = #{block_offset(layout.reg_file_base)} " \
+                    "TO #{block_offset(last)}"
+      @emitter.indent
+      @emitter.line "#{indexed_base}:Z#{z} = 0"
+      @emitter.dedent
+      @emitter.line "NEXT"
+    end
+
+    # 汎用グローバル変数を潰す。**型タグごと 0 にします**
+    def clear_general_globals(z)
+      last = layout.general_global_slot_addr(layout.max_globals) - 1
+      @emitter.note "汎用グローバル変数クリア " \
+                    "(#{layout.max_globals}スロット × #{VmConstants::SLOT_WORDS}ワード)"
+      @emitter.line "FOR Z#{z} = #{block_offset(layout.general_global_base)} " \
                     "TO #{block_offset(last)}"
       @emitter.indent
       @emitter.line "#{indexed_base}:Z#{z} = 0"
@@ -484,6 +500,9 @@ module FaRuby
     # クロックパルス。**デバイスを直に書けないのでラベルにします**
     TICK_PULSE = "VMTICKPULSE"
 
+    # 初回スキャンの接点。これもラベルにします
+    FIRST_SCAN = "VMFIRSTSCAN"
+
     # ビットの型名。**`BOOL` ではありません** (GX Works2 が弾きます)
     BIT_TYPE = "BIT"
 
@@ -538,6 +557,10 @@ module FaRuby
     # `REAL` と IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
     def tick_pulse_ref(device, period)
       remember("#{TICK_PULSE}#{period}", BIT_TYPE, device, "クロックパルス #{period}ms")
+    end
+
+    def first_scan_ref(device)
+      remember(FIRST_SCAN, BIT_TYPE, device, "初回スキャンのみ ON")
     end
 
     # **32 ビットは別のラベルです。** 同じ 2 ワードを INT と DINT の両方で
@@ -631,6 +654,21 @@ module FaRuby
       first = layout.offset_of(layout.reg_file_base) / VmConstants::SLOT_WORDS
       @emitter.note "レジスタファイルクリア (型タグを TT_EMPTY に)"
       @emitter.line "FOR #{counter} = #{first} TO #{first + layout.max_regs - 1}"
+      @emitter.indent
+      @emitter.line "#{SLOT}[#{counter}].#{TAG} = 0"
+      @emitter.dedent
+      @emitter.line "NEXT"
+    end
+
+    # 汎用グローバル変数を潰す。**型タグだけで足ります**
+    #
+    # 偽になれば Ruby からは未代入と見分けが付きません。値ワードは次に
+    # 代入されたときに型タグごと書き換わります。
+    def clear_general_globals(_z)
+      counter = state(layout.loop_counter_addr)
+      first = layout.offset_of(layout.general_global_base) / VmConstants::SLOT_WORDS
+      @emitter.note "汎用グローバル変数クリア (型タグを TT_EMPTY に)"
+      @emitter.line "FOR #{counter} = #{first} TO #{first + layout.max_globals - 1}"
       @emitter.indent
       @emitter.line "#{SLOT}[#{counter}].#{TAG} = 0"
       @emitter.dedent

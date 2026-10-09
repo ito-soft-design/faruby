@@ -141,6 +141,14 @@ module FaRuby
     # 10ms クロックなら 5ms より短いスキャンタイムが要ります。
     def tick_ms = clock_pulses.keys.min || 10
     def tick_pulse = clock_pulses[tick_ms]
+
+    # 電源投入後の最初のスキャンだけ ON になる接点
+    #
+    # **これが起動の合図です。** 電源を切った時の状態は EM / D に残るので、
+    # 実行中のまま切れたプログラムを先頭から走らせ直すのに使います。
+    #
+    # 空を返す機種では起動を見つけられません。中断地点から続きが走ります。
+    def first_scan_pulse = nil
   end
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの
@@ -156,6 +164,9 @@ module FaRuby
     # 数えた経過時間が実時間で進み、10 の倍数になり、その間に CR2005 が真と偽の
     # 両方を取りました。
     def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
+
+    # 電源投入後の最初のスキャンだけ ON
+    def first_scan_pulse = "CR2008"
   end
 
   # KV-X500 の ST (IEC 61131-3 準拠の構造化テキスト)
@@ -185,6 +196,9 @@ module FaRuby
     # KV-5000 と同じ。**タイマ・カウンタは使えないが CR は読める**
     # (実機で確認済み。ST でも `IF CR2004 THEN` がそのまま通ります)
     def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
+
+    # KV-5000 と同じ
+    def first_scan_pulse = "CR2008"
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
@@ -289,6 +303,9 @@ module FaRuby
     # 「データ型が不正」で弾きました。ワードの側が `INT` / `DINT` / `REAL` と
     # IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
     def clock_pulses = { 10 => "SM409", 100 => "SM410", 1000 => "SM412" }
+
+    # 電源投入後の最初のスキャンだけ ON (初期処理完了後の 1 スキャン)
+    def first_scan_pulse = "SM402"
 
     # GX Works2 のコメントは (* *)。// は使いません
     def wrap_comment(text) = text.empty? ? "(* *)" : "(* #{text} *)"

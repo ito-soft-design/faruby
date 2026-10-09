@@ -50,6 +50,19 @@ class TestDialect < Minitest::Test
     end
   end
 
+  # **起動の合図はどの機種にも要ります。** これが無いと電源投入を見つけられず、
+  # 中断地点から続きが走ります (命令の途中で切れるとオペランドを命令として
+  # 解釈する)
+  def test_every_model_knows_its_first_scan_contact
+    FaRuby::Dialect.all.each do |dialect|
+      refute_nil dialect.first_scan_pulse, dialect.model
+    end
+    assert_equal "CR2008", kvs.first_scan_pulse
+    assert_equal "CR2008", st.first_scan_pulse
+    assert_equal "SM402", FaRuby::MelsecDialect.new.first_scan_pulse
+    assert_equal "SM402", FaRuby::MelsecIqrDialect.new.first_scan_pulse
+  end
+
   # 経過時間はいちばん細かいパルスで数える
   def test_ticks_use_the_finest_pulse
     assert_equal ["CR2004", 10], [kvs.tick_pulse, kvs.tick_ms]

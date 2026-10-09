@@ -123,6 +123,7 @@ module FaRuby
     def clock_tag(period)           = devices.clock_tag_ref(period)
     def clock_value(period)         = devices.clock_value_ref(period)
     def tick_pulse(device, period)  = devices.tick_pulse_ref(device, period)
+    def first_scan(device)          = devices.first_scan_ref(device)
 
     # バイトコードの現在位置を読み、PC を 1 つ進める
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
@@ -143,6 +144,9 @@ module FaRuby
 
     # レジスタファイルを 0 で埋める。**潰し方は機種が決めます**
     def clear_register_file(z) = devices.clear_register_file(z)
+
+    # 汎用グローバル変数を 0 で埋める。同じく機種が決めます
+    def clear_general_globals(z) = devices.clear_general_globals(z)
 
     # --- インデックスレジスタの退避・復元 ---
     #
@@ -3274,6 +3278,9 @@ module FaRuby
       e.note ""
       e.note "毎スキャン実行。RESET_REQ = 1 のインスタンスについて"
       e.note "VM 状態とレジスタファイルを初期化します。"
+      e.note ""
+      e.note "**電源投入後の最初のスキャンでも初期化します。** 詳しくは"
+      e.note "emit_restart_on_power_up を見てください。"
       e.blank
 
       e.save_z_registers
@@ -3282,19 +3289,11 @@ module FaRuby
 
       e.each_instance do
         e.blank
+        emit_restart_on_power_up(e, z)
         e.line "IF #{e.state(layout.reset_req_addr)} = 1 THEN"
         e.blank
         e.indent
-        e.line "#{e.pc} = 0      ' PC = 0"
-        e.line "#{e.status} = #{VM_STOPPED}      ' STATUS = stopped"
-        e.line "#{e.error} = 0      ' ERROR = none"
-        e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
-        e.blank
-        e.reset_to_top_irep
-        e.blank
-        e.clear_register_file(z)
-        e.blank
-        e.set_top_level_self
+        emit_vm_state_reset(e, z)
         e.blank
         e.line "#{e.state(layout.reset_req_addr)} = 0     ' リセット要求クリア"
         e.dedent
@@ -3307,6 +3306,59 @@ module FaRuby
       e.restore_fixed_bank
       e.restore_z_registers
       "#{e.lines.join("\n")}\n"
+    end
+
+    # VM 状態を初期化する。**止めた状態まで戻します**
+    #
+    # リセット要求と電源投入の両方から呼ばれます。書くのは実行の位置と
+    # 値を置く場所で、**メソッド表は残します** — `load` のときに作るもので、
+    # 消すとメソッド呼び出しが壊れます。バイトコードも固定領域なので残ります。
+    def emit_vm_state_reset(e, z)
+      e.line "#{e.pc} = 0      ' PC = 0"
+      e.line "#{e.status} = #{VM_STOPPED}      ' STATUS = stopped"
+      e.line "#{e.error} = 0      ' ERROR = none"
+      e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
+      e.blank
+      e.reset_to_top_irep
+      e.blank
+      e.clear_register_file(z)
+      e.blank
+      e.set_top_level_self
+      e.blank
+      e.clear_general_globals(z)
+    end
+
+    # 電源投入後の最初のスキャンで、走っていたものを先頭から走らせ直す
+    #
+    # **継続実行は危ないので選びません。** STATUS も PC も EM / D に残るため、
+    # 何もしないと中断地点から続きが走ります。ところが取り込みは命令の実行前に
+    # PC を進めるので、命令の途中で電源が切れるとオペランドを命令コードとして
+    # 解釈します。設備の状態とプログラムの位置もずれます。
+    #
+    # **走らせ直すかどうかは電源が切れたときの状態で決めます。** 実行中だった
+    # なら先頭から、停止・完了・エラーならそのまま止めておきます。設定を足して
+    # いないのは、これが利用者の意図とふつう一致するからです。
+    #
+    # リセット要求に乗せず初期化をここでもう一度書くのは、下の枝が STATUS を
+    # 停止にするためです。要求に乗せると「初期化のあと実行中へ戻す」ことを
+    # 覚えておく場所が要り、VM 状態に 1 語足すことになります。
+    def emit_restart_on_power_up(e, z)
+      pulse = dialect.first_scan_pulse
+      return if pulse.nil?
+
+      e.note "=== 電源投入後の最初のスキャン ==="
+      e.note "**実行中のまま切れていたら先頭から走らせ直す。** 継続はしない"
+      e.if_(e.first_scan(pulse)) do
+        e.if_("#{e.status} = #{VM_RUNNING}") do
+          emit_vm_state_reset(e, z)
+          e.blank
+          e.line "#{e.status} = #{VM_RUNNING}      ' STATUS = running (先頭から)"
+        end
+        e.note "電源が切れる前のリセット要求は意味を失っている。"
+        e.note "**残すと走らせ直した直後に止めてしまう**"
+        e.line "#{e.state(layout.reset_req_addr)} = 0"
+      end
+      e.blank
     end
 
     # 経過時間を進める

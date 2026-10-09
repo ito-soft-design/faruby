@@ -220,6 +220,49 @@ class TestKvsGenerator < Minitest::Test
                     "反復フレームに loop の種別を書いていない"
   end
 
+  # === 電源投入後の再始動 ===
+
+  # **実行中のまま電源が切れたものだけ、先頭から走らせ直す。**
+  #
+  # 停止・完了・エラーで切れたものは止めたままにします。走らせ直すかどうかを
+  # 設定ではなく状態で決めているので、この 2 段の枝がその判断そのものです。
+  def test_the_init_restarts_only_what_was_running
+    code = code_lines(init_source)
+    first_scan = code.index { |l| l.include?("IF #{FaRuby::KvsDialect.new.first_scan_pulse} THEN") }
+
+    refute_nil first_scan, "初回スキャンの枝が無い"
+    assert_includes code[first_scan + 1], "IF #{emitter.status} = #{VM_RUNNING} THEN",
+                    "実行中だったかどうかを見ていない"
+    assert_includes code.join("\n"), "#{emitter.status} = #{VM_RUNNING}",
+                    "初期化したあと実行中へ戻していない"
+  end
+
+  # **電源が切れる前のリセット要求は捨てる。**
+  #
+  # 残すと、走らせ直した直後に下の枝が初期化して止めてしまいます。
+  def test_the_init_drops_a_reset_request_from_before_the_power_cut
+    code = code_lines(init_source)
+    first_scan = code.index { |l| l.include?("IF #{FaRuby::KvsDialect.new.first_scan_pulse} THEN") }
+    # 初回スキャンの枝の中 (次の END IF まで) で要求を落としていること
+    inside = code[first_scan..].take_while { |l| !l.strip.start_with?("IF #{emitter.state(layout.reset_req_addr)}") }
+
+    assert_includes inside.join("\n"), "#{emitter.state(layout.reset_req_addr)} = 0",
+                    "初回スキャンの枝でリセット要求を落としていない"
+  end
+
+  # **汎用グローバル変数も潰す。** 残すと設備の状態と食い違う
+  #
+  # `$timer1` のような控えが電源を切る前の値のままになり、先頭から走らせ直す
+  # 意味が無くなります。`load` が 0 初期化するのと揃えました。
+  def test_the_reset_clears_the_general_globals
+    last = layout.general_global_slot_addr(layout.max_globals) - 1
+
+    assert_includes init_source,
+                    "FOR Z1 = #{layout.offset_of(layout.general_global_base)} + Z9 " \
+                    "TO #{layout.offset_of(last)} + Z9",
+                    "汎用グローバル変数を潰していない"
+  end
+
   # R[0] はトップレベルの self。**mruby は OP_LOADSELF を書かない**
   def test_the_reset_sets_the_top_level_self
     assert_includes init_source, "= #{TT_OBJECT}",
