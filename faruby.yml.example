@@ -12,17 +12,23 @@
 # 名前は自由に付けられます。設備や装置の名前にしておくと、どれに繋いで
 # いるかがコンソールの表示だけで分かります。
 #
-# 書けるのは model / protocol / host / port だけです。**接続先が持つのは
-# 接続情報だけで、メモリ配置と実行設定は機種のものです。**
+# 書けるのは model / protocol / host / port だけです。**メモリ配置と実行設定は
+# 機種のものです。**
+#
+# デバイスの割り付けもここには書きません。**割り付けは PLC ではなく
+# プログラムのもの**なので、プログラムの隣の Ruby ファイルに置き、プログラムの
+# 先頭に `# devices: line1.devices.rb` と書いて指します (README 参照)。
 connections:
   current: target1
 
   target1:
     model: KV-5000
     host: 192.168.0.10
+
   target2:
     model: KV-5000
     host: 192.168.0.11
+
   target3:
     model: KV-X500
     host: 192.168.0.12

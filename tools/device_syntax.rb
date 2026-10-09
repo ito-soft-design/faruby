@@ -26,25 +26,60 @@ module FaRuby
     # access_type に詰められる桁数の上限 (16ビットに収まる範囲)
     MAX_STRING_FIELD = 4095
 
-    attr_reader :device_set
+    attr_reader :device_set, :mapping
 
-    def initialize(device_set)
+    # mapping:        割り付け表 (抽象的な名前 => 実デバイス)
+    # warn_unmapped:  表を通らずに実デバイスとして読んだ名前を覚えておくか
+    def initialize(device_set, mapping: {}, warn_unmapped: false)
       @device_set = device_set
+      @mapping = mapping.to_h { |name, target| [name.to_s, target.to_s] }
+      @warn_unmapped = warn_unmapped
+      @unmapped = []
+      validate_mapping!
     end
 
     def self.keyence = @keyence ||= new(DeviceSet.keyence)
     def self.melsec  = @melsec  ||= new(DeviceSet.melsec)
 
     # 機種の綴り方から引く
-    def self.for_dialect(dialect) = new(dialect.device_set)
+    def self.for_dialect(dialect, mapping: {}, warn_unmapped: false)
+      new(dialect.device_set, mapping: mapping, warn_unmapped: warn_unmapped)
+    end
+
+    # 表を通らずに実デバイスとして読んだ名前 (出現順、重複なし)
+    #
+    # **全部を抽象化したい設備で `$R0` の直書きを見つけるためのものです。**
+    # 表が空のときは何も覚えません (抽象化していない設備では意味が無い)。
+    attr_reader :unmapped
+
+    def warn_unmapped? = @warn_unmapped && !@mapping.empty?
 
     # --- 解析 ---
 
-    # シンボル名 (`$DM100`、`$DM100L`) から
-    def parse_symbol(sym) = parse(sym, prefix: "\\$")
+    # シンボル名 (`$DM100`、`$DM100L`、割り付けた `$x0`) から
+    #
+    # **割り付け表を先に引きます。** 表に無い名前は今までどおり実デバイスとして
+    # 読むので、表を書かない設備も表に無い名前も影響を受けません。
+    def parse_symbol(sym)
+      return nil unless sym
+
+      mapped = parse_mapped(sym)
+      return mapped if mapped
+
+      parse(sym, prefix: "\\$").tap do |parsed|
+        @unmapped << sym if parsed && warn_unmapped? && !@unmapped.include?(sym)
+      end
+    end
 
     # デバイス名 (`DM100`、$ なし) から
     def parse_name(name) = parse(name, prefix: "")
+
+    # 割り付けた名前として読む (`$` 無し)。表に無ければ nil
+    #
+    # **コンソールが `dev x0` を読むのに使います。** `parse_symbol` を
+    # 使わないのは、実デバイスの直書きを警告に数えてしまうためです
+    # (コンソールから触った名前はプログラムが書いたものではない)。
+    def parse_mapped_name(name) = name && parse_mapped("$#{name}")
 
     # デバイス族 (`$DM`、`$DML`、`$MR`)。アドレスを持たない形
     #
@@ -80,6 +115,61 @@ module FaRuby
     def type_name(type) = device_set.find(type)&.name
 
     private
+
+    # --- 割り付け表 ---
+
+    # 割り付けた名前として読む。表に無ければ nil
+    #
+    # **幅サフィックスは名前を引いてから付けます。** `$x0L` は表の `x0L` を
+    # 先に探し、無ければ `x0` を引いて `.L` を付けます。表に書いた名前が
+    # そのまま勝つので、`x0L` という名前も作れます。
+    def parse_mapped(sym)
+      return nil if @mapping.empty?
+      return nil unless sym.start_with?("$")
+
+      name = sym[1..]
+      return mapped_entry(@mapping[name], nil, sym) if @mapping.key?(name)
+
+      m = name.match(/_?(L|D|U|S|F|T\d*)\z/i)
+      return nil unless m
+
+      base = name[0...m.begin(0)]
+      return nil unless @mapping.key?(base)
+
+      mapped_entry(@mapping[base], m[1], sym)
+    end
+
+    # 割り付け先を読む。使う側のサフィックスが表のものより優先する
+    def mapped_entry(target, suffix, label)
+      parsed = parse_name(target)
+      raise CodegenError, mapping_error(label, target, "デバイスとして読めません") if parsed.nil?
+      return parsed if suffix.nil? || suffix.empty?
+
+      spec = "#{parsed[:device_name]}#{parsed[:address]}#{suffix}"
+      begin
+        parse_name(spec) ||
+          raise(CodegenError, mapping_error(label, spec, "デバイスとして読めません"))
+      rescue CodegenError => e
+        raise CodegenError, mapping_error(label, target, e.message)
+      end
+    end
+
+    def mapping_error(label, target, reason)
+      "#{label} の割り付け先 #{target} は#{reason} (割り付け表)"
+    end
+
+    # **表そのものを転送前に検査します。** 使っていない名前の綴り誤りも、
+    # 設定を読んだ時点で止まります。
+    def validate_mapping!
+      @mapping.each do |name, target|
+        if parse_name(name) || parse_family("$#{name}")
+          raise CodegenError,
+                "割り付け表の #{name} は実デバイスの名前です。" \
+                "割り付ける名前には実デバイスと重ならないものを使ってください"
+        end
+        mapped_entry(target, nil, "$#{name}")
+      end
+    end
 
     # --- 名前の並び ---
     #

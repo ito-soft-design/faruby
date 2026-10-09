@@ -80,4 +80,41 @@ class TestHardwareCheck < Minitest::Test
 
     assert_empty bad
   end
+
+  # === 割り付け表 ===
+
+  # `# devices:` 行の綴り誤りと、表の中の誤りをここで見つける
+  #
+  # **割り付け先が実デバイスとして読めるかは機種で違います** (三菱には X / Y が
+  # ある)。プログラムが名乗った機種すべてで読めることを確かめます。実機に
+  # 繋がなくても分かるので、転送する前に止まります。
+  def test_every_devices_line_points_at_a_readable_table
+    bad = hardware_programs.filter_map do |path|
+      map = FaRuby::DeviceMap.for_program(path)
+      next if map.empty?
+
+      models = Check.models(File.read(path, encoding: "utf-8")) || FaRuby::Dialect.models
+      models.each do |model|
+        FaRuby::DeviceSyntax.for_dialect(FaRuby::Dialect.for(model), mapping: map.mapping)
+      end
+      nil
+    rescue FaRuby::CodegenError => e
+      "#{File.basename(path)}: #{e.message}"
+    end
+
+    assert_empty bad
+  end
+
+  # 表そのものは PLC に送るものではないので、プログラムとして数えない
+  def test_a_table_is_not_a_program
+    assert_includes hardware_programs.map { |p| File.basename(p) }, "test_40_device_map.rb"
+    refute_includes hardware_programs.map { |p| File.basename(p) },
+                    "test_40_device_map.devices.rb"
+  end
+
+  private
+
+  def hardware_programs
+    Dir[File.join(Check::PROGRAM_DIR, "*.rb")].reject { |p| p.end_with?(".devices.rb") }
+  end
 end

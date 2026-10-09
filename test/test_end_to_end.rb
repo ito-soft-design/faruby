@@ -884,6 +884,42 @@ end
     assert_equal [1, 0, 1], [64, 65, 66].map { |n| mr.read_u16(n) }
   end
 
+  # === デバイスの割り付け ===
+
+  # **割り付けた名前が実デバイスに届くこと。** mrbc から通して確かめます
+  #
+  # 表はホスト側だけのものなので、間違っていても生成は通り、**別のデバイスを
+  # 書きながら動きます。** ここで値の行き先そのものを見ます。
+  def test_a_mapped_name_reaches_the_real_device
+    syntax = FaRuby::DeviceSyntax.new(
+      FaRuby::DeviceSet.keyence,
+      mapping: { "motor" => "MR101", "count" => "DM1040", "speed" => "DM1041L" }
+    )
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $motor = true
+      $count = 7
+      $speed = 100000
+    RUBY
+    devices = result[:sim].devices
+
+    # MR101 は番号 17 (チャンネル 1 のビット 1)
+    assert_equal 1, devices[FaRuby::VmConstants::DEVICE_TYPE_MR].read_u16(17)
+    assert_equal 7, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1040)
+    # 幅は割り付け先に付いている。2 ワードで入ること
+    assert_equal 100_000, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s32(1041)
+  end
+
+  # 割り付けた名前と実デバイスは混ぜて書ける (表は任意)
+  def test_a_mapped_name_and_a_real_device_live_together
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "count" => "DM1040" })
+    result = compile_and_run("$count = 7\n$DM1044 = 42\n", device_syntax: syntax)
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 7,  dm.read_s16(1040)
+    assert_equal 42, dm.read_s16(1044)
+  end
+
   private
 
   # エラー停止することを期待して実行する (compile_and_run は完了を要求する)
@@ -923,7 +959,7 @@ end
 
   # ブロックを渡すと、走らせる直前のシミュレータを触れる。
   # 生成スクリプトが用意する値 (経過時間・クロックパルス) を置くのに使う。
-  def compile_and_run(source, &before_run)
+  def compile_and_run(source, device_syntax: nil, &before_run)
     # 一時ファイルに書き出し
     rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
@@ -939,7 +975,11 @@ end
       # パースして実行
       data = File.binread(mrb_path)
       parser = FaRuby::MrbParser.new(data).parse
-      sim = FaRuby::KvVmSimulator.new
+      sim = if device_syntax
+              FaRuby::KvVmSimulator.new(device_syntax: device_syntax)
+            else
+              FaRuby::KvVmSimulator.new
+            end
       before_run&.call(sim)
       sim.load_irep_and_run(parser.irep)
 
