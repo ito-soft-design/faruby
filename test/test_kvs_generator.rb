@@ -184,7 +184,7 @@ class TestKvsGenerator < Minitest::Test
 
   # === loop ===
 
-  # `OP_SSENDB` は self をレシーバ位置に置いて `OP_SENDB` の枝へ落ちる前置き。
+  # `OP_SSENDB` は self をレシーバ位置に置いて `OP_SENDB` の枝へ落ちる前処理。
   # 別々に書くと組み込みメソッドの振り分けが 2 度展開される
   def test_ssendb_falls_into_sendb
     ssendb = FaRuby::OpcodeTable.lookup[0x2E]
@@ -205,9 +205,9 @@ class TestKvsGenerator < Minitest::Test
     prologues = FaRuby::OpcodeTable.all.reject(&:branch?)
 
     assert_operator prologues.size, :>=, 2, "持ち越しが起きる形になっていない"
-    # R[0] (self) のアドレスを組み立てる行が、前置きの数だけ出ていること
+    # R[0] (self) のアドレスを組み立てる行が、前処理の数だけ出ていること
     assert_equal prologues.size, fetch.scan("= 0 + #{emitter.reg_offset}").size,
-                 "前置きごとにスロットのアドレスを組み立てていない"
+                 "前処理ごとにスロットのアドレスを組み立てていない"
   end
 
   # loop は上限が無い。**break でしか終わらない**
@@ -252,7 +252,7 @@ class TestKvsGenerator < Minitest::Test
 
   # **汎用グローバル変数も潰す。** 残すと設備の状態と食い違う
   #
-  # `$timer1` のような控えが電源を切る前の値のままになり、先頭から走らせ直す
+  # `$timer1` のように覚えておいた値が電源を切る前の値のままになり、先頭から走らせ直す
   # 意味が無くなります。`load` が 0 初期化するのと揃えました。
   def test_the_reset_clears_the_general_globals
     last = layout.general_global_slot_addr(layout.max_globals) - 1

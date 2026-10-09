@@ -129,7 +129,7 @@ module FaRuby
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
     def peek_bytecode_into(dest) = devices.peek_bytecode_into(dest)
 
-    # 命令ごとの下ごしらえ。**要るかどうかは機種が決めます**
+    # 命令ごとの下準備。**要るかどうかは機種が決めます**
     def prepare_instruction = devices.prepare_instruction
 
     # Z に載せたアドレスで 1 ワードを指す。**区切り記号は機種による**
@@ -178,7 +178,7 @@ module FaRuby
 
     # --- 行の組み立て ---
 
-    # 1 文を出す。**方言は dialect が決める** (KV 向けは素通し)
+    # 1 文を出す。**方言は dialect が決める** (KV 向けはそのまま出す)
     def line(text)
       rendered = dialect.statement(text)
       return if rendered.empty?
@@ -3368,7 +3368,7 @@ module FaRuby
     # ループの中に置くと 1 スキャンで何度も数えてしまいます。
     #
     # **立ち上がりだけを数えます。** 上がっている間ずっと足すと、スキャン
-    # タイムによって足す回数が変わり、時間になりません。前回の状態を控えて
+    # タイムによって足す回数が変わり、時間になりません。前回の状態を覚えて
     # おき、0 から 1 に変わったときだけ周期ぶんのミリ秒を足します。
     #
     # **止まっているインスタンスがあっても進みます。** 時間は VM の実行とは
@@ -3730,7 +3730,7 @@ module FaRuby
       end
     end
 
-    # 前置きだけの命令。**枝を持たず、別の命令の枝へ落ちます**
+    # 前処理だけの命令。**枝を持たず、別の命令の枝へ落ちます**
     #
     # mruby の vm.c と同じ形です (`OP_SSEND` は self をレシーバ位置に置いてから
     # `OP_SEND` へ)。別々に書いていたころは組み込みメソッドの振り分けが生成
@@ -3740,10 +3740,10 @@ module FaRuby
     # PC を進めません。
     def emit_prologues(e)
       @opcodes.reject(&:branch?).each do |op|
-        # **前置きごとに Z の控えを捨てます。** 1 つ目が組み立てたスロットの
+        # **前処理ごとに Z に覚えたアドレスを捨てます。** 1 つ目が組み立てたスロットの
         # アドレスを 2 つ目が使い回すと、組み立てる行が出ないまま参照だけが
         # 残ります。前置きは互いに素通りするので、持ち越してはいけません
-        # (実機で踏みました。`OP_SSENDB` が self を写さないまま落ちました)
+        # (実機で起きました。`OP_SSENDB` が self を写さないまま落ちました)
         e.begin_instruction
         e.blank
         e.note "#{op.name}: #{op.summary}"

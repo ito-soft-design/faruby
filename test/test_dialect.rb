@@ -74,10 +74,10 @@ class TestDialect < Minitest::Test
 
   # **段の区切りは記録で、いまは全部載っています** (MelsecDialect::STAGES)。
   #
-  # 落ちていると生成コードからその命令が消えます。前置きだけの命令
+  # 落ちていると生成コードからその命令が消えます。前処理だけの命令
   # (`OP_SSENDB`) は枝を持たないため**エラーにも見えず**、実機で
   # 「未知のオペコード」で止まるまで気づけません。実際に `loop` を入れた
-  # ときに踏みました。
+  # ときに起きました。
   def test_every_model_carries_every_opcode
     all = FaRuby::OpcodeTable.all
 
@@ -103,7 +103,7 @@ class TestDialect < Minitest::Test
 
   # === KV スクリプト ===
 
-  # 生成器は KV スクリプトの形で組み立てるので、KV 向けは素通し。
+  # 生成器は KV スクリプトの形で組み立てるので、KV 向けはそのまま出す。
   # この層を挟んでも出力が変わらないことがそのまま担保になる。
   def test_the_kv_dialect_passes_statements_through
     ["EM6:Z9 = FM0:Z1", "IF EM6:Z9 = 61 THEN", "END IF", "NEXT", "BREAK"].each do |text|

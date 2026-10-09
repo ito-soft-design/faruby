@@ -171,8 +171,8 @@ module FaRuby
       @vm.begin_instruction(@vm.fetch_operands(op.operand_sizes))
       op.body&.call(@vm)
 
-      # **前置きだけの命令は、続けて落ちる先の本体を実行する。**
-      # mruby の vm.c と同じで、生成コードでは取り込みが前置きを実行してから
+      # **前処理だけの命令は、続けて落ちる先の本体を実行する。**
+      # mruby の vm.c と同じで、生成コードでは取り込みが前処理を実行してから
       # オペコードを書き替え、落ちる先の枝がそのまま拾う (tools/opcode_table.rb)。
       return if op.branch?
 

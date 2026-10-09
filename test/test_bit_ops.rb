@@ -128,7 +128,7 @@ class TestBitOps < Minitest::Test
     assert_equal 65_536, sim.devices[DEVICE_TYPE_DM].read_s32(800)
   end
 
-  # 左シフトで 32 ビットからあふれると回り込む (Ruby は多倍長になる)
+  # 左シフトで 32 ビットからあふれると一周する (Ruby は多倍長になる)
   def test_a_shift_that_overflows_wraps
     sim = run_source("$DM800L = 1 << 31\n")
 

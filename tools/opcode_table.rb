@@ -178,14 +178,14 @@ module FaRuby
   class OpcodeDef
     attr_reader :code, :name, :format, :summary, :body, :enters
 
-    # enters: 前置きだけ実行して、別の命令の枝へ入る
+    # enters: 前処理だけ実行して、別の命令の枝へ入る
     #
     # **mruby の vm.c と同じ形です。** `OP_SSEND` は `regs[a] = regs[0]` で
     # self をレシーバ位置に置いてから `OP_SEND` へ落ちます。そこを真似ず
     # 別々に書いていたころは、組み込みメソッドの振り分けが**生成コードに
     # 2 度展開**され、KV 全体の 14% を占めていました。
     #
-    # 前置きは命令の取り込みで実行します。**オペランドはまだ読めない**ので、
+    # 前処理は命令の取り込みで実行します。**オペランドはまだ読めない**ので、
     # 覗くだけで PC は進めません。
     def initialize(code, summary, enters: nil, &body)
       info = OpcodeTable::MRUBY_OPCODES[code]
@@ -198,7 +198,7 @@ module FaRuby
       @body = body
     end
 
-    # 枝を持つか。前置きだけの命令は持たない
+    # 枝を持つか。前処理だけの命令は持たない
     def branch? = enters.nil?
 
     def operand_sizes

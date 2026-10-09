@@ -488,13 +488,13 @@ end
 
   # 32 ビット符号付きで読む。**一周した後も引き算が経過ミリ秒になる**
   def test_ticks_wraps_around_as_a_signed_32bit_value
-    # 0x7FFFFFFF (上限) の 2 ミリ秒後。回り込んで負になっている
+    # 0x7FFFFFFF (上限) の 2 ミリ秒後。一周して負になっている
     result = compile_and_run("t = $FARUBY_TICKS\nd = t - 2147483647\n") do |sim|
       sim.em.write_u32(layout.ticks_addr, 0x8000_0001)
     end
 
-    assert_equal(-2_147_483_647, result[:locals]["t"], "回り込むと負になる")
-    assert_equal 2, result[:locals]["d"], "差は回り込んでも正しい"
+    assert_equal(-2_147_483_647, result[:locals]["t"], "一周すると負になる")
+    assert_equal 2, result[:locals]["d"], "差は一周しても正しい"
   end
 
   # 汎用グローバルの枠は使わない。**VM 状態の中にある**

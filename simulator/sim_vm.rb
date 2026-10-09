@@ -1112,7 +1112,7 @@ module FaRuby
 
     # 累計実行命令数を 1 増やす (生成コードは INC)
     #
-    # 32 ビットで回り込む。命令ごとに走るので長く動かせば必ず 65535 を超える
+    # 32 ビットを超えると一周する。命令ごとに走るので長く動かせば必ず 65535 を超える
     def count_step
       @em.write_u32(layout.step_count_addr,
                     (@em.read_u32(layout.step_count_addr) + 1) & 0xFFFF_FFFF)
