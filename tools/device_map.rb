@@ -61,12 +61,24 @@ module FaRuby
       load_file(path)
     end
 
-    # `# devices:` 行を探す。最初の 1 本だけを使う
+    # `# devices:` 行を探す。無ければ nil
+    #
+    # **装置ごとの表を並べておき、`##` で無効にして切り替えられます。**
+    # `#` の直後が `#` だと当たらないので、行を消さずに残せます。
+    #
+    #     # devices: line1.devices.rb      有効
+    #     ## devices: line2.devices.rb     無効
+    #
+    # **有効な行が 2 本あったら止めます。** 先に書いた方を黙って使うと、
+    # `##` の付け忘れに気づけません。
     def self.declaration(source)
-      source.lines.each do |line|
-        return Regexp.last_match(1) if line.match(DECLARATION)
-      end
-      nil
+      found = source.lines.filter_map { |line| line.match(DECLARATION)&.captures&.first }
+      return nil if found.empty?
+      return found.first if found.size == 1
+
+      raise CodegenError,
+            "`# devices:` 行が #{found.size} 本あります (#{found.join(', ')})。" \
+            "使う 1 本だけを残し、ほかは `##` で無効にしてください"
     end
 
     # 表のファイルを実行して読む

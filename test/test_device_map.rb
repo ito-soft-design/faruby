@@ -370,6 +370,57 @@ class TestDeviceMapFile < Minitest::Test
     end
   end
 
+  # === 装置ごとの切り替え ===
+
+  # **装置分を並べておき、`##` で無効にして切り替えられること**
+  #
+  # 行を消して書き直すと、どの装置の表があったか分からなくなります。
+  def test_a_disabled_line_is_ignored
+    table = %(FaRuby.devices { map "start", "R0" }\n)
+    program = <<~RUBY
+      ## devices: line2.devices.rb
+      # devices: line.devices.rb
+      ## devices: line3.devices.rb
+    RUBY
+    with_program(program, table) do |path|
+      map = FaRuby::DeviceMap.for_program(path)
+
+      assert_equal "R0", map.mapping["start"]
+      assert_includes map.path, "line.devices.rb"
+    end
+  end
+
+  # 全部無効にすれば割り付けなしになる (実デバイスを直に書く形へ戻せる)
+  def test_every_line_disabled_means_no_table
+    with_program("## devices: line.devices.rb\n") do |path|
+      assert_predicate FaRuby::DeviceMap.for_program(path), :empty?
+    end
+  end
+
+  # **`##` の付け忘れは止めること。** 先に書いた方を黙って使うと、
+  # 別の装置の配線で動いていることに気づけません
+  def test_two_live_lines_stop
+    program = <<~RUBY
+      # devices: line1.devices.rb
+      # devices: line2.devices.rb
+    RUBY
+    with_program(program) do |path|
+      error = assert_raises(FaRuby::CodegenError) { FaRuby::DeviceMap.for_program(path) }
+
+      assert_includes error.message, "line1.devices.rb"
+      assert_includes error.message, "line2.devices.rb"
+      assert_includes error.message, "##"
+    end
+  end
+
+  # 行の後ろに覚書きを足せる (どの装置かを書いておける)
+  def test_a_note_after_the_name_is_allowed
+    table = %(FaRuby.devices { map "start", "R0" }\n)
+    with_program("# devices: line.devices.rb   1 号ライン (2026-10 更新)\n", table) do |path|
+      assert_equal 1, FaRuby::DeviceMap.for_program(path).size
+    end
+  end
+
   # === 止める場所 ===
 
   # ファイル名の綴り誤りは転送前に止める
