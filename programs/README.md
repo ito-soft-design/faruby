@@ -1,6 +1,6 @@
 # programs
 
-**PLC で動かす Ruby プログラムの置き場です。**
+**PLC で動かす mruby プログラムの置き場です。**
 
 ```
 $ rake console

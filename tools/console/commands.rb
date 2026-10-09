@@ -19,7 +19,7 @@ module FaRuby
     class Commands
       include VmConstants
 
-      # 利用者が書いた Ruby プログラムの置き場 (git の管理外)
+      # 利用者が書いた mruby プログラムの置き場 (git の管理外)
       PROGRAM_DIR = "programs"
 
       # 操作対象のインスタンス番号
@@ -210,7 +210,7 @@ module FaRuby
         puts "  PC       : #{state[:pc]}"
         puts "  ERROR    : #{state[:error]}"
         puts "  STEPS    : #{state[:step_count]}"
-        puts "  TICKS    : #{state[:ticks]} ms (電源投入から。全インスタンス共通)"
+        puts "  TICKS    : #{state[:ticks]} ms (数え始めてから。全インスタンス共通)"
         puts "  OPCODE   : #{state[:current_opcode]}"
         puts "  ARGS     : a=#{state[:operand_a]} b=#{state[:operand_b]} c=#{state[:operand_c]}"
         puts "  BCLEN    : #{state[:bytecode_len]}"
@@ -454,7 +454,7 @@ module FaRuby
       def cmd_help(args)
         puts <<~HELP
           === faRuby Console ===
-          compile <file.rb>  Ruby ソースをコンパイル (programs/ から探します)
+          compile <file.rb>  mruby としてコンパイル (programs/ から探します)
           load               コンパイル済みプログラムを PLC に書き込み
           run                VM を開始 (STATUS=1)
           instance [n]       操作対象のインスタンスを表示 / 切り替え

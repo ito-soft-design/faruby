@@ -1,16 +1,20 @@
 # faRuby
 
-**PLC 上で Ruby を動かします。** 名称は FA (Factory Automation) + Ruby に
+**PLC 上で mruby を動かします。** 名称は FA (Factory Automation) + Ruby に
 由来する実験的プロジェクトです。
 
-Ruby で書いたプログラムを PC でコンパイルして PLC へ転送すると、PLC が
-そのまま実行します。デバイスは `$DM100` のようにグローバル変数で読み書き
-します。
+mruby で書いたプログラムを PC で `mrbc` でコンパイルし、PLC へ転送すると
+PLC がそのまま実行します。デバイスは `$DM100` のようにグローバル変数で
+読み書きします。
 
 ```ruby
 $DM100 = 42
 $MR10 = true if $DM100 > 10
 ```
+
+**使えるのは mruby の部分集合です。** 何がどこまで動くかは
+[現在の対応範囲](#現在の対応範囲)に、Ruby のつもりで書いたものがどうなるかは
+[doc/differences.md](doc/differences.md) にあります。
 
 ### 対応 PLC
 
@@ -249,7 +253,7 @@ KV-5000 はバンク 3 (スクリプトが `FRSET` で選びます)。**KV-X500 
 
 ### プログラムの置き場
 
-PLC で動かす Ruby プログラムは `programs/` に置きます。**この中身は git の
+PLC で動かす mruby プログラムは `programs/` に置きます。**この中身は git の
 管理外**なので、設備ごとのプログラムを置いたままにできます。
 
 コンソールはここを探すので、**`compile` にはファイル名だけを書けば足ります**
@@ -268,7 +272,7 @@ rake console
 
 | コマンド | 説明 |
 |---------|------|
-| `compile <file.rb>` | Ruby ソースをコンパイル (`programs/` から探す) |
+| `compile <file.rb>` | mruby としてコンパイル (`programs/` から探す) |
 | `load` | バイトコードを PLC に転送 |
 | `run` | VM 実行開始 |
 | `instance [n]` | 操作対象のインスタンスを表示 / 切り替え |
@@ -299,7 +303,7 @@ faruby> regs
 
 ### 複数プログラムの並行実行
 
-インスタンスごとに独立した VM が動き、それぞれ別の Ruby プログラムを実行します。
+インスタンスごとに独立した VM が動き、それぞれ別のプログラムを実行します。
 
 ```
 faruby[0]> compile a.rb
@@ -361,7 +365,8 @@ $y0 = true if $x0        # 配線を知らなくても書ける
 $DM100 = $speed
 ```
 
-表は **Ruby で書きます** (`programs/line1.devices.rb`)。
+表は Ruby で書きます (`programs/line1.devices.rb`)。**これは PC 側で動く
+ので、mruby の部分集合という制限はありません。**
 
 ```ruby
 FaRuby.devices do
@@ -372,7 +377,7 @@ FaRuby.devices do
 end
 ```
 
-**読むときに本当に Ruby として実行します。** 連番の配線を手で並べずに済みます。
+**読むときに Ruby として実行します。** 連番の配線を手で並べずに済みます。
 
 ```ruby
 FaRuby.devices do
@@ -718,6 +723,8 @@ rake bench
 確かめてください。
 
 ## 現在の対応範囲
+
+**mruby のうち、次が動きます。**
 
 - 整数の四則演算、比較、代入
 - [組み込みメソッド](#組み込みメソッド) 28 個
