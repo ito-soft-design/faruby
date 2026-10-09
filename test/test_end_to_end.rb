@@ -909,6 +909,70 @@ end
     assert_equal 100_000, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s32(1041)
   end
 
+  # **ふつうの変数も実デバイスにできること。** 足すものは何もありません
+  #
+  # 割り付け表に書けばシンボル表の項目がデバイスになるだけで、汎用グローバルの
+  # 枠 (`max_globals`) も使いません。デバイスなので `load` で消えず、
+  # インスタンスをまたいで共有でき、ラダーや表示器からも見えます。
+  def test_a_plain_variable_can_become_a_device
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "counter" => "DM1050" })
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $counter = 0
+      3.times { $counter = $counter + 1 }
+    RUBY
+
+    assert_equal 3, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1050)
+  end
+
+  # 割り付けても**デバイスの決まりがそのまま効く**こと
+  #
+  # 配列は連続したデバイスへ並び、文字列は文字で入り、実数は 0 方向へ
+  # 切り捨てられます。割り付けは名前の読み替えだけなので当然ですが、
+  # 「変数を実デバイスにすると配列と文字列が持てなくなる」と考えていたので
+  # 確かめました。**持てます。**
+  def test_a_mapped_variable_keeps_the_device_rules
+    syntax = FaRuby::DeviceSyntax.new(
+      FaRuby::DeviceSet.keyence,
+      mapping: { "list" => "DM1060", "name" => "DM1056", "ratio" => "DM1064" }
+    )
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $list = [1, 2, 3]
+      $name = "abc"
+      $ratio = 1.5
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [1, 2, 3], (1060..1062).map { |a| dm.read_s16(a) }
+    assert_equal [0x6162, 0x6300], (1056..1057).map { |a| dm.read_u16(a) }
+    assert_equal 1, dm.read_s16(1064)
+  end
+
+  # **`nil` は入れられません。** デバイスは数値しか持てないので 0 になります
+  #
+  # 止めてはいません。リテラルの `= nil` はバイトコードから見つけられるので
+  # コンパイル時に弾ける見込みですが、まだ入れていません。
+  def test_nil_through_a_mapped_name_becomes_zero
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "flag" => "DM1054" })
+    result = compile_and_run("$flag = nil\n", device_syntax: syntax)
+
+    assert_equal 0, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1054)
+  end
+
+  # **`||=` は実デバイスでは働きません。** 落とし穴なので形で留めておきます
+  #
+  # デバイスから読んだ 0 は Ruby では真なので、`$once ||= 7` は一度も代入
+  # されません。汎用グローバルなら `nil` から始まるので 7 が入ります。
+  # **同じプログラムが割り付け表の有無で違う結果になる**唯一の形です。
+  def test_or_assign_never_fires_on_a_device
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "once" => "DM1052" })
+    result = compile_and_run("$once ||= 7\n", device_syntax: syntax)
+
+    assert_equal 0, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1052)
+  end
+
   # 割り付けた名前と実デバイスは混ぜて書ける (表は任意)
   def test_a_mapped_name_and_a_real_device_live_together
     syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
