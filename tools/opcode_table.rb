@@ -306,6 +306,18 @@ module FaRuby
         vm.store_reg_into_global(:b, :a)
       end
 
+      # インスタンス変数 (`@foo`)。**枝を持たず、グローバルの枝へ落ちます**
+      #
+      # `OP_GETGV` と同じ `BB` 形式で、オペランドもやること (シンボル表を引いて
+      # 値スロットを写す) も同じです。**self が 1 つしか無いので名前ごとに
+      # 1 枠で足り**、ホスト側が `@foo` を汎用グローバルの枠に割り当てます
+      # (tools/plc_codegen.rb)。中身を書く必要がないので前処理だけにします。
+      #
+      # クラスができたら、ここが「self の表を引く」に変わります
+      # (doc/instance_vars.md)。**`@` を扱う場所はこの 2 つだけです。**
+      defs << OpcodeDef.new(0x19, "R[a] = @名前 (OP_GETGV の枝へ)", enters: 0x15)
+      defs << OpcodeDef.new(0x1A, "@名前 = R[a] (OP_SETGV の枝へ)", enters: 0x16)
+
       # 添字アクセス。デバイス族 ($DM[100 + i])・配列 (a[0])・ハッシュ・
       # 文字列 (s[0]) が通る。OP_GETIDX / OP_SETIDX は専用命令なので
       # メソッド呼び出しは要らない。

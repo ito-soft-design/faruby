@@ -884,6 +884,78 @@ end
     assert_equal [1, 0, 1], [64, 65, 66].map { |n| mr.read_u16(n) }
   end
 
+  # === インスタンス変数 ===
+
+  # **`@foo` が読み書きできること。** mrbc から通して確かめます
+  def test_an_instance_variable_holds_a_value
+    result = compile_and_run("@n = 0\n@n = @n + 1\n$DM100 = @n\n")
+
+    assert_equal 1, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(100)
+  end
+
+  # **メソッドの中も同じ self なので、同じ `@n` が見えること**
+  #
+  # faRuby にクラスは無いので、トップレベルもメソッドの中も self は `main`
+  # です。Ruby でも同じで、ここが「名前ごとに 1 枠で足りる」根拠です。
+  def test_a_method_sees_the_same_instance_variable
+    result = compile_and_run(<<~RUBY)
+      @n = 0
+      def bump
+        @n = @n + 1
+      end
+      bump
+      bump
+      bump
+      $DM101 = @n
+    RUBY
+
+    assert_equal 3, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(101)
+  end
+
+  # ブロックの中からも同じもの
+  def test_a_block_sees_the_same_instance_variable
+    result = compile_and_run("@sum = 0\n5.times { |i| @sum = @sum + i }\n$DM102 = @sum\n")
+
+    assert_equal 10, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(102)
+  end
+
+  # 値スロットなので**どの型でも持てる** (配列・文字列・実数)
+  def test_an_instance_variable_holds_any_type
+    result = compile_and_run(<<~RUBY)
+      @a = [1, 2, 3]
+      @s = "abc"
+      @f = 1.5
+      $DM103 = @a.length
+      $DM104 = @s.length
+      $DM105 = 1 if @f > 1.0
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 3, dm.read_s16(103)
+    assert_equal 3, dm.read_s16(104)
+    assert_equal 1, dm.read_s16(105)
+  end
+
+  # **`nil` から始まるので `||=` が効くこと**
+  #
+  # デバイスに割り付けた変数との違いです。デバイスは数値しか持てないので
+  # 読んだ 0 が真になり、`||=` が一度も代入されません
+  # (README の「変数を実デバイスにする」)。
+  def test_or_assign_works_on_an_instance_variable
+    result = compile_and_run("@once ||= 7\n$DM106 = @once\n")
+
+    assert_equal 7, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(106)
+  end
+
+  # `$n` と `@n` は別のもの
+  def test_a_global_and_an_instance_variable_do_not_collide
+    result = compile_and_run("$n = 1\n@n = 2\n$DM107 = $n\n$DM108 = @n\n")
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 1, dm.read_s16(107)
+    assert_equal 2, dm.read_s16(108)
+  end
+
   # === デバイスの割り付け ===
 
   # **割り付けた名前が実デバイスに届くこと。** mrbc から通して確かめます

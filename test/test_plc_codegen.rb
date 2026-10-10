@@ -627,6 +627,81 @@ end
     assert_equal SYMBOL_KIND_GLOBAL, mappings[0][:kind]
   end
 
+  # === インスタンス変数 ===
+
+  # **`@foo` は汎用グローバルと同じ値スロットに置く。**
+  #
+  # self が 1 つしか無いので名前ごとに 1 枠で足ります (doc/instance_vars.md)。
+  # VM から見ると `$foo` と区別がありません。
+  def test_an_instance_variable_takes_a_general_global_slot
+    irep = build_irep(symbols: ["@count"])
+    mapping = FaRuby::PlcCodegen.new(irep).device_mappings.first
+
+    assert mapping[:general], "汎用グローバルの枠に入っていない"
+    assert_equal SYMBOL_KIND_GLOBAL, mapping[:kind]
+    assert_equal layout.general_global_slot_addr(0), mapping[:z_offset]
+  end
+
+  # `$foo` と `@foo` は別の枠。名前が違うので別のもの
+  def test_a_dollar_and_an_at_sign_are_different_variables
+    irep = build_irep(symbols: ["$n", "@n"])
+    mappings = FaRuby::PlcCodegen.new(irep).device_mappings
+
+    refute_equal mappings[0][:z_offset], mappings[1][:z_offset]
+  end
+
+  # **クラス変数は転送前に止める。**
+  #
+  # `@` で始まるので振り分けを素通りしてしまい、命令 (`OP_SETCV`) が無いまま
+  # シンボルだけが枠を取ります。Ruby もトップレベルの `@@` を許していません
+  def test_a_class_variable_stops
+    irep = build_irep(symbols: ["@@count"])
+    error = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).device_mappings }
+
+    assert_includes error.message, "@@count"
+    assert_includes error.message, "@count"
+  end
+
+  # === 変数の数 ===
+
+  # **枠を超えたら止める。** 溢れると次に並ぶ配列プールに重なり、
+  # 配列を壊しながら動くので気づきにくい
+  #
+  # **既定の設定では先にシンボル数で止まります** (どちらも 100 で、変数は
+  # 必ずシンボルを 1 つ使うため)。ここが効くのは `max_symbols` を増やした
+  # 配置です。順番で隠れていても検査そのものは要ります
+  def test_too_many_variables_stops
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
+    names = (1..roomy.max_globals).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # `$foo` と `@foo` は同じ枠を分け合う
+  def test_globals_and_instance_variables_share_the_limit
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
+    names = (1..roomy.max_globals).map { |i| "@v#{i}" }
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # 同じ名前は irep をまたいでも 1 枠。アドレスで数える
+  def test_the_same_name_in_two_ireps_takes_one_slot
+    irep = build_irep(symbols: ["@n"])
+    irep.add_child(build_irep(symbols: ["@n"]))
+
+    assert_equal 1, FaRuby::PlcCodegen.new(irep).general_global_count
+  end
+
   # デバイス名付きシンボルは汎用領域を消費しない
   def test_device_mappings_mixed
     irep = build_irep(symbols: ["$DM100", "$foo", "$MR10", "$bar"])

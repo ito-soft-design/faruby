@@ -3748,9 +3748,13 @@ module FaRuby
         e.blank
         e.note "#{op.name}: #{op.summary}"
         e.if_("#{e.opcode} = #{op.code}") do
-          e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
-          e.peek_bytecode_into(e.operand(:a))
-          op.body.call(e)
+          # **中身を書かない前処理もあります** (`OP_GETIV` は落とすだけ)。
+          # オペランドを覗くのは中身がそれを使うときだけです
+          if op.body
+            e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
+            e.peek_bytecode_into(e.operand(:a))
+            op.body.call(e)
+          end
           e.line "#{e.opcode} = #{op.enters}"
         end
       end

@@ -21,6 +21,16 @@ ELSE
   EM0:Z9 = EM0:Z9 + 1
   INC(EM3.L:Z9)   ' 累計実行命令数
 
+  ' OP_GETIV: R[a] = @名前 (OP_GETGV の枝へ)
+  IF EM6:Z9 = 25 THEN
+    EM6:Z9 = 21
+  END IF
+
+  ' OP_SETIV: @名前 = R[a] (OP_SETGV の枝へ)
+  IF EM6:Z9 = 26 THEN
+    EM6:Z9 = 22
+  END IF
+
   ' OP_SSEND: self をレシーバ位置に置いて OP_SEND へ
   IF EM6:Z9 = 45 THEN
     ' オペランド a を覗く。枝の中で読み直すので PC は進めない

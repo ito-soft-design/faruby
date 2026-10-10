@@ -202,12 +202,26 @@ class TestKvsGenerator < Minitest::Test
   def test_each_prologue_builds_its_own_slot_addresses
     generator = FaRuby::KvsGenerator.new
     fetch = generator.generate.fetch(generator.file_name("fetch"))
-    prologues = FaRuby::OpcodeTable.all.reject(&:branch?)
+    # **中身のある前処理だけが数に入る。** `OP_GETIV` のように落とすだけの
+    # ものはスロットを触らないので、組み立てる行も出ない
+    prologues = FaRuby::OpcodeTable.all.reject(&:branch?).select(&:body)
 
     assert_operator prologues.size, :>=, 2, "持ち越しが起きる形になっていない"
     # R[0] (self) のアドレスを組み立てる行が、前処理の数だけ出ていること
     assert_equal prologues.size, fetch.scan("= 0 + #{emitter.reg_offset}").size,
                  "前処理ごとにスロットのアドレスを組み立てていない"
+  end
+
+  # 中身を書かない前処理は、落とすだけの 3 行で済む
+  def test_a_prologue_without_a_body_only_rewrites_the_opcode
+    generator = FaRuby::KvsGenerator.new
+    fetch = generator.generate.fetch(generator.file_name("fetch"))
+    getiv = FaRuby::OpcodeTable.lookup.fetch(0x19)
+
+    assert_nil getiv.body, "OP_GETIV に中身を書いている"
+    assert_includes fetch, "IF #{emitter.opcode} = #{getiv.code} THEN"
+    # 落ちる先は OP_GETGV。汎用グローバルと同じ枝を通る
+    assert_equal 0x15, getiv.enters
   end
 
   # loop は上限が無い。**break でしか終わらない**

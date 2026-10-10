@@ -65,7 +65,17 @@ module FaRuby
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
       check_limit("文字列定数のワード数", string_constant_words, layout.max_string_words)
+      # 汎用グローバル変数 (`$foo` と `@foo`) の枠。**溢れると配列プールに重なり、
+      # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
+      check_limit("変数の数", general_global_count, layout.max_globals)
       self
+    end
+
+    # 枠を取った汎用グローバル変数の数
+    #
+    # 同じ名前は irep をまたいでも同じ枠なので、アドレスで数えます。
+    def general_global_count
+      device_mappings.select { |m| m[:general] }.map { |m| m[:z_offset] }.uniq.size
     end
 
     # EM レジスタ初期化用の KV スクリプトを生成
@@ -380,7 +390,17 @@ module FaRuby
           address: parsed[:address], z_offset: parsed[:z_offset],
           access_type: parsed[:access_type], bit: parsed[:bit],
           family: parsed[:family] || false }
-      elsif sym.start_with?("$")
+      elsif sym.start_with?("@@")
+        # **クラス変数は未対応です。** `@` の枠に入れると `@c` と区別が付かず、
+        # 命令 (`OP_SETCV`) が無いままシンボルだけが枠を取ります。
+        #
+        # Ruby もトップレベルの `@@` を許していません (3.0 以降 RuntimeError)。
+        # 通すと faRuby でしか動かないプログラムが書けてしまいます。
+        # クラスを入れるときに、クラスの表と一緒に考えます (doc/instance_vars.md)
+        raise CodegenError,
+              "#{sym} はクラス変数です。faRuby には未対応です " \
+              "(#{sym.sub('@@', '@')} のように 1 つにしてください)"
+      elsif sym.start_with?("@") || sym.start_with?("$")
         # **`$FARUBY_` で始まる名前は faRuby の予約です。** 表に無いものは
         # 書き間違いなので、ここで止めます。通してしまうと普通のグローバル
         # 変数になり、いつまでも 0 を返す変数ができるだけで気づけません。
@@ -391,8 +411,13 @@ module FaRuby
                 "(#{RESERVED_GLOBALS.join(', ')})"
         end
 
-        # 汎用グローバル変数は Ruby の値をそのまま持つ。**アドレスは値スロットの
-        # 先頭**で、VM が型タグごと写す。幅は使わない
+        # 汎用グローバル変数とインスタンス変数は Ruby の値をそのまま持つ。
+        # **アドレスは値スロットの先頭**で、VM が型タグごと写す。幅は使わない
+        #
+        # **`@foo` が同じ枠で足りるのは self が 1 つしか無いから**です。
+        # クラスが無いので、トップレベルもメソッドの中もブロックの中も self は
+        # `main` で、Ruby でもトップレベルの `@foo` は `main` のインスタンス
+        # 変数です。名前ごとに 1 枠で正しく、近似ではありません。
         slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))
         { symbol: sym, index: idx, table_addr: table_addr, general: true,
           kind: SYMBOL_KIND_GLOBAL,

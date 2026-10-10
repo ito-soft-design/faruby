@@ -136,6 +136,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
   VMREGSLOT := VMREGBASE / 4;
   VMSTEPCOUNTL := VMSTEPCOUNTL + 1;   (* 累計実行命令数 *)
 
+  (* OP_GETIV: R[a] = @名前 (OP_GETGV の枝へ) *)
+  IF VMCURRENTOPCODE = 25 THEN
+    VMCURRENTOPCODE := 21;
+  END_IF;
+
+  (* OP_SETIV: @名前 = R[a] (OP_SETGV の枝へ) *)
+  IF VMCURRENTOPCODE = 26 THEN
+    VMCURRENTOPCODE := 22;
+  END_IF;
+
   (* OP_SSEND: self をレシーバ位置に置いて OP_SEND へ *)
   IF VMCURRENTOPCODE = 45 THEN
     (* オペランド a を覗く。枝の中で読み直すので PC は進めない *)
@@ -315,8 +325,8 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       EXIT;
 
     END_IF;
-  ELSIF VMCURRENTOPCODE <= 30 THEN
-    (* オペコード 0x10 - 0x1E *)
+  ELSIF VMCURRENTOPCODE <= 25 THEN
+    (* オペコード 0x10 - 0x19 *)
     IF VMCURRENTOPCODE = 16 THEN
       (* OP_LOADSYM (BB): R[a] = symbols[b] (シンボル) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
@@ -1362,7 +1372,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 30 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 38 THEN
+    (* オペコード 0x1A - 0x26 *)
+    IF VMCURRENTOPCODE = 30 THEN
       (* OP_SETCONST (BB): FARUBY_ の設定なら VM 状態へ書く *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -1379,16 +1398,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 40 THEN
-    (* オペコード 0x1F - 0x28 *)
-    IF VMCURRENTOPCODE = 33 THEN
+    ELSIF VMCURRENTOPCODE = 33 THEN
       (* OP_GETUPVAR (BBB): R[a] = 外側 c 段の R[b] *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -3027,7 +3037,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMPC := VMPC + VMOPERANDB;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 39 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 56 THEN
+    (* オペコード 0x27 - 0x38 *)
+    IF VMCURRENTOPCODE = 39 THEN
       (* OP_JMPNOT (BS): if R[a] が偽 (nil/false) then PC += signed16(b) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -3055,16 +3074,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMPC := VMPC + VMOPERANDB;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 60 THEN
-    (* オペコード 0x29 - 0x3C *)
-    IF VMCURRENTOPCODE = 47 THEN
+    ELSIF VMCURRENTOPCODE = 47 THEN
       (* OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -4907,7 +4917,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 58 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 66 THEN
+    (* オペコード 0x39 - 0x42 *)
+    IF VMCURRENTOPCODE = 58 THEN
       (* OP_BREAK (B): 反復を打ち切って R[a] を返す *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5060,16 +5079,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 68 THEN
-    (* オペコード 0x3D - 0x44 *)
-    IF VMCURRENTOPCODE = 61 THEN
+    ELSIF VMCURRENTOPCODE = 61 THEN
       (* OP_ADDI (BB): R[a] = R[a] + b *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5337,7 +5347,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 2;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 67 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 82 THEN
+    (* オペコード 0x43 - 0x52 *)
+    IF VMCURRENTOPCODE = 67 THEN
       (* OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5421,16 +5440,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 87 THEN
-    (* オペコード 0x45 - 0x57 *)
-    IF VMCURRENTOPCODE = 69 THEN
+    ELSIF VMCURRENTOPCODE = 69 THEN
       (* OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5712,7 +5722,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMTEMP32L := VMTEMP32L + VMTEMP32BL;
       D0Z3 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
 
-    ELSIF VMCURRENTOPCODE = 83 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 105 THEN
+    (* オペコード 0x53 - 0x69 *)
+    IF VMCURRENTOPCODE = 83 THEN
       (* OP_HASH (BB): R[a] = { R[a] => R[a+1], .. } (b 組) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -5780,16 +5799,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 := Z4;   (* 定義元のフレーム *)
       VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 12;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 105 THEN
-    (* オペコード 0x58 - 0x69 *)
-    IF VMCURRENTOPCODE = 88 THEN
+    ELSIF VMCURRENTOPCODE = 88 THEN
       (* OP_METHOD (BB): R[a] = 子 irep b への参照 *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
