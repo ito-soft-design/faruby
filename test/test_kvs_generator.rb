@@ -194,10 +194,10 @@ class TestKvsGenerator < Minitest::Test
     assert_equal 0x30, ssendb.enters, "OP_SENDB の枝へ落ちること"
   end
 
-  # **前置きは互いに素通りするので、Z の控えを持ち越してはいけない。**
+  # **前処理は互いに素通りするので、Z に覚えたアドレスを持ち越してはいけない。**
   #
   # 1 つ目が組み立てたスロットのアドレスを 2 つ目が使い回すと、組み立てる行が
-  # 出ないまま参照だけが残る。実機で踏んだ — `OP_SSENDB` が self を写さず、
+  # 出ないまま参照だけが残る。実機で起きた — `OP_SSENDB` が self を写さず、
   # レシーバの型検査で止まった。**三菱では出ない** (添字で指すので行が無い)
   def test_each_prologue_builds_its_own_slot_addresses
     generator = FaRuby::KvsGenerator.new

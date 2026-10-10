@@ -959,6 +959,7 @@ h["n"] += 2
 | [doc/opcodes.md](doc/opcodes.md) | 対応オペコード一覧 |
 | [doc/method_calls.md](doc/method_calls.md) | メソッド定義・呼び出し |
 | [doc/blocks.md](doc/blocks.md) | ブロック |
+| [doc/instance_vars.md](doc/instance_vars.md) | インスタンス変数 (`@`) の計画 |
 | [doc/hash.md](doc/hash.md) | ハッシュと Symbol |
 | [doc/plc_access_issues.md](doc/plc_access_issues.md) | plc_access で見つかった問題の記録 |
 
