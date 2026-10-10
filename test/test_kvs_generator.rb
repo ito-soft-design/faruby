@@ -182,6 +182,107 @@ class TestKvsGenerator < Minitest::Test
     end
   end
 
+  # === loop ===
+
+  # `OP_SSENDB` は self をレシーバ位置に置いて `OP_SENDB` の枝へ落ちる前処理。
+  # 別々に書くと組み込みメソッドの振り分けが 2 度展開される
+  def test_ssendb_falls_into_sendb
+    ssendb = FaRuby::OpcodeTable.lookup[0x2E]
+
+    refute_nil ssendb, "OP_SSENDB が定義表に無い"
+    assert_equal :OP_SSENDB, ssendb.name
+    assert_equal 0x30, ssendb.enters, "OP_SENDB の枝へ落ちること"
+  end
+
+  # **前処理は互いに素通りするので、Z に覚えたアドレスを持ち越してはいけない。**
+  #
+  # 1 つ目が組み立てたスロットのアドレスを 2 つ目が使い回すと、組み立てる行が
+  # 出ないまま参照だけが残る。実機で起きた — `OP_SSENDB` が self を写さず、
+  # レシーバの型検査で止まった。**三菱では出ない** (添字で指すので行が無い)
+  def test_each_prologue_builds_its_own_slot_addresses
+    generator = FaRuby::KvsGenerator.new
+    fetch = generator.generate.fetch(generator.file_name("fetch"))
+    # **中身のある前処理だけが数に入る。** `OP_GETIV` のように落とすだけの
+    # ものはスロットを触らないので、組み立てる行も出ない
+    prologues = FaRuby::OpcodeTable.all.reject(&:branch?).select(&:body)
+
+    assert_operator prologues.size, :>=, 2, "持ち越しが起きる形になっていない"
+    # R[0] (self) のアドレスを組み立てる行が、前処理の数だけ出ていること
+    assert_equal prologues.size, fetch.scan("= 0 + #{emitter.reg_offset}").size,
+                 "前処理ごとにスロットのアドレスを組み立てていない"
+  end
+
+  # 中身を書かない前処理は、落とすだけの 3 行で済む
+  def test_a_prologue_without_a_body_only_rewrites_the_opcode
+    generator = FaRuby::KvsGenerator.new
+    fetch = generator.generate.fetch(generator.file_name("fetch"))
+    getiv = FaRuby::OpcodeTable.lookup.fetch(0x19)
+
+    assert_nil getiv.body, "OP_GETIV に中身を書いている"
+    assert_includes fetch, "IF #{emitter.opcode} = #{getiv.code} THEN"
+    # 落ちる先は OP_GETGV。汎用グローバルと同じ枝を通る
+    assert_equal 0x15, getiv.enters
+  end
+
+  # loop は上限が無い。**break でしか終わらない**
+  def test_loop_skips_the_limit_check
+    kind = emitter.frame_kind
+
+    assert_includes @source, "IF #{kind} = #{FaRuby::MemoryLayout::FRAME_KIND_LOOP} THEN",
+                    "上限の比較を飛ばす枝が無い"
+    assert_includes @source, "#{kind} = #{FaRuby::MemoryLayout::FRAME_KIND_LOOP}",
+                    "反復フレームに loop の種別を書いていない"
+  end
+
+  # === 電源投入後の再始動 ===
+
+  # **実行中のまま電源が切れたものだけ、先頭から走らせ直す。**
+  #
+  # 停止・完了・エラーで切れたものは止めたままにします。走らせ直すかどうかを
+  # 設定ではなく状態で決めているので、この 2 段の枝がその判断そのものです。
+  def test_the_init_restarts_only_what_was_running
+    code = code_lines(init_source)
+    first_scan = code.index { |l| l.include?("IF #{FaRuby::KvsDialect.new.first_scan_pulse} THEN") }
+
+    refute_nil first_scan, "初回スキャンの枝が無い"
+    assert_includes code[first_scan + 1], "IF #{emitter.status} = #{VM_RUNNING} THEN",
+                    "実行中だったかどうかを見ていない"
+    assert_includes code.join("\n"), "#{emitter.status} = #{VM_RUNNING}",
+                    "初期化したあと実行中へ戻していない"
+  end
+
+  # **電源が切れる前のリセット要求は捨てる。**
+  #
+  # 残すと、走らせ直した直後に下の枝が初期化して止めてしまいます。
+  def test_the_init_drops_a_reset_request_from_before_the_power_cut
+    code = code_lines(init_source)
+    first_scan = code.index { |l| l.include?("IF #{FaRuby::KvsDialect.new.first_scan_pulse} THEN") }
+    # 初回スキャンの枝の中 (次の END IF まで) で要求を落としていること
+    inside = code[first_scan..].take_while { |l| !l.strip.start_with?("IF #{emitter.state(layout.reset_req_addr)}") }
+
+    assert_includes inside.join("\n"), "#{emitter.state(layout.reset_req_addr)} = 0",
+                    "初回スキャンの枝でリセット要求を落としていない"
+  end
+
+  # **汎用グローバル変数も潰す。** 残すと設備の状態と食い違う
+  #
+  # `$timer1` のように覚えておいた値が電源を切る前の値のままになり、先頭から走らせ直す
+  # 意味が無くなります。`load` が 0 初期化するのと揃えました。
+  def test_the_reset_clears_the_general_globals
+    last = layout.general_global_slot_addr(layout.max_globals) - 1
+
+    assert_includes init_source,
+                    "FOR Z1 = #{layout.offset_of(layout.general_global_base)} + Z9 " \
+                    "TO #{layout.offset_of(last)} + Z9",
+                    "汎用グローバル変数を潰していない"
+  end
+
+  # R[0] はトップレベルの self。**mruby は OP_LOADSELF を書かない**
+  def test_the_reset_sets_the_top_level_self
+    assert_includes init_source, "= #{TT_OBJECT}",
+                    "リセットで R[0] を self に戻していない"
+  end
+
   # 実行判定は各インスタンスの STATUS を見る
   def test_each_instance_checks_its_own_status
     assert_includes @source, "IF #{emitter.status} = #{VM_RUNNING} THEN"

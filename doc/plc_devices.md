@@ -64,7 +64,7 @@ s = $DM100T6        # 6 バイトぶんを読む。埋め物も中身に入る
 
 | 変数 | 型 | 内容 |
 |------|-----|------|
-| `$FARUBY_TICKS` | 整数 | 電源投入からのミリ秒。32 ビット符号付き |
+| `$FARUBY_TICKS` | 整数 | 数え始めてからのミリ秒。32 ビット符号付き。**電源を入れ直しても 0 に戻らない** |
 | `$FARUBY_CLOCK_10MS` | 真偽値 | 10ms クロックパルス |
 | `$FARUBY_CLOCK_100MS` | 真偽値 | 100ms クロックパルス |
 | `$FARUBY_CLOCK_1S` | 真偽値 | 1s クロックパルス |
@@ -242,7 +242,7 @@ plc_access は略記を知らず、`L100` を受け付けても**番号の付け
 | `tools/memory_map.rb` | `ACCESS_*` / `ACCESS_SUFFIXES` の調整 (機種で使える幅が違う場合) |
 | `simulator/kv_vm_simulator.rb` | `BIT_DEVICE_TYPES` の調整、デバイスメモリ数の調整 |
 | `tools/kvs_generator.rb` | 各デバイスの間接アクセスコード生成 (`WORD_DEVICES` / `BIT_DEVICES`) |
-| `tools/dialect.rb` | 文の綴り方、書き出し先、その機種で使えないデバイス種別 (`unsupported_devices`)。機種名を `Dialect::CLASSES` に足すと生成も設定もそれに従う |
+| `tools/dialect.rb` | 文の方言、書き出し先、その機種で使えないデバイス種別 (`unsupported_devices`)。機種名を `Dialect::CLASSES` に足すと生成も設定もそれに従う |
 | `faruby.yml` | 機種ごとに違う設定 (接続先・メモリ配置・実行設定) を `models:` の下に |
 | `doc/plc_devices.md` | 本ドキュメントにセクション追加 |
 

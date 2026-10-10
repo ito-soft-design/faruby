@@ -210,12 +210,16 @@ module FaRuby
 
     # --- 経過時間 ---
     #
-    # faRuby が用意するグローバル変数で、電源投入からのミリ秒を返します。
+    # faRuby が用意するグローバル変数で、数え始めてからのミリ秒を返します。
     # 生成スクリプトがクロックパルスの立ち上がりを数えて進めます。
+    #
+    # **電源を入れ直しても 0 に戻りません。** 値は EM / D に残るので、
+    # 切っていた間を飛ばして続きから数えます (実機で確認)。差で時間を見る
+    # 使い方なので、起点を取り直せば困りません。
     #
     # **設定定数と接頭辞が同じですが別物です。** 設定定数は `$` を付けない
     # 定数 (`FARUBY_STR_FILL = 0x20`) で、こちらは `$` の付くグローバル変数
-    # です。綴りで分かれるので混ざりません。
+    # です。見た目で分かれるので混ざりません。
     #
     # **利用者が書いても意味がありません。** 次のスキャンで生成スクリプトが
     # 足し込むので、書いた値はそのまま数え続ける起点になるだけです。
@@ -249,7 +253,7 @@ module FaRuby
     ENCODING_SJIS  = 1
     ENCODING_ASCII = 2
 
-    # マジックコメントの綴り => ENCODING_*
+    # マジックコメントの表記 => ENCODING_*
     #
     # mrbc はマジックコメントを見ていないため、読むのは faRuby の仕事です。
     ENCODING_NAMES = {
@@ -303,6 +307,11 @@ module FaRuby
     METHOD_VALUES  = 25
     # $DML[100, 3]。デバイス参照から連続した値を配列にする
     METHOD_SLICE   = 26
+    # レシーバが self (トップレベルの main)。ブロックを取る
+    #
+    # **末尾に置くのは番号を振り直さずに済ませるため**です。番号はレシーバの
+    # 型ごとに連続していればよく、タグの大小とは関係しません。
+    METHOD_LOOP    = 27
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -324,7 +333,8 @@ module FaRuby
       [METHOD_EACH,    TT_ARRAY,   TT_HASH,  "配列・ハッシュ"],
       [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
       [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
-      [nil,            TT_DEVICE,  TT_DEVICE, "デバイス参照"],
+      [METHOD_SLICE,   TT_DEVICE,  TT_DEVICE, "デバイス参照"],
+      [nil,            TT_OBJECT,  TT_OBJECT, "self"],
     ].freeze
 
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
@@ -370,13 +380,14 @@ module FaRuby
       "keys"   => [METHOD_KEYS,   0],
       "values" => [METHOD_VALUES, 0],
       "[]"     => [METHOD_SLICE,  2],
+      "loop"   => [METHOD_LOOP,   0],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない
     #
     # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
     # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
-    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH].freeze
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH, METHOD_LOOP].freeze
 
     # 番号 => 生成コードのコメントに使う名前
     #

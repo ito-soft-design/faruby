@@ -28,7 +28,7 @@ class TestMelsecTypes < Minitest::Test
 
   # **GX Works2 は文の無い分岐を通しません。** KV スクリプトでも KV-X500 の
   # ST でも通るので、生成器は `OP_NOP` や「ここへは来ない」の分岐を注釈だけで
-  # 閉じています。綴り方が最後に何もしない代入を置きます。
+  # 閉じています。方言が最後に何もしない代入を置きます。
   def test_no_branch_is_left_empty
     generator = FaRuby::KvsGenerator.new(layout: layout, dialect: FaRuby::MelsecDialect.new)
     offenders = generator.generate.flat_map do |name, content|
@@ -59,7 +59,7 @@ class TestMelsecTypes < Minitest::Test
   # 「1 番目の引数に不正な値」で止まります (実機で確認済み)
   #
   # 1 本にまとめたときにステップのループがループカウンタを使うようになり、
-  # 中身の無い分岐に置いた自己代入がそこを踏みました。
+  # 中身の無い分岐に置いた自己代入がそこに当たりました。
   # **開いているループの変数だけを見ます。** Z レジスタはループの変数にも
   # 算法の一時変数にも使うので、そのループの外なら代入して構いません。
   def test_no_loop_variable_is_assigned

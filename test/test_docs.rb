@@ -110,6 +110,7 @@ class TestDocs < Minitest::Test
 
   # 容量は利用者が最初にぶつかる制限。README とずれると問い合わせになる
   def test_the_readme_states_the_pool_size
-    assert_includes doc("README.md"), "#{Layout.default.max_arrays} 個で止まります"
+    assert_includes doc("README.md"),
+                    "#{Layout.default.max_arrays} 個目で実行時エラーになります"
   end
 end

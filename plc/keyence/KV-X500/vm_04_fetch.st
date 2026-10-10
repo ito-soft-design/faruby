@@ -21,6 +21,16 @@ ELSE
   EM0:Z9 := EM0:Z9 + 1;
   EM3.L:Z9 := EM3.L:Z9 + 1;   // 累計実行命令数
 
+  // OP_GETIV: R[a] = @名前 (OP_GETGV の枝へ)
+  IF EM6:Z9 = 25 THEN
+    EM6:Z9 := 21;
+  END_IF;
+
+  // OP_SETIV: @名前 = R[a] (OP_SETGV の枝へ)
+  IF EM6:Z9 = 26 THEN
+    EM6:Z9 := 22;
+  END_IF;
+
   // OP_SSEND: self をレシーバ位置に置いて OP_SEND へ
   IF EM6:Z9 = 45 THEN
     // オペランド a を覗く。枝の中で読み直すので PC は進めない
@@ -32,6 +42,19 @@ ELSE
     EM1.L:Z1 := EM1.L:Z3;
     EM0:Z1 := EM0:Z3;
     EM6:Z9 := 47;
+  END_IF;
+
+  // OP_SSENDB: self をレシーバ位置に置いて OP_SENDB へ
+  IF EM6:Z9 = 46 THEN
+    // オペランド a を覗く。枝の中で読み直すので PC は進めない
+    Z1 := EM0:Z9 + EM33:Z9;
+    EM7:Z9 := FM0:Z1;
+    // self をレシーバ位置に置く (mruby の regs[a] = regs[0])
+    Z3 := 0 + EM32:Z9 + Z9;
+    Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+    EM1.L:Z1 := EM1.L:Z3;
+    EM0:Z1 := EM0:Z3;
+    EM6:Z9 := 48;
   END_IF;
 
   // 振り分け用の写し。担当の群が実行したら空き番号で潰す

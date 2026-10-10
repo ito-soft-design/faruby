@@ -19,7 +19,7 @@
 #   MELSEC  VMRV[VMOPA] := VMRV[VMOPB];         型付きラベル配列の添字
 #
 # KV は 1 本の Z でタグと値の両方を指し、MELSEC は配列を型ごとに分けます。
-# **アドレス計算そのものが要らなくなる**ので、綴り替えでは届きません。
+# **アドレス計算そのものが要らなくなる**ので、文の書き替えでは届きません。
 
 require_relative "memory_layout"
 require_relative "vm_constants"
@@ -64,7 +64,7 @@ module FaRuby
 
     # アクセス幅とデバイスに付けるサフィックス
     #
-    # **KV は幅をデバイス側に付けて選びます** (`DM0.L:Z6`)。三菱にこの綴りは
+    # **KV は幅をデバイス側に付けて選びます** (`DM0.L:Z6`)。三菱にこの書き方は
     # 無いので、この対応表も KV だけのものです。
     ACCESS_SUFFIX = { ACCESS_S => "S", ACCESS_U => "U", ACCESS_L => "L",
                       ACCESS_D => "D", ACCESS_F => "F" }.freeze
@@ -153,6 +153,9 @@ module FaRuby
 
     # クロックパルス。**KV はデバイスをそのまま書けます**
     def tick_pulse_ref(device, _period) = device
+
+    # 初回スキャンの接点も同じ。そのまま書けます
+    def first_scan_ref(device) = device
 
     # 実行中の irep の領域を指す項
     #
@@ -308,7 +311,20 @@ module FaRuby
       @emitter.line "NEXT"
     end
 
-    # --- 命令ごとの下ごしらえ ---
+    # 汎用グローバル変数を潰す。**型タグごと 0 にします**
+    def clear_general_globals(z)
+      last = layout.general_global_slot_addr(layout.max_globals) - 1
+      @emitter.note "汎用グローバル変数クリア " \
+                    "(#{layout.max_globals}スロット × #{VmConstants::SLOT_WORDS}ワード)"
+      @emitter.line "FOR Z#{z} = #{block_offset(layout.general_global_base)} " \
+                    "TO #{block_offset(last)}"
+      @emitter.indent
+      @emitter.line "#{indexed_base}:Z#{z} = 0"
+      @emitter.dedent
+      @emitter.line "NEXT"
+    end
+
+    # --- 命令ごとの下準備 ---
 
     # **要りません。** アドレスは Z に組み立てるので、命令ごとに
     # 用意しておくものがありません。
@@ -363,7 +379,7 @@ module FaRuby
 
     # 次の 1 バイトを覗く。**PC は進めません**
     #
-    # 命令の取り込みで前置きを実行する命令 (`OP_SSEND`) が使います。枝の中で
+    # 命令の取り込みで前処理を実行する命令 (`OP_SSEND`) が使います。枝の中で
     # もう一度読み直すので、ここで進めると 1 バイトずれます。
     def peek_bytecode_into(dest)
       @emitter.line "Z1 = #{state(layout.pc_addr)} + #{bytecode_offset}"
@@ -484,6 +500,9 @@ module FaRuby
     # クロックパルス。**デバイスを直に書けないのでラベルにします**
     TICK_PULSE = "VMTICKPULSE"
 
+    # 初回スキャンの接点。これもラベルにします
+    FIRST_SCAN = "VMFIRSTSCAN"
+
     # ビットの型名。**`BOOL` ではありません** (GX Works2 が弾きます)
     BIT_TYPE = "BIT"
 
@@ -533,11 +552,15 @@ module FaRuby
     #
     # 周期ごとに別のラベルです。同じ名前に別のデバイスを割り付けられません。
     #
-    # **型は `BIT` です。** IEC の綴りは `BOOL` ですが、GX Works2 は
+    # **型は `BIT` です。** IEC の表記は `BOOL` ですが、GX Works2 は
     # 「データ型が不正」で取り込みを弾きます。ワードの側が `INT` / `DINT` /
-    # `REAL` と IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
+    # `REAL` と IEC の表記で通るので揃えていましたが、ビットだけ違いました。
     def tick_pulse_ref(device, period)
       remember("#{TICK_PULSE}#{period}", BIT_TYPE, device, "クロックパルス #{period}ms")
+    end
+
+    def first_scan_ref(device)
+      remember(FIRST_SCAN, BIT_TYPE, device, "初回スキャンのみ ON")
     end
 
     # **32 ビットは別のラベルです。** 同じ 2 ワードを INT と DINT の両方で
@@ -637,6 +660,21 @@ module FaRuby
       @emitter.line "NEXT"
     end
 
+    # 汎用グローバル変数を潰す。**型タグだけで足ります**
+    #
+    # 偽になれば Ruby からは未代入と見分けが付きません。値ワードは次に
+    # 代入されたときに型タグごと書き換わります。
+    def clear_general_globals(_z)
+      counter = state(layout.loop_counter_addr)
+      first = layout.offset_of(layout.general_global_base) / VmConstants::SLOT_WORDS
+      @emitter.note "汎用グローバル変数クリア (型タグを TT_EMPTY に)"
+      @emitter.line "FOR #{counter} = #{first} TO #{first + layout.max_globals - 1}"
+      @emitter.indent
+      @emitter.line "#{SLOT}[#{counter}].#{TAG} = 0"
+      @emitter.dedent
+      @emitter.line "NEXT"
+    end
+
     # --- インデックスレジスタ ---
 
     # 退避先。VM 状態の中に 9 語並べた配列で持ちます
@@ -654,7 +692,7 @@ module FaRuby
     # ビットデバイスは桁指定が使えます (`K4M0Z6` で 16 個、`K8M0Z6` で 32 個)。
     # インデックス修飾と併用でき、1 文で読めます (実機で確認済み)。
     #
-    # **ワードデバイスに 32 ビットの綴りはありません。** 16 ビット 2 回に開いて
+    # **ワードデバイスに 32 ビットの書き方はありません。** 16 ビット 2 回に開いて
     # スクラッチの重ね合わせに載せ、そこを指します。実数は同じ場所を REAL で
     # 読み替えるだけで、変換は入りません。
     def device_read(device, access, z)
@@ -778,7 +816,7 @@ module FaRuby
 
     # 読む。**16 ビット 2 回に開いてスクラッチへ載せ、そこを指します**
     #
-    # ラベルは型が固定なので、任意のアドレスを 32 ビットで指す綴りが
+    # ラベルは型が固定なので、任意のアドレスを 32 ビットで指す書き方が
     # ありません。重ね合わせを持っているスクラッチを経由します。
     def long_at(z, offset, scratch)
       @emitter.line "#{state(scratch)} = #{word_at(z, offset)}"
@@ -796,14 +834,14 @@ module FaRuby
     # 16 ビットオペランドを符号付きとして読み直す
     #
     # **何もしません。** ラベルが符号付き INT で、取り込みの `Z3 * 256 + Z4`
-    # が 2 の補数で回り込むため、その時点ですでに符号付きの値です。KV のように
+    # が 2 の補数で一周するため、その時点ですでに符号付きの値です。KV のように
     # 65536 を引くと、比較の 32768 も引く数も符号付き INT に入りません。
     def normalize_signed16(var) = nil
 
     # bits ビットの値を符号拡張して 32 ビットスクラッチに置く
     #
     # **ラベルに型があるので変換 1 文です。** オペランドは符号付き INT で、
-    # 取り込みの `Z3 * 256 + Z4` が 2 の補数で回り込むため、その時点で
+    # 取り込みの `Z3 * 256 + Z4` が 2 の補数で一周するため、その時点で
     # すでに符号付きの値になっています。あとは幅を広げるだけです。
     #
     # KV のように上位ワードを 65535 で埋める手は使えません。符号付き INT に
@@ -820,7 +858,7 @@ module FaRuby
     # そのまま書けます。オペランドは INT なので変換を挟みます。
     def negate(value) = "0 - #{value}"
 
-    # --- 命令ごとの下ごしらえ ---
+    # --- 命令ごとの下準備 ---
 
     # レジスタ窓の先頭をスロット単位に直しておく
     #
@@ -911,7 +949,7 @@ module FaRuby
             .map { |l| [l.name, l.device] }
     end
 
-    # IEC の型を貼り付けの表の綴りに直す
+    # IEC の型を貼り付けの表の表記に直す
     JAPANESE_TYPES = { "INT" => "ワード[符号付き]", "DINT" => "ダブルワード[符号付き]",
                        "REAL" => "単精度実数", BIT_TYPE => "ビット" }.freeze
 
@@ -932,7 +970,7 @@ module FaRuby
     # 引用符で囲みます**。エンジニアリングツールが書き出すとおりです。
     #
     # **列は版で違います** (GX Works2 は 11、GX Works3 は 28)。並びも違うので、
-    # 見出しの名前で値を置きます。綴り方が見出しを持ちます (tools/dialect.rb)。
+    # 見出しの名前で値を置きます。方言が見出しを持ちます (tools/dialect.rb)。
     CSV_NAME = "faruby"
 
     def label_csv(header)
@@ -1066,9 +1104,9 @@ module FaRuby
       [label.device, "%M#{width}#{area}.#{label.device[/\d+/]}"]
     end
 
-    # 配列の型。**IEC の綴りで持ちます**
+    # 配列の型。**IEC の表記で持ちます**
     #
-    # 取り込みの CSV はこの綴りで、貼り付けの表は日本語です。どちらも
+    # 取り込みの CSV はこの表記で、貼り付けの表は日本語です。どちらも
     # 同じところから作ります。
     def array_of(type, count) = "ARRAY [0..#{count - 1}] OF #{type}"
 
@@ -1115,7 +1153,7 @@ module FaRuby
 
     # 値ワードを 16 ビット単位で指す
     #
-    # **構造体のメンバの一部だけを取り出す綴りがありません。** そこで、値を
+    # **構造体のメンバの一部だけを取り出す書き方がありません。** そこで、値を
     # 16 ビット 2 つとして見る形を同じアドレスに重ねてあります。デバイス参照が
     # 種別・幅・アドレスを 2 ワードに詰めるので、そこで通ります。
     def word_of(index_expr, offset, word_array = SLOTW)

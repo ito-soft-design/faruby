@@ -5,11 +5,11 @@ require "minitest/autorun"
 require_relative "../tools/dialect"
 require_relative "../tools/kvs_generator"
 
-# 生成コードの綴り方
+# 生成コードの方言
 #
 # **命令の意味は機種によらず同じで、違うのは文の書き方だけ**という前提を
 # 守らせるためのテストです。デバイスの指し方 (`EM0:Z9`、`.L`、`.F`) は
-# KV スクリプトでも ST でも同じなので、差し替えるのは文の綴りに限られます。
+# KV スクリプトでも ST でも同じなので、差し替えるのは文の書き方に限られます。
 class TestDialect < Minitest::Test
   def kvs = FaRuby::KvsDialect.new
   def st = FaRuby::StDialect.new
@@ -17,7 +17,7 @@ class TestDialect < Minitest::Test
   # === 機種 ===
 
   # **機種名は書き出し先のフォルダ名で、設定の models: の見出しでもあります。**
-  # 3 つが同じ名前だからこそ、機種を増やすのが綴り方を足すだけで済みます。
+  # 3 つが同じ名前だからこそ、機種を増やすのが方言を足すだけで済みます。
   #
   # 書き出し先はメーカー名を挟みます。エンジニアリングツールが違えば
   # プロジェクトの置き場所も分かれるためです。
@@ -50,6 +50,19 @@ class TestDialect < Minitest::Test
     end
   end
 
+  # **起動の合図はどの機種にも要ります。** これが無いと電源投入を見つけられず、
+  # 中断地点から続きが走ります (命令の途中で切れるとオペランドを命令として
+  # 解釈する)
+  def test_every_model_knows_its_first_scan_contact
+    FaRuby::Dialect.all.each do |dialect|
+      refute_nil dialect.first_scan_pulse, dialect.model
+    end
+    assert_equal "CR2008", kvs.first_scan_pulse
+    assert_equal "CR2008", st.first_scan_pulse
+    assert_equal "SM402", FaRuby::MelsecDialect.new.first_scan_pulse
+    assert_equal "SM402", FaRuby::MelsecIqrDialect.new.first_scan_pulse
+  end
+
   # 経過時間はいちばん細かいパルスで数える
   def test_ticks_use_the_finest_pulse
     assert_equal ["CR2004", 10], [kvs.tick_pulse, kvs.tick_ms]
@@ -57,6 +70,22 @@ class TestDialect < Minitest::Test
     assert_equal ["SM409", 10], [FaRuby::MelsecDialect.new.tick_pulse,
                                  FaRuby::MelsecDialect.new.tick_ms]
     assert_equal "SM409", FaRuby::MelsecIqrDialect.new.tick_pulse
+  end
+
+  # **段の区切りは記録で、いまは全部載っています** (MelsecDialect::STAGES)。
+  #
+  # 落ちていると生成コードからその命令が消えます。前処理だけの命令
+  # (`OP_SSENDB`) は枝を持たないため**エラーにも見えず**、実機で
+  # 「未知のオペコード」で止まるまで気づけません。実際に `loop` を入れた
+  # ときに起きました。
+  def test_every_model_carries_every_opcode
+    all = FaRuby::OpcodeTable.all
+
+    FaRuby::Dialect.all.each do |dialect|
+      missing = all.map(&:code) - dialect.select_opcodes(all).map(&:code)
+
+      assert_empty missing.map { |code| format("0x%02X", code) }, dialect.model
+    end
   end
 
   # 機種を増やすときに書き出し先が衝突しないこと
@@ -74,7 +103,7 @@ class TestDialect < Minitest::Test
 
   # === KV スクリプト ===
 
-  # 生成器は KV スクリプトの形で組み立てるので、KV 向けは素通し。
+  # 生成器は KV スクリプトの形で組み立てるので、KV 向けはそのまま出す。
   # この層を挟んでも出力が変わらないことがそのまま担保になる。
   def test_the_kv_dialect_passes_statements_through
     ["EM6:Z9 = FM0:Z1", "IF EM6:Z9 = 61 THEN", "END IF", "NEXT", "BREAK"].each do |text|
@@ -146,7 +175,7 @@ class TestDialect < Minitest::Test
 
   # === 生成結果 ===
 
-  # 綴り替え漏れがあると変換で落ちる。コード行に KV だけの綴りが残らないこと
+  # 書き替え漏れがあると変換で落ちる。コード行に KV だけの書き方が残らないこと
   def test_the_generated_st_keeps_no_kv_only_spelling
     files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
     code = files.values.flat_map { |c| c.split("\n") }
@@ -175,7 +204,7 @@ class TestDialect < Minitest::Test
   end
 
   # **タイマ・カウンタは KV-X500 では読み取りもできません。**
-  # 綴り替えでは直らないので、分岐ごと生成コードから外す
+  # 文の書き替えでは直らないので、分岐ごと生成コードから外す
   def test_the_generated_st_has_no_timer_or_counter
     files = FaRuby::KvsGenerator.new(dialect: FaRuby::StDialect.new).generate
     offenders = files.flat_map do |name, content|

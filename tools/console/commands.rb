@@ -8,6 +8,7 @@ require_relative "../mrb_parser"
 require_relative "../disasm"
 require_relative "../plc_codegen"
 require_relative "../device_syntax"
+require_relative "../device_map"
 require_relative "../dialect"
 require_relative "../vm_constants"
 require_relative "../memory_layout"
@@ -18,7 +19,7 @@ module FaRuby
     class Commands
       include VmConstants
 
-      # 利用者が書いた Ruby プログラムの置き場 (git の管理外)
+      # 利用者が書いた mruby プログラムの置き場 (git の管理外)
       PROGRAM_DIR = "programs"
 
       # 操作対象のインスタンス番号
@@ -49,7 +50,16 @@ module FaRuby
       # M / L は 10 進そのままです (`M100` は番号 100)。既定のまま
       # `PlcCodegen.parse_device_name` を呼ぶとキーエンスの数え方になり、
       # 三菱に繋いでいるときに別のビットを指します。
-      def device_syntax = @device_syntax ||= DeviceSyntax.for_dialect(Dialect.for(@config.model))
+      # **割り付け表はプログラムが持ちます** (`compile` で読み込みます)。
+      # ここを通れば `load` も `dev` も `sim` も同じ読み方になります。
+      def device_syntax
+        @device_syntax ||= DeviceSyntax.for_dialect(Dialect.for(@config.model),
+                                                    mapping: device_map.mapping,
+                                                    warn_unmapped: device_map.warn_unmapped?)
+      end
+
+      # 読み込んでいるプログラムの割り付け表。まだなら空の表
+      def device_map = @device_map || DeviceMap.empty
 
       # 使える種別の名前。**機種で違うので表から引きます**
       def supported_device_names
@@ -107,6 +117,19 @@ module FaRuby
         end
         source = found
 
+        # **割り付け表はプログラムが指します** (`# devices:` 行)。
+        # 読めなければコンパイルまで進みません。書き間違いを転送前に止めます
+        begin
+          @device_map = DeviceMap.for_program(source)
+          @device_syntax = nil
+          device_syntax     # 表そのものの検査は機種が決まってから
+        rescue CodegenError => e
+          @device_map = nil
+          @device_syntax = nil
+          puts "ERROR: #{e.message}"
+          return
+        end
+
         # mrbc でコンパイル
         mrb_path = source.sub(/\.rb$/, ".mrb")
         puts "Compiling: #{source}"
@@ -130,6 +153,9 @@ module FaRuby
         # 一時ファイル削除
         File.delete(mrb_path) if File.exist?(mrb_path)
 
+        unless device_map.empty?
+          puts "割り付け: #{device_map.path} (#{device_map.size} 点)"
+        end
         puts "OK: nlocals=#{@last_irep.nlocals}, nregs=#{@last_irep.nregs}, " \
              "ilen=#{@last_irep.ilen}, pool=#{@last_irep.pool.size}, " \
              "syms=#{@last_irep.symbols.size}"
@@ -155,6 +181,19 @@ module FaRuby
         puts "  バイトコード: #{ireps.sum { |e| e[:irep].ilen }} バイト"
         puts "  定数プール: #{ireps.sum { |e| e[:irep].pool.size }} エントリ"
         puts "  レジスタ: #{ireps.map { |e| e[:irep].nregs }.max} 個"
+        report_unmapped
+      end
+
+      # 割り付け表を通らなかった名前を知らせる
+      #
+      # **全部を抽象化したい設備で実デバイスの直書きを見つけるためです。**
+      # 止めはしません。表は任意で、混ぜて使えるのが前提だからです。
+      def report_unmapped
+        names = device_syntax.unmapped
+        return if names.empty?
+
+        puts "警告: 割り付け表に無い名前を実デバイスとして読みました (#{names.size} 個)"
+        puts "  #{names.join(', ')}"
       end
 
       # run
@@ -171,7 +210,7 @@ module FaRuby
         puts "  PC       : #{state[:pc]}"
         puts "  ERROR    : #{state[:error]}"
         puts "  STEPS    : #{state[:step_count]}"
-        puts "  TICKS    : #{state[:ticks]} ms (電源投入から。全インスタンス共通)"
+        puts "  TICKS    : #{state[:ticks]} ms (数え始めてから。全インスタンス共通)"
         puts "  OPCODE   : #{state[:current_opcode]}"
         puts "  ARGS     : a=#{state[:operand_a]} b=#{state[:operand_b]} c=#{state[:operand_c]}"
         puts "  BCLEN    : #{state[:bytecode_len]}"
@@ -343,10 +382,14 @@ module FaRuby
           return
         end
 
-        parsed = PlcCodegen.parse_device_name(args[0], device_syntax)
+        # **割り付けた名前でも読めること。** プログラムと同じ名前で触れないと、
+        # 抽象化した設備ではコンソールから確かめられません
+        parsed = device_syntax.parse_mapped_name(args[0]) ||
+                 PlcCodegen.parse_device_name(args[0], device_syntax)
         unless parsed
           puts "ERROR: 不明なデバイス: #{args[0]}"
           puts "  対応デバイス (#{@config.model}): #{supported_device_names.join(', ')}"
+          puts "  割り付けた名前: #{device_syntax.mapping.keys.join(', ')}" unless device_syntax.mapping.empty?
           return
         end
 
@@ -356,6 +399,9 @@ module FaRuby
         dev_type = parsed[:device_type]
         bit = parsed[:bit]
         access_type = parsed[:access_type] || ACCESS_S
+
+        # 添字で引ける範囲は、値 1 つではなく中身を並べる
+        return dump_device_range(args[0], parsed) if parsed[:words] && args[1].nil?
 
         if args[1]
           # 書き込み
@@ -370,6 +416,24 @@ module FaRuby
           else
             puts "#{dev_name}#{dev_addr} = #{val}"
           end
+        end
+      end
+
+      # 添字で引ける範囲の中身を並べる
+      #
+      # **1 つだけ見せると範囲だと分かりません。** 割り付け表に書いたワード数が
+      # そのまま並ぶので、どこまでが自分のものかが見えます。
+      def dump_device_range(name, parsed)
+        base = parsed[:z_offset]
+        words = parsed[:words]
+        puts "#{name} = #{parsed[:device_name]}#{parsed[:address]} から #{words} ワード"
+        words.times do |i|
+          addr = device_syntax.address_of(parsed[:device_name], base + i)
+          val = read_device_value(parsed[:device_name], addr, base + i,
+                                  parsed[:device_type], parsed[:bit],
+                                  parsed[:access_type] || ACCESS_S)
+          puts format("  [%d] %s%s = %s", i, parsed[:device_name], addr,
+                      val.nil? ? "?" : val.to_s)
         end
       end
 
@@ -390,7 +454,7 @@ module FaRuby
       def cmd_help(args)
         puts <<~HELP
           === faRuby Console ===
-          compile <file.rb>  Ruby ソースをコンパイル (programs/ から探します)
+          compile <file.rb>  mruby としてコンパイル (programs/ から探します)
           load               コンパイル済みプログラムを PLC に書き込み
           run                VM を開始 (STATUS=1)
           instance [n]       操作対象のインスタンスを表示 / 切り替え

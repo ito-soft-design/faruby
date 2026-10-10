@@ -327,13 +327,28 @@ end
     irep = build_irep(nregs: 3)
     image = mutable_image(irep)
 
-    3.times do |i|
+    # R[0] はトップレベルの self なので 0 ではない (下のテストで見る)
+    (1...3).each do |i|
       slot = layout.reg_slot_addr(i)
       SLOT_WORDS.times do |w|
         assert image.key?(slot + w), "EM#{slot + w} (R[#{i}] slot word #{w}) が初期化されていない"
         assert_equal 0, image[slot + w]
       end
     end
+  end
+
+  # **R[0] はトップレベルの self (main)。**
+  #
+  # mruby は `OP_LOADSELF` を書かずに R[0] が self である前提で呼び出す。
+  # 空のままだとタグが TT_EMPTY で、レシーバが self の組み込みメソッド
+  # (`loop`) が型検査で弾かれる。自分自身への呼び出しで渡されていくので、
+  # ここを self にすればメソッドの中でも self のままになる
+  def test_the_first_register_holds_the_top_level_self
+    image = mutable_image(build_irep(nregs: 3))
+    slot = layout.reg_slot_addr(0)
+
+    assert_equal TT_OBJECT, image[slot + SLOT_TYPE_OFFSET]
+    assert_equal TT_CANONICAL_VALUE.fetch(TT_OBJECT), image[slot + SLOT_VALUE_OFFSET]
   end
 
   # レジスタ領域が呼び出しスタックを侵さないこと
@@ -610,6 +625,81 @@ end
     # 値スロットの先頭。VM が型タグごと写す
     assert_equal layout.general_global_base, mappings[0][:z_offset]
     assert_equal SYMBOL_KIND_GLOBAL, mappings[0][:kind]
+  end
+
+  # === インスタンス変数 ===
+
+  # **`@foo` は汎用グローバルと同じ値スロットに置く。**
+  #
+  # self が 1 つしか無いので名前ごとに 1 枠で足ります (doc/instance_vars.md)。
+  # VM から見ると `$foo` と区別がありません。
+  def test_an_instance_variable_takes_a_general_global_slot
+    irep = build_irep(symbols: ["@count"])
+    mapping = FaRuby::PlcCodegen.new(irep).device_mappings.first
+
+    assert mapping[:general], "汎用グローバルの枠に入っていない"
+    assert_equal SYMBOL_KIND_GLOBAL, mapping[:kind]
+    assert_equal layout.general_global_slot_addr(0), mapping[:z_offset]
+  end
+
+  # `$foo` と `@foo` は別の枠。名前が違うので別のもの
+  def test_a_dollar_and_an_at_sign_are_different_variables
+    irep = build_irep(symbols: ["$n", "@n"])
+    mappings = FaRuby::PlcCodegen.new(irep).device_mappings
+
+    refute_equal mappings[0][:z_offset], mappings[1][:z_offset]
+  end
+
+  # **クラス変数は転送前に止める。**
+  #
+  # `@` で始まるので振り分けを素通りしてしまい、命令 (`OP_SETCV`) が無いまま
+  # シンボルだけが枠を取ります。Ruby もトップレベルの `@@` を許していません
+  def test_a_class_variable_stops
+    irep = build_irep(symbols: ["@@count"])
+    error = assert_raises(FaRuby::CodegenError) { FaRuby::PlcCodegen.new(irep).device_mappings }
+
+    assert_includes error.message, "@@count"
+    assert_includes error.message, "@count"
+  end
+
+  # === 変数の数 ===
+
+  # **枠を超えたら止める。** 溢れると次に並ぶ配列プールに重なり、
+  # 配列を壊しながら動くので気づきにくい
+  #
+  # **既定の設定では先にシンボル数で止まります** (どちらも 100 で、変数は
+  # 必ずシンボルを 1 つ使うため)。ここが効くのは `max_symbols` を増やした
+  # 配置です。順番で隠れていても検査そのものは要ります
+  def test_too_many_variables_stops
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
+    names = (1..roomy.max_globals).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # `$foo` と `@foo` は同じ枠を分け合う
+  def test_globals_and_instance_variables_share_the_limit
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
+    names = (1..roomy.max_globals).map { |i| "@v#{i}" }
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # 同じ名前は irep をまたいでも 1 枠。アドレスで数える
+  def test_the_same_name_in_two_ireps_takes_one_slot
+    irep = build_irep(symbols: ["@n"])
+    irep.add_child(build_irep(symbols: ["@n"]))
+
+    assert_equal 1, FaRuby::PlcCodegen.new(irep).general_global_count
   end
 
   # デバイス名付きシンボルは汎用領域を消費しない

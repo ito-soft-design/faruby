@@ -7,15 +7,15 @@ require_relative "melsec_types"
 require_relative "opcode_table"
 
 module FaRuby
-  # 生成コードの綴り方
+  # 生成コードの方言
   #
   # **命令の意味は機種によらず同じで、違うのは文の書き方だけです。**
   # デバイスの指し方 (`EM0:Z9`、`.L`、`.F`) は KV-5000 の KV スクリプトでも
   # KV-X500 の ST でも同じなので、差し替えるのは代入・条件・ループ・
   # いくつかの関数名に限られます。
   #
-  # 生成器は KV スクリプトの形で文を組み立て、ここで綴り直します。
-  # KV 向けは素通しなので、この層を挟んでも出力は 1 バイトも変わりません。
+  # 生成器は KV スクリプトの形で文を組み立て、ここで書き直します。
+  # KV 向けは何も変えないので、この層を挟んでも出力は 1 バイトも変わりません。
   class Dialect
     include VmConstants
 
@@ -24,7 +24,7 @@ module FaRuby
 
     def self.all = CLASSES.map(&:new)
 
-    # 機種名から綴り方を引く
+    # 機種名から方言を引く
     def self.for(model)
       all.find { |dialect| dialect.model == model } ||
         raise(ArgumentError, "知らない機種です: #{model.inspect} (#{models.join(', ')})")
@@ -37,10 +37,10 @@ module FaRuby
     #   mitsubishi/Q       GX Works2 のプロジェクト
     def directory = "#{vendor}/#{model}"
 
-    # デバイスの指し方。**綴り方と対で決まります**
+    # デバイスの指し方。**方言と対で決まります**
     def devices_for(layout, emitter) = KvDevices.new(layout, emitter)
 
-    # 1 文を綴り直す
+    # 1 文を書き直す
     def statement(text) = text
 
     # コメント 1 行
@@ -68,7 +68,7 @@ module FaRuby
 
     # 指せないデバイス種別。**分岐ごと生成コードから外します**
     #
-    # 綴り方の違いではなく、その機種で書けない文です。外した種別は VM が
+    # 言語の違いではなく、その機種で書けない文です。外した種別は VM が
     # 知らない種別として扱い、使おうとしたプログラムは実行時に止まります。
     def unsupported_devices = []
 
@@ -141,6 +141,14 @@ module FaRuby
     # 10ms クロックなら 5ms より短いスキャンタイムが要ります。
     def tick_ms = clock_pulses.keys.min || 10
     def tick_pulse = clock_pulses[tick_ms]
+
+    # 電源投入後の最初のスキャンだけ ON になる接点
+    #
+    # **これが起動の合図です。** 電源を切った時の状態は EM / D に残るので、
+    # 実行中のまま切れたプログラムを先頭から走らせ直すのに使います。
+    #
+    # 空を返す機種では起動を見つけられません。中断地点から続きが走ります。
+    def first_scan_pulse = nil
   end
 
   # KV-5000 の KV スクリプト。生成器が組み立てる形そのもの
@@ -156,6 +164,9 @@ module FaRuby
     # 数えた経過時間が実時間で進み、10 の倍数になり、その間に CR2005 が真と偽の
     # 両方を取りました。
     def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
+
+    # 電源投入後の最初のスキャンだけ ON
+    def first_scan_pulse = "CR2008"
   end
 
   # KV-X500 の ST (IEC 61131-3 準拠の構造化テキスト)
@@ -175,7 +186,7 @@ module FaRuby
   # **`INC(x)` は使わず `x := x + 1;` に開きます。** ST にあるか分からない
   # ためで、開いても意味は同じです。
   #
-  # 綴り方以外の違いが 1 つあります。**タイマ・カウンタ (T / C) は使えません。**
+  # 方言以外の違いが 1 つあります。**タイマ・カウンタ (T / C) は使えません。**
   class StDialect < Dialect
     def vendor = "keyence"
     def model = "KV-X500"
@@ -185,6 +196,9 @@ module FaRuby
     # KV-5000 と同じ。**タイマ・カウンタは使えないが CR は読める**
     # (実機で確認済み。ST でも `IF CR2004 THEN` がそのまま通ります)
     def clock_pulses = { 10 => "CR2004", 100 => "CR2005", 1000 => "CR2006" }
+
+    # KV-5000 と同じ
+    def first_scan_pulse = "CR2008"
 
     # バンクは常に 0 なので選ぶ手立てが無い
     def select_bank(_bank) = nil
@@ -200,11 +214,11 @@ module FaRuby
     #
     # KV-5000 の KV スクリプトでは接点 (`T0:Z6`) と現在値 (`T0.D:Z6`) を
     # 読めましたが、KV-X500 で変換を通すとどちらも通りませんでした
-    # (KV Studio が読み出しもできないと出します)。綴り替えでは直らないので、
+    # (KV Studio が読み出しもできないと出します)。文の書き替えでは直らないので、
     # 分岐ごと外します。
     def unsupported_devices = [DEVICE_TYPE_T, DEVICE_TYPE_C]
 
-    # コメントの綴り。**GX Works2 は (* *) なので機種で差し替えます**
+    # コメントの書き方。**GX Works2 は (* *) なので機種で差し替えます**
     def comment(text) = wrap_comment(text)
 
     def statement(text)
@@ -270,7 +284,7 @@ module FaRuby
 
   # MELSEC Q の ST (GX Works2)
   #
-  # **綴りは KV-X500 の ST とほぼ同じで、違うのはコメントとデバイスの指し方**
+  # **書き方は KV-X500 の ST とほぼ同じで、違うのはコメントとデバイスの指し方**
   # です。指し方は tools/devices.rb の MelsecDevices が持ちます。
   #
   # 実機で確かめた性質は doc/melsec.md にあります。KV と同じだったもの
@@ -285,17 +299,20 @@ module FaRuby
     #
     # **Q と iQ-R で確認済み** (`test_37_ticks_melsec` が 5 値一致)。
     #
-    # **ラベルの型は `BIT` です。** IEC の綴りの `BOOL` は GX Works2 が
+    # **ラベルの型は `BIT` です。** IEC の表記の `BOOL` は GX Works2 が
     # 「データ型が不正」で弾きました。ワードの側が `INT` / `DINT` / `REAL` と
-    # IEC の綴りで通るので揃えていましたが、ビットだけ違いました。
+    # IEC の表記で通るので揃えていましたが、ビットだけ違いました。
     def clock_pulses = { 10 => "SM409", 100 => "SM410", 1000 => "SM412" }
+
+    # 電源投入後の最初のスキャンだけ ON (初期処理完了後の 1 スキャン)
+    def first_scan_pulse = "SM402"
 
     # GX Works2 のコメントは (* *)。// は使いません
     def wrap_comment(text) = text.empty? ? "(* *)" : "(* #{text} *)"
 
-    # **ラベルの控えは綴り方が持ちます。** 生成はファイルごとに別の emitter で
+    # **ラベルの一覧は方言が持ちます。** 生成はファイルごとに別の emitter で
     # 行うので、デバイス層に持たせると 1 ファイルぶんしか集まりません。
-    # 綴り方は 1 回の生成で 1 つなので、ここが全体の受け皿になります。
+    # 方言は 1 回の生成で 1 つなので、ここが全体の受け皿になります。
     def devices_for(layout, emitter)
       MelsecDevices.new(layout, emitter, labels, retain_fixed: retain_fixed_labels?)
     end
@@ -329,7 +346,7 @@ module FaRuby
       OP_LOADI_0 OP_LOADI_1 OP_LOADI_2 OP_LOADI_3 OP_LOADI_4 OP_LOADI_5
       OP_LOADI_6 OP_LOADI_7 OP_LOADI16 OP_LOADI32
       OP_LOADNIL OP_LOADSELF OP_LOADT OP_LOADF
-      OP_GETGV OP_SETGV OP_GETIDX OP_SETIDX
+      OP_GETGV OP_SETGV OP_GETIV OP_SETIV OP_GETIDX OP_SETIDX
       OP_JMP OP_JMPIF OP_JMPNOT OP_JMPNIL
       OP_ADD OP_ADDI OP_SUB OP_SUBI OP_MUL OP_DIV
       OP_EQ OP_LT OP_LE OP_GT OP_GE
@@ -344,7 +361,7 @@ module FaRuby
     # `OP_TCLASS` と `OP_LOADSYM` と `OP_DEF` は `def` の出力に混ざります。
     # `OP_GETUPVAR` / `OP_SETUPVAR` はブロックの外側の変数を触ります。
     STAGE2 = %i[
-      OP_SSEND OP_SEND OP_SENDB OP_ENTER OP_BREAK
+      OP_SSEND OP_SSENDB OP_SEND OP_SENDB OP_ENTER OP_BREAK
       OP_BLOCK OP_METHOD OP_DEF OP_TCLASS OP_LOADSYM
       OP_GETUPVAR OP_SETUPVAR
     ].freeze
@@ -496,7 +513,7 @@ module FaRuby
   # **デバイスの種別は Q と同じ**です (D / W / R / ZR / M / L / B / X / Y)。
   # 違うのはエンジニアリングツールで、ラベルの書式と PLC 側の設定が変わります。
   #
-  # **綴りは Q から始めます。** 実機で確かめた性質 (doc/melsec.md) の多くは
+  # **書き方は Q から始めます。** 実機で確かめた性質 (doc/melsec.md) の多くは
   # 同じ MELSEC なので通るはずで、違うところは変換のエラーが教えてくれます。
   # Q のときもその進め方で 6 つの穴を 1 つずつ潰しました。
   class MelsecIqrDialect < MelsecDialect

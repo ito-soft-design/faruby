@@ -4,7 +4,7 @@
 #
 # ここに書いた命令定義から以下すべてが導かれます。
 #   - plc/keyence/KV-5000/vm_*.kvs (KvsEmitter が KV スクリプトを生成)
-#   - plc/keyence/KV-X500/vm_*.st  (綴り方を StDialect に差し替えたもの)
+#   - plc/keyence/KV-X500/vm_*.st  (方言を StDialect に差し替えたもの)
 #   - simulator/kv_vm_simulator.rb (SimVm が同じ定義を実行)
 #   - tools/disasm.rb              (MRUBY_OPCODES を参照)
 #
@@ -178,14 +178,14 @@ module FaRuby
   class OpcodeDef
     attr_reader :code, :name, :format, :summary, :body, :enters
 
-    # enters: 前置きだけ実行して、別の命令の枝へ入る
+    # enters: 前処理だけ実行して、別の命令の枝へ入る
     #
     # **mruby の vm.c と同じ形です。** `OP_SSEND` は `regs[a] = regs[0]` で
     # self をレシーバ位置に置いてから `OP_SEND` へ落ちます。そこを真似ず
     # 別々に書いていたころは、組み込みメソッドの振り分けが**生成コードに
     # 2 度展開**され、KV 全体の 14% を占めていました。
     #
-    # 前置きは命令の取り込みで実行します。**オペランドはまだ読めない**ので、
+    # 前処理は命令の取り込みで実行します。**オペランドはまだ読めない**ので、
     # 覗くだけで PC は進めません。
     def initialize(code, summary, enters: nil, &body)
       info = OpcodeTable::MRUBY_OPCODES[code]
@@ -198,7 +198,7 @@ module FaRuby
       @body = body
     end
 
-    # 枝を持つか。前置きだけの命令は持たない
+    # 枝を持つか。前処理だけの命令は持たない
     def branch? = enters.nil?
 
     def operand_sizes
@@ -305,6 +305,18 @@ module FaRuby
       defs << OpcodeDef.new(0x16, "global[symbols[b]] = R[a]") do |vm|
         vm.store_reg_into_global(:b, :a)
       end
+
+      # インスタンス変数 (`@foo`)。**枝を持たず、グローバルの枝へ落ちます**
+      #
+      # `OP_GETGV` と同じ `BB` 形式で、オペランドもやること (シンボル表を引いて
+      # 値スロットを写す) も同じです。**self が 1 つしか無いので名前ごとに
+      # 1 枠で足り**、ホスト側が `@foo` を汎用グローバルの枠に割り当てます
+      # (tools/plc_codegen.rb)。中身を書く必要がないので前処理だけにします。
+      #
+      # クラスができたら、ここが「self の表を引く」に変わります
+      # (doc/instance_vars.md)。**`@` を扱う場所はこの 2 つだけです。**
+      defs << OpcodeDef.new(0x19, "R[a] = @名前 (OP_GETGV の枝へ)", enters: 0x15)
+      defs << OpcodeDef.new(0x1A, "@名前 = R[a] (OP_SETGV の枝へ)", enters: 0x16)
 
       # 添字アクセス。デバイス族 ($DM[100 + i])・配列 (a[0])・ハッシュ・
       # 文字列 (s[0]) が通る。OP_GETIDX / OP_SETIDX は専用命令なので
@@ -437,6 +449,13 @@ module FaRuby
       # KV 全体の 14% を占めていました。
       defs << OpcodeDef.new(0x2D, "self をレシーバ位置に置いて OP_SEND へ",
                             enters: 0x2F) do |vm|
+        vm.move_self_to_receiver(:a)
+      end
+
+      # `loop { }` はこれになります。`3.times` の OP_SENDB とは別命令で、
+      # レシーバを書かない呼び出しだけがここを通ります。
+      defs << OpcodeDef.new(0x2E, "self をレシーバ位置に置いて OP_SENDB へ",
+                            enters: 0x30) do |vm|
         vm.move_self_to_receiver(:a)
       end
 

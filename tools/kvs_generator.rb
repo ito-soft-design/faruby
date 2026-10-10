@@ -123,12 +123,13 @@ module FaRuby
     def clock_tag(period)           = devices.clock_tag_ref(period)
     def clock_value(period)         = devices.clock_value_ref(period)
     def tick_pulse(device, period)  = devices.tick_pulse_ref(device, period)
+    def first_scan(device)          = devices.first_scan_ref(device)
 
     # バイトコードの現在位置を読み、PC を 1 つ進める
     def read_bytecode_into(dest) = devices.read_bytecode_into(dest)
     def peek_bytecode_into(dest) = devices.peek_bytecode_into(dest)
 
-    # 命令ごとの下ごしらえ。**要るかどうかは機種が決めます**
+    # 命令ごとの下準備。**要るかどうかは機種が決めます**
     def prepare_instruction = devices.prepare_instruction
 
     # Z に載せたアドレスで 1 ワードを指す。**区切り記号は機種による**
@@ -143,6 +144,9 @@ module FaRuby
 
     # レジスタファイルを 0 で埋める。**潰し方は機種が決めます**
     def clear_register_file(z) = devices.clear_register_file(z)
+
+    # 汎用グローバル変数を 0 で埋める。同じく機種が決めます
+    def clear_general_globals(z) = devices.clear_general_globals(z)
 
     # --- インデックスレジスタの退避・復元 ---
     #
@@ -174,7 +178,7 @@ module FaRuby
 
     # --- 行の組み立て ---
 
-    # 1 文を出す。**綴り方は dialect が決める** (KV 向けは素通し)
+    # 1 文を出す。**方言は dialect が決める** (KV 向けはそのまま出す)
     def line(text)
       rendered = dialect.statement(text)
       return if rendered.empty?
@@ -1924,6 +1928,11 @@ module FaRuby
     # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
     def advance_iteration
       line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_INDEX)} + 1"
+      if_("#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}") do
+        note "loop は上限が無い。**break でしか終わらない。**"
+        note "上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)"
+        line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}"
+      end
       if_else_block("#{scratch32} <= #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}") do
         note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
         note "irep もレジスタ窓もそのまま使い回す"
@@ -1952,7 +1961,13 @@ module FaRuby
       line "Z2 = #{SLOT_WORDS} + #{reg_offset}"
       argument = slot_on(2)
       element = slot_on(Z_ARRAY_ELEMENT)
-      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      chain_head(true, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}")
+      indent
+      note "loop はブロックに何も渡さない。**引数の数だけ書く。**"
+      note "Ruby の loop { |i| } も i は nil で、ここでは未代入のまま"
+      line "#{state(layout.call_argc_addr)} = 0"
+      dedent
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
       indent
       note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
       line "Z4 = 0 + #{reg_offset}"
@@ -1985,6 +2000,21 @@ module FaRuby
       line "#{state(layout.call_argc_addr)} = 1"
       dedent
       line "END IF"
+    end
+
+    # R[0] をトップレベルの self (main) にする
+    #
+    # **mruby は `OP_LOADSELF` を書きません。** R[0] が self である前提で
+    # 呼び出すので、潰したままにするとタグが `TT_EMPTY` になり、レシーバが
+    # self の組み込みメソッド (`loop`) が型検査で弾かれます。自分自身への
+    # 呼び出しで渡されていくため、ここを self にすればメソッドの中でも
+    # self のままになります。
+    def set_top_level_self
+      note "R[0] はトップレベルの self (main)。**mruby は OP_LOADSELF を書かない**"
+      line "Z1 = #{reg_offset}"
+      slot = slot_on(1)
+      line "#{slot.value} = #{TT_CANONICAL_VALUE.fetch(TT_OBJECT)}"
+      line "#{slot.tag} = #{TT_OBJECT}"
     end
 
     # 実行中のフレームの種別 (Z3 がそのフレームを指していること)
@@ -2058,7 +2088,13 @@ module FaRuby
 
     # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
     def iteration_range(name, recv, type_code)
-      line "IF Z5 = #{METHOD_TIMES} THEN"
+      line "IF Z5 = #{METHOD_LOOP} THEN"
+      indent
+      note "loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = 0"
+      dedent
+      line "ELSE IF Z5 = #{METHOD_TIMES} THEN"
       indent
       note "n.times は 0 から n-1 まで"
       line "#{scratch32} = 0"
@@ -2098,6 +2134,10 @@ module FaRuby
         end
         line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
         end_block
+      end
+      if_("Z5 = #{METHOD_LOOP}") do
+        note "loop は上限が無く、ブロックに渡す値も無い"
+        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
       end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
@@ -2986,7 +3026,7 @@ module FaRuby
     # 整数・実数のスクラッチを使うため、レジスタの型を再び見なくてよい。
     #
     # **デバイスの指し方は機種によります** (tools/devices.rb)。KV は幅を
-    # サフィックスで選ぶので 1 つの式で済みますが、三菱にその綴りが無く、
+    # サフィックスで選ぶので 1 つの式で済みますが、三菱にその書き方が無く、
     # 32 ビットは 16 ビット 2 回に開きます。
     def word_access(mode, device, access, slot)
       float = access == ACCESS_F
@@ -3016,7 +3056,7 @@ module FaRuby
 
     # Z に載せたアドレスの 32 ビットを読む。**値の式を返します**
     #
-    # **KV は 1 つの式ですが、三菱に 32 ビットの綴りがありません。** 16 ビット
+    # **KV は 1 つの式ですが、三菱に 32 ビットの書き方がありません。** 16 ビット
     # 2 回に開いてスクラッチへ載せるので、どちらのスクラッチを使うかを
     # 指定します。2 つを同時に見比べるところ (ループの添字と上限) があります。
     def long_at(z, offset, secondary: false)
@@ -3238,6 +3278,9 @@ module FaRuby
       e.note ""
       e.note "毎スキャン実行。RESET_REQ = 1 のインスタンスについて"
       e.note "VM 状態とレジスタファイルを初期化します。"
+      e.note ""
+      e.note "**電源投入後の最初のスキャンでも初期化します。** 詳しくは"
+      e.note "emit_restart_on_power_up を見てください。"
       e.blank
 
       e.save_z_registers
@@ -3246,17 +3289,11 @@ module FaRuby
 
       e.each_instance do
         e.blank
+        emit_restart_on_power_up(e, z)
         e.line "IF #{e.state(layout.reset_req_addr)} = 1 THEN"
         e.blank
         e.indent
-        e.line "#{e.pc} = 0      ' PC = 0"
-        e.line "#{e.status} = #{VM_STOPPED}      ' STATUS = stopped"
-        e.line "#{e.error} = 0      ' ERROR = none"
-        e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
-        e.blank
-        e.reset_to_top_irep
-        e.blank
-        e.clear_register_file(z)
+        emit_vm_state_reset(e, z)
         e.blank
         e.line "#{e.state(layout.reset_req_addr)} = 0     ' リセット要求クリア"
         e.dedent
@@ -3271,6 +3308,59 @@ module FaRuby
       "#{e.lines.join("\n")}\n"
     end
 
+    # VM 状態を初期化する。**止めた状態まで戻します**
+    #
+    # リセット要求と電源投入の両方から呼ばれます。書くのは実行の位置と
+    # 値を置く場所で、**メソッド表は残します** — `load` のときに作るもので、
+    # 消すとメソッド呼び出しが壊れます。バイトコードも固定領域なので残ります。
+    def emit_vm_state_reset(e, z)
+      e.line "#{e.pc} = 0      ' PC = 0"
+      e.line "#{e.status} = #{VM_STOPPED}      ' STATUS = stopped"
+      e.line "#{e.error} = 0      ' ERROR = none"
+      e.line "#{e.state_long(layout.step_count_addr)} = 0    ' STEP_COUNT = 0"
+      e.blank
+      e.reset_to_top_irep
+      e.blank
+      e.clear_register_file(z)
+      e.blank
+      e.set_top_level_self
+      e.blank
+      e.clear_general_globals(z)
+    end
+
+    # 電源投入後の最初のスキャンで、走っていたものを先頭から走らせ直す
+    #
+    # **継続実行は危ないので選びません。** STATUS も PC も EM / D に残るため、
+    # 何もしないと中断地点から続きが走ります。ところが取り込みは命令の実行前に
+    # PC を進めるので、命令の途中で電源が切れるとオペランドを命令コードとして
+    # 解釈します。設備の状態とプログラムの位置もずれます。
+    #
+    # **走らせ直すかどうかは電源が切れたときの状態で決めます。** 実行中だった
+    # なら先頭から、停止・完了・エラーならそのまま止めておきます。設定を足して
+    # いないのは、これが利用者の意図とふつう一致するからです。
+    #
+    # リセット要求に乗せず初期化をここでもう一度書くのは、下の枝が STATUS を
+    # 停止にするためです。要求に乗せると「初期化のあと実行中へ戻す」ことを
+    # 覚えておく場所が要り、VM 状態に 1 語足すことになります。
+    def emit_restart_on_power_up(e, z)
+      pulse = dialect.first_scan_pulse
+      return if pulse.nil?
+
+      e.note "=== 電源投入後の最初のスキャン ==="
+      e.note "**実行中のまま切れていたら先頭から走らせ直す。** 継続はしない"
+      e.if_(e.first_scan(pulse)) do
+        e.if_("#{e.status} = #{VM_RUNNING}") do
+          emit_vm_state_reset(e, z)
+          e.blank
+          e.line "#{e.status} = #{VM_RUNNING}      ' STATUS = running (先頭から)"
+        end
+        e.note "電源が切れる前のリセット要求は意味を失っている。"
+        e.note "**残すと走らせ直した直後に止めてしまう**"
+        e.line "#{e.state(layout.reset_req_addr)} = 0"
+      end
+      e.blank
+    end
+
     # 経過時間を進める
     #
     # **1 スキャンに 1 回だけ走る場所に置きます。** 分ける機種は前口上、
@@ -3278,7 +3368,7 @@ module FaRuby
     # ループの中に置くと 1 スキャンで何度も数えてしまいます。
     #
     # **立ち上がりだけを数えます。** 上がっている間ずっと足すと、スキャン
-    # タイムによって足す回数が変わり、時間になりません。前回の状態を控えて
+    # タイムによって足す回数が変わり、時間になりません。前回の状態を覚えて
     # おき、0 から 1 に変わったときだけ周期ぶんのミリ秒を足します。
     #
     # **止まっているインスタンスがあっても進みます。** 時間は VM の実行とは
@@ -3640,7 +3730,7 @@ module FaRuby
       end
     end
 
-    # 前置きだけの命令。**枝を持たず、別の命令の枝へ落ちます**
+    # 前処理だけの命令。**枝を持たず、別の命令の枝へ落ちます**
     #
     # mruby の vm.c と同じ形です (`OP_SSEND` は self をレシーバ位置に置いてから
     # `OP_SEND` へ)。別々に書いていたころは組み込みメソッドの振り分けが生成
@@ -3650,12 +3740,21 @@ module FaRuby
     # PC を進めません。
     def emit_prologues(e)
       @opcodes.reject(&:branch?).each do |op|
+        # **前処理ごとに Z に覚えたアドレスを捨てます。** 1 つ目が組み立てたスロットの
+        # アドレスを 2 つ目が使い回すと、組み立てる行が出ないまま参照だけが
+        # 残ります。前処理は互いに素通りするので、持ち越してはいけません
+        # (実機で起きました。`OP_SSENDB` が self を写さないまま落ちました)
+        e.begin_instruction
         e.blank
         e.note "#{op.name}: #{op.summary}"
         e.if_("#{e.opcode} = #{op.code}") do
-          e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
-          e.peek_bytecode_into(e.operand(:a))
-          op.body.call(e)
+          # **中身を書かない前処理もあります** (`OP_GETIV` は落とすだけ)。
+          # オペランドを覗くのは中身がそれを使うときだけです
+          if op.body
+            e.note "オペランド a を覗く。枝の中で読み直すので PC は進めない"
+            e.peek_bytecode_into(e.operand(:a))
+            op.body.call(e)
+          end
           e.line "#{e.opcode} = #{op.enters}"
         end
       end
