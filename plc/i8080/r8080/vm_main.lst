@@ -98,7 +98,7 @@
 8400                             ; ===============================================================
 8400                             ; リセットベクタ
 8400                             ; ===============================================================
-8400   C3 22 87               JMP   vm_start   
+8400   C3 2D 87               JMP   vm_start   
 8403                             ; ===============================================================
 8403                             ; サブルーチン群 (.include で取り込む)
 8403                             ; ===============================================================
@@ -370,7 +370,7 @@
 8491                             ; OP_NOP (Z): 何もしない
 8491                             ; ---------------------------------------------------------------
 8491                DO_OP_NOP:      
-8491   C3 4E 87               JMP   vm_loop   
+8491   C3 59 87               JMP   vm_loop   
 8494                             ; ---------------------------------------------------------------
 8494                             ; OP_MOVE (BB): R[a] = R[b]
 8494                             ; ---------------------------------------------------------------
@@ -384,7 +384,7 @@
 84A0   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 84A3   EB                     XCHG      ; DE = R[a] (コピー先), HL = R[b] (コピー元)
 84A4   CD 22 84               CALL   copy_slot   
-84A7   C3 4E 87               JMP   vm_loop   
+84A7   C3 59 87               JMP   vm_loop   
 84AA                             ; ---------------------------------------------------------------
 84AA                             ; OP_LOADI (BB): R[a] = b (符号なし 8 ビット)
 84AA                             ; ---------------------------------------------------------------
@@ -398,7 +398,7 @@
 84B6   79                     MOV   a,c   ; 退避していた値を C に戻す (既に C にある)
 84B7   06 00                  MVI   b,0   ; B = val_hi (正なので 0)
 84B9   CD 0D 84               CALL   set_slot_int16   
-84BC   C3 4E 87               JMP   vm_loop   
+84BC   C3 59 87               JMP   vm_loop   
 84BF                             ; ---------------------------------------------------------------
 84BF                             ; OP_LOADINEG (BB): R[a] = -b
 84BF                             ; ---------------------------------------------------------------
@@ -415,7 +415,7 @@
 84CB   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 84CE   06 FF                  MVI   b,0FFh   ; B = val_hi (負なので FF)
 84D0   CD 0D 84               CALL   set_slot_int16   
-84D3   C3 4E 87               JMP   vm_loop   
+84D3   C3 59 87               JMP   vm_loop   
 84D6                             ; ---------------------------------------------------------------
 84D6                             ; OP_LOADI__1 (B): R[a] = -1
 84D6                             ; ---------------------------------------------------------------
@@ -425,7 +425,7 @@
 84DC   0E FF                  MVI   c,0FFh   ; val_lo = FFh
 84DE   06 FF                  MVI   b,0FFh   ; val_hi = FFh (-1 = 0xFFFF)
 84E0   CD 0D 84               CALL   set_slot_int16   
-84E3   C3 4E 87               JMP   vm_loop   
+84E3   C3 59 87               JMP   vm_loop   
 84E6                             ; ---------------------------------------------------------------
 84E6                             ; OP_LOADI_0 ～ OP_LOADI_7 (B): R[a] = 0..7
 84E6                             ; ---------------------------------------------------------------
@@ -458,7 +458,7 @@
 850E   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8511   06 00                  MVI   b,0   ; val_hi = 0 (正)
 8513   CD 0D 84               CALL   set_slot_int16   
-8516   C3 4E 87               JMP   vm_loop   
+8516   C3 59 87               JMP   vm_loop   
 8519                             ; ---------------------------------------------------------------
 8519                             ; OP_LOADI16 (BS): R[a] = signed16(b)
 8519                             ; 
@@ -482,7 +482,7 @@
 852C   71                     MOV   m,c   ; +2: val_lo
 852D   23                     INX   h   
 852E   70                     MOV   m,b   ; +3: val_hi
-852F   C3 4E 87               JMP   vm_loop   
+852F   C3 59 87               JMP   vm_loop   
 8532                             ; ---------------------------------------------------------------
 8532                             ; OP_LOADNIL (B): R[a] = nil
 8532                             ; ---------------------------------------------------------------
@@ -491,7 +491,7 @@
 8535   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8538   3E 01                  MVI   a,TT_NIL   
 853A   CD 17 84               CALL   set_slot_special   
-853D   C3 4E 87               JMP   vm_loop   
+853D   C3 59 87               JMP   vm_loop   
 8540                             ; ---------------------------------------------------------------
 8540                             ; OP_LOADT (B): R[a] = true
 8540                             ; ---------------------------------------------------------------
@@ -500,7 +500,7 @@
 8543   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8546   3E 03                  MVI   a,TT_TRUE   
 8548   CD 17 84               CALL   set_slot_special   
-854B   C3 4E 87               JMP   vm_loop   
+854B   C3 59 87               JMP   vm_loop   
 854E                             ; ---------------------------------------------------------------
 854E                             ; OP_LOADF (B): R[a] = false
 854E                             ; ---------------------------------------------------------------
@@ -509,7 +509,7 @@
 8551   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8554   3E 02                  MVI   a,TT_FALSE   
 8556   CD 17 84               CALL   set_slot_special   
-8559   C3 4E 87               JMP   vm_loop   
+8559   C3 59 87               JMP   vm_loop   
 855C                             ; vm_arith.a80 — 算術命令 (16 ビット整数)
 855C                             ; 
 855C                             ; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI
@@ -531,7 +531,7 @@
 856B   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
 856E                             ; 16 ビット加算: val[a] += val[a+1]
 856E   CD 32 84               CALL   add_value16   
-8571   C3 4E 87               JMP   vm_loop   
+8571   C3 59 87               JMP   vm_loop   
 8574                             ; ---------------------------------------------------------------
 8574                             ; OP_SUB (B): R[a] = R[a] - R[a+1]
 8574                             ; ---------------------------------------------------------------
@@ -545,7 +545,7 @@
 8580   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8583   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
 8586   CD 3B 84               CALL   sub_value16   
-8589   C3 4E 87               JMP   vm_loop   
+8589   C3 59 87               JMP   vm_loop   
 858C                             ; ---------------------------------------------------------------
 858C                             ; OP_ADDI (BB): R[a] = R[a] + b (b は符号なし即値 0-255)
 858C                             ; 
@@ -566,7 +566,7 @@
 859F   7E                     MOV   a,m   ; val_hi (MOV はフラグを変えない)
 85A0   CE 00                  ACI   0   ; val_hi + CY
 85A2   77                     MOV   m,a   
-85A3   C3 4E 87               JMP   vm_loop   
+85A3   C3 59 87               JMP   vm_loop   
 85A6                             ; ---------------------------------------------------------------
 85A6                             ; OP_SUBI (BB): R[a] = R[a] - b (b は符号なし即値 0-255)
 85A6                             ; ---------------------------------------------------------------
@@ -585,7 +585,7 @@
 85B9   7E                     MOV   a,m   ; val_hi
 85BA   DE 00                  SBI   0   ; val_hi - CY
 85BC   77                     MOV   m,a   
-85BD   C3 4E 87               JMP   vm_loop   
+85BD   C3 59 87               JMP   vm_loop   
 85C0                             ; vm_compare.a80 — 比較命令
 85C0                             ; 
 85C0                             ; OP_EQ, OP_LT, OP_LE, OP_GT, OP_GE
@@ -629,13 +629,13 @@
 85DD   CD 03 84               CALL   get_reg_addr   
 85E0   3E 03                  MVI   a,TT_TRUE   
 85E2   CD 17 84               CALL   set_slot_special   
-85E5   C3 4E 87               JMP   vm_loop   
+85E5   C3 59 87               JMP   vm_loop   
 85E8                CMP_SET_FALSE:      
 85E8   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
 85EB   CD 03 84               CALL   get_reg_addr   
 85EE   3E 02                  MVI   a,TT_FALSE   
 85F0   CD 17 84               CALL   set_slot_special   
-85F3   C3 4E 87               JMP   vm_loop   
+85F3   C3 59 87               JMP   vm_loop   
 85F6                             ; ---------------------------------------------------------------
 85F6                             ; OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
 85F6                             ; 
@@ -729,7 +729,7 @@
 8657                DO_OP_JMP:      
 8657   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
 865A   CD 4E 86               CALL   apply_jump   
-865D   C3 4E 87               JMP   vm_loop   
+865D   C3 59 87               JMP   vm_loop   
 8660                             ; ---------------------------------------------------------------
 8660                             ; OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
 8660                             ; 
@@ -749,9 +749,9 @@
 8675                             ; 真 → ジャンプする
 8675   EB                     XCHG      ; HL = オフセット (DE にあった)
 8676   CD 4E 86               CALL   apply_jump   
-8679   C3 4E 87               JMP   vm_loop   
+8679   C3 59 87               JMP   vm_loop   
 867C                JMPIF_SKIP:      
-867C   C3 4E 87               JMP   vm_loop   
+867C   C3 59 87               JMP   vm_loop   
 867F                             ; ---------------------------------------------------------------
 867F                             ; OP_JMPNOT (BS): if R[a] が偽 then PC += signed16(b)
 867F                             ; ---------------------------------------------------------------
@@ -769,13 +769,13 @@
 8694                             ; 偽 → ジャンプする
 8694   EB                     XCHG      ; HL = オフセット
 8695   CD 4E 86               CALL   apply_jump   
-8698   C3 4E 87               JMP   vm_loop   
+8698   C3 59 87               JMP   vm_loop   
 869B                JMPNOT_SKIP:      
-869B   C3 4E 87               JMP   vm_loop   
+869B   C3 59 87               JMP   vm_loop   
 869E                             ; vm_display.a80 — 7 セグメント表示
 869E                             ; 
 869E                             ; 16 ビット整数値を 8 桁の 16 進数に変換し、7 セグ表示バッファに書く。
-869E                             ; 上位 4 桁は "0000" で埋める。
+869E                             ; 上位 4 桁はブランク（消灯）にする。
 869E                             ; セグメントパターンは seg_table にまとめる。
 869E                             ; ---------------------------------------------------------------
 869E                             ; display_hex16 — 16 ビット値を 7 セグに表示
@@ -784,360 +784,372 @@
 869E                             ;   出力: DISPLAY_BASE に 8 桁のセグメントパターン
 869E                             ;   破壊: A, B, C, HL, DE
 869E                             ; 
-869E                             ; 8 桁表示: 上位 4 桁は "0" (0x3F), 下位 4 桁が値。
+869E                             ; 8 桁表示: 上位 4 桁はブランク (消灯), 下位 4 桁が値。
 869E                             ; val_hi の上位ニブルが桁 4、val_lo の下位ニブルが桁 7。
 869E                             ; ---------------------------------------------------------------
 869E                DISPLAY_HEX16:      
 869E   E5                     PUSH   h   ; 値のアドレスを退避
-869F                             ; 上位 4 桁を "0" で埋める
+869F                             ; 上位 4 桁をブランク (消灯) にする
 869F   11 F8 FF               LXI   d,DISPLAY_BASE   
-86A2   3E 5C                  MVI   a,5Ch   ; "0" のセグメントパターン (ND8080)
-86A4   12                     STAX   d   
-86A5   13                     INX   d   
-86A6   12                     STAX   d   
-86A7   13                     INX   d   
-86A8   12                     STAX   d   
-86A9   13                     INX   d   
-86AA   12                     STAX   d   
-86AB   13                     INX   d   ; DE = DISPLAY_BASE + 4
-86AC                             ; 値の byte1 (val_hi) から表示
-86AC   E1                     POP   h   ; HL = val_lo
-86AD   23                     INX   h   ; HL = val_hi
-86AE   0E 02                  MVI   c,2   ; 2 バイト (= 4 ニブル)
-86B0                DISPLAY_BYTE_LOOP:      
-86B0                             ; 上位ニブル
-86B0   7E                     MOV   a,m   
+86A2   AF                     XRA   a   ; A = 0 (全セグメント消灯)
+86A3   12                     STAX   d   
+86A4   13                     INX   d   
+86A5   12                     STAX   d   
+86A6   13                     INX   d   
+86A7   12                     STAX   d   
+86A8   13                     INX   d   
+86A9   12                     STAX   d   
+86AA   13                     INX   d   ; DE = DISPLAY_BASE + 4
+86AB                             ; 値の byte1 (val_hi) から表示
+86AB   E1                     POP   h   ; HL = val_lo
+86AC   23                     INX   h   ; HL = val_hi
+86AD   0E 02                  MVI   c,2   ; 2 バイト (= 4 ニブル)
+86AF                DISPLAY_BYTE_LOOP:      
+86AF                             ; 上位ニブル
+86AF   7E                     MOV   a,m   
+86B0   0F                     RRC      
 86B1   0F                     RRC      
 86B2   0F                     RRC      
 86B3   0F                     RRC      
-86B4   0F                     RRC      
-86B5   E6 0F                  ANI   0Fh   
-86B7   CD CA 86               CALL   nibble_to_seg   
-86BA   12                     STAX   d   
-86BB   13                     INX   d   
-86BC                             ; 下位ニブル
-86BC   7E                     MOV   a,m   
-86BD   E6 0F                  ANI   0Fh   
-86BF   CD CA 86               CALL   nibble_to_seg   
-86C2   12                     STAX   d   
-86C3   13                     INX   d   
-86C4                             ; 次のバイト (val_hi → val_lo)
-86C4   2B                     DCX   h   
-86C5   0D                     DCR   c   
-86C6   C2 B0 86               JNZ   display_byte_loop   
-86C9   C9                     RET      
-86CA                             ; ---------------------------------------------------------------
-86CA                             ; nibble_to_seg — 4 ビット値を 7 セグパターンに変換
-86CA                             ; 
-86CA                             ;   入力: A = 0-F
-86CA                             ;   出力: A = セグメントパターン
-86CA                             ;   破壊: なし (HL, BC は内部で退避・復元)
-86CA                             ; ---------------------------------------------------------------
-86CA                NIBBLE_TO_SEG:      
-86CA   E5                     PUSH   h   
-86CB   C5                     PUSH   b   ; BC を退避 (C = ループカウンタ)
-86CC   6F                     MOV   l,a   
-86CD   26 00                  MVI   h,0   
-86CF   01 D7 86               LXI   b,seg_table   
-86D2   09                     DAD   b   ; HL = seg_table + nibble
-86D3   7E                     MOV   a,m   
-86D4   C1                     POP   b   ; BC を復元
-86D5   E1                     POP   h   
-86D6   C9                     RET      
-86D7                             ; ---------------------------------------------------------------
-86D7                             ; 7 セグメントパターンテーブル
-86D7                             ; 
-86D7                             ;   bit 0 = a (上)
-86D7                             ;   bit 1 = b (右上)
-86D7                             ;   bit 2 = c (右下)
-86D7                             ;   bit 3 = d (下)
-86D7                             ;   bit 4 = e (左下)
-86D7                             ;   bit 5 = f (左上)
-86D7                             ;   bit 6 = g (中)
-86D7                             ; 
-86D7                             ;       aaa
-86D7                             ;      f   b
-86D7                             ;       ggg
-86D7                             ;      e   c
-86D7                             ;       ddd
-86D7                             ; ---------------------------------------------------------------
-86D7                SEG_TABLE:      
-86D7   5C                     DB   5Ch   ; 0  (ND8080 ROM パターン)
-86D8   06                     DB   06h   ; 1
-86D9   5B                     DB   5Bh   ; 2
-86DA   4F                     DB   4Fh   ; 3
-86DB   66                     DB   66h   ; 4
-86DC   6D                     DB   6Dh   ; 5
-86DD   7D                     DB   7Dh   ; 6
-86DE   27                     DB   27h   ; 7  (ND8080 ROM パターン)
-86DF   7F                     DB   7Fh   ; 8
-86E0   6F                     DB   6Fh   ; 9
-86E1   77                     DB   77h   ; A
-86E2   7C                     DB   7Ch   ; b
-86E3   39                     DB   39h   ; C
-86E4   5E                     DB   5Eh   ; d
-86E5   79                     DB   79h   ; E
-86E6   71                     DB   71h   ; F
-86E7                             ; ===============================================================
-86E7                             ; OP_RETURN (B): トップレベルでは VM 停止
-86E7                             ; 
-86E7                             ; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
-86E7                             ; R[a] の値を 7 セグに表示して停止する。
-86E7                             ; ===============================================================
-86E7                DO_OP_RETURN:      
-86E7   CD 74 84               CALL   fetch_byte   ; A = a (戻り値のレジスタ)
-86EA   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-86ED   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
-86F0   CD 9E 86               CALL   display_hex16   
-86F3   3E 02                  MVI   a,VM_FINISHED   
-86F5   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-86F8   C3 1C 87               JMP   vm_halt   
-86FB                             ; ===============================================================
-86FB                             ; OP_STOP (Z): VM 停止
-86FB                             ; ===============================================================
-86FB                DO_OP_STOP:      
-86FB   3E 02                  MVI   a,VM_FINISHED   
-86FD   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-8700                             ; R[1] の値を 7 セグに表示
-8700   3E 01                  MVI   a,1   
-8702   CD 03 84               CALL   get_reg_addr   ; HL = R[1]
-8705   CD 2F 84               CALL   slot_to_value   ; HL = R[1] の値先頭
-8708   CD 9E 86               CALL   display_hex16   
-870B   C3 1C 87               JMP   vm_halt   
-870E                             ; ===============================================================
-870E                             ; エラー停止
-870E                             ; 
-870E                             ; 未対応のオペコードを踏んだとき。
-870E                             ; 現在のオペコードをエラーコードとして保存する。
-870E                             ; ===============================================================
-870E                VM_ERROR:      
-870E   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-8711   32 04 80               STA   VM_STATE_BASE + OFF_ERROR   
-8714   3E 03                  MVI   a,VM_ERROR   
-8716   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-8719   C3 1C 87               JMP   vm_halt   
-871C                             ; ===============================================================
-871C                             ; 停止 — ND80Z モニタのリモートモードへ復帰
-871C                             ; 
-871C                             ; HLT だとリモートモードに戻るために手動リセット + [*(I/O)][8] が
-871C                             ; 必要になる。代わりに N80MON2D ジャンプテーブルの REMOTE エントリ
-871C                             ; (0821h) にジャンプする。REMOTE ルーチンは REMOTEMK=FFh を設定し、
-871C                             ; RST5/RST6 をリモート用ハンドラに差し替えてから START2 に入る。
-871C                             ; これにより自動的にリモートモードへ復帰する。
-871C                             ; エミュレータでは ROM 領域へのジャンプを検出して停止する。
-871C                             ; ===============================================================
-871C                VM_HALT:      
-871C   31 B8 FF               LXI   sp,0FFB8h   ; MONSP: モニタのスタックポインタを復元
-871F   C3 21 08               JMP   00821h   ; N80MON2D REMOTE: リモートモード再入口
-8722                             ; ===============================================================
-8722                             ; 初期化
-8722                             ; ===============================================================
-8722                VM_START:      
-8722                             ; スタックポインタを設定
-8722   31 00 FE               LXI   sp,STACK_TOP + 1   
-8725                             ; VM 状態領域をゼロクリア (256 バイト)
-8725   21 00 80               LXI   h,VM_STATE_BASE   
-8728   0E 00                  MVI   c,0   ; 256 回 (0 は 256 として扱う)
-872A                VM_CLEAR_STATE:      
-872A   36 00                  MVI   m,0   
-872C   23                     INX   h   
-872D   0D                     DCR   c   
-872E   C2 2A 87               JNZ   vm_clear_state   
-8731                             ; レジスタファイルをゼロクリア (256 バイト)
-8731   21 00 81               LXI   h,REG_FILE_BASE   
-8734   0E 00                  MVI   c,0   
-8736                VM_CLEAR_REGS:      
-8736   36 00                  MVI   m,0   
-8738   23                     INX   h   
-8739   0D                     DCR   c   
-873A   C2 36 87               JNZ   vm_clear_regs   
-873D                             ; IREP 0 のバイトコード長を VM 状態に設定
-873D                             ; IREP テーブルの先頭エントリから読む
-873D   3A 02 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN   
-8740   32 0E 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN   
-8743   3A 03 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1   
-8746   32 0F 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN + 1   
-8749                             ; PC = 0 (ゼロクリア済み)
-8749                             ; 実行状態を RUNNING に設定
-8749   3E 01                  MVI   a,VM_RUNNING   
-874B   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-874E                             ; メインループへ
-874E                             ; fall through
-874E                             ; ===============================================================
-874E                             ; メインループ (fetch-decode-execute)
-874E                             ; ===============================================================
-874E                VM_LOOP:      
-874E                             ; --- 実行状態の確認 ---
-874E   3A 02 80               LDA   VM_STATE_BASE + OFF_STATUS   
-8751   FE 01                  CPI   VM_RUNNING   
-8753   C2 1C 87               JNZ   vm_halt   
-8756                             ; --- PC がバイトコード長を超えていないか ---
-8756   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   
-8759   EB                     XCHG      ; DE = PC
-875A   2A 0E 80               LHLD   VM_STATE_BASE + OFF_BYTECODE_LEN   
-875D                             ; HL = bytecode_len, DE = PC
-875D                             ; PC >= bytecode_len ならエラー
-875D   7B                     MOV   a,e   
-875E   95                     SUB   l   
-875F   7A                     MOV   a,d   
-8760   9C                     SBB   h   ; DE - HL (PC - len)
-8761   D2 03 00               JNC   vm_error   ; PC >= len → エラー
-8764                             ; --- オペコードフェッチ ---
-8764   CD 74 84               CALL   fetch_byte   ; A = opcode
-8767   32 0A 80               STA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-876A                             ; --- ステップカウント ---
-876A   2A 06 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT   
-876D   23                     INX   h   
-876E   22 06 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT   
-8771                             ; 上位 16 ビットの桁上げ (HL が 0 に戻ったとき)
-8771   7C                     MOV   a,h   
-8772   B5                     ORA   l   
-8773   C2 7D 87               JNZ   vm_dispatch   
-8776   2A 08 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
-8779   23                     INX   h   
-877A   22 08 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
-877D                             ; --- ディスパッチ ---
-877D                VM_DISPATCH:      
-877D   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-8780                             ; オペコード × 2 でジャンプテーブルのオフセットを求める
-8780   87                     ADD   a   ; A = opcode * 2 (テーブルエントリは 2 バイト)
-8781   DA 03 00               JC   vm_error   ; オーバーフロー → 未対応
-8784   5F                     MOV   e,a   
-8785   16 00                  MVI   d,0   ; DE = opcode * 2
-8787   21 9F 87               LXI   h,dispatch_table   
-878A   19                     DAD   d   ; HL = &dispatch_table[opcode]
-878B                             ; テーブル上限チェック
-878B   11 73 88               LXI   d,dispatch_table_end   
-878E   7B                     MOV   a,e   
-878F   95                     SUB   l   
-8790   7A                     MOV   a,d   
-8791   9C                     SBB   h   ; DE - HL → dispatch_table_end - 現在位置
-8792   DA 03 00               JC   vm_error   ; テーブル範囲外
-8795                             ; アドレスを読んでジャンプ
-8795   5E                     MOV   e,m   ; E = 下位バイト
-8796   23                     INX   h   
-8797   56                     MOV   d,m   ; D = 上位バイト
-8798   EB                     XCHG      ; HL = ハンドラアドレス
-8799                             ; 0000h ならエラー (未実装マーカー)
-8799   7C                     MOV   a,h   
-879A   B5                     ORA   l   
-879B   CA 03 00               JZ   vm_error   
-879E   E9                     PCHL      ; ハンドラへジャンプ
-879F                             ; ===============================================================
-879F                             ; ディスパッチテーブル
-879F                             ; 
-879F                             ; オペコード番号順に 2 バイトのアドレスを並べる。
-879F                             ; 未実装のオペコードは 0000h (vm_error で捕捉)。
-879F                             ; ===============================================================
-879F                DISPATCH_TABLE:      
-879F   91 84                  DW   do_op_nop   ; 00 OP_NOP
-87A1   94 84                  DW   do_op_move   ; 01 OP_MOVE
-87A3   00 00                  DW   0000h   ; 02 OP_LOADL
-87A5   AA 84                  DW   do_op_loadi   ; 03 OP_LOADI
-87A7   BF 84                  DW   do_op_loadineg   ; 04 OP_LOADINEG
-87A9   D6 84                  DW   do_op_loadi__1   ; 05 OP_LOADI__1
-87AB   E6 84                  DW   do_op_loadi_0   ; 06 OP_LOADI_0
-87AD   EB 84                  DW   do_op_loadi_1   ; 07 OP_LOADI_1
-87AF   F0 84                  DW   do_op_loadi_2   ; 08 OP_LOADI_2
-87B1   F5 84                  DW   do_op_loadi_3   ; 09 OP_LOADI_3
-87B3   FA 84                  DW   do_op_loadi_4   ; 0A OP_LOADI_4
-87B5   FF 84                  DW   do_op_loadi_5   ; 0B OP_LOADI_5
-87B7   04 85                  DW   do_op_loadi_6   ; 0C OP_LOADI_6
-87B9   09 85                  DW   do_op_loadi_7   ; 0D OP_LOADI_7
-87BB   19 85                  DW   do_op_loadi16   ; 0E OP_LOADI16
-87BD   00 00                  DW   0000h   ; 0F OP_LOADI32
-87BF   00 00                  DW   0000h   ; 10 OP_LOADSYM
-87C1   32 85                  DW   do_op_loadnil   ; 11 OP_LOADNIL
-87C3   00 00                  DW   0000h   ; 12 OP_LOADSELF
-87C5   40 85                  DW   do_op_loadt   ; 13 OP_LOADT
-87C7   4E 85                  DW   do_op_loadf   ; 14 OP_LOADF
-87C9   00 00                  DW   0000h   ; 15 OP_GETGV
-87CB   00 00                  DW   0000h   ; 16 OP_SETGV
-87CD   00 00                  DW   0000h   ; 17 OP_GETSV
-87CF   00 00                  DW   0000h   ; 18 OP_SETSV
-87D1   00 00                  DW   0000h   ; 19 OP_GETIV
-87D3   00 00                  DW   0000h   ; 1A OP_SETIV
-87D5   00 00                  DW   0000h   ; 1B OP_GETCV
-87D7   00 00                  DW   0000h   ; 1C OP_SETCV
-87D9   00 00                  DW   0000h   ; 1D OP_GETCONST
-87DB   00 00                  DW   0000h   ; 1E OP_SETCONST
-87DD   00 00                  DW   0000h   ; 1F OP_GETMCNST
-87DF   00 00                  DW   0000h   ; 20 OP_SETMCNST
-87E1   00 00                  DW   0000h   ; 21 OP_GETUPVAR
-87E3   00 00                  DW   0000h   ; 22 OP_SETUPVAR
-87E5   00 00                  DW   0000h   ; 23 OP_GETIDX
-87E7   00 00                  DW   0000h   ; 24 OP_SETIDX
-87E9   57 86                  DW   do_op_jmp   ; 25 OP_JMP
-87EB   60 86                  DW   do_op_jmpif   ; 26 OP_JMPIF
-87ED   7F 86                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
-87EF   00 00                  DW   0000h   ; 28 OP_JMPNIL
-87F1   00 00                  DW   0000h   ; 29 OP_JMPUW
-87F3   00 00                  DW   0000h   ; 2A OP_EXCEPT
-87F5   00 00                  DW   0000h   ; 2B OP_RESCUE
-87F7   00 00                  DW   0000h   ; 2C OP_RAISEIF
-87F9   00 00                  DW   0000h   ; 2D OP_SSEND
-87FB   00 00                  DW   0000h   ; 2E OP_SSENDB
-87FD   00 00                  DW   0000h   ; 2F OP_SEND
-87FF   00 00                  DW   0000h   ; 30 OP_SENDB
-8801   00 00                  DW   0000h   ; 31 OP_CALL
-8803   00 00                  DW   0000h   ; 32 OP_SUPER
-8805   00 00                  DW   0000h   ; 33 OP_ARGARY
-8807   00 00                  DW   0000h   ; 34 OP_ENTER
-8809   00 00                  DW   0000h   ; 35 OP_KEY_P
-880B   00 00                  DW   0000h   ; 36 OP_KEYEND
-880D   00 00                  DW   0000h   ; 37 OP_KARG
-880F   E7 86                  DW   do_op_return   ; 38 OP_RETURN
-8811   00 00                  DW   0000h   ; 39 OP_RETURN_BLK
-8813   00 00                  DW   0000h   ; 3A OP_BREAK
-8815   00 00                  DW   0000h   ; 3B OP_BLKPUSH
-8817   5C 85                  DW   do_op_add   ; 3C OP_ADD
-8819   8C 85                  DW   do_op_addi   ; 3D OP_ADDI
-881B   74 85                  DW   do_op_sub   ; 3E OP_SUB
-881D   A6 85                  DW   do_op_subi   ; 3F OP_SUBI
-881F   00 00                  DW   0000h   ; 40 OP_MUL
-8821   00 00                  DW   0000h   ; 41 OP_DIV
-8823   F6 85                  DW   do_op_eq   ; 42 OP_EQ
-8825   20 86                  DW   do_op_lt   ; 43 OP_LT
-8827   2A 86                  DW   do_op_le   ; 44 OP_LE
-8829   37 86                  DW   do_op_gt   ; 45 OP_GT
-882B   44 86                  DW   do_op_ge   ; 46 OP_GE
-882D   00 00                  DW   0000h   ; 47 OP_ARRAY
-882F   00 00                  DW   0000h   ; 48 OP_ARRAY2
-8831   00 00                  DW   0000h   ; 49 OP_ARYCAT
-8833   00 00                  DW   0000h   ; 4A OP_ARYPUSH
-8835   00 00                  DW   0000h   ; 4B OP_ARYSPLAT
-8837   00 00                  DW   0000h   ; 4C OP_AREF
-8839   00 00                  DW   0000h   ; 4D OP_ASET
-883B   00 00                  DW   0000h   ; 4E OP_APOST
-883D   00 00                  DW   0000h   ; 4F OP_INTERN
-883F   00 00                  DW   0000h   ; 50 OP_SYMBOL
-8841   00 00                  DW   0000h   ; 51 OP_STRING
-8843   00 00                  DW   0000h   ; 52 OP_STRCAT
-8845   00 00                  DW   0000h   ; 53 OP_HASH
-8847   00 00                  DW   0000h   ; 54 OP_HASHADD
-8849   00 00                  DW   0000h   ; 55 OP_HASHCAT
-884B   00 00                  DW   0000h   ; 56 OP_LAMBDA
-884D   00 00                  DW   0000h   ; 57 OP_BLOCK
-884F   00 00                  DW   0000h   ; 58 OP_METHOD
-8851   00 00                  DW   0000h   ; 59 OP_RANGE_INC
-8853   00 00                  DW   0000h   ; 5A OP_RANGE_EXC
-8855   00 00                  DW   0000h   ; 5B OP_OCLASS
-8857   00 00                  DW   0000h   ; 5C OP_CLASS
-8859   00 00                  DW   0000h   ; 5D OP_MODULE
-885B   00 00                  DW   0000h   ; 5E OP_EXEC
-885D   00 00                  DW   0000h   ; 5F OP_DEF
-885F   00 00                  DW   0000h   ; 60 OP_ALIAS
-8861   00 00                  DW   0000h   ; 61 OP_UNDEF
-8863   00 00                  DW   0000h   ; 62 OP_SCLASS
-8865   00 00                  DW   0000h   ; 63 OP_TCLASS
-8867   00 00                  DW   0000h   ; 64 OP_DEBUG
-8869   00 00                  DW   0000h   ; 65 OP_ERR
-886B   00 00                  DW   0000h   ; 66 OP_EXT1
-886D   00 00                  DW   0000h   ; 67 OP_EXT2
-886F   00 00                  DW   0000h   ; 68 OP_EXT3
-8871   FB 86                  DW   do_op_stop   ; 69 OP_STOP
-8873                DISPATCH_TABLE_END:      
-8873                          END      
+86B4   E6 0F                  ANI   0Fh   
+86B6   CD C9 86               CALL   nibble_to_seg   
+86B9   12                     STAX   d   
+86BA   13                     INX   d   
+86BB                             ; 下位ニブル
+86BB   7E                     MOV   a,m   
+86BC   E6 0F                  ANI   0Fh   
+86BE   CD C9 86               CALL   nibble_to_seg   
+86C1   12                     STAX   d   
+86C2   13                     INX   d   
+86C3                             ; 次のバイト (val_hi → val_lo)
+86C3   2B                     DCX   h   
+86C4   0D                     DCR   c   
+86C5   C2 AF 86               JNZ   display_byte_loop   
+86C8   C9                     RET      
+86C9                             ; ---------------------------------------------------------------
+86C9                             ; nibble_to_seg — 4 ビット値を 7 セグパターンに変換
+86C9                             ; 
+86C9                             ;   入力: A = 0-F
+86C9                             ;   出力: A = セグメントパターン
+86C9                             ;   破壊: なし (HL, BC は内部で退避・復元)
+86C9                             ; ---------------------------------------------------------------
+86C9                NIBBLE_TO_SEG:      
+86C9   E5                     PUSH   h   
+86CA   C5                     PUSH   b   ; BC を退避 (C = ループカウンタ)
+86CB   6F                     MOV   l,a   
+86CC   26 00                  MVI   h,0   
+86CE   01 D6 86               LXI   b,seg_table   
+86D1   09                     DAD   b   ; HL = seg_table + nibble
+86D2   7E                     MOV   a,m   
+86D3   C1                     POP   b   ; BC を復元
+86D4   E1                     POP   h   
+86D5   C9                     RET      
+86D6                             ; ---------------------------------------------------------------
+86D6                             ; 7 セグメントパターンテーブル
+86D6                             ; 
+86D6                             ;   bit 0 = a (上)
+86D6                             ;   bit 1 = b (右上)
+86D6                             ;   bit 2 = c (右下)
+86D6                             ;   bit 3 = d (下)
+86D6                             ;   bit 4 = e (左下)
+86D6                             ;   bit 5 = f (左上)
+86D6                             ;   bit 6 = g (中)
+86D6                             ; 
+86D6                             ;       aaa
+86D6                             ;      f   b
+86D6                             ;       ggg
+86D6                             ;      e   c
+86D6                             ;       ddd
+86D6                             ; ---------------------------------------------------------------
+86D6                SEG_TABLE:      
+86D6   5C                     DB   5Ch   ; 0  (ND8080 ROM パターン)
+86D7   06                     DB   06h   ; 1
+86D8   5B                     DB   5Bh   ; 2
+86D9   4F                     DB   4Fh   ; 3
+86DA   66                     DB   66h   ; 4
+86DB   6D                     DB   6Dh   ; 5
+86DC   7D                     DB   7Dh   ; 6
+86DD   27                     DB   27h   ; 7  (ND8080 ROM パターン)
+86DE   7F                     DB   7Fh   ; 8
+86DF   6F                     DB   6Fh   ; 9
+86E0   77                     DB   77h   ; A
+86E1   7C                     DB   7Ch   ; b
+86E2   39                     DB   39h   ; C
+86E3   5E                     DB   5Eh   ; d
+86E4   79                     DB   79h   ; E
+86E5   71                     DB   71h   ; F
+86E6                             ; ===============================================================
+86E6                             ; OP_RETURN (B): トップレベルでは VM 停止
+86E6                             ; 
+86E6                             ; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
+86E6                             ; R[a] の値を 7 セグに表示して停止する。
+86E6                             ; ===============================================================
+86E6                DO_OP_RETURN:      
+86E6   CD 74 84               CALL   fetch_byte   ; A = a (戻り値のレジスタ)
+86E9   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+86EC   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
+86EF   CD 9E 86               CALL   display_hex16   
+86F2   3E 02                  MVI   a,VM_FINISHED   
+86F4   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+86F7   C3 1B 87               JMP   vm_halt   
+86FA                             ; ===============================================================
+86FA                             ; OP_STOP (Z): VM 停止
+86FA                             ; ===============================================================
+86FA                DO_OP_STOP:      
+86FA   3E 02                  MVI   a,VM_FINISHED   
+86FC   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+86FF                             ; R[1] の値を 7 セグに表示
+86FF   3E 01                  MVI   a,1   
+8701   CD 03 84               CALL   get_reg_addr   ; HL = R[1]
+8704   CD 2F 84               CALL   slot_to_value   ; HL = R[1] の値先頭
+8707   CD 9E 86               CALL   display_hex16   
+870A   C3 1B 87               JMP   vm_halt   
+870D                             ; ===============================================================
+870D                             ; エラー停止
+870D                             ; 
+870D                             ; 未対応のオペコードを踏んだとき。
+870D                             ; 現在のオペコードをエラーコードとして保存する。
+870D                             ; ===============================================================
+870D                VM_ERROR:      
+870D   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+8710   32 04 80               STA   VM_STATE_BASE + OFF_ERROR   
+8713   3E 03                  MVI   a,VM_ERROR   
+8715   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+8718   C3 1B 87               JMP   vm_halt   
+871B                             ; ===============================================================
+871B                             ; 停止 — ND80Z モニタのリモートモードへ復帰
+871B                             ; 
+871B                             ; HLT だとリモートモードに戻るために手動リセット + [*(I/O)][8] が
+871B                             ; 必要になる。代わりに N80MON2D ジャンプテーブルの REMOTE エントリ
+871B                             ; (0821h) にジャンプする。REMOTE ルーチンは REMOTEMK=FFh を設定し、
+871B                             ; RST5/RST6 をリモート用ハンドラに差し替えてから START2 に入る。
+871B                             ; これにより自動的にリモートモードへ復帰する。
+871B                             ; エミュレータでは ROM 領域へのジャンプを検出して停止する。
+871B                             ; ===============================================================
+871B                VM_HALT:      
+871B                             ; LED 表示を約 3 秒間見せてからリモートモードへ復帰する。
+871B                             ; 外側ループ B=12, 内側ループ DE=0 (65536 回)
+871B                             ; 1 回 ≈ 24 クロック, 2.048 MHz → 約 0.77 秒/周 × 4 ≈ 3 秒
+871B   06 04                  MVI   b,4   
+871D                VM_HALT_OUTER:      
+871D   11 00 00               LXI   d,0   
+8720                VM_HALT_INNER:      
+8720   1B                     DCX   d   
+8721   7A                     MOV   a,d   
+8722   B3                     ORA   e   
+8723   C2 20 87               JNZ   vm_halt_inner   
+8726   05                     DCR   b   
+8727   C2 1D 87               JNZ   vm_halt_outer   
+872A   C3 21 08               JMP   00821h   ; N80MON2D REMOTE: リモートモード再入口
+872D                             ; ===============================================================
+872D                             ; 初期化
+872D                             ; ===============================================================
+872D                VM_START:      
+872D                             ; スタックポインタを設定
+872D   31 00 FE               LXI   sp,STACK_TOP + 1   
+8730                             ; VM 状態領域をゼロクリア (256 バイト)
+8730   21 00 80               LXI   h,VM_STATE_BASE   
+8733   0E 00                  MVI   c,0   ; 256 回 (0 は 256 として扱う)
+8735                VM_CLEAR_STATE:      
+8735   36 00                  MVI   m,0   
+8737   23                     INX   h   
+8738   0D                     DCR   c   
+8739   C2 35 87               JNZ   vm_clear_state   
+873C                             ; レジスタファイルをゼロクリア (256 バイト)
+873C   21 00 81               LXI   h,REG_FILE_BASE   
+873F   0E 00                  MVI   c,0   
+8741                VM_CLEAR_REGS:      
+8741   36 00                  MVI   m,0   
+8743   23                     INX   h   
+8744   0D                     DCR   c   
+8745   C2 41 87               JNZ   vm_clear_regs   
+8748                             ; IREP 0 のバイトコード長を VM 状態に設定
+8748                             ; IREP テーブルの先頭エントリから読む
+8748   3A 02 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN   
+874B   32 0E 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN   
+874E   3A 03 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1   
+8751   32 0F 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN + 1   
+8754                             ; PC = 0 (ゼロクリア済み)
+8754                             ; 実行状態を RUNNING に設定
+8754   3E 01                  MVI   a,VM_RUNNING   
+8756   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+8759                             ; メインループへ
+8759                             ; fall through
+8759                             ; ===============================================================
+8759                             ; メインループ (fetch-decode-execute)
+8759                             ; ===============================================================
+8759                VM_LOOP:      
+8759                             ; --- 実行状態の確認 ---
+8759   3A 02 80               LDA   VM_STATE_BASE + OFF_STATUS   
+875C   FE 01                  CPI   VM_RUNNING   
+875E   C2 1B 87               JNZ   vm_halt   
+8761                             ; --- PC がバイトコード長を超えていないか ---
+8761   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   
+8764   EB                     XCHG      ; DE = PC
+8765   2A 0E 80               LHLD   VM_STATE_BASE + OFF_BYTECODE_LEN   
+8768                             ; HL = bytecode_len, DE = PC
+8768                             ; PC >= bytecode_len ならエラー
+8768   7B                     MOV   a,e   
+8769   95                     SUB   l   
+876A   7A                     MOV   a,d   
+876B   9C                     SBB   h   ; DE - HL (PC - len)
+876C   D2 03 00               JNC   vm_error   ; PC >= len → エラー
+876F                             ; --- オペコードフェッチ ---
+876F   CD 74 84               CALL   fetch_byte   ; A = opcode
+8772   32 0A 80               STA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+8775                             ; --- ステップカウント ---
+8775   2A 06 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT   
+8778   23                     INX   h   
+8779   22 06 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT   
+877C                             ; 上位 16 ビットの桁上げ (HL が 0 に戻ったとき)
+877C   7C                     MOV   a,h   
+877D   B5                     ORA   l   
+877E   C2 88 87               JNZ   vm_dispatch   
+8781   2A 08 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
+8784   23                     INX   h   
+8785   22 08 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
+8788                             ; --- ディスパッチ ---
+8788                VM_DISPATCH:      
+8788   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+878B                             ; オペコード × 2 でジャンプテーブルのオフセットを求める
+878B   87                     ADD   a   ; A = opcode * 2 (テーブルエントリは 2 バイト)
+878C   DA 03 00               JC   vm_error   ; オーバーフロー → 未対応
+878F   5F                     MOV   e,a   
+8790   16 00                  MVI   d,0   ; DE = opcode * 2
+8792   21 AA 87               LXI   h,dispatch_table   
+8795   19                     DAD   d   ; HL = &dispatch_table[opcode]
+8796                             ; テーブル上限チェック
+8796   11 7E 88               LXI   d,dispatch_table_end   
+8799   7B                     MOV   a,e   
+879A   95                     SUB   l   
+879B   7A                     MOV   a,d   
+879C   9C                     SBB   h   ; DE - HL → dispatch_table_end - 現在位置
+879D   DA 03 00               JC   vm_error   ; テーブル範囲外
+87A0                             ; アドレスを読んでジャンプ
+87A0   5E                     MOV   e,m   ; E = 下位バイト
+87A1   23                     INX   h   
+87A2   56                     MOV   d,m   ; D = 上位バイト
+87A3   EB                     XCHG      ; HL = ハンドラアドレス
+87A4                             ; 0000h ならエラー (未実装マーカー)
+87A4   7C                     MOV   a,h   
+87A5   B5                     ORA   l   
+87A6   CA 03 00               JZ   vm_error   
+87A9   E9                     PCHL      ; ハンドラへジャンプ
+87AA                             ; ===============================================================
+87AA                             ; ディスパッチテーブル
+87AA                             ; 
+87AA                             ; オペコード番号順に 2 バイトのアドレスを並べる。
+87AA                             ; 未実装のオペコードは 0000h (vm_error で捕捉)。
+87AA                             ; ===============================================================
+87AA                DISPATCH_TABLE:      
+87AA   91 84                  DW   do_op_nop   ; 00 OP_NOP
+87AC   94 84                  DW   do_op_move   ; 01 OP_MOVE
+87AE   00 00                  DW   0000h   ; 02 OP_LOADL
+87B0   AA 84                  DW   do_op_loadi   ; 03 OP_LOADI
+87B2   BF 84                  DW   do_op_loadineg   ; 04 OP_LOADINEG
+87B4   D6 84                  DW   do_op_loadi__1   ; 05 OP_LOADI__1
+87B6   E6 84                  DW   do_op_loadi_0   ; 06 OP_LOADI_0
+87B8   EB 84                  DW   do_op_loadi_1   ; 07 OP_LOADI_1
+87BA   F0 84                  DW   do_op_loadi_2   ; 08 OP_LOADI_2
+87BC   F5 84                  DW   do_op_loadi_3   ; 09 OP_LOADI_3
+87BE   FA 84                  DW   do_op_loadi_4   ; 0A OP_LOADI_4
+87C0   FF 84                  DW   do_op_loadi_5   ; 0B OP_LOADI_5
+87C2   04 85                  DW   do_op_loadi_6   ; 0C OP_LOADI_6
+87C4   09 85                  DW   do_op_loadi_7   ; 0D OP_LOADI_7
+87C6   19 85                  DW   do_op_loadi16   ; 0E OP_LOADI16
+87C8   00 00                  DW   0000h   ; 0F OP_LOADI32
+87CA   00 00                  DW   0000h   ; 10 OP_LOADSYM
+87CC   32 85                  DW   do_op_loadnil   ; 11 OP_LOADNIL
+87CE   00 00                  DW   0000h   ; 12 OP_LOADSELF
+87D0   40 85                  DW   do_op_loadt   ; 13 OP_LOADT
+87D2   4E 85                  DW   do_op_loadf   ; 14 OP_LOADF
+87D4   00 00                  DW   0000h   ; 15 OP_GETGV
+87D6   00 00                  DW   0000h   ; 16 OP_SETGV
+87D8   00 00                  DW   0000h   ; 17 OP_GETSV
+87DA   00 00                  DW   0000h   ; 18 OP_SETSV
+87DC   00 00                  DW   0000h   ; 19 OP_GETIV
+87DE   00 00                  DW   0000h   ; 1A OP_SETIV
+87E0   00 00                  DW   0000h   ; 1B OP_GETCV
+87E2   00 00                  DW   0000h   ; 1C OP_SETCV
+87E4   00 00                  DW   0000h   ; 1D OP_GETCONST
+87E6   00 00                  DW   0000h   ; 1E OP_SETCONST
+87E8   00 00                  DW   0000h   ; 1F OP_GETMCNST
+87EA   00 00                  DW   0000h   ; 20 OP_SETMCNST
+87EC   00 00                  DW   0000h   ; 21 OP_GETUPVAR
+87EE   00 00                  DW   0000h   ; 22 OP_SETUPVAR
+87F0   00 00                  DW   0000h   ; 23 OP_GETIDX
+87F2   00 00                  DW   0000h   ; 24 OP_SETIDX
+87F4   57 86                  DW   do_op_jmp   ; 25 OP_JMP
+87F6   60 86                  DW   do_op_jmpif   ; 26 OP_JMPIF
+87F8   7F 86                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
+87FA   00 00                  DW   0000h   ; 28 OP_JMPNIL
+87FC   00 00                  DW   0000h   ; 29 OP_JMPUW
+87FE   00 00                  DW   0000h   ; 2A OP_EXCEPT
+8800   00 00                  DW   0000h   ; 2B OP_RESCUE
+8802   00 00                  DW   0000h   ; 2C OP_RAISEIF
+8804   00 00                  DW   0000h   ; 2D OP_SSEND
+8806   00 00                  DW   0000h   ; 2E OP_SSENDB
+8808   00 00                  DW   0000h   ; 2F OP_SEND
+880A   00 00                  DW   0000h   ; 30 OP_SENDB
+880C   00 00                  DW   0000h   ; 31 OP_CALL
+880E   00 00                  DW   0000h   ; 32 OP_SUPER
+8810   00 00                  DW   0000h   ; 33 OP_ARGARY
+8812   00 00                  DW   0000h   ; 34 OP_ENTER
+8814   00 00                  DW   0000h   ; 35 OP_KEY_P
+8816   00 00                  DW   0000h   ; 36 OP_KEYEND
+8818   00 00                  DW   0000h   ; 37 OP_KARG
+881A   E6 86                  DW   do_op_return   ; 38 OP_RETURN
+881C   00 00                  DW   0000h   ; 39 OP_RETURN_BLK
+881E   00 00                  DW   0000h   ; 3A OP_BREAK
+8820   00 00                  DW   0000h   ; 3B OP_BLKPUSH
+8822   5C 85                  DW   do_op_add   ; 3C OP_ADD
+8824   8C 85                  DW   do_op_addi   ; 3D OP_ADDI
+8826   74 85                  DW   do_op_sub   ; 3E OP_SUB
+8828   A6 85                  DW   do_op_subi   ; 3F OP_SUBI
+882A   00 00                  DW   0000h   ; 40 OP_MUL
+882C   00 00                  DW   0000h   ; 41 OP_DIV
+882E   F6 85                  DW   do_op_eq   ; 42 OP_EQ
+8830   20 86                  DW   do_op_lt   ; 43 OP_LT
+8832   2A 86                  DW   do_op_le   ; 44 OP_LE
+8834   37 86                  DW   do_op_gt   ; 45 OP_GT
+8836   44 86                  DW   do_op_ge   ; 46 OP_GE
+8838   00 00                  DW   0000h   ; 47 OP_ARRAY
+883A   00 00                  DW   0000h   ; 48 OP_ARRAY2
+883C   00 00                  DW   0000h   ; 49 OP_ARYCAT
+883E   00 00                  DW   0000h   ; 4A OP_ARYPUSH
+8840   00 00                  DW   0000h   ; 4B OP_ARYSPLAT
+8842   00 00                  DW   0000h   ; 4C OP_AREF
+8844   00 00                  DW   0000h   ; 4D OP_ASET
+8846   00 00                  DW   0000h   ; 4E OP_APOST
+8848   00 00                  DW   0000h   ; 4F OP_INTERN
+884A   00 00                  DW   0000h   ; 50 OP_SYMBOL
+884C   00 00                  DW   0000h   ; 51 OP_STRING
+884E   00 00                  DW   0000h   ; 52 OP_STRCAT
+8850   00 00                  DW   0000h   ; 53 OP_HASH
+8852   00 00                  DW   0000h   ; 54 OP_HASHADD
+8854   00 00                  DW   0000h   ; 55 OP_HASHCAT
+8856   00 00                  DW   0000h   ; 56 OP_LAMBDA
+8858   00 00                  DW   0000h   ; 57 OP_BLOCK
+885A   00 00                  DW   0000h   ; 58 OP_METHOD
+885C   00 00                  DW   0000h   ; 59 OP_RANGE_INC
+885E   00 00                  DW   0000h   ; 5A OP_RANGE_EXC
+8860   00 00                  DW   0000h   ; 5B OP_OCLASS
+8862   00 00                  DW   0000h   ; 5C OP_CLASS
+8864   00 00                  DW   0000h   ; 5D OP_MODULE
+8866   00 00                  DW   0000h   ; 5E OP_EXEC
+8868   00 00                  DW   0000h   ; 5F OP_DEF
+886A   00 00                  DW   0000h   ; 60 OP_ALIAS
+886C   00 00                  DW   0000h   ; 61 OP_UNDEF
+886E   00 00                  DW   0000h   ; 62 OP_SCLASS
+8870   00 00                  DW   0000h   ; 63 OP_TCLASS
+8872   00 00                  DW   0000h   ; 64 OP_DEBUG
+8874   00 00                  DW   0000h   ; 65 OP_ERR
+8876   00 00                  DW   0000h   ; 66 OP_EXT1
+8878   00 00                  DW   0000h   ; 67 OP_EXT2
+887A   00 00                  DW   0000h   ; 68 OP_EXT3
+887C   FA 86                  DW   do_op_stop   ; 69 OP_STOP
+887E                DISPATCH_TABLE_END:      
+887E                          END      
 
 
 VM_CODE_ORG:        8400 DEFINED AT LINE 6 IN vm_constants.a80
@@ -1146,8 +1158,8 @@ BYTECODE_BASE:      9000 DEFINED AT LINE 7 IN vm_constants.a80
 BYTECODE_SIZE:      1000 DEFINED AT LINE 8 IN vm_constants.a80
 POOL_BASE:          A000 DEFINED AT LINE 9 IN vm_constants.a80
 IREP_TABLE_BASE:    8200 DEFINED AT LINE 10 IN vm_constants.a80
-                    > USED AT LINE 110
-                    > USED AT LINE 112
+                    > USED AT LINE 122
+                    > USED AT LINE 124
 VM_STATE_BASE:      8000 DEFINED AT LINE 11 IN vm_constants.a80
                     > USED AT LINE 17 IN vm_fetch.a80
                     > USED AT LINE 22 IN vm_fetch.a80
@@ -1165,26 +1177,26 @@ VM_STATE_BASE:      8000 DEFINED AT LINE 11 IN vm_constants.a80
                     > USED AT LINE 63
                     > USED AT LINE 64
                     > USED AT LINE 66
-                    > USED AT LINE 91
-                    > USED AT LINE 111
-                    > USED AT LINE 113
-                    > USED AT LINE 119
-                    > USED AT LINE 129
-                    > USED AT LINE 134
-                    > USED AT LINE 136
-                    > USED AT LINE 147
-                    > USED AT LINE 150
-                    > USED AT LINE 152
-                    > USED AT LINE 157
+                    > USED AT LINE 103
+                    > USED AT LINE 123
+                    > USED AT LINE 125
+                    > USED AT LINE 131
+                    > USED AT LINE 141
+                    > USED AT LINE 146
+                    > USED AT LINE 148
                     > USED AT LINE 159
-                    > USED AT LINE 163
+                    > USED AT LINE 162
+                    > USED AT LINE 164
+                    > USED AT LINE 169
+                    > USED AT LINE 171
+                    > USED AT LINE 175
 REG_FILE_BASE:      8100 DEFINED AT LINE 12 IN vm_constants.a80
-                    > USED AT LINE 100
+                    > USED AT LINE 112
 REG_FILE_BASE_HI:   0081 DEFINED AT LINE 13 IN vm_constants.a80
                     > USED AT LINE 26 IN vm_util.a80
 MAX_REGS:           0040 DEFINED AT LINE 14 IN vm_constants.a80
 STACK_TOP:          FDFF DEFINED AT LINE 15 IN vm_constants.a80
-                    > USED AT LINE 88
+                    > USED AT LINE 100
 DISPLAY_BASE:       FFF8 DEFINED AT LINE 16 IN vm_constants.a80
                     > USED AT LINE 20 IN vm_display.a80
 DISPLAY_SIZE:       0008 DEFINED AT LINE 17 IN vm_constants.a80
@@ -1198,24 +1210,24 @@ OFF_PC:             0000 DEFINED AT LINE 27 IN vm_constants.a80
                     > USED AT LINE 24 IN vm_fetch.a80
                     > USED AT LINE 17 IN vm_jump.a80
                     > USED AT LINE 19 IN vm_jump.a80
-                    > USED AT LINE 134
+                    > USED AT LINE 146
 OFF_STATUS:         0002 DEFINED AT LINE 28 IN vm_constants.a80
                     > USED AT LINE 40
                     > USED AT LINE 48
                     > USED AT LINE 66
-                    > USED AT LINE 119
-                    > USED AT LINE 129
+                    > USED AT LINE 131
+                    > USED AT LINE 141
 OFF_ERROR:          0004 DEFINED AT LINE 29 IN vm_constants.a80
                     > USED AT LINE 64
 OFF_STEP_COUNT:     0006 DEFINED AT LINE 30 IN vm_constants.a80
-                    > USED AT LINE 150
-                    > USED AT LINE 152
-                    > USED AT LINE 157
-                    > USED AT LINE 159
+                    > USED AT LINE 162
+                    > USED AT LINE 164
+                    > USED AT LINE 169
+                    > USED AT LINE 171
 OFF_CURRENT_OPCODE: 000A DEFINED AT LINE 31 IN vm_constants.a80
                     > USED AT LINE 63
-                    > USED AT LINE 147
-                    > USED AT LINE 163
+                    > USED AT LINE 159
+                    > USED AT LINE 175
 OFF_OPERAND_A:      000B DEFINED AT LINE 32 IN vm_constants.a80
                     > USED AT LINE 24 IN vm_compare.a80
                     > USED AT LINE 30 IN vm_compare.a80
@@ -1226,17 +1238,17 @@ OFF_OPERAND_A:      000B DEFINED AT LINE 32 IN vm_constants.a80
 OFF_OPERAND_B:      000C DEFINED AT LINE 33 IN vm_constants.a80
 OFF_OPERAND_C:      000D DEFINED AT LINE 34 IN vm_constants.a80
 OFF_BYTECODE_LEN:   000E DEFINED AT LINE 35 IN vm_constants.a80
-                    > USED AT LINE 111
-                    > USED AT LINE 113
-                    > USED AT LINE 136
+                    > USED AT LINE 123
+                    > USED AT LINE 125
+                    > USED AT LINE 148
 OFF_NREGS:          0010 DEFINED AT LINE 36 IN vm_constants.a80
 OFF_CUR_IREP:       0011 DEFINED AT LINE 37 IN vm_constants.a80
 OFF_NUM_IREPS:      0012 DEFINED AT LINE 38 IN vm_constants.a80
 IREP_ENTRY_BYTES:   0008 DEFINED AT LINE 42 IN vm_constants.a80
 IREP_OFF_BYTECODE:  0000 DEFINED AT LINE 43 IN vm_constants.a80
 IREP_OFF_BYTECODE_LEN: 0002 DEFINED AT LINE 44 IN vm_constants.a80
-                    > USED AT LINE 110
-                    > USED AT LINE 112
+                    > USED AT LINE 122
+                    > USED AT LINE 124
 IREP_OFF_POOL:      0004 DEFINED AT LINE 45 IN vm_constants.a80
 IREP_OFF_NREGS:     0006 DEFINED AT LINE 46 IN vm_constants.a80
 TT_EMPTY:           0000 DEFINED AT LINE 51 IN vm_constants.a80
@@ -1256,17 +1268,17 @@ TT_FALSY_MAX:       0002 DEFINED AT LINE 56 IN vm_constants.a80
                     > USED AT LINE 65 IN vm_jump.a80
 VM_STOPPED:         0000 DEFINED AT LINE 60 IN vm_constants.a80
 VM_RUNNING:         0001 DEFINED AT LINE 61 IN vm_constants.a80
-                    > USED AT LINE 118
                     > USED AT LINE 130
+                    > USED AT LINE 142
 VM_FINISHED:        0002 DEFINED AT LINE 62 IN vm_constants.a80
                     > USED AT LINE 39
                     > USED AT LINE 47
-VM_ERROR:           870E DEFINED AT LINE 62
+VM_ERROR:           870D DEFINED AT LINE 62
                     > USED AT LINE 65
-                    > USED AT LINE 143
-                    > USED AT LINE 166
-                    > USED AT LINE 177
-                    > USED AT LINE 186
+                    > USED AT LINE 155
+                    > USED AT LINE 178
+                    > USED AT LINE 189
+                    > USED AT LINE 198
 OP_NOP:             0000 DEFINED AT LINE 67 IN vm_constants.a80
 OP_MOVE:            0001 DEFINED AT LINE 68 IN vm_constants.a80
 OP_LOADI:           0003 DEFINED AT LINE 69 IN vm_constants.a80
@@ -1403,7 +1415,7 @@ FETCH_BYTE:         8474 DEFINED AT LINE 16 IN vm_fetch.a80
                     > USED AT LINE 36 IN vm_jump.a80
                     > USED AT LINE 57 IN vm_jump.a80
                     > USED AT LINE 35
-                    > USED AT LINE 146
+                    > USED AT LINE 158
 FETCH_U16BE:        8484 DEFINED AT LINE 37 IN vm_fetch.a80
                     > USED AT LINE 55 IN vm_fetch.a80
 FETCH_S16BE:        848E DEFINED AT LINE 54 IN vm_fetch.a80
@@ -1412,31 +1424,31 @@ FETCH_S16BE:        848E DEFINED AT LINE 54 IN vm_fetch.a80
                     > USED AT LINE 38 IN vm_jump.a80
                     > USED AT LINE 59 IN vm_jump.a80
 DO_OP_NOP:          8491 DEFINED AT LINE 11 IN vm_load.a80
-                    > USED AT LINE 196
-DO_OP_MOVE:         8494 DEFINED AT LINE 17 IN vm_load.a80
-                    > USED AT LINE 197
-DO_OP_LOADI:        84AA DEFINED AT LINE 32 IN vm_load.a80
-                    > USED AT LINE 199
-DO_OP_LOADINEG:     84BF DEFINED AT LINE 47 IN vm_load.a80
-                    > USED AT LINE 200
-DO_OP_LOADI__1:     84D6 DEFINED AT LINE 65 IN vm_load.a80
-                    > USED AT LINE 201
-DO_OP_LOADI_0:      84E6 DEFINED AT LINE 76 IN vm_load.a80
-                    > USED AT LINE 202
-DO_OP_LOADI_1:      84EB DEFINED AT LINE 79 IN vm_load.a80
-                    > USED AT LINE 203
-DO_OP_LOADI_2:      84F0 DEFINED AT LINE 82 IN vm_load.a80
-                    > USED AT LINE 204
-DO_OP_LOADI_3:      84F5 DEFINED AT LINE 85 IN vm_load.a80
-                    > USED AT LINE 205
-DO_OP_LOADI_4:      84FA DEFINED AT LINE 88 IN vm_load.a80
-                    > USED AT LINE 206
-DO_OP_LOADI_5:      84FF DEFINED AT LINE 91 IN vm_load.a80
-                    > USED AT LINE 207
-DO_OP_LOADI_6:      8504 DEFINED AT LINE 94 IN vm_load.a80
                     > USED AT LINE 208
-DO_OP_LOADI_7:      8509 DEFINED AT LINE 97 IN vm_load.a80
+DO_OP_MOVE:         8494 DEFINED AT LINE 17 IN vm_load.a80
                     > USED AT LINE 209
+DO_OP_LOADI:        84AA DEFINED AT LINE 32 IN vm_load.a80
+                    > USED AT LINE 211
+DO_OP_LOADINEG:     84BF DEFINED AT LINE 47 IN vm_load.a80
+                    > USED AT LINE 212
+DO_OP_LOADI__1:     84D6 DEFINED AT LINE 65 IN vm_load.a80
+                    > USED AT LINE 213
+DO_OP_LOADI_0:      84E6 DEFINED AT LINE 76 IN vm_load.a80
+                    > USED AT LINE 214
+DO_OP_LOADI_1:      84EB DEFINED AT LINE 79 IN vm_load.a80
+                    > USED AT LINE 215
+DO_OP_LOADI_2:      84F0 DEFINED AT LINE 82 IN vm_load.a80
+                    > USED AT LINE 216
+DO_OP_LOADI_3:      84F5 DEFINED AT LINE 85 IN vm_load.a80
+                    > USED AT LINE 217
+DO_OP_LOADI_4:      84FA DEFINED AT LINE 88 IN vm_load.a80
+                    > USED AT LINE 218
+DO_OP_LOADI_5:      84FF DEFINED AT LINE 91 IN vm_load.a80
+                    > USED AT LINE 219
+DO_OP_LOADI_6:      8504 DEFINED AT LINE 94 IN vm_load.a80
+                    > USED AT LINE 220
+DO_OP_LOADI_7:      8509 DEFINED AT LINE 97 IN vm_load.a80
+                    > USED AT LINE 221
 LOADI_SMALL:        850B DEFINED AT LINE 99 IN vm_load.a80
                     > USED AT LINE 78 IN vm_load.a80
                     > USED AT LINE 81 IN vm_load.a80
@@ -1446,21 +1458,21 @@ LOADI_SMALL:        850B DEFINED AT LINE 99 IN vm_load.a80
                     > USED AT LINE 93 IN vm_load.a80
                     > USED AT LINE 96 IN vm_load.a80
 DO_OP_LOADI16:      8519 DEFINED AT LINE 114 IN vm_load.a80
-                    > USED AT LINE 210
+                    > USED AT LINE 222
 DO_OP_LOADNIL:      8532 DEFINED AT LINE 135 IN vm_load.a80
-                    > USED AT LINE 213
+                    > USED AT LINE 225
 DO_OP_LOADT:        8540 DEFINED AT LINE 145 IN vm_load.a80
-                    > USED AT LINE 215
+                    > USED AT LINE 227
 DO_OP_LOADF:        854E DEFINED AT LINE 155 IN vm_load.a80
-                    > USED AT LINE 216
+                    > USED AT LINE 228
 DO_OP_ADD:          855C DEFINED AT LINE 10 IN vm_arith.a80
-                    > USED AT LINE 256
+                    > USED AT LINE 268
 DO_OP_SUB:          8574 DEFINED AT LINE 28 IN vm_arith.a80
-                    > USED AT LINE 258
+                    > USED AT LINE 270
 DO_OP_ADDI:         858C DEFINED AT LINE 45 IN vm_arith.a80
-                    > USED AT LINE 257
+                    > USED AT LINE 269
 DO_OP_SUBI:         85A6 DEFINED AT LINE 65 IN vm_arith.a80
-                    > USED AT LINE 259
+                    > USED AT LINE 271
 CMP_REG_PAIR:       85C0 DEFINED AT LINE 22 IN vm_compare.a80
                     > USED AT LINE 93 IN vm_compare.a80
                     > USED AT LINE 102 IN vm_compare.a80
@@ -1483,55 +1495,59 @@ CMP_SET_FALSE:      85E8 DEFINED AT LINE 47 IN vm_compare.a80
                     > USED AT LINE 116 IN vm_compare.a80
                     > USED AT LINE 124 IN vm_compare.a80
 DO_OP_EQ:           85F6 DEFINED AT LINE 59 IN vm_compare.a80
-                    > USED AT LINE 262
+                    > USED AT LINE 274
 DO_OP_LT:           8620 DEFINED AT LINE 92 IN vm_compare.a80
-                    > USED AT LINE 263
+                    > USED AT LINE 275
 DO_OP_LE:           862A DEFINED AT LINE 101 IN vm_compare.a80
-                    > USED AT LINE 264
+                    > USED AT LINE 276
 DO_OP_GT:           8637 DEFINED AT LINE 111 IN vm_compare.a80
-                    > USED AT LINE 265
+                    > USED AT LINE 277
 DO_OP_GE:           8644 DEFINED AT LINE 121 IN vm_compare.a80
-                    > USED AT LINE 266
+                    > USED AT LINE 278
 APPLY_JUMP:         864E DEFINED AT LINE 15 IN vm_jump.a80
                     > USED AT LINE 27 IN vm_jump.a80
                     > USED AT LINE 48 IN vm_jump.a80
                     > USED AT LINE 69 IN vm_jump.a80
 DO_OP_JMP:          8657 DEFINED AT LINE 25 IN vm_jump.a80
-                    > USED AT LINE 233
+                    > USED AT LINE 245
 DO_OP_JMPIF:        8660 DEFINED AT LINE 35 IN vm_jump.a80
-                    > USED AT LINE 234
+                    > USED AT LINE 246
 JMPIF_SKIP:         867C DEFINED AT LINE 50 IN vm_jump.a80
                     > USED AT LINE 45 IN vm_jump.a80
 DO_OP_JMPNOT:       867F DEFINED AT LINE 56 IN vm_jump.a80
-                    > USED AT LINE 235
+                    > USED AT LINE 247
 JMPNOT_SKIP:        869B DEFINED AT LINE 71 IN vm_jump.a80
                     > USED AT LINE 66 IN vm_jump.a80
 DISPLAY_HEX16:      869E DEFINED AT LINE 17 IN vm_display.a80
                     > USED AT LINE 38
                     > USED AT LINE 53
-DISPLAY_BYTE_LOOP:  86B0 DEFINED AT LINE 34 IN vm_display.a80
+DISPLAY_BYTE_LOOP:  86AF DEFINED AT LINE 34 IN vm_display.a80
                     > USED AT LINE 54 IN vm_display.a80
-NIBBLE_TO_SEG:      86CA DEFINED AT LINE 64 IN vm_display.a80
+NIBBLE_TO_SEG:      86C9 DEFINED AT LINE 64 IN vm_display.a80
                     > USED AT LINE 42 IN vm_display.a80
                     > USED AT LINE 48 IN vm_display.a80
-SEG_TABLE:          86D7 DEFINED AT LINE 93 IN vm_display.a80
+SEG_TABLE:          86D6 DEFINED AT LINE 93 IN vm_display.a80
                     > USED AT LINE 69 IN vm_display.a80
-DO_OP_RETURN:       86E7 DEFINED AT LINE 34
-                    > USED AT LINE 252
-DO_OP_STOP:         86FB DEFINED AT LINE 46
-                    > USED AT LINE 301
-VM_HALT:            871C DEFINED AT LINE 79
+DO_OP_RETURN:       86E6 DEFINED AT LINE 34
+                    > USED AT LINE 264
+DO_OP_STOP:         86FA DEFINED AT LINE 46
+                    > USED AT LINE 313
+VM_HALT:            871B DEFINED AT LINE 79
                     > USED AT LINE 41
                     > USED AT LINE 54
                     > USED AT LINE 67
-                    > USED AT LINE 131
-VM_START:           8722 DEFINED AT LINE 86
+                    > USED AT LINE 143
+VM_HALT_OUTER:      871D DEFINED AT LINE 84
+                    > USED AT LINE 92
+VM_HALT_INNER:      8720 DEFINED AT LINE 86
+                    > USED AT LINE 90
+VM_START:           872D DEFINED AT LINE 98
                     > USED AT LINE 15
-VM_CLEAR_STATE:     872A DEFINED AT LINE 93
-                    > USED AT LINE 97
-VM_CLEAR_REGS:      8736 DEFINED AT LINE 102
-                    > USED AT LINE 106
-VM_LOOP:            874E DEFINED AT LINE 127
+VM_CLEAR_STATE:     8735 DEFINED AT LINE 105
+                    > USED AT LINE 109
+VM_CLEAR_REGS:      8741 DEFINED AT LINE 114
+                    > USED AT LINE 118
+VM_LOOP:            8759 DEFINED AT LINE 139
                     > USED AT LINE 12 IN vm_load.a80
                     > USED AT LINE 27 IN vm_load.a80
                     > USED AT LINE 42 IN vm_load.a80
@@ -1553,9 +1569,9 @@ VM_LOOP:            874E DEFINED AT LINE 127
                     > USED AT LINE 51 IN vm_jump.a80
                     > USED AT LINE 70 IN vm_jump.a80
                     > USED AT LINE 72 IN vm_jump.a80
-VM_DISPATCH:        877D DEFINED AT LINE 162
-                    > USED AT LINE 156
-DISPATCH_TABLE:     879F DEFINED AT LINE 195
-                    > USED AT LINE 169
-DISPATCH_TABLE_END: 8873 DEFINED AT LINE 302
-                    > USED AT LINE 172
+VM_DISPATCH:        8788 DEFINED AT LINE 174
+                    > USED AT LINE 168
+DISPATCH_TABLE:     87AA DEFINED AT LINE 207
+                    > USED AT LINE 181
+DISPATCH_TABLE_END: 887E DEFINED AT LINE 314
+                    > USED AT LINE 184

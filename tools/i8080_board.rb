@@ -62,7 +62,7 @@ module FaRuby
     #
     # max_steps: 最大命令数 (無限ループ防止)
     # 戻り値: 停止理由 (:finished, :error, :timeout, :halted)
-    def run(max_steps: 100_000)
+    def run(max_steps: 2_000_000)
       @cpu.reset
       @cpu.pc = Layout::VM_CODE_ORG
       @halted = false
@@ -149,7 +149,7 @@ module FaRuby
 
     # 表示バッファをセグメントパターンから 16 進文字に変換
     SEG_TO_HEX = {
-      0x5C => "0", 0x06 => "1", 0x5B => "2", 0x4F => "3",
+      0x00 => " ", 0x5C => "0", 0x06 => "1", 0x5B => "2", 0x4F => "3",
       0x66 => "4", 0x6D => "5", 0x7D => "6", 0x27 => "7",
       0x7F => "8", 0x6F => "9", 0x77 => "A", 0x7C => "b",
       0x39 => "C", 0x5E => "d", 0x79 => "E", 0x71 => "F",

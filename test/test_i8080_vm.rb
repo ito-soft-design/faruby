@@ -39,7 +39,7 @@ class TestI8080Vm < Minitest::Test
     board = run_ruby("a = 1 + 2\n")
     assert_equal :finished, board[:result]
     assert_equal 3, board[:board].reg_value(1)
-    assert_equal "00000003", board[:board].display_text
+    assert_equal "    0003", board[:board].display_text
   end
 
   def test_subtraction
@@ -263,19 +263,19 @@ class TestI8080Vm < Minitest::Test
   def test_display_zero
     board = run_ruby("a = 0\n")
     assert_equal :finished, board[:result]
-    assert_equal "00000000", board[:board].display_text
+    assert_equal "    0000", board[:board].display_text
   end
 
   def test_display_hex
     board = run_ruby("a = 255\n")
     assert_equal :finished, board[:result]
-    assert_equal "000000FF", board[:board].display_text
+    assert_equal "    00FF", board[:board].display_text
   end
 
   def test_display_large
     board = run_ruby("a = 4096\n")
     assert_equal :finished, board[:result]
-    assert_equal "00001000", board[:board].display_text
+    assert_equal "    1000", board[:board].display_text
   end
 
   # === SimVm との相互検証 ===
