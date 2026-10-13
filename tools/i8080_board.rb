@@ -72,8 +72,10 @@ module FaRuby
         old_pc = @cpu.pc
         @cpu.send(:execute)
 
-        # HLT を検出: PC が進まない (HLT は PC を進めない)
-        if @cpu.pc == old_pc
+        # 停止検出:
+        # 1) HLT: PC が進まない
+        # 2) ROM 領域へのジャンプ: モニタ復帰 (実機では NDZENT1 等)
+        if @cpu.pc == old_pc || @cpu.pc < Layout::RAM_BASE
           @halted = true
           break
         end
@@ -114,15 +116,15 @@ module FaRuby
     # レジスタの型タグ
     def reg_type(index)
       addr = Layout.reg_type_addr(index)
-      read_u16(addr)
+      @cpu.mem[addr]
     end
 
-    # レジスタの値 (32 ビット符号付き整数として解釈)
+    # レジスタの値 (16 ビット符号付き整数として解釈)
     def reg_value(index)
       addr = Layout.reg_value_addr(index)
-      val = read_u32(addr)
+      val = read_u16(addr)
       # 符号付きに変換
-      val >= 0x80000000 ? val - 0x100000000 : val
+      val >= 0x8000 ? val - 0x10000 : val
     end
 
     # レジスタの内容を読みやすい形で返す
@@ -147,8 +149,8 @@ module FaRuby
 
     # 表示バッファをセグメントパターンから 16 進文字に変換
     SEG_TO_HEX = {
-      0x3F => "0", 0x06 => "1", 0x5B => "2", 0x4F => "3",
-      0x66 => "4", 0x6D => "5", 0x7D => "6", 0x07 => "7",
+      0x5C => "0", 0x06 => "1", 0x5B => "2", 0x4F => "3",
+      0x66 => "4", 0x6D => "5", 0x7D => "6", 0x27 => "7",
       0x7F => "8", 0x6F => "9", 0x77 => "A", 0x7C => "b",
       0x39 => "C", 0x5E => "d", 0x79 => "E", 0x71 => "F",
     }.freeze

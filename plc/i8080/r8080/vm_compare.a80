@@ -3,22 +3,21 @@
 ; OP_EQ, OP_LT, OP_LE, OP_GT, OP_GE
 ;
 ; 結果は R[a] に true (TT_TRUE) または false (TT_FALSE) を書く。
-; Phase 1 は整数のみ。
+; Phase 2 は整数のみ。
 ;
-; cmp_value32 は結果を A で返す:
+; cmp_value16 は結果を A で返す:
 ;   A = 00h → 等しい
 ;   A = FFh → val1 < val2 (bit7 がセットされるので JM で拾える)
 ;   A = 01h → val1 > val2
 ;
 ; OFF_OPERAND_A にレジスタ番号を保存し、結果書き込み時に再取得する。
-; スタックにアドレスを残す方式は CALL の戻りアドレスと衝突するので避ける。
 
 ; ---------------------------------------------------------------
 ; cmp_reg_pair — R[a] と R[a+1] の値を比較する (共通前処理)
 ;
 ;   出力: A = 比較結果 (00h/FFh/01h)
 ;         OFF_OPERAND_A にレジスタ番号 a が入っている
-;   破壊: A, B, C, HL, DE
+;   破壊: A, B, HL, DE
 ; ---------------------------------------------------------------
 cmp_reg_pair:
   call fetch_byte
@@ -31,7 +30,7 @@ cmp_reg_pair:
   lda VM_STATE_BASE + OFF_OPERAND_A
   call get_reg_addr
   call slot_to_value        ; HL = R[a] 値先頭
-  call cmp_value32          ; A = 結果
+  call cmp_value16          ; A = 結果
   ret
 
 ; ---------------------------------------------------------------
@@ -56,7 +55,6 @@ cmp_set_false:
 ; OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
 ;
 ; 型タグと値の両方が一致したときだけ true。
-; cmp_value32 は値しか見ないため、型タグは別途比べる。
 ; ---------------------------------------------------------------
 do_op_eq:
   call fetch_byte
@@ -73,20 +71,19 @@ do_op_eq:
   ldax d                    ; A = R[a].type
   cmp b
   jnz cmp_set_false         ; 型が違えば false
-  ; 型が同じ → 値を 4 バイト比べる
+  ; 型が同じ → 値を 2 バイト比べる
   inx h
   inx h                     ; HL = R[a+1] + 2 (値先頭)
   inx d
   inx d                     ; DE = R[a] + 2 (値先頭)
-  mvi c, 4
-eq_cmp_loop:
-  ldax d                    ; A = R[a] のバイト
-  cmp m                     ; R[a] - R[a+1]
+  ldax d                    ; A = R[a].val_lo
+  cmp m                     ; R[a].val_lo - R[a+1].val_lo
   jnz cmp_set_false
   inx h
   inx d
-  dcr c
-  jnz eq_cmp_loop
+  ldax d                    ; A = R[a].val_hi
+  cmp m                     ; R[a].val_hi - R[a+1].val_hi
+  jnz cmp_set_false
   jmp cmp_set_true          ; すべて一致
 
 ; ---------------------------------------------------------------

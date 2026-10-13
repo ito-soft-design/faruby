@@ -35,7 +35,7 @@ do_op_return:
   call fetch_byte         ; A = a (戻り値のレジスタ)
   call get_reg_addr       ; HL = R[a]
   call slot_to_value      ; HL = R[a] の値先頭
-  call display_hex32
+  call display_hex16
   mvi a, VM_FINISHED
   sta VM_STATE_BASE + OFF_STATUS
   jmp vm_halt
@@ -50,7 +50,7 @@ do_op_stop:
   mvi a, 1
   call get_reg_addr       ; HL = R[1]
   call slot_to_value      ; HL = R[1] の値先頭
-  call display_hex32
+  call display_hex16
   jmp vm_halt
 
 ; ===============================================================
@@ -67,10 +67,18 @@ vm_error:
   jmp vm_halt
 
 ; ===============================================================
-; 停止
+; 停止 — ND80Z モニタのリモートモードへ復帰
+;
+; HLT だとリモートモードに戻るために手動リセット + [*(I/O)][8] が
+; 必要になる。代わりに N80MON2D ジャンプテーブルの REMOTE エントリ
+; (0821h) にジャンプする。REMOTE ルーチンは REMOTEMK=FFh を設定し、
+; RST5/RST6 をリモート用ハンドラに差し替えてから START2 に入る。
+; これにより自動的にリモートモードへ復帰する。
+; エミュレータでは ROM 領域へのジャンプを検出して停止する。
 ; ===============================================================
 vm_halt:
-  hlt
+  lxi sp, 0FFB8h   ; MONSP: モニタのスタックポインタを復元
+  jmp 00821h        ; N80MON2D REMOTE: リモートモード再入口
 
 ; ===============================================================
 ; 初期化

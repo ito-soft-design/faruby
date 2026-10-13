@@ -11,14 +11,14 @@ IREP_TABLE_BASE          EQU  8200h
 VM_STATE_BASE            EQU  8000h
 REG_FILE_BASE            EQU  8100h
 REG_FILE_BASE_HI         EQU  81h  ; REG_FILE_BASE の上位バイト
-MAX_REGS                 EQU  20h
+MAX_REGS                 EQU  40h
 STACK_TOP                EQU  0FDFFh
-DISPLAY_BASE             EQU  0FE00h
+DISPLAY_BASE             EQU  0FFF8h
 DISPLAY_SIZE             EQU  08h
 
 ; --- バリュースロット ---
 
-SLOT_BYTES               EQU  08h  ; 1 スロットのバイト数
+SLOT_BYTES               EQU  04h  ; 1 スロットのバイト数
 SLOT_TYPE_OFFSET         EQU  00h  ; 型タグのバイトオフセット
 SLOT_VALUE_OFFSET        EQU  02h  ; 値のバイトオフセット
 

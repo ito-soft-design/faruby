@@ -246,6 +246,89 @@ namespace :i8080 do
     mrb&.unlink
     combined&.unlink
   end
+
+  nd8080_rb = File.expand_path("tools/nd8080.rb", __dir__)
+
+  desc "Generate combined HEX for ND8080"
+  task :hex do
+    src = ENV["SRC"]
+    unless src
+      warn "SRC を指定してください: rake i8080:hex SRC=path/to/program.rb"
+      exit 1
+    end
+
+    require "tempfile"
+    require_relative "tools/i8080_bytecode_hex"
+
+    mrb = Tempfile.new(["faruby", ".mrb"])
+    mrb.close
+    sh "mrbc -o #{mrb.path} #{src}"
+
+    mrb_data = File.binread(mrb.path)
+    hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+    hex_text = hex_gen.generate_hex(vm_hex_path: vm_hex)
+
+    out = ENV["OUT"] || "combined.hex"
+    File.write(out, hex_text)
+    puts "生成: #{out}"
+  ensure
+    mrb&.unlink
+  end
+
+  desc "Upload combined HEX to ND8080 via USB"
+  task :upload do
+    src = ENV["SRC"]
+    unless src
+      warn "SRC を指定してください: rake i8080:upload SRC=path/to/program.rb"
+      exit 1
+    end
+    require "tempfile"
+    require_relative "tools/i8080_bytecode_hex"
+    require_relative "tools/intel_hex"
+
+    # mrbc でコンパイル
+    mrb = Tempfile.new(["faruby", ".mrb"])
+    mrb.close
+    sh "mrbc -o #{mrb.path} #{src}"
+
+    # 結合 HEX を生成
+    mrb_data = File.binread(mrb.path)
+    hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+    hex_text = hex_gen.generate_hex(vm_hex_path: vm_hex)
+
+    # Intel HEX → メモリイメージ → BTK ファイル群
+    mem = FaRuby::IntelHex.parse(hex_text)
+    btks = FaRuby::IntelHex.to_nd8080_btks(mem)
+
+    btk_files = []
+    btks.each_with_index do |(s, e, btk_data), i|
+      f = Tempfile.new(["nd8080_#{i}", ".btk"])
+      f.binmode
+      f.write(btk_data)
+      f.close
+      btk_files << f
+      puts format("領域 %d: %04X-%04X (%d バイト)", i, s, e, e - s + 1)
+    end
+
+    # nd8080.rb で書き込み
+    btk_files.each_with_index do |f, i|
+      puts "書き込み中 (領域 #{i})..."
+      sh "ruby #{nd8080_rb} load #{f.path} --verify"
+    end
+
+    puts ""
+    puts "書き込み完了。実行するには:"
+    puts "  ruby #{nd8080_rb} run 8400"
+  ensure
+    mrb&.unlink
+    btk_files&.each(&:unlink)
+  end
+
+  desc "Run program on ND8080 hardware"
+  task :nd8080_run do
+    addr = ENV["ADDR"] || "8400"
+    sh "ruby #{nd8080_rb} run #{addr}"
+  end
 end
 
 task default: :test

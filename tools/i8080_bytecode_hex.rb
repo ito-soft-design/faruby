@@ -100,20 +100,17 @@ module FaRuby
       end
     end
 
-    # 整数をバリュースロットに書く
+    # 整数をバリュースロットに書く (16 ビット)
     def place_slot_integer(mem, addr, value)
-      # 型タグ (リトルエンディアン 16 ビット)
+      raise "値が 16 ビット範囲外: #{value}" if value < -32768 || value > 32767
+
+      # 型タグ
       mem[addr + 0] = TT_INTEGER
-      mem[addr + 1] = 0
-      # 値 (リトルエンディアン 32 ビット)
-      val = value & 0xFFFFFFFF
+      mem[addr + 1] = 0   # 予約
+      # 値 (リトルエンディアン 16 ビット)
+      val = value & 0xFFFF
       mem[addr + 2] = val & 0xFF
       mem[addr + 3] = (val >> 8) & 0xFF
-      mem[addr + 4] = (val >> 16) & 0xFF
-      mem[addr + 5] = (val >> 24) & 0xFF
-      # 予備
-      mem[addr + 6] = 0
-      mem[addr + 7] = 0
     end
 
     # nil をバリュースロットに書く

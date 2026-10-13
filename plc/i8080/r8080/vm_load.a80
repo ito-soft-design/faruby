@@ -1,6 +1,9 @@
 ; vm_load.a80 — ロード命令
 ;
 ; LOADI*, LOADNIL, LOADT, LOADF, MOVE
+;
+; Phase 2: 16 ビットスロット (4 バイト)
+;   set_slot_int16: B=val_hi, C=val_lo
 
 ; ---------------------------------------------------------------
 ; OP_NOP (Z): 何もしない
@@ -30,12 +33,12 @@ do_op_loadi:
   call fetch_byte       ; A = a
   push psw
   call fetch_byte       ; A = b (値)
-  mov c, a              ; C = 値 (退避)
+  mov c, a              ; C = val_lo
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
-  mov a, c              ; A = 値
-  mvi b, 0              ; B = 符号拡張 (正なので 0)
-  call set_slot_int_small
+  mov a, c              ; 退避していた値を C に戻す (既に C にある)
+  mvi b, 0              ; B = val_hi (正なので 0)
+  call set_slot_int16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
@@ -49,12 +52,11 @@ do_op_loadineg:
   mov c, a              ; C = b (退避)
   xra a                 ; A = 0
   sub c                 ; A = -b
-  mov c, a              ; C = -b (値)
+  mov c, a              ; C = val_lo (-b)
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
-  mov a, c              ; A = -b
-  mvi b, 0FFh           ; B = 符号拡張 (負なので FF)
-  call set_slot_int_small
+  mvi b, 0FFh           ; B = val_hi (負なので FF)
+  call set_slot_int16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
@@ -63,15 +65,13 @@ do_op_loadineg:
 do_op_loadi__1:
   call fetch_byte       ; A = a
   call get_reg_addr     ; HL = R[a]
-  mvi a, 0FFh           ; -1 の byte0
-  mvi b, 0FFh           ; 符号拡張
-  call set_slot_int_small
+  mvi c, 0FFh           ; val_lo = FFh
+  mvi b, 0FFh           ; val_hi = FFh (-1 = 0xFFFF)
+  call set_slot_int16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
 ; OP_LOADI_0 ～ OP_LOADI_7 (B): R[a] = 0..7
-;
-; 即値はオペコードから求める: 値 = opcode - OP_LOADI_0
 ; ---------------------------------------------------------------
 do_op_loadi_0:
   mvi c, 0
@@ -100,48 +100,33 @@ loadi_small:
   ; C = 即値 (0-7)
   call fetch_byte       ; A = a
   call get_reg_addr     ; HL = R[a]
-  mov a, c              ; A = 値
-  mvi b, 0              ; 符号拡張 (正)
-  call set_slot_int_small
+  mvi b, 0              ; val_hi = 0 (正)
+  call set_slot_int16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
 ; OP_LOADI16 (BS): R[a] = signed16(b)
 ;
 ; b は符号付き 16 ビット (ビッグエンディアン)。
-; 32 ビットに符号拡張してスロットに書く。
+; 16 ビットスロットではそのままネイティブサイズ。
+; 符号拡張は不要。
 ; ---------------------------------------------------------------
 do_op_loadi16:
   call fetch_byte       ; A = a
   push psw
   call fetch_s16be      ; HL = signed16 値 (H=上位, L=下位)
-  mov c, l              ; C = byte0 (下位)
-  mov d, h              ; D = byte1 (上位)
+  mov c, l              ; C = val_lo
+  mov b, h              ; B = val_hi
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
-  ; 型タグ
-  mvi m, TT_INTEGER
+  ; 型タグと値を書く
+  mvi m, TT_INTEGER     ; +0: 型タグ
   inx h
-  mvi m, 0
+  mvi m, 0              ; +1: 予約
   inx h
-  ; 値 byte0
-  mov m, c
+  mov m, c              ; +2: val_lo
   inx h
-  ; 値 byte1
-  mov m, d
-  inx h
-  ; 符号拡張: byte1 の bit7 を byte2, byte3 に伝搬
-  mov a, d
-  ral                   ; bit7 → CY
-  sbb a                 ; A = CY ? FFh : 00h
-  mov m, a              ; byte2
-  inx h
-  mov m, a              ; byte3
-  inx h
-  ; 予備
-  mvi m, 0
-  inx h
-  mvi m, 0
+  mov m, b              ; +3: val_hi
   jmp vm_loop
 
 ; ---------------------------------------------------------------

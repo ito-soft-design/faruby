@@ -1,11 +1,11 @@
-; vm_arith.a80 — 算術命令 (32 ビット整数)
+; vm_arith.a80 — 算術命令 (16 ビット整数)
 ;
 ; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI
 
 ; ---------------------------------------------------------------
 ; OP_ADD (B): R[a] = R[a] + R[a+1]
 ;
-; Phase 1 は整数のみ。型タグの検査は省略し、TT_INTEGER として扱う。
+; Phase 2 は整数のみ。型タグの検査は省略し、TT_INTEGER として扱う。
 ; ---------------------------------------------------------------
 do_op_add:
   call fetch_byte       ; A = a
@@ -18,8 +18,8 @@ do_op_add:
   ; R[a] のスロットアドレスを求める
   call get_reg_addr     ; HL = R[a]
   call slot_to_value    ; HL = R[a] の値先頭
-  ; 32 ビット加算: val[a] += val[a+1]
-  call add_value32
+  ; 16 ビット加算: val[a] += val[a+1]
+  call add_value16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
@@ -34,7 +34,7 @@ do_op_sub:
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
   call slot_to_value    ; HL = R[a] の値先頭
-  call sub_value32
+  call sub_value16
   jmp vm_loop
 
 ; ---------------------------------------------------------------
@@ -50,20 +50,12 @@ do_op_addi:
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
   call slot_to_value    ; HL = 値の先頭 (+2)
-  mov a, m              ; byte0
-  add c                 ; byte0 + b (CY = 桁上げ)
+  mov a, m              ; val_lo
+  add c                 ; val_lo + b (CY = 桁上げ)
   mov m, a
   inx h
-  mov a, m              ; byte1 (MOV はフラグを変えない)
-  aci 0                 ; byte1 + CY
-  mov m, a
-  inx h
-  mov a, m              ; byte2
-  aci 0
-  mov m, a
-  inx h
-  mov a, m              ; byte3
-  aci 0
+  mov a, m              ; val_hi (MOV はフラグを変えない)
+  aci 0                 ; val_hi + CY
   mov m, a
   jmp vm_loop
 
@@ -78,19 +70,11 @@ do_op_subi:
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
   call slot_to_value    ; HL = 値の先頭 (+2)
-  mov a, m              ; byte0
-  sub c                 ; byte0 - b (CY = 借り)
+  mov a, m              ; val_lo
+  sub c                 ; val_lo - b (CY = 借り)
   mov m, a
   inx h
-  mov a, m              ; byte1
-  sbi 0                 ; byte1 - CY
-  mov m, a
-  inx h
-  mov a, m              ; byte2
-  sbi 0
-  mov m, a
-  inx h
-  mov a, m              ; byte3
-  sbi 0
+  mov a, m              ; val_hi
+  sbi 0                 ; val_hi - CY
   mov m, a
   jmp vm_loop

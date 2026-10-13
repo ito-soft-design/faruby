@@ -22,21 +22,18 @@
 #   0xA000 - 0xA7FF : 定数プール         (2KB)
 #   0xA800 - 0xEFFF : (free)            (18KB)
 #   0xF000 - 0xFDFF : CPU スタック (SP)  (3.5KB)
-#   0xFE00 - 0xFE07 : 7 セグ表示バッファ (8B)
+#   0xFFB8 - 0xFFF7 : ND80Z モニタワーク (RST ベクタ, レジスタ退避等)
+#   0xFFF8 - 0xFFFF : 7 セグ表示 (DIG)  (8B)
 #
 # ## バリュースロット
 #
 # レジスタ・定数プールは共通の「バリュースロット」形式で格納します。
-# 1 スロット = 8 バイト。リトルエンディアン。
+# 1 スロット = 4 バイト。リトルエンディアン。
 #
-#   +0 : 型タグ 下位バイト    ┐ 型タグ (16 ビット)
-#   +1 : 型タグ 上位バイト    ┘
-#   +2 : 値 byte 0 (最下位)  ┐
-#   +3 : 値 byte 1           │ 値 (32 ビット, リトルエンディアン)
-#   +4 : 値 byte 2           │
-#   +5 : 値 byte 3 (最上位)  ┘
-#   +6 : 予備                ┐ 将来の拡張用
-#   +7 : 予備                ┘
+#   +0 : 型タグ (1 バイト)
+#   +1 : 予約  (1 バイト, 常に 0)
+#   +2 : 値 下位バイト (val_lo)  ┐ 値 (16 ビット, リトルエンディアン)
+#   +3 : 値 上位バイト (val_hi)  ┘
 #
 # 型タグの番号は VmConstants の TT_* と同じです。
 
@@ -46,8 +43,8 @@ module FaRuby
   class I8080MemoryLayout
     include VmConstants
 
-    # --- バリュースロット ---
-    SLOT_BYTES        = 8
+    # --- バリュースロット (16 ビット値) ---
+    SLOT_BYTES        = 4
     SLOT_TYPE_OFFSET  = 0   # バイトオフセット
     SLOT_VALUE_OFFSET = 2   # バイトオフセット
 
@@ -59,7 +56,7 @@ module FaRuby
 
     REG_FILE_BASE     = 0x8100
     REG_FILE_SIZE     = 0x0100   # 256B
-    MAX_REGS          = 32       # 256B / 8B = 32 スロット
+    MAX_REGS          = 64       # 256B / 4B = 64 スロット
 
     IREP_TABLE_BASE   = 0x8200
     IREP_TABLE_SIZE   = 0x0100   # 256B
@@ -80,8 +77,8 @@ module FaRuby
     STACK_TOP         = 0xFDFF   # SP 初期値
     STACK_SIZE        = 0x0E00   # 3.5KB
 
-    # 7 セグメント表示バッファ (メモリマップド I/O)
-    DISPLAY_BASE      = 0xFE00
+    # 7 セグメント表示バッファ (ND80Z モニタの DIG アドレス)
+    DISPLAY_BASE      = 0xFFF8
     DISPLAY_SIZE      = 8        # 8 桁
 
     # --- VM 状態領域のバイトオフセット ---
@@ -160,15 +157,15 @@ module FaRuby
 
     # レジスタ番号からスロットアドレスを計算するアセンブリ用の情報
     #
-    # i8080 は乗算命令が無いため、× 8 は 3 回の左シフトで行います。
-    # A レジスタにレジスタ番号を入れて 3 回 ADD A すれば × 8 になり、
+    # i8080 は乗算命令が無いため、× 4 は 2 回の左シフトで行います。
+    # A レジスタにレジスタ番号を入れて 2 回 ADD A すれば × 4 になり、
     # REG_FILE_BASE の下位バイトを足せばアドレスが出ます。
     # REG_FILE_BASE (0x8100) の下位バイトが 0x00 なので、
     # 上位バイトに 0x81 を入れるだけで済みます。
     def self.reg_addr_calc_note
       <<~NOTE
         ; レジスタ番号 (A) → HL にスロットアドレス
-        ;   A = A << 3  (× 8)
+        ;   A = A << 2  (× 4)
         ;   L = A
         ;   H = 0x81    (REG_FILE_BASE >> 8)
       NOTE
@@ -187,7 +184,8 @@ module FaRuby
         0x9000-0x9FFF  Bytecode         (#{BYTECODE_SIZE / 1024}KB)
         0xA000-0xA7FF  Constant pool    (#{POOL_SIZE / 1024}KB)
         0xF000-0xFDFF  CPU stack        (#{STACK_SIZE}B)
-        0xFE00-0xFE07  7-seg display    (#{DISPLAY_SIZE}B)
+        0xFFB8-0xFFF7  ND80Z monitor work
+        0xFFF8-0xFFFF  7-seg display    (#{DISPLAY_SIZE}B)
       MAP
     end
   end
