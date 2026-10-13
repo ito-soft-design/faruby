@@ -1,0 +1,128 @@
+; vm_compare.a80 — 比較命令
+;
+; OP_EQ, OP_LT, OP_LE, OP_GT, OP_GE
+;
+; 結果は R[a] に true (TT_TRUE) または false (TT_FALSE) を書く。
+; Phase 1 は整数のみ。
+;
+; cmp_value32 は結果を A で返す:
+;   A = 00h → 等しい
+;   A = FFh → val1 < val2 (bit7 がセットされるので JM で拾える)
+;   A = 01h → val1 > val2
+;
+; OFF_OPERAND_A にレジスタ番号を保存し、結果書き込み時に再取得する。
+; スタックにアドレスを残す方式は CALL の戻りアドレスと衝突するので避ける。
+
+; ---------------------------------------------------------------
+; cmp_reg_pair — R[a] と R[a+1] の値を比較する (共通前処理)
+;
+;   出力: A = 比較結果 (00h/FFh/01h)
+;         OFF_OPERAND_A にレジスタ番号 a が入っている
+;   破壊: A, B, C, HL, DE
+; ---------------------------------------------------------------
+cmp_reg_pair:
+  call fetch_byte
+  sta VM_STATE_BASE + OFF_OPERAND_A
+  ; R[a+1] の値先頭
+  call get_reg_addr_next
+  call slot_to_value
+  xchg                      ; DE = R[a+1] 値先頭
+  ; R[a] の値先頭
+  lda VM_STATE_BASE + OFF_OPERAND_A
+  call get_reg_addr
+  call slot_to_value        ; HL = R[a] 値先頭
+  call cmp_value32          ; A = 結果
+  ret
+
+; ---------------------------------------------------------------
+; cmp_set_true / cmp_set_false — 結果をスロットに書いてループへ戻る
+;
+; OFF_OPERAND_A から R[a] のアドレスを再計算する。
+; ---------------------------------------------------------------
+cmp_set_true:
+  lda VM_STATE_BASE + OFF_OPERAND_A
+  call get_reg_addr
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+cmp_set_false:
+  lda VM_STATE_BASE + OFF_OPERAND_A
+  call get_reg_addr
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
+;
+; 型タグと値の両方が一致したときだけ true。
+; cmp_value32 は値しか見ないため、型タグは別途比べる。
+; ---------------------------------------------------------------
+do_op_eq:
+  call fetch_byte
+  sta VM_STATE_BASE + OFF_OPERAND_A
+  ; R[a] と R[a+1] のスロットアドレスを求める
+  call get_reg_addr         ; HL = R[a]
+  push h                    ; R[a] を退避
+  lda VM_STATE_BASE + OFF_OPERAND_A
+  call get_reg_addr_next    ; HL = R[a+1]
+  pop d                     ; DE = R[a]
+  ; HL = R[a+1], DE = R[a]
+  ; 型タグを比べる
+  mov b, m                  ; B = R[a+1].type
+  ldax d                    ; A = R[a].type
+  cmp b
+  jnz cmp_set_false         ; 型が違えば false
+  ; 型が同じ → 値を 4 バイト比べる
+  inx h
+  inx h                     ; HL = R[a+1] + 2 (値先頭)
+  inx d
+  inx d                     ; DE = R[a] + 2 (値先頭)
+  mvi c, 4
+eq_cmp_loop:
+  ldax d                    ; A = R[a] のバイト
+  cmp m                     ; R[a] - R[a+1]
+  jnz cmp_set_false
+  inx h
+  inx d
+  dcr c
+  jnz eq_cmp_loop
+  jmp cmp_set_true          ; すべて一致
+
+; ---------------------------------------------------------------
+; OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
+; ---------------------------------------------------------------
+do_op_lt:
+  call cmp_reg_pair         ; A = 結果
+  ora a
+  jm cmp_set_true           ; A = FFh → val1 < val2
+  jmp cmp_set_false
+
+; ---------------------------------------------------------------
+; OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
+; ---------------------------------------------------------------
+do_op_le:
+  call cmp_reg_pair
+  ora a
+  jm cmp_set_true           ; val1 < val2
+  jz cmp_set_true           ; val1 == val2
+  jmp cmp_set_false
+
+; ---------------------------------------------------------------
+; OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
+; ---------------------------------------------------------------
+do_op_gt:
+  call cmp_reg_pair
+  ora a
+  jz cmp_set_false          ; val1 == val2
+  jp cmp_set_true           ; A = 01h → val1 > val2
+  jmp cmp_set_false         ; A = FFh → val1 < val2
+
+; ---------------------------------------------------------------
+; OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
+; ---------------------------------------------------------------
+do_op_ge:
+  call cmp_reg_pair
+  ora a
+  jm cmp_set_false          ; val1 < val2
+  jmp cmp_set_true          ; val1 >= val2

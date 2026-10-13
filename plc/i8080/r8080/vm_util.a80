@@ -1,0 +1,274 @@
+; vm_util.a80 — ユーティリティサブルーチン
+;
+; レジスタスロットのアドレス計算、値の読み書き、スロットの複写。
+; 他のすべてのモジュールがここに依存します。
+
+; ---------------------------------------------------------------
+; get_reg_addr — レジスタ番号 → スロット先頭アドレス
+;
+;   入力: A = レジスタ番号 (0-31)
+;   出力: HL = スロット先頭アドレス
+;   破壊: A
+;
+; REG_FILE_BASE = 0x8100 (下位バイト 0x00) なので、
+; レジスタ番号 × 8 がそのまま L になり、H は固定。
+; ---------------------------------------------------------------
+get_reg_addr:
+  add a           ; ×2
+  add a           ; ×4
+  add a           ; ×8
+  mov l, a
+  mvi h, REG_FILE_BASE_HI
+  ret
+
+; ---------------------------------------------------------------
+; get_reg_addr_next — R[a+1] のスロット先頭アドレス
+;
+;   入力: A = レジスタ番号 a
+;   出力: HL = R[a+1] のスロット先頭アドレス
+;   破壊: A
+; ---------------------------------------------------------------
+get_reg_addr_next:
+  inr a
+  jmp get_reg_addr
+
+; ---------------------------------------------------------------
+; set_slot_int_small — スロットに小さい整数を書く
+;
+;   入力: HL = スロット先頭アドレス
+;          A  = 値の byte0 (LSB)
+;          B  = 符号拡張バイト (正なら 00h, 負なら FFh)
+;   出力: なし
+;   破壊: A, HL
+; ---------------------------------------------------------------
+set_slot_int_small:
+  mvi m, TT_INTEGER   ; +0: 型タグ下位
+  inx h
+  mvi m, 0             ; +1: 型タグ上位
+  inx h
+  mov m, a             ; +2: 値 byte0 (LSB)
+  inx h
+  mov m, b             ; +3: 値 byte1
+  inx h
+  mov m, b             ; +4: 値 byte2
+  inx h
+  mov m, b             ; +5: 値 byte3 (MSB)
+  inx h
+  mvi m, 0             ; +6: 予備
+  inx h
+  mvi m, 0             ; +7: 予備
+  ret
+
+; ---------------------------------------------------------------
+; set_slot_special — 値を持たない型をスロットに書く
+;
+;   入力: HL = スロット先頭アドレス
+;          A  = 型タグ (TT_NIL, TT_TRUE, TT_FALSE)
+;   出力: なし
+;   破壊: A, HL
+; ---------------------------------------------------------------
+set_slot_special:
+  mov m, a             ; +0: 型タグ下位
+  inx h
+  mvi m, 0             ; +1: 型タグ上位
+  inx h
+  ; +2 ～ +7 を 0 クリア
+  xra a                ; A = 0
+  mov m, a             ; +2
+  inx h
+  mov m, a             ; +3
+  inx h
+  mov m, a             ; +4
+  inx h
+  mov m, a             ; +5
+  inx h
+  mov m, a             ; +6
+  inx h
+  mov m, a             ; +7
+  ret
+
+; ---------------------------------------------------------------
+; copy_slot — スロットを丸ごと複写 (8 バイト)
+;
+;   入力: HL = コピー元先頭
+;         DE = コピー先先頭
+;   出力: なし
+;   破壊: A, C, HL, DE
+; ---------------------------------------------------------------
+copy_slot:
+  mvi c, SLOT_BYTES
+copy_slot_loop:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz copy_slot_loop
+  ret
+
+; ---------------------------------------------------------------
+; get_slot_type — スロットの型タグを読む
+;
+;   入力: HL = スロット先頭アドレス
+;   出力: A = 型タグ (下位バイトのみ。上位は常に 0)
+;   破壊: なし (HL 保存)
+; ---------------------------------------------------------------
+get_slot_type:
+  mov a, m
+  ret
+
+; ---------------------------------------------------------------
+; slot_to_value — スロット先頭から値の先頭へ進める
+;
+;   入力: HL = スロット先頭アドレス
+;   出力: HL = 値の先頭 (スロット +2)
+;   破壊: なし
+; ---------------------------------------------------------------
+slot_to_value:
+  inx h
+  inx h
+  ret
+
+; ---------------------------------------------------------------
+; add_value32 — 32 ビット加算
+;
+;   入力: HL = 値 1 の先頭 (被加算数, 結果をここに上書き)
+;         DE = 値 2 の先頭 (加算数)
+;   出力: 結果を HL の元の位置に上書き
+;   破壊: A, HL, DE
+;
+; INX/XCHG はフラグを変えないので、桁上げが正しく伝搬する。
+; ---------------------------------------------------------------
+add_value32:
+  ldax d          ; A = val2[byte0]
+  add m           ; A += val1[byte0]
+  mov m, a        ; val1[byte0] = result
+  inx h
+  inx d
+  ldax d          ; A = val2[byte1]
+  adc m           ; A += val1[byte1] + CY
+  mov m, a
+  inx h
+  inx d
+  ldax d          ; A = val2[byte2]
+  adc m
+  mov m, a
+  inx h
+  inx d
+  ldax d          ; A = val2[byte3]
+  adc m
+  mov m, a
+  ret
+
+; ---------------------------------------------------------------
+; sub_value32 — 32 ビット減算 (val1 -= val2)
+;
+;   入力: HL = 値 1 の先頭 (被減数, 結果をここに上書き)
+;         DE = 値 2 の先頭 (減数)
+;   出力: 結果を HL の元の位置に上書き
+;   破壊: A, HL, DE
+;
+; SUB M は A = A - [HL] なので、被減数を A に取ってから
+; XCHG で HL と DE を入れ替えて減数を引く。
+; XCHG はフラグを変えないので借りが正しく伝搬する。
+; ---------------------------------------------------------------
+sub_value32:
+  mov a, m        ; A = val1[byte0]
+  xchg            ; HL=val2, DE=val1
+  sub m           ; A -= val2[byte0]
+  xchg            ; HL=val1, DE=val2
+  mov m, a        ; val1[byte0] = result
+  inx h
+  inx d
+  mov a, m        ; A = val1[byte1]
+  xchg
+  sbb m           ; A -= val2[byte1] - CY
+  xchg
+  mov m, a
+  inx h
+  inx d
+  mov a, m        ; A = val1[byte2]
+  xchg
+  sbb m
+  xchg
+  mov m, a
+  inx h
+  inx d
+  mov a, m        ; A = val1[byte3]
+  xchg
+  sbb m
+  xchg
+  mov m, a
+  ret
+
+; ---------------------------------------------------------------
+; cmp_value32 — 32 ビット符号付き比較
+;
+;   入力: HL = 値 1 の先頭 (byte0 の位置)
+;         DE = 値 2 の先頭 (byte0 の位置)
+;   出力: A = 比較結果
+;           00h → val1 == val2
+;           FFh → val1 < val2  (ORA A で S フラグが立つ → JM)
+;           01h → val1 > val2  (ORA A で S が立たない → JP)
+;   破壊: A, B, C, HL, DE
+;
+; 手順:
+;   1. MSB (byte3) の符号ビットを比べる
+;   2. 符号が違えば、負の方が小さい
+;   3. 符号が同じなら MSB → LSB の順に符号なし比較
+; ---------------------------------------------------------------
+cmp_value32:
+  ; byte3 (MSB) の位置を求める
+  inx h
+  inx h
+  inx h           ; HL = val1+3 (byte3)
+  inx d
+  inx d
+  inx d           ; DE = val2+3 (byte3)
+  ; 符号ビットを比べる
+  mov a, m        ; A = val1[byte3]
+  mov b, a        ; B = val1[byte3] (退避)
+  ldax d          ; A = val2[byte3]
+  xra b           ; 符号ビットが違えば bit7 = 1
+  jp cmp32_same_sign
+  ; 符号が違う: val1 が負なら val1 < val2
+  mov a, b        ; A = val1[byte3]
+  ani 80h         ; bit7 を取り出す
+  jnz cmp32_ret_neg ; val1 が負 → val1 < val2
+  jmp cmp32_ret_pos ; val1 が正 → val1 > val2
+cmp32_same_sign:
+  ; 符号が同じ: MSB → LSB の順に符号なし比較
+  ; CMP M は A - [HL] なので、A=val2, M=val1
+  ;   CY=1 → val2 < val1 → val1 > val2 → 正を返す
+  ;   CY=0, Z=0 → val2 > val1 → val1 < val2 → 負を返す
+  ldax d
+  cmp m           ; val2[byte3] - val1[byte3]
+  jc cmp32_ret_pos
+  jnz cmp32_ret_neg
+  dcx h
+  dcx d
+  ldax d
+  cmp m           ; val2[byte2] - val1[byte2]
+  jc cmp32_ret_pos
+  jnz cmp32_ret_neg
+  dcx h
+  dcx d
+  ldax d
+  cmp m           ; val2[byte1] - val1[byte1]
+  jc cmp32_ret_pos
+  jnz cmp32_ret_neg
+  dcx h
+  dcx d
+  ldax d
+  cmp m           ; val2[byte0] - val1[byte0]
+  jc cmp32_ret_pos
+  jnz cmp32_ret_neg
+  ; すべて等しい
+  xra a           ; A = 00h
+  ret
+cmp32_ret_neg:
+  mvi a, 0FFh     ; val1 < val2
+  ret
+cmp32_ret_pos:
+  mvi a, 01h      ; val1 > val2
+  ret

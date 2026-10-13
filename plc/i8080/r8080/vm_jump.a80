@@ -1,0 +1,72 @@
+; vm_jump.a80 — ジャンプ命令
+;
+; OP_JMP, OP_JMPIF, OP_JMPNOT
+;
+; オフセットは命令読み取り後の PC (= 次の命令の先頭) からの相対値。
+; mruby のバイトコードは符号付き 16 ビット、ビッグエンディアン。
+
+; ---------------------------------------------------------------
+; apply_jump — PC に符号付きオフセットを加える
+;
+;   入力: HL = 符号付き 16 ビットオフセット
+;   出力: なし (PC が更新される)
+;   破壊: A, HL, DE
+; ---------------------------------------------------------------
+apply_jump:
+  xchg                      ; DE = オフセット
+  lhld VM_STATE_BASE + OFF_PC ; HL = 現在の PC
+  dad d                      ; HL = PC + オフセット
+  shld VM_STATE_BASE + OFF_PC
+  ret
+
+; ---------------------------------------------------------------
+; OP_JMP (S): PC += signed16(a)
+; ---------------------------------------------------------------
+do_op_jmp:
+  call fetch_s16be          ; HL = オフセット
+  call apply_jump
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
+;
+; Ruby で偽なのは nil と false だけ。型タグが TT_FALSY_MAX 以下なら偽。
+; ---------------------------------------------------------------
+do_op_jmpif:
+  call fetch_byte           ; A = a (レジスタ番号)
+  push psw
+  call fetch_s16be          ; HL = オフセット
+  push h                    ; オフセットを退避
+  pop d                     ; DE = オフセット
+  pop psw                   ; A = a
+  call get_reg_addr         ; HL = R[a] スロット先頭
+  call get_slot_type        ; A = 型タグ
+  cpi TT_FALSY_MAX + 1
+  jc jmpif_skip             ; 型タグ <= TT_FALSY_MAX → 偽 → ジャンプしない
+  ; 真 → ジャンプする
+  xchg                      ; HL = オフセット (DE にあった)
+  call apply_jump
+  jmp vm_loop
+jmpif_skip:
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_JMPNOT (BS): if R[a] が偽 then PC += signed16(b)
+; ---------------------------------------------------------------
+do_op_jmpnot:
+  call fetch_byte           ; A = a
+  push psw
+  call fetch_s16be          ; HL = オフセット
+  push h
+  pop d                     ; DE = オフセット
+  pop psw                   ; A = a
+  call get_reg_addr         ; HL = R[a] スロット先頭
+  call get_slot_type        ; A = 型タグ
+  cpi TT_FALSY_MAX + 1
+  jnc jmpnot_skip           ; 型タグ > TT_FALSY_MAX → 真 → ジャンプしない
+  ; 偽 → ジャンプする
+  xchg                      ; HL = オフセット
+  call apply_jump
+  jmp vm_loop
+jmpnot_skip:
+  jmp vm_loop

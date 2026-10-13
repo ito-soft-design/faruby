@@ -1,0 +1,175 @@
+; vm_load.a80 — ロード命令
+;
+; LOADI*, LOADNIL, LOADT, LOADF, MOVE
+
+; ---------------------------------------------------------------
+; OP_NOP (Z): 何もしない
+; ---------------------------------------------------------------
+do_op_nop:
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_MOVE (BB): R[a] = R[b]
+; ---------------------------------------------------------------
+do_op_move:
+  call fetch_byte       ; A = a (コピー先)
+  push psw
+  call fetch_byte       ; A = b (コピー元)
+  call get_reg_addr     ; HL = R[b] のスロット先頭
+  xchg                  ; DE = R[b]
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  xchg                  ; DE = R[a] (コピー先), HL = R[b] (コピー元)
+  call copy_slot
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADI (BB): R[a] = b (符号なし 8 ビット)
+; ---------------------------------------------------------------
+do_op_loadi:
+  call fetch_byte       ; A = a
+  push psw
+  call fetch_byte       ; A = b (値)
+  mov c, a              ; C = 値 (退避)
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mov a, c              ; A = 値
+  mvi b, 0              ; B = 符号拡張 (正なので 0)
+  call set_slot_int_small
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADINEG (BB): R[a] = -b
+; ---------------------------------------------------------------
+do_op_loadineg:
+  call fetch_byte       ; A = a
+  push psw
+  call fetch_byte       ; A = b
+  ; -b を計算 (0 - b)
+  mov c, a              ; C = b (退避)
+  xra a                 ; A = 0
+  sub c                 ; A = -b
+  mov c, a              ; C = -b (値)
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mov a, c              ; A = -b
+  mvi b, 0FFh           ; B = 符号拡張 (負なので FF)
+  call set_slot_int_small
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADI__1 (B): R[a] = -1
+; ---------------------------------------------------------------
+do_op_loadi__1:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, 0FFh           ; -1 の byte0
+  mvi b, 0FFh           ; 符号拡張
+  call set_slot_int_small
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADI_0 ～ OP_LOADI_7 (B): R[a] = 0..7
+;
+; 即値はオペコードから求める: 値 = opcode - OP_LOADI_0
+; ---------------------------------------------------------------
+do_op_loadi_0:
+  mvi c, 0
+  jmp loadi_small
+do_op_loadi_1:
+  mvi c, 1
+  jmp loadi_small
+do_op_loadi_2:
+  mvi c, 2
+  jmp loadi_small
+do_op_loadi_3:
+  mvi c, 3
+  jmp loadi_small
+do_op_loadi_4:
+  mvi c, 4
+  jmp loadi_small
+do_op_loadi_5:
+  mvi c, 5
+  jmp loadi_small
+do_op_loadi_6:
+  mvi c, 6
+  jmp loadi_small
+do_op_loadi_7:
+  mvi c, 7
+loadi_small:
+  ; C = 即値 (0-7)
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mov a, c              ; A = 値
+  mvi b, 0              ; 符号拡張 (正)
+  call set_slot_int_small
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADI16 (BS): R[a] = signed16(b)
+;
+; b は符号付き 16 ビット (ビッグエンディアン)。
+; 32 ビットに符号拡張してスロットに書く。
+; ---------------------------------------------------------------
+do_op_loadi16:
+  call fetch_byte       ; A = a
+  push psw
+  call fetch_s16be      ; HL = signed16 値 (H=上位, L=下位)
+  mov c, l              ; C = byte0 (下位)
+  mov d, h              ; D = byte1 (上位)
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  ; 型タグ
+  mvi m, TT_INTEGER
+  inx h
+  mvi m, 0
+  inx h
+  ; 値 byte0
+  mov m, c
+  inx h
+  ; 値 byte1
+  mov m, d
+  inx h
+  ; 符号拡張: byte1 の bit7 を byte2, byte3 に伝搬
+  mov a, d
+  ral                   ; bit7 → CY
+  sbb a                 ; A = CY ? FFh : 00h
+  mov m, a              ; byte2
+  inx h
+  mov m, a              ; byte3
+  inx h
+  ; 予備
+  mvi m, 0
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADNIL (B): R[a] = nil
+; ---------------------------------------------------------------
+do_op_loadnil:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADT (B): R[a] = true
+; ---------------------------------------------------------------
+do_op_loadt:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_LOADF (B): R[a] = false
+; ---------------------------------------------------------------
+do_op_loadf:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop

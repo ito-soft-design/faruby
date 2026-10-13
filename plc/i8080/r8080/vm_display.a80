@@ -1,0 +1,98 @@
+; vm_display.a80 — 7 セグメント表示
+;
+; 32 ビット整数値を 8 桁の 16 進数に変換し、7 セグ表示バッファに書く。
+; セグメントパターンは seg_table にまとめる。
+
+; ---------------------------------------------------------------
+; display_hex32 — 32 ビット値を 7 セグに表示
+;
+;   入力: HL = 値の先頭 (byte0, リトルエンディアン)
+;   出力: DISPLAY_BASE に 8 桁のセグメントパターン
+;   破壊: A, B, C, HL, DE
+;
+; MSB (byte3) から表示する。byte3 の上位ニブルが桁 0、
+; byte0 の下位ニブルが桁 7。
+; ---------------------------------------------------------------
+display_hex32:
+  ; byte3 (MSB) へ移動
+  inx h
+  inx h
+  inx h           ; HL = byte3
+  lxi d, DISPLAY_BASE
+  mvi c, 4        ; 4 バイト (= 8 ニブル)
+display_byte_loop:
+  ; 上位ニブル
+  mov a, m
+  rrc
+  rrc
+  rrc
+  rrc
+  ani 0Fh
+  call nibble_to_seg
+  stax d
+  inx d
+  ; 下位ニブル
+  mov a, m
+  ani 0Fh
+  call nibble_to_seg
+  stax d
+  inx d
+  ; 次のバイト (MSB → LSB)
+  dcx h
+  dcr c
+  jnz display_byte_loop
+  ret
+
+; ---------------------------------------------------------------
+; nibble_to_seg — 4 ビット値を 7 セグパターンに変換
+;
+;   入力: A = 0-F
+;   出力: A = セグメントパターン
+;   破壊: なし (HL, BC は内部で退避・復元)
+; ---------------------------------------------------------------
+nibble_to_seg:
+  push h
+  push b          ; BC を退避 (C = ループカウンタ)
+  mov l, a
+  mvi h, 0
+  lxi b, seg_table
+  dad b           ; HL = seg_table + nibble
+  mov a, m
+  pop b           ; BC を復元
+  pop h
+  ret
+
+; ---------------------------------------------------------------
+; 7 セグメントパターンテーブル
+;
+;   bit 0 = a (上)
+;   bit 1 = b (右上)
+;   bit 2 = c (右下)
+;   bit 3 = d (下)
+;   bit 4 = e (左下)
+;   bit 5 = f (左上)
+;   bit 6 = g (中)
+;
+;       aaa
+;      f   b
+;       ggg
+;      e   c
+;       ddd
+; ---------------------------------------------------------------
+seg_table:
+  db 3Fh          ; 0: abcdef
+  db 06h          ; 1: bc
+  db 5Bh          ; 2: abdeg
+  db 4Fh          ; 3: abcdg
+  db 66h          ; 4: bcfg
+  db 6Dh          ; 5: acdfg
+  db 7Dh          ; 6: acdefg
+  db 07h          ; 7: abc
+  db 7Fh          ; 8: abcdefg
+  db 6Fh          ; 9: abcdfg
+  db 77h          ; A: abcefg
+  db 7Ch          ; b: cdefg
+  db 39h          ; C: adef
+  db 5Eh          ; d: bcdeg
+  db 79h          ; E: adefg
+  db 71h          ; F: aefg

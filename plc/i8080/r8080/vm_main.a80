@@ -1,0 +1,296 @@
+; vm_main.a80 — faRuby i8080 VM エントリポイント
+;
+; mruby バイトコードを実行する VM の本体。
+; ND8080 ボード (32KB RAM: 0x8000-0xFFFF) を想定。
+;
+; asm80 -m I8080 vm_main.a80
+
+.include "vm_constants.a80"
+
+  org 08400h
+
+; ===============================================================
+; リセットベクタ
+; ===============================================================
+  jmp vm_start
+
+; ===============================================================
+; サブルーチン群 (.include で取り込む)
+; ===============================================================
+.include "vm_util.a80"
+.include "vm_fetch.a80"
+.include "vm_load.a80"
+.include "vm_arith.a80"
+.include "vm_compare.a80"
+.include "vm_jump.a80"
+.include "vm_display.a80"
+
+; ===============================================================
+; OP_RETURN (B): トップレベルでは VM 停止
+;
+; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
+; R[a] の値を 7 セグに表示して停止する。
+; ===============================================================
+do_op_return:
+  call fetch_byte         ; A = a (戻り値のレジスタ)
+  call get_reg_addr       ; HL = R[a]
+  call slot_to_value      ; HL = R[a] の値先頭
+  call display_hex32
+  mvi a, VM_FINISHED
+  sta VM_STATE_BASE + OFF_STATUS
+  jmp vm_halt
+
+; ===============================================================
+; OP_STOP (Z): VM 停止
+; ===============================================================
+do_op_stop:
+  mvi a, VM_FINISHED
+  sta VM_STATE_BASE + OFF_STATUS
+  ; R[1] の値を 7 セグに表示
+  mvi a, 1
+  call get_reg_addr       ; HL = R[1]
+  call slot_to_value      ; HL = R[1] の値先頭
+  call display_hex32
+  jmp vm_halt
+
+; ===============================================================
+; エラー停止
+;
+; 未対応のオペコードを踏んだとき。
+; 現在のオペコードをエラーコードとして保存する。
+; ===============================================================
+vm_error:
+  lda VM_STATE_BASE + OFF_CURRENT_OPCODE
+  sta VM_STATE_BASE + OFF_ERROR
+  mvi a, VM_ERROR
+  sta VM_STATE_BASE + OFF_STATUS
+  jmp vm_halt
+
+; ===============================================================
+; 停止
+; ===============================================================
+vm_halt:
+  hlt
+
+; ===============================================================
+; 初期化
+; ===============================================================
+vm_start:
+  ; スタックポインタを設定
+  lxi sp, STACK_TOP + 1
+
+  ; VM 状態領域をゼロクリア (256 バイト)
+  lxi h, VM_STATE_BASE
+  mvi c, 0              ; 256 回 (0 は 256 として扱う)
+vm_clear_state:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_state
+
+  ; レジスタファイルをゼロクリア (256 バイト)
+  lxi h, REG_FILE_BASE
+  mvi c, 0
+vm_clear_regs:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_regs
+
+  ; IREP 0 のバイトコード長を VM 状態に設定
+  ; IREP テーブルの先頭エントリから読む
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
+
+  ; PC = 0 (ゼロクリア済み)
+
+  ; 実行状態を RUNNING に設定
+  mvi a, VM_RUNNING
+  sta VM_STATE_BASE + OFF_STATUS
+
+  ; メインループへ
+  ; fall through
+
+; ===============================================================
+; メインループ (fetch-decode-execute)
+; ===============================================================
+vm_loop:
+  ; --- 実行状態の確認 ---
+  lda VM_STATE_BASE + OFF_STATUS
+  cpi VM_RUNNING
+  jnz vm_halt
+
+  ; --- PC がバイトコード長を超えていないか ---
+  lhld VM_STATE_BASE + OFF_PC
+  xchg                      ; DE = PC
+  lhld VM_STATE_BASE + OFF_BYTECODE_LEN
+  ; HL = bytecode_len, DE = PC
+  ; PC >= bytecode_len ならエラー
+  mov a, e
+  sub l
+  mov a, d
+  sbb h                     ; DE - HL (PC - len)
+  jnc vm_error               ; PC >= len → エラー
+
+  ; --- オペコードフェッチ ---
+  call fetch_byte           ; A = opcode
+  sta VM_STATE_BASE + OFF_CURRENT_OPCODE
+
+  ; --- ステップカウント ---
+  lhld VM_STATE_BASE + OFF_STEP_COUNT
+  inx h
+  shld VM_STATE_BASE + OFF_STEP_COUNT
+  ; 上位 16 ビットの桁上げ (HL が 0 に戻ったとき)
+  mov a, h
+  ora l
+  jnz vm_dispatch
+  lhld VM_STATE_BASE + OFF_STEP_COUNT + 2
+  inx h
+  shld VM_STATE_BASE + OFF_STEP_COUNT + 2
+
+  ; --- ディスパッチ ---
+vm_dispatch:
+  lda VM_STATE_BASE + OFF_CURRENT_OPCODE
+  ; オペコード × 2 でジャンプテーブルのオフセットを求める
+  add a                     ; A = opcode * 2 (テーブルエントリは 2 バイト)
+  jc vm_error               ; オーバーフロー → 未対応
+  mov e, a
+  mvi d, 0                  ; DE = opcode * 2
+  lxi h, dispatch_table
+  dad d                     ; HL = &dispatch_table[opcode]
+  ; テーブル上限チェック
+  lxi d, dispatch_table_end
+  mov a, e
+  sub l
+  mov a, d
+  sbb h                     ; DE - HL → dispatch_table_end - 現在位置
+  jc vm_error               ; テーブル範囲外
+  ; アドレスを読んでジャンプ
+  mov e, m                  ; E = 下位バイト
+  inx h
+  mov d, m                  ; D = 上位バイト
+  xchg                      ; HL = ハンドラアドレス
+  ; 0000h ならエラー (未実装マーカー)
+  mov a, h
+  ora l
+  jz vm_error
+  pchl                      ; ハンドラへジャンプ
+
+; ===============================================================
+; ディスパッチテーブル
+;
+; オペコード番号順に 2 バイトのアドレスを並べる。
+; 未実装のオペコードは 0000h (vm_error で捕捉)。
+; ===============================================================
+dispatch_table:
+  dw do_op_nop        ; 00 OP_NOP
+  dw do_op_move       ; 01 OP_MOVE
+  dw 0000h            ; 02 OP_LOADL
+  dw do_op_loadi      ; 03 OP_LOADI
+  dw do_op_loadineg   ; 04 OP_LOADINEG
+  dw do_op_loadi__1   ; 05 OP_LOADI__1
+  dw do_op_loadi_0    ; 06 OP_LOADI_0
+  dw do_op_loadi_1    ; 07 OP_LOADI_1
+  dw do_op_loadi_2    ; 08 OP_LOADI_2
+  dw do_op_loadi_3    ; 09 OP_LOADI_3
+  dw do_op_loadi_4    ; 0A OP_LOADI_4
+  dw do_op_loadi_5    ; 0B OP_LOADI_5
+  dw do_op_loadi_6    ; 0C OP_LOADI_6
+  dw do_op_loadi_7    ; 0D OP_LOADI_7
+  dw do_op_loadi16    ; 0E OP_LOADI16
+  dw 0000h            ; 0F OP_LOADI32
+  dw 0000h            ; 10 OP_LOADSYM
+  dw do_op_loadnil    ; 11 OP_LOADNIL
+  dw 0000h            ; 12 OP_LOADSELF
+  dw do_op_loadt      ; 13 OP_LOADT
+  dw do_op_loadf      ; 14 OP_LOADF
+  dw 0000h            ; 15 OP_GETGV
+  dw 0000h            ; 16 OP_SETGV
+  dw 0000h            ; 17 OP_GETSV
+  dw 0000h            ; 18 OP_SETSV
+  dw 0000h            ; 19 OP_GETIV
+  dw 0000h            ; 1A OP_SETIV
+  dw 0000h            ; 1B OP_GETCV
+  dw 0000h            ; 1C OP_SETCV
+  dw 0000h            ; 1D OP_GETCONST
+  dw 0000h            ; 1E OP_SETCONST
+  dw 0000h            ; 1F OP_GETMCNST
+  dw 0000h            ; 20 OP_SETMCNST
+  dw 0000h            ; 21 OP_GETUPVAR
+  dw 0000h            ; 22 OP_SETUPVAR
+  dw 0000h            ; 23 OP_GETIDX
+  dw 0000h            ; 24 OP_SETIDX
+  dw do_op_jmp        ; 25 OP_JMP
+  dw do_op_jmpif      ; 26 OP_JMPIF
+  dw do_op_jmpnot     ; 27 OP_JMPNOT
+  dw 0000h            ; 28 OP_JMPNIL
+  dw 0000h            ; 29 OP_JMPUW
+  dw 0000h            ; 2A OP_EXCEPT
+  dw 0000h            ; 2B OP_RESCUE
+  dw 0000h            ; 2C OP_RAISEIF
+  dw 0000h            ; 2D OP_SSEND
+  dw 0000h            ; 2E OP_SSENDB
+  dw 0000h            ; 2F OP_SEND
+  dw 0000h            ; 30 OP_SENDB
+  dw 0000h            ; 31 OP_CALL
+  dw 0000h            ; 32 OP_SUPER
+  dw 0000h            ; 33 OP_ARGARY
+  dw 0000h            ; 34 OP_ENTER
+  dw 0000h            ; 35 OP_KEY_P
+  dw 0000h            ; 36 OP_KEYEND
+  dw 0000h            ; 37 OP_KARG
+  dw do_op_return     ; 38 OP_RETURN
+  dw 0000h            ; 39 OP_RETURN_BLK
+  dw 0000h            ; 3A OP_BREAK
+  dw 0000h            ; 3B OP_BLKPUSH
+  dw do_op_add        ; 3C OP_ADD
+  dw do_op_addi       ; 3D OP_ADDI
+  dw do_op_sub        ; 3E OP_SUB
+  dw do_op_subi       ; 3F OP_SUBI
+  dw 0000h            ; 40 OP_MUL
+  dw 0000h            ; 41 OP_DIV
+  dw do_op_eq         ; 42 OP_EQ
+  dw do_op_lt         ; 43 OP_LT
+  dw do_op_le         ; 44 OP_LE
+  dw do_op_gt         ; 45 OP_GT
+  dw do_op_ge         ; 46 OP_GE
+  dw 0000h            ; 47 OP_ARRAY
+  dw 0000h            ; 48 OP_ARRAY2
+  dw 0000h            ; 49 OP_ARYCAT
+  dw 0000h            ; 4A OP_ARYPUSH
+  dw 0000h            ; 4B OP_ARYSPLAT
+  dw 0000h            ; 4C OP_AREF
+  dw 0000h            ; 4D OP_ASET
+  dw 0000h            ; 4E OP_APOST
+  dw 0000h            ; 4F OP_INTERN
+  dw 0000h            ; 50 OP_SYMBOL
+  dw 0000h            ; 51 OP_STRING
+  dw 0000h            ; 52 OP_STRCAT
+  dw 0000h            ; 53 OP_HASH
+  dw 0000h            ; 54 OP_HASHADD
+  dw 0000h            ; 55 OP_HASHCAT
+  dw 0000h            ; 56 OP_LAMBDA
+  dw 0000h            ; 57 OP_BLOCK
+  dw 0000h            ; 58 OP_METHOD
+  dw 0000h            ; 59 OP_RANGE_INC
+  dw 0000h            ; 5A OP_RANGE_EXC
+  dw 0000h            ; 5B OP_OCLASS
+  dw 0000h            ; 5C OP_CLASS
+  dw 0000h            ; 5D OP_MODULE
+  dw 0000h            ; 5E OP_EXEC
+  dw 0000h            ; 5F OP_DEF
+  dw 0000h            ; 60 OP_ALIAS
+  dw 0000h            ; 61 OP_UNDEF
+  dw 0000h            ; 62 OP_SCLASS
+  dw 0000h            ; 63 OP_TCLASS
+  dw 0000h            ; 64 OP_DEBUG
+  dw 0000h            ; 65 OP_ERR
+  dw 0000h            ; 66 OP_EXT1
+  dw 0000h            ; 67 OP_EXT2
+  dw 0000h            ; 68 OP_EXT3
+  dw do_op_stop       ; 69 OP_STOP
+dispatch_table_end:
+
+  end

@@ -1,0 +1,107 @@
+; vm_constants.a80 — 自動生成 (i8080_constants_gen.rb)
+; このファイルは手で書き換えないでください
+
+; --- メモリマップ ---
+
+VM_CODE_ORG              EQU  8400h
+BYTECODE_BASE            EQU  9000h
+BYTECODE_SIZE            EQU  1000h
+POOL_BASE                EQU  0A000h
+IREP_TABLE_BASE          EQU  8200h
+VM_STATE_BASE            EQU  8000h
+REG_FILE_BASE            EQU  8100h
+REG_FILE_BASE_HI         EQU  81h  ; REG_FILE_BASE の上位バイト
+MAX_REGS                 EQU  20h
+STACK_TOP                EQU  0FDFFh
+DISPLAY_BASE             EQU  0FE00h
+DISPLAY_SIZE             EQU  08h
+
+; --- バリュースロット ---
+
+SLOT_BYTES               EQU  08h  ; 1 スロットのバイト数
+SLOT_TYPE_OFFSET         EQU  00h  ; 型タグのバイトオフセット
+SLOT_VALUE_OFFSET        EQU  02h  ; 値のバイトオフセット
+
+; --- VM 状態領域のオフセット ---
+
+OFF_PC                   EQU  00h  ; 2B
+OFF_STATUS               EQU  02h  ; 2B
+OFF_ERROR                EQU  04h  ; 2B
+OFF_STEP_COUNT           EQU  06h  ; 4B
+OFF_CURRENT_OPCODE       EQU  0Ah  ; 1B
+OFF_OPERAND_A            EQU  0Bh  ; 1B
+OFF_OPERAND_B            EQU  0Ch  ; 1B
+OFF_OPERAND_C            EQU  0Dh  ; 1B
+OFF_BYTECODE_LEN         EQU  0Eh  ; 2B
+OFF_NREGS                EQU  10h  ; 1B
+OFF_CUR_IREP             EQU  11h  ; 1B
+OFF_NUM_IREPS            EQU  12h  ; 1B
+
+; --- IREP テーブルエントリ ---
+
+IREP_ENTRY_BYTES         EQU  08h
+IREP_OFF_BYTECODE        EQU  00h  ; 2B
+IREP_OFF_BYTECODE_LEN    EQU  02h  ; 2B
+IREP_OFF_POOL            EQU  04h  ; 2B
+IREP_OFF_NREGS           EQU  06h  ; 1B
+
+; --- 型タグ ---
+; TT_FALSY_MAX 以下が偽 (nil, false)
+
+TT_EMPTY                 EQU  00h
+TT_NIL                   EQU  01h
+TT_FALSE                 EQU  02h
+TT_TRUE                  EQU  03h
+TT_INTEGER               EQU  04h
+TT_FALSY_MAX             EQU  02h
+
+; --- VM 実行状態 ---
+
+VM_STOPPED               EQU  00h
+VM_RUNNING               EQU  01h
+VM_FINISHED              EQU  02h
+VM_ERROR                 EQU  03h
+
+; --- Phase 1 オペコード ---
+
+OP_NOP                   EQU  00h
+OP_MOVE                  EQU  01h
+OP_LOADI                 EQU  03h
+OP_LOADINEG              EQU  04h
+OP_LOADI__1              EQU  05h
+OP_LOADI_0               EQU  06h
+OP_LOADI_1               EQU  07h
+OP_LOADI_2               EQU  08h
+OP_LOADI_3               EQU  09h
+OP_LOADI_4               EQU  0Ah
+OP_LOADI_5               EQU  0Bh
+OP_LOADI_6               EQU  0Ch
+OP_LOADI_7               EQU  0Dh
+OP_LOADI16               EQU  0Eh
+OP_LOADNIL               EQU  11h
+OP_LOADT                 EQU  13h
+OP_LOADF                 EQU  14h
+OP_ADD                   EQU  3Ch
+OP_SUB                   EQU  3Eh
+OP_EQ                    EQU  42h
+OP_LT                    EQU  43h
+OP_LE                    EQU  44h
+OP_GT                    EQU  45h
+OP_GE                    EQU  46h
+OP_JMP                   EQU  25h
+OP_JMPIF                 EQU  26h
+OP_JMPNOT                EQU  27h
+OP_STOP                  EQU  69h
+
+; --- 命令形式ごとのオペランドバイト数 ---
+; 命令長 = 1 (オペコード) + オペランドバイト数
+
+FMT_Z                    EQU  00h  ; Z 形式のオペランドバイト数
+FMT_B                    EQU  01h  ; B 形式のオペランドバイト数
+FMT_BB                   EQU  02h  ; BB 形式のオペランドバイト数
+FMT_BBB                  EQU  03h  ; BBB 形式のオペランドバイト数
+FMT_S                    EQU  02h  ; S 形式のオペランドバイト数
+FMT_BS                   EQU  03h  ; BS 形式のオペランドバイト数
+FMT_BSS                  EQU  05h  ; BSS 形式のオペランドバイト数
+FMT_W                    EQU  03h  ; W 形式のオペランドバイト数
+
