@@ -14,13 +14,15 @@
 #   0x8000 - 0x80FF : VM 状態           (256B)
 #   0x8100 - 0x81FF : レジスタファイル   (32 × 8B = 256B)
 #   0x8200 - 0x82FF : IREP テーブル      (256B)
-#   0x8300 - 0x83C6 : (free)            (199B)
+#   0x8300 - 0x83C6 : シンボルテーブル    (198B, GETGV/SETGV 用)
 #   0x83C7 - 0x83F7 : === 除外 (割り込みベクタ) ===
 #   0x83F8 - 0x83FF : (free)            (8B)
 #   0x8400 - 0x8FFF : VM コード          (3KB, org 8400h)
 #   0x9000 - 0x9FFF : mruby バイトコード (4KB)
 #   0xA000 - 0xA7FF : 定数プール         (2KB)
-#   0xA800 - 0xEFFF : (free)            (18KB)
+#   0xA800 - 0xAFFF : (free)            (2KB)
+#   0xB000 - 0xB0FF : グローバル変数      (256B, 64 スロット)
+#   0xB100 - 0xEFFF : (free)            (16KB)
 #   0xF000 - 0xFDFF : CPU スタック (SP)  (3.5KB)
 #   0xFFB8 - 0xFFF7 : ND80Z モニタワーク (RST ベクタ, レジスタ退避等)
 #   0xFFF8 - 0xFFFF : 7 セグ表示 (DIG)  (8B)
@@ -71,6 +73,19 @@ module FaRuby
 
     POOL_BASE         = 0xA000
     POOL_SIZE         = 0x0800   # 2KB
+
+    # シンボルテーブル (OP_GETGV / OP_SETGV 用)
+    # 各エントリ 2 バイト: グローバルスロットのアドレス (LE)
+    # 0x0000 = 未対応のシンボル (メソッド名等)
+    SYM_TABLE_BASE    = 0x8300
+    SYM_TABLE_SIZE    = 0x00C6   # 198B (0x83C7 手前まで)
+    MAX_SYMBOLS       = 99       # 198 / 2
+
+    # グローバル変数スロット ($foo, $bar 等)
+    # レジスタと同じ 4 バイト形式 (型タグ + 予約 + val_lo + val_hi)
+    GLOBALS_BASE      = 0xB000
+    GLOBALS_SIZE      = 0x0100   # 256B
+    MAX_GLOBALS       = 64       # 256 / 4
 
     # CPU スタック (SP は下方向に伸びる。SP 初期値は STACK_TOP)
     STACK_BASE        = 0xF000

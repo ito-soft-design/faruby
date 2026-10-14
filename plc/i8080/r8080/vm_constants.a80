@@ -62,6 +62,11 @@ VM_RUNNING               EQU  01h
 VM_FINISHED              EQU  02h
 VM_ERROR                 EQU  03h
 
+; --- シンボルテーブル / グローバル変数 ---
+
+SYM_TABLE_BASE           EQU  8300h
+GLOBALS_BASE             EQU  0B000h
+
 ; --- Phase 1 オペコード ---
 
 OP_NOP                   EQU  00h

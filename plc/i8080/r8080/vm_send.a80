@@ -1,0 +1,246 @@
+; vm_send.a80 — メソッド呼び出し (組み込みメソッド限定)
+;
+; OP_SEND, OP_SSEND
+;
+; 組み込みメソッドのみサポート。ユーザ定義メソッドは未対応。
+; シンボルテーブルの値が 0x0001-0x00FF の場合メソッド ID として扱う:
+;   1 = !=  (不等号)
+;   2 = !   (論理否定)
+;   3 = %   (剰余, Ruby floor modulo)
+;   4 = abs (絶対値)
+
+; ---------------------------------------------------------------
+; OP_SSEND (BBB): self をレシーバに置いて SEND
+;
+; R[a] = R[0] (self) を設定してから OP_SEND と同じ処理を行う。
+; ---------------------------------------------------------------
+do_op_ssend:
+  call fetch_byte       ; A = a
+  push psw
+  call get_reg_addr     ; HL = R[a] (コピー先)
+  xchg                  ; DE = R[a]
+  xra a                 ; A = 0
+  call get_reg_addr     ; HL = R[0] (self)
+  call copy_slot        ; R[a] = R[0]
+  pop psw               ; A = a
+  sta send_reg_a
+  call fetch_byte       ; A = b (シンボル)
+  push psw
+  call fetch_byte       ; A = c (argc)
+  sta send_argc
+  pop psw               ; A = b
+  jmp send_dispatch
+
+; ---------------------------------------------------------------
+; OP_SEND (BBB): R[a] = R[a].method(R[a+1], ...)
+; ---------------------------------------------------------------
+do_op_send:
+  call fetch_byte       ; A = a
+  sta send_reg_a
+  call fetch_byte       ; A = b (シンボル)
+  push psw
+  call fetch_byte       ; A = c (argc)
+  sta send_argc
+  pop psw               ; A = b
+
+send_dispatch:
+  ; シンボルテーブルからメソッド ID を取得
+  add a                 ; b * 2
+  mov e, a
+  mvi d, 0
+  lxi h, SYM_TABLE_BASE
+  dad d
+  mov e, m
+  inx h
+  mov d, m              ; DE = エントリ値
+  ; D != 0 ならグローバルアドレス → メソッドではない
+  mov a, d
+  ora a
+  jnz vm_error
+  ; E = メソッド ID (0 = 未対応)
+  mov a, e
+  ora a
+  jz vm_error
+  ; メソッドディスパッチ
+  cpi 1
+  jz send_ne            ; != (不等号)
+  cpi 2
+  jz send_not           ; !  (論理否定)
+  cpi 3
+  jz send_mod           ; %  (剰余)
+  cpi 4
+  jz send_abs           ; abs (絶対値)
+  jmp vm_error          ; 未対応メソッド
+
+; ---------------------------------------------------------------
+; != (不等号): R[a] = (R[a] != R[a+1]) ? true : false
+;
+; スロット全体 (4 バイト) をバイト比較する。
+; 型タグも含めて比較するので異なる型は常に true。
+; ---------------------------------------------------------------
+send_ne:
+  lda send_reg_a
+  push psw
+  call get_reg_addr_next ; HL = R[a+1]
+  xchg                  ; DE = R[a+1]
+  pop psw
+  call get_reg_addr     ; HL = R[a]
+  mvi c, SLOT_BYTES
+send_ne_cmp:
+  ldax d
+  cmp m
+  jnz send_ne_diff
+  inx h
+  inx d
+  dcr c
+  jnz send_ne_cmp
+  ; 全バイト一致 → 等しい → false
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop
+send_ne_diff:
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; ! (論理否定): R[a] = falsy(R[a]) ? true : false
+;
+; TT_FALSY_MAX (02h) 以下が偽 (TT_EMPTY, TT_NIL, TT_FALSE)。
+; ---------------------------------------------------------------
+send_not:
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_FALSY_MAX + 1  ; A < 3 なら偽
+  jc send_not_falsy
+  ; 真だった → false
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop
+send_not_falsy:
+  ; 偽だった → true
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; % (剰余, Ruby floor modulo): R[a] = R[a] % R[a+1]
+; ---------------------------------------------------------------
+send_mod:
+  lda send_reg_a
+  push psw
+  call get_reg_addr_next
+  call slot_to_value
+  mov e, m
+  inx h
+  mov d, m              ; DE = 除数
+  mov a, d
+  ora e
+  jnz send_mod_ok
+  pop psw
+  jmp vm_error          ; ゼロ除算
+send_mod_ok:
+  pop psw
+  call get_reg_addr
+  call slot_to_value
+  push h                ; 書き戻し先
+  mov c, m
+  inx h
+  mov b, m              ; BC = 被除数
+  call smod16           ; BC = 剰余 (除数と同符号)
+  pop h
+  mov m, c
+  inx h
+  mov m, b
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; abs (絶対値): R[a] = |R[a]|
+; ---------------------------------------------------------------
+send_abs:
+  lda send_reg_a
+  call get_reg_addr
+  call slot_to_value    ; HL = 値の先頭
+  inx h                 ; HL → val_hi
+  mov a, m
+  ani 80h
+  jz vm_loop            ; 正ならそのまま
+  dcx h                 ; HL → val_lo
+  mov c, m
+  inx h
+  mov b, m              ; BC = 値
+  call neg_bc
+  mov m, b              ; val_hi
+  dcx h
+  mov m, c              ; val_lo
+  jmp vm_loop
+
+; --- 一時変数 ---
+send_reg_a:
+  db 0
+send_argc:
+  db 0
+
+; ---------------------------------------------------------------
+; smod16 — 16 ビット符号付き剰余 (Ruby floor modulo)
+;
+;   入力: BC = 被除数, DE = 除数 (≠ 0)
+;   出力: BC = 剰余 (除数と同符号)
+;   破壊: A, DE, HL
+;
+; |被除数| mod |除数| を求めたあと、符号と floor 調整を行う。
+; ---------------------------------------------------------------
+smod16:
+  ; 除数の符号を保存
+  mov a, d
+  push psw
+  ; 符号の差を保存 (bit7: 異符号なら 1)
+  mov a, b
+  xra d
+  push psw
+  ; 被除数を正にする
+  mov a, b
+  ani 80h
+  jz smod_chk_div
+  call neg_bc
+smod_chk_div:
+  mov a, d
+  ani 80h
+  jz smod_do
+  call neg_de
+smod_do:
+  push d               ; |除数| を退避
+  call udiv16          ; BC = 商, HL = 剰余
+  mov b, h
+  mov c, l             ; BC = |剰余|
+  mov a, b
+  ora c
+  pop d                ; DE = |除数|
+  pop psw              ; 符号差 (bit7)
+  jz smod_zero         ; 剰余 = 0
+  ani 80h
+  jz smod_sign         ; 同符号 → 大きさはそのまま
+  ; 異符号: 大きさ = |除数| - |剰余|
+  mov a, e
+  sub c
+  mov c, a
+  mov a, d
+  sbb b
+  mov b, a
+smod_sign:
+  pop psw              ; 除数の符号 (bit7)
+  ani 80h
+  rz                   ; 除数が正 → 正の剰余
+  jmp neg_bc           ; 除数が負 → 負にする
+smod_zero:
+  pop psw              ; 除数の符号を捨てる
+  ret

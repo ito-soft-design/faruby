@@ -1,6 +1,6 @@
 ; vm_arith.a80 — 算術命令 (16 ビット整数)
 ;
-; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI
+; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI, OP_MUL, OP_DIV
 
 ; ---------------------------------------------------------------
 ; OP_ADD (B): R[a] = R[a] + R[a+1]
@@ -78,3 +78,209 @@ do_op_subi:
   sbi 0                 ; val_hi - CY
   mov m, a
   jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_MUL (B): R[a] = R[a] * R[a+1]
+;
+; 16 ビット整数の乗算。下位 16 ビットのみ保持。
+; 符号付き・符号なしとも下位 16 ビットは同一なので符号処理は不要。
+; ---------------------------------------------------------------
+do_op_mul:
+  call fetch_byte       ; A = a
+  push psw
+  call get_reg_addr_next ; HL = R[a+1]
+  call slot_to_value    ; HL = R[a+1] の値先頭
+  mov e, m              ; E = val2_lo
+  inx h
+  mov d, m              ; D = val2_hi → DE = 乗数
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  call slot_to_value    ; HL = R[a] の値先頭
+  push h                ; 書き戻し先を退避
+  mov c, m
+  inx h
+  mov b, m              ; BC = 被乗数
+  call umul16           ; HL = BC × DE (下位 16 ビット)
+  pop d                 ; DE = 書き戻し先
+  mov a, l
+  stax d
+  inx d
+  mov a, h
+  stax d
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_DIV (B): R[a] = R[a] / R[a+1]
+;
+; 16 ビット符号付き整数の除算 (Ruby 互換の floor 除算)。
+; 除数 0 はエラー停止。
+; ---------------------------------------------------------------
+do_op_div:
+  call fetch_byte       ; A = a
+  push psw
+  call get_reg_addr_next ; HL = R[a+1]
+  call slot_to_value
+  mov e, m
+  inx h
+  mov d, m              ; DE = 除数
+  ; ゼロ除算チェック
+  mov a, d
+  ora e
+  jnz do_div_nonzero
+  pop psw
+  jmp vm_error
+do_div_nonzero:
+  pop psw               ; A = a
+  call get_reg_addr
+  call slot_to_value
+  push h                ; 書き戻し先を退避
+  mov c, m
+  inx h
+  mov b, m              ; BC = 被除数
+  call sdiv16           ; BC = 商
+  pop h                 ; HL = 書き戻し先
+  mov m, c
+  inx h
+  mov m, b
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; umul16 — 16 ビット符号なし乗算 (shift-and-add)
+;
+;   入力: BC = 被乗数, DE = 乗数
+;   出力: HL = 積の下位 16 ビット
+;   破壊: A, DE
+; ---------------------------------------------------------------
+umul16:
+  lxi h, 0             ; 積 = 0
+  mvi a, 16            ; ビットカウンタ
+umul16_loop:
+  dad h                ; 積 <<= 1
+  xchg                 ; HL ↔ DE
+  dad h                ; 乗数 <<= 1, bit15 → CY
+  xchg                 ; HL ↔ DE
+  jnc umul16_noadd
+  dad b                ; 積 += 被乗数
+umul16_noadd:
+  dcr a
+  jnz umul16_loop
+  ret
+
+; ---------------------------------------------------------------
+; sdiv16 — 16 ビット符号付き除算 (floor 除算, Ruby 互換)
+;
+;   入力: BC = 被除数, DE = 除数 (≠ 0)
+;   出力: BC = 商
+;   破壊: A, DE, HL
+;
+; 符号を記録 → 絶対値 → 符号なし除算 → 符号復元。
+; 異符号で剰余 ≠ 0 なら商を 1 減らす (floor)。
+; ---------------------------------------------------------------
+sdiv16:
+  mov a, b
+  xra d               ; bit7 = 商の符号 (異符号なら負)
+  push psw            ; 符号情報を退避
+  ; 被除数を正にする
+  mov a, b
+  ani 80h
+  jz sdiv16_chk_div
+  call neg_bc
+sdiv16_chk_div:
+  ; 除数を正にする
+  mov a, d
+  ani 80h
+  jz sdiv16_do
+  call neg_de
+sdiv16_do:
+  call udiv16          ; BC = |商|, HL = |剰余|
+  pop psw
+  ani 80h
+  rz                   ; 同符号 → 正の商をそのまま返す
+  ; 異符号: 剰余があれば floor 調整
+  mov a, h
+  ora l
+  jz sdiv16_neg        ; 剰余 = 0 → 単純に符号反転
+  inx b                ; 剰余 ≠ 0 → 商 +1 してから反転 (floor)
+sdiv16_neg:
+  jmp neg_bc
+
+; ---------------------------------------------------------------
+; udiv16 — 16 ビット符号なし除算 (2 進長除算)
+;
+;   入力: BC = 被除数, DE = 除数 (≠ 0)
+;   出力: BC = 商, HL = 剰余
+;   破壊: A
+;
+; 被除数の MSB から 1 ビットずつ剰余にシフトし、
+; 剰余 ≧ 除数なら減算して商ビットを立てる。
+; ---------------------------------------------------------------
+udiv16:
+  lxi h, 0            ; 剰余 = 0
+  mvi a, 16
+  sta udiv_cnt
+udiv16_loop:
+  ; BC を 1 ビット左シフト (MSB → CY)
+  mov a, c
+  add a                ; C <<= 1, bit7 → CY
+  mov c, a
+  mov a, b
+  adc a                ; B <<= 1 + CY from C
+  mov b, a             ; CY = 元の BC bit15 (被除数ビット)
+  ; CY を剰余 (HL) にシフトイン
+  mov a, l
+  ral
+  mov l, a
+  mov a, h
+  ral
+  mov h, a
+  ; CY=1 なら剰余がオーバーフロー → 確実に除数以上
+  jc udiv16_sub
+  ; 剰余 (HL) と 除数 (DE) を比較
+  mov a, h
+  cmp d
+  jc udiv16_nosub      ; H < D → HL < DE
+  jnz udiv16_sub       ; H > D → HL > DE
+  mov a, l
+  cmp e
+  jc udiv16_nosub      ; L < E → HL < DE
+udiv16_sub:
+  ; 剰余 ≧ 除数: 減算して商ビット = 1
+  mov a, l
+  sub e
+  mov l, a
+  mov a, h
+  sbb d
+  mov h, a
+  inr c                ; 商の bit0 を立てる
+udiv16_nosub:
+  lda udiv_cnt         ; LDA は CY に影響しない
+  dcr a                ; DCR は CY に影響しない
+  sta udiv_cnt
+  jnz udiv16_loop
+  ret
+
+udiv_cnt:
+  db 0
+
+; ---------------------------------------------------------------
+; neg_bc / neg_de — 16 ビット 2 の補数 (符号反転)
+; ---------------------------------------------------------------
+neg_bc:
+  mov a, c
+  cma
+  mov c, a
+  mov a, b
+  cma
+  mov b, a
+  inx b
+  ret
+
+neg_de:
+  mov a, e
+  cma
+  mov e, a
+  mov a, d
+  cma
+  mov d, a
+  inx d
+  ret

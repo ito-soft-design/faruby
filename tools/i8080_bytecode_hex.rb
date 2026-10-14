@@ -33,6 +33,7 @@ module FaRuby
       place_bytecode(mem)
       place_pool(mem)
       place_irep_table(mem)
+      place_symbol_table(mem)
       mem
     end
 
@@ -145,6 +146,57 @@ module FaRuby
 
       # 予備 (1B)
       mem[addr + Layout::IREP_OFF_NREGS + 1] = 0
+    end
+
+    # 組み込みメソッド名 → メソッド ID のマッピング
+    # vm_send.a80 の send_dispatch と一致させること
+    METHOD_IDS = {
+      "!=" => 1,
+      "!"  => 2,
+      "%"  => 3,
+      "abs" => 4,
+    }.freeze
+
+    # --- シンボルテーブルの配置 ---
+    #
+    # irep のシンボルテーブルを走査し、各シンボルに対応する値を書く:
+    #   - $ で始まるシンボル → グローバルスロットのアドレス (>= 0xB000)
+    #   - METHOD_IDS に含まれるシンボル → メソッド ID (0x0001-0x00FF)
+    #   - それ以外 → 0x0000 (未対応マーカー)
+    def place_symbol_table(mem)
+      return if irep.symbols.empty?
+
+      raise "シンボルが多すぎます (#{irep.symbols.size} > #{Layout::MAX_SYMBOLS})" if irep.symbols.size > Layout::MAX_SYMBOLS
+
+      globals_count = 0
+
+      irep.symbols.each_with_index do |sym, idx|
+        tbl_addr = Layout::SYM_TABLE_BASE + idx * 2
+
+        if sym && sym.start_with?("$")
+          # グローバル変数 — スロットを割り当てる
+          raise "グローバル変数が多すぎます (> #{Layout::MAX_GLOBALS})" if globals_count >= Layout::MAX_GLOBALS
+
+          slot_addr = Layout::GLOBALS_BASE + globals_count * Layout::SLOT_BYTES
+          globals_count += 1
+
+          # シンボルテーブルにスロットアドレスを書く
+          mem[tbl_addr]     = slot_addr & 0xFF
+          mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+
+          # グローバルスロットを nil で初期化
+          place_slot_nil(mem, slot_addr)
+        elsif sym && METHOD_IDS.key?(sym)
+          # 組み込みメソッド — メソッド ID を書く
+          mid = METHOD_IDS[sym]
+          mem[tbl_addr]     = mid & 0xFF
+          mem[tbl_addr + 1] = 0   # 上位バイト = 0 → メソッド ID
+        else
+          # 未対応 — アドレス 0
+          mem[tbl_addr]     = 0
+          mem[tbl_addr + 1] = 0
+        end
+      end
     end
 
     # --- Intel HEX レコード生成 ---

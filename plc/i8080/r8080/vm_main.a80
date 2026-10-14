@@ -23,6 +23,8 @@
 .include "vm_arith.a80"
 .include "vm_compare.a80"
 .include "vm_jump.a80"
+.include "vm_globals.a80"
+.include "vm_send.a80"
 .include "vm_display.a80"
 
 ; ===============================================================
@@ -226,8 +228,8 @@ dispatch_table:
   dw 0000h            ; 12 OP_LOADSELF
   dw do_op_loadt      ; 13 OP_LOADT
   dw do_op_loadf      ; 14 OP_LOADF
-  dw 0000h            ; 15 OP_GETGV
-  dw 0000h            ; 16 OP_SETGV
+  dw do_op_getgv      ; 15 OP_GETGV
+  dw do_op_setgv      ; 16 OP_SETGV
   dw 0000h            ; 17 OP_GETSV
   dw 0000h            ; 18 OP_SETSV
   dw 0000h            ; 19 OP_GETIV
@@ -250,9 +252,9 @@ dispatch_table:
   dw 0000h            ; 2A OP_EXCEPT
   dw 0000h            ; 2B OP_RESCUE
   dw 0000h            ; 2C OP_RAISEIF
-  dw 0000h            ; 2D OP_SSEND
+  dw do_op_ssend      ; 2D OP_SSEND
   dw 0000h            ; 2E OP_SSENDB
-  dw 0000h            ; 2F OP_SEND
+  dw do_op_send       ; 2F OP_SEND
   dw 0000h            ; 30 OP_SENDB
   dw 0000h            ; 31 OP_CALL
   dw 0000h            ; 32 OP_SUPER
@@ -269,8 +271,8 @@ dispatch_table:
   dw do_op_addi       ; 3D OP_ADDI
   dw do_op_sub        ; 3E OP_SUB
   dw do_op_subi       ; 3F OP_SUBI
-  dw 0000h            ; 40 OP_MUL
-  dw 0000h            ; 41 OP_DIV
+  dw do_op_mul        ; 40 OP_MUL
+  dw do_op_div        ; 41 OP_DIV
   dw do_op_eq         ; 42 OP_EQ
   dw do_op_lt         ; 43 OP_LT
   dw do_op_le         ; 44 OP_LE

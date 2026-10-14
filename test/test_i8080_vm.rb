@@ -74,6 +74,174 @@ class TestI8080Vm < Minitest::Test
     assert_equal 13, board[:board].reg_value(2)
   end
 
+  # === 乗算・除算 ===
+
+  def test_mul_basic
+    board = run_ruby("a = 3\nb = 4\nc = a * b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 12, board[:board].reg_value(3)
+  end
+
+  def test_mul_by_zero
+    board = run_ruby("a = 5\nb = 0\nc = a * b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(3)
+  end
+
+  def test_mul_negative
+    board = run_ruby("a = -3\nb = 4\nc = a * b\n")
+    assert_equal :finished, board[:result]
+    assert_equal(-12, board[:board].reg_value(3))
+  end
+
+  def test_mul_large
+    board = run_ruby("a = 100\nb = 200\nc = a * b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 20_000, board[:board].reg_value(3)
+  end
+
+  def test_div_basic
+    board = run_ruby("a = 10\nb = 3\nc = a / b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  def test_div_exact
+    board = run_ruby("a = 12\nb = 4\nc = a / b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  def test_div_negative_floor
+    # Ruby の整数除算は floor (負の無限大方向): -7 / 2 = -4
+    board = run_ruby("a = -7\nb = 2\nc = a / b\n")
+    assert_equal :finished, board[:result]
+    assert_equal(-4, board[:board].reg_value(3))
+  end
+
+  def test_div_by_one
+    board = run_ruby("a = 42\nb = 1\nc = a / b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 42, board[:board].reg_value(3)
+  end
+
+  # === グローバル変数 ===
+
+  def test_global_var_set_get
+    board = run_ruby("$foo = 42\na = $foo + 8\n")
+    assert_equal :finished, board[:result]
+    assert_equal 50, board[:board].reg_value(1)
+  end
+
+  def test_global_var_multiple
+    board = run_ruby("$x = 10\n$y = 20\na = $x + $y\n")
+    assert_equal :finished, board[:result]
+    assert_equal 30, board[:board].reg_value(1)
+  end
+
+  def test_global_var_overwrite
+    board = run_ruby("$g = 5\n$g = $g + 3\na = $g\n")
+    assert_equal :finished, board[:result]
+    assert_equal 8, board[:board].reg_value(1)
+  end
+
+  # === メソッド呼び出し (SEND/SSEND) ===
+
+  def test_send_ne_true
+    board = run_ruby(<<~RUBY)
+      a = 5
+      b = 6
+      if a != b
+        c = 1
+      else
+        c = 2
+      end
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 1, board[:board].reg_value(3)
+  end
+
+  def test_send_ne_false
+    board = run_ruby(<<~RUBY)
+      a = 5
+      b = 5
+      if a != b
+        c = 1
+      else
+        c = 2
+      end
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 2, board[:board].reg_value(3)
+  end
+
+  def test_send_not_nil
+    board = run_ruby(<<~RUBY)
+      a = nil
+      b = 0
+      if !a
+        b = 1
+      else
+        b = 2
+      end
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 1, board[:board].reg_value(2)
+  end
+
+  def test_send_not_true
+    board = run_ruby(<<~RUBY)
+      a = true
+      b = 0
+      if !a
+        b = 1
+      else
+        b = 2
+      end
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 2, board[:board].reg_value(2)
+  end
+
+  def test_send_mod_basic
+    board = run_ruby(<<~RUBY)
+      a = 7
+      b = 3
+      c = a % b
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 1, board[:board].reg_value(3)
+  end
+
+  def test_send_mod_floor
+    # Ruby の剰余は除数と同符号 (floor modulo): -7 % 3 = 2
+    board = run_ruby(<<~RUBY)
+      a = -7
+      b = 3
+      c = a % b
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 2, board[:board].reg_value(3)
+  end
+
+  def test_send_abs_negative
+    board = run_ruby(<<~RUBY)
+      a = -5
+      b = a.abs
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(2)
+  end
+
+  def test_send_abs_positive
+    board = run_ruby(<<~RUBY)
+      a = 5
+      b = a.abs
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(2)
+  end
+
   def test_loadi_0_through_7
     # OP_LOADI_0 〜 OP_LOADI_7 がそれぞれ正しい値を返す
     (0..7).each do |n|

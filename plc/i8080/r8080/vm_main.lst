@@ -55,6 +55,9 @@
 0000                VM_RUNNING:   EQU   01h   
 0000                VM_FINISHED:   EQU   02h   
 0000                VM_ERROR:   EQU   03h   
+0000                             ; --- シンボルテーブル / グローバル変数 ---
+0000                SYM_TABLE_BASE:   EQU   8300h   
+0000                GLOBALS_BASE:   EQU   0B000h   
 0000                             ; --- Phase 1 オペコード ---
 0000                OP_NOP:   EQU   00h   
 0000                OP_MOVE:   EQU   01h   
@@ -98,7 +101,7 @@
 8400                             ; ===============================================================
 8400                             ; リセットベクタ
 8400                             ; ===============================================================
-8400   C3 2D 87               JMP   vm_start   
+8400   C3 84 89               JMP   vm_start   
 8403                             ; ===============================================================
 8403                             ; サブルーチン群 (.include で取り込む)
 8403                             ; ===============================================================
@@ -370,7 +373,7 @@
 8491                             ; OP_NOP (Z): 何もしない
 8491                             ; ---------------------------------------------------------------
 8491                DO_OP_NOP:      
-8491   C3 59 87               JMP   vm_loop   
+8491   C3 B0 89               JMP   vm_loop   
 8494                             ; ---------------------------------------------------------------
 8494                             ; OP_MOVE (BB): R[a] = R[b]
 8494                             ; ---------------------------------------------------------------
@@ -384,7 +387,7 @@
 84A0   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 84A3   EB                     XCHG      ; DE = R[a] (コピー先), HL = R[b] (コピー元)
 84A4   CD 22 84               CALL   copy_slot   
-84A7   C3 59 87               JMP   vm_loop   
+84A7   C3 B0 89               JMP   vm_loop   
 84AA                             ; ---------------------------------------------------------------
 84AA                             ; OP_LOADI (BB): R[a] = b (符号なし 8 ビット)
 84AA                             ; ---------------------------------------------------------------
@@ -398,7 +401,7 @@
 84B6   79                     MOV   a,c   ; 退避していた値を C に戻す (既に C にある)
 84B7   06 00                  MVI   b,0   ; B = val_hi (正なので 0)
 84B9   CD 0D 84               CALL   set_slot_int16   
-84BC   C3 59 87               JMP   vm_loop   
+84BC   C3 B0 89               JMP   vm_loop   
 84BF                             ; ---------------------------------------------------------------
 84BF                             ; OP_LOADINEG (BB): R[a] = -b
 84BF                             ; ---------------------------------------------------------------
@@ -415,7 +418,7 @@
 84CB   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 84CE   06 FF                  MVI   b,0FFh   ; B = val_hi (負なので FF)
 84D0   CD 0D 84               CALL   set_slot_int16   
-84D3   C3 59 87               JMP   vm_loop   
+84D3   C3 B0 89               JMP   vm_loop   
 84D6                             ; ---------------------------------------------------------------
 84D6                             ; OP_LOADI__1 (B): R[a] = -1
 84D6                             ; ---------------------------------------------------------------
@@ -425,7 +428,7 @@
 84DC   0E FF                  MVI   c,0FFh   ; val_lo = FFh
 84DE   06 FF                  MVI   b,0FFh   ; val_hi = FFh (-1 = 0xFFFF)
 84E0   CD 0D 84               CALL   set_slot_int16   
-84E3   C3 59 87               JMP   vm_loop   
+84E3   C3 B0 89               JMP   vm_loop   
 84E6                             ; ---------------------------------------------------------------
 84E6                             ; OP_LOADI_0 ～ OP_LOADI_7 (B): R[a] = 0..7
 84E6                             ; ---------------------------------------------------------------
@@ -458,7 +461,7 @@
 850E   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8511   06 00                  MVI   b,0   ; val_hi = 0 (正)
 8513   CD 0D 84               CALL   set_slot_int16   
-8516   C3 59 87               JMP   vm_loop   
+8516   C3 B0 89               JMP   vm_loop   
 8519                             ; ---------------------------------------------------------------
 8519                             ; OP_LOADI16 (BS): R[a] = signed16(b)
 8519                             ; 
@@ -482,7 +485,7 @@
 852C   71                     MOV   m,c   ; +2: val_lo
 852D   23                     INX   h   
 852E   70                     MOV   m,b   ; +3: val_hi
-852F   C3 59 87               JMP   vm_loop   
+852F   C3 B0 89               JMP   vm_loop   
 8532                             ; ---------------------------------------------------------------
 8532                             ; OP_LOADNIL (B): R[a] = nil
 8532                             ; ---------------------------------------------------------------
@@ -491,7 +494,7 @@
 8535   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8538   3E 01                  MVI   a,TT_NIL   
 853A   CD 17 84               CALL   set_slot_special   
-853D   C3 59 87               JMP   vm_loop   
+853D   C3 B0 89               JMP   vm_loop   
 8540                             ; ---------------------------------------------------------------
 8540                             ; OP_LOADT (B): R[a] = true
 8540                             ; ---------------------------------------------------------------
@@ -500,7 +503,7 @@
 8543   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8546   3E 03                  MVI   a,TT_TRUE   
 8548   CD 17 84               CALL   set_slot_special   
-854B   C3 59 87               JMP   vm_loop   
+854B   C3 B0 89               JMP   vm_loop   
 854E                             ; ---------------------------------------------------------------
 854E                             ; OP_LOADF (B): R[a] = false
 854E                             ; ---------------------------------------------------------------
@@ -509,10 +512,10 @@
 8551   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8554   3E 02                  MVI   a,TT_FALSE   
 8556   CD 17 84               CALL   set_slot_special   
-8559   C3 59 87               JMP   vm_loop   
+8559   C3 B0 89               JMP   vm_loop   
 855C                             ; vm_arith.a80 — 算術命令 (16 ビット整数)
 855C                             ; 
-855C                             ; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI
+855C                             ; OP_ADD, OP_ADDI, OP_SUB, OP_SUBI, OP_MUL, OP_DIV
 855C                             ; ---------------------------------------------------------------
 855C                             ; OP_ADD (B): R[a] = R[a] + R[a+1]
 855C                             ; 
@@ -531,7 +534,7 @@
 856B   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
 856E                             ; 16 ビット加算: val[a] += val[a+1]
 856E   CD 32 84               CALL   add_value16   
-8571   C3 59 87               JMP   vm_loop   
+8571   C3 B0 89               JMP   vm_loop   
 8574                             ; ---------------------------------------------------------------
 8574                             ; OP_SUB (B): R[a] = R[a] - R[a+1]
 8574                             ; ---------------------------------------------------------------
@@ -545,7 +548,7 @@
 8580   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 8583   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
 8586   CD 3B 84               CALL   sub_value16   
-8589   C3 59 87               JMP   vm_loop   
+8589   C3 B0 89               JMP   vm_loop   
 858C                             ; ---------------------------------------------------------------
 858C                             ; OP_ADDI (BB): R[a] = R[a] + b (b は符号なし即値 0-255)
 858C                             ; 
@@ -566,7 +569,7 @@
 859F   7E                     MOV   a,m   ; val_hi (MOV はフラグを変えない)
 85A0   CE 00                  ACI   0   ; val_hi + CY
 85A2   77                     MOV   m,a   
-85A3   C3 59 87               JMP   vm_loop   
+85A3   C3 B0 89               JMP   vm_loop   
 85A6                             ; ---------------------------------------------------------------
 85A6                             ; OP_SUBI (BB): R[a] = R[a] - b (b は符号なし即値 0-255)
 85A6                             ; ---------------------------------------------------------------
@@ -585,571 +588,1073 @@
 85B9   7E                     MOV   a,m   ; val_hi
 85BA   DE 00                  SBI   0   ; val_hi - CY
 85BC   77                     MOV   m,a   
-85BD   C3 59 87               JMP   vm_loop   
-85C0                             ; vm_compare.a80 — 比較命令
-85C0                             ; 
-85C0                             ; OP_EQ, OP_LT, OP_LE, OP_GT, OP_GE
-85C0                             ; 
-85C0                             ; 結果は R[a] に true (TT_TRUE) または false (TT_FALSE) を書く。
-85C0                             ; Phase 2 は整数のみ。
-85C0                             ; 
-85C0                             ; cmp_value16 は結果を A で返す:
-85C0                             ;   A = 00h → 等しい
-85C0                             ;   A = FFh → val1 < val2 (bit7 がセットされるので JM で拾える)
-85C0                             ;   A = 01h → val1 > val2
-85C0                             ; 
-85C0                             ; OFF_OPERAND_A にレジスタ番号を保存し、結果書き込み時に再取得する。
+85BD   C3 B0 89               JMP   vm_loop   
 85C0                             ; ---------------------------------------------------------------
-85C0                             ; cmp_reg_pair — R[a] と R[a+1] の値を比較する (共通前処理)
+85C0                             ; OP_MUL (B): R[a] = R[a] * R[a+1]
 85C0                             ; 
-85C0                             ;   出力: A = 比較結果 (00h/FFh/01h)
-85C0                             ;         OFF_OPERAND_A にレジスタ番号 a が入っている
-85C0                             ;   破壊: A, B, HL, DE
+85C0                             ; 16 ビット整数の乗算。下位 16 ビットのみ保持。
+85C0                             ; 符号付き・符号なしとも下位 16 ビットは同一なので符号処理は不要。
 85C0                             ; ---------------------------------------------------------------
-85C0                CMP_REG_PAIR:      
-85C0   CD 74 84               CALL   fetch_byte   
-85C3   32 0B 80               STA   VM_STATE_BASE + OFF_OPERAND_A   
-85C6                             ; R[a+1] の値先頭
-85C6   CD 09 84               CALL   get_reg_addr_next   
-85C9   CD 2F 84               CALL   slot_to_value   
-85CC   EB                     XCHG      ; DE = R[a+1] 値先頭
-85CD                             ; R[a] の値先頭
-85CD   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
-85D0   CD 03 84               CALL   get_reg_addr   
-85D3   CD 2F 84               CALL   slot_to_value   ; HL = R[a] 値先頭
-85D6   CD 48 84               CALL   cmp_value16   ; A = 結果
-85D9   C9                     RET      
-85DA                             ; ---------------------------------------------------------------
-85DA                             ; cmp_set_true / cmp_set_false — 結果をスロットに書いてループへ戻る
-85DA                             ; 
-85DA                             ; OFF_OPERAND_A から R[a] のアドレスを再計算する。
-85DA                             ; ---------------------------------------------------------------
-85DA                CMP_SET_TRUE:      
-85DA   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
-85DD   CD 03 84               CALL   get_reg_addr   
-85E0   3E 03                  MVI   a,TT_TRUE   
-85E2   CD 17 84               CALL   set_slot_special   
-85E5   C3 59 87               JMP   vm_loop   
-85E8                CMP_SET_FALSE:      
-85E8   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
-85EB   CD 03 84               CALL   get_reg_addr   
-85EE   3E 02                  MVI   a,TT_FALSE   
-85F0   CD 17 84               CALL   set_slot_special   
-85F3   C3 59 87               JMP   vm_loop   
-85F6                             ; ---------------------------------------------------------------
-85F6                             ; OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
-85F6                             ; 
-85F6                             ; 型タグと値の両方が一致したときだけ true。
-85F6                             ; ---------------------------------------------------------------
-85F6                DO_OP_EQ:      
-85F6   CD 74 84               CALL   fetch_byte   
-85F9   32 0B 80               STA   VM_STATE_BASE + OFF_OPERAND_A   
-85FC                             ; R[a] と R[a+1] のスロットアドレスを求める
-85FC   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-85FF   E5                     PUSH   h   ; R[a] を退避
-8600   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
-8603   CD 09 84               CALL   get_reg_addr_next   ; HL = R[a+1]
-8606   D1                     POP   d   ; DE = R[a]
-8607                             ; HL = R[a+1], DE = R[a]
-8607                             ; 型タグを比べる
-8607   46                     MOV   b,m   ; B = R[a+1].type
-8608   1A                     LDAX   d   ; A = R[a].type
-8609   B8                     CMP   b   
-860A   C2 E8 85               JNZ   cmp_set_false   ; 型が違えば false
-860D                             ; 型が同じ → 値を 2 バイト比べる
-860D   23                     INX   h   
-860E   23                     INX   h   ; HL = R[a+1] + 2 (値先頭)
-860F   13                     INX   d   
-8610   13                     INX   d   ; DE = R[a] + 2 (値先頭)
-8611   1A                     LDAX   d   ; A = R[a].val_lo
-8612   BE                     CMP   m   ; R[a].val_lo - R[a+1].val_lo
-8613   C2 E8 85               JNZ   cmp_set_false   
-8616   23                     INX   h   
-8617   13                     INX   d   
-8618   1A                     LDAX   d   ; A = R[a].val_hi
-8619   BE                     CMP   m   ; R[a].val_hi - R[a+1].val_hi
-861A   C2 E8 85               JNZ   cmp_set_false   
-861D   C3 DA 85               JMP   cmp_set_true   ; すべて一致
-8620                             ; ---------------------------------------------------------------
-8620                             ; OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
-8620                             ; ---------------------------------------------------------------
-8620                DO_OP_LT:      
-8620   CD C0 85               CALL   cmp_reg_pair   ; A = 結果
-8623   B7                     ORA   a   
-8624   FA DA 85               JM   cmp_set_true   ; A = FFh → val1 < val2
-8627   C3 E8 85               JMP   cmp_set_false   
-862A                             ; ---------------------------------------------------------------
-862A                             ; OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
-862A                             ; ---------------------------------------------------------------
-862A                DO_OP_LE:      
-862A   CD C0 85               CALL   cmp_reg_pair   
-862D   B7                     ORA   a   
-862E   FA DA 85               JM   cmp_set_true   ; val1 < val2
-8631   CA DA 85               JZ   cmp_set_true   ; val1 == val2
-8634   C3 E8 85               JMP   cmp_set_false   
-8637                             ; ---------------------------------------------------------------
-8637                             ; OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
-8637                             ; ---------------------------------------------------------------
-8637                DO_OP_GT:      
-8637   CD C0 85               CALL   cmp_reg_pair   
-863A   B7                     ORA   a   
-863B   CA E8 85               JZ   cmp_set_false   ; val1 == val2
-863E   F2 DA 85               JP   cmp_set_true   ; A = 01h → val1 > val2
-8641   C3 E8 85               JMP   cmp_set_false   ; A = FFh → val1 < val2
-8644                             ; ---------------------------------------------------------------
-8644                             ; OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
-8644                             ; ---------------------------------------------------------------
-8644                DO_OP_GE:      
-8644   CD C0 85               CALL   cmp_reg_pair   
-8647   B7                     ORA   a   
-8648   FA E8 85               JM   cmp_set_false   ; val1 < val2
-864B   C3 DA 85               JMP   cmp_set_true   ; val1 >= val2
-864E                             ; vm_jump.a80 — ジャンプ命令
-864E                             ; 
-864E                             ; OP_JMP, OP_JMPIF, OP_JMPNOT
-864E                             ; 
-864E                             ; オフセットは命令読み取り後の PC (= 次の命令の先頭) からの相対値。
-864E                             ; mruby のバイトコードは符号付き 16 ビット、ビッグエンディアン。
-864E                             ; ---------------------------------------------------------------
-864E                             ; apply_jump — PC に符号付きオフセットを加える
-864E                             ; 
-864E                             ;   入力: HL = 符号付き 16 ビットオフセット
-864E                             ;   出力: なし (PC が更新される)
-864E                             ;   破壊: A, HL, DE
-864E                             ; ---------------------------------------------------------------
-864E                APPLY_JUMP:      
-864E   EB                     XCHG      ; DE = オフセット
-864F   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   ; HL = 現在の PC
-8652   19                     DAD   d   ; HL = PC + オフセット
-8653   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
-8656   C9                     RET      
-8657                             ; ---------------------------------------------------------------
-8657                             ; OP_JMP (S): PC += signed16(a)
-8657                             ; ---------------------------------------------------------------
-8657                DO_OP_JMP:      
-8657   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
-865A   CD 4E 86               CALL   apply_jump   
-865D   C3 59 87               JMP   vm_loop   
-8660                             ; ---------------------------------------------------------------
-8660                             ; OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
-8660                             ; 
-8660                             ; Ruby で偽なのは nil と false だけ。型タグが TT_FALSY_MAX 以下なら偽。
-8660                             ; ---------------------------------------------------------------
-8660                DO_OP_JMPIF:      
-8660   CD 74 84               CALL   fetch_byte   ; A = a (レジスタ番号)
-8663   F5                     PUSH   psw   
-8664   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
-8667   E5                     PUSH   h   ; オフセットを退避
-8668   D1                     POP   d   ; DE = オフセット
-8669   F1                     POP   psw   ; A = a
-866A   CD 03 84               CALL   get_reg_addr   ; HL = R[a] スロット先頭
-866D   CD 2D 84               CALL   get_slot_type   ; A = 型タグ
-8670   FE 03                  CPI   TT_FALSY_MAX + 1   
-8672   DA 7C 86               JC   jmpif_skip   ; 型タグ <= TT_FALSY_MAX → 偽 → ジャンプしない
-8675                             ; 真 → ジャンプする
-8675   EB                     XCHG      ; HL = オフセット (DE にあった)
-8676   CD 4E 86               CALL   apply_jump   
-8679   C3 59 87               JMP   vm_loop   
-867C                JMPIF_SKIP:      
-867C   C3 59 87               JMP   vm_loop   
-867F                             ; ---------------------------------------------------------------
-867F                             ; OP_JMPNOT (BS): if R[a] が偽 then PC += signed16(b)
-867F                             ; ---------------------------------------------------------------
-867F                DO_OP_JMPNOT:      
-867F   CD 74 84               CALL   fetch_byte   ; A = a
-8682   F5                     PUSH   psw   
-8683   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
-8686   E5                     PUSH   h   
-8687   D1                     POP   d   ; DE = オフセット
-8688   F1                     POP   psw   ; A = a
-8689   CD 03 84               CALL   get_reg_addr   ; HL = R[a] スロット先頭
-868C   CD 2D 84               CALL   get_slot_type   ; A = 型タグ
-868F   FE 03                  CPI   TT_FALSY_MAX + 1   
-8691   D2 9B 86               JNC   jmpnot_skip   ; 型タグ > TT_FALSY_MAX → 真 → ジャンプしない
-8694                             ; 偽 → ジャンプする
-8694   EB                     XCHG      ; HL = オフセット
-8695   CD 4E 86               CALL   apply_jump   
-8698   C3 59 87               JMP   vm_loop   
-869B                JMPNOT_SKIP:      
-869B   C3 59 87               JMP   vm_loop   
-869E                             ; vm_display.a80 — 7 セグメント表示
-869E                             ; 
-869E                             ; 16 ビット整数値を 8 桁の 16 進数に変換し、7 セグ表示バッファに書く。
-869E                             ; 上位 4 桁はブランク（消灯）にする。
-869E                             ; セグメントパターンは seg_table にまとめる。
-869E                             ; ---------------------------------------------------------------
-869E                             ; display_hex16 — 16 ビット値を 7 セグに表示
-869E                             ; 
-869E                             ;   入力: HL = 値の先頭 (val_lo の位置)
-869E                             ;   出力: DISPLAY_BASE に 8 桁のセグメントパターン
-869E                             ;   破壊: A, B, C, HL, DE
-869E                             ; 
-869E                             ; 8 桁表示: 上位 4 桁はブランク (消灯), 下位 4 桁が値。
-869E                             ; val_hi の上位ニブルが桁 4、val_lo の下位ニブルが桁 7。
-869E                             ; ---------------------------------------------------------------
-869E                DISPLAY_HEX16:      
-869E   E5                     PUSH   h   ; 値のアドレスを退避
-869F                             ; 上位 4 桁をブランク (消灯) にする
-869F   11 F8 FF               LXI   d,DISPLAY_BASE   
-86A2   AF                     XRA   a   ; A = 0 (全セグメント消灯)
-86A3   12                     STAX   d   
-86A4   13                     INX   d   
-86A5   12                     STAX   d   
-86A6   13                     INX   d   
-86A7   12                     STAX   d   
-86A8   13                     INX   d   
-86A9   12                     STAX   d   
-86AA   13                     INX   d   ; DE = DISPLAY_BASE + 4
-86AB                             ; 値の byte1 (val_hi) から表示
-86AB   E1                     POP   h   ; HL = val_lo
-86AC   23                     INX   h   ; HL = val_hi
-86AD   0E 02                  MVI   c,2   ; 2 バイト (= 4 ニブル)
-86AF                DISPLAY_BYTE_LOOP:      
-86AF                             ; 上位ニブル
-86AF   7E                     MOV   a,m   
-86B0   0F                     RRC      
-86B1   0F                     RRC      
-86B2   0F                     RRC      
-86B3   0F                     RRC      
-86B4   E6 0F                  ANI   0Fh   
-86B6   CD C9 86               CALL   nibble_to_seg   
-86B9   12                     STAX   d   
-86BA   13                     INX   d   
-86BB                             ; 下位ニブル
-86BB   7E                     MOV   a,m   
-86BC   E6 0F                  ANI   0Fh   
-86BE   CD C9 86               CALL   nibble_to_seg   
-86C1   12                     STAX   d   
-86C2   13                     INX   d   
-86C3                             ; 次のバイト (val_hi → val_lo)
-86C3   2B                     DCX   h   
-86C4   0D                     DCR   c   
-86C5   C2 AF 86               JNZ   display_byte_loop   
-86C8   C9                     RET      
-86C9                             ; ---------------------------------------------------------------
-86C9                             ; nibble_to_seg — 4 ビット値を 7 セグパターンに変換
-86C9                             ; 
-86C9                             ;   入力: A = 0-F
-86C9                             ;   出力: A = セグメントパターン
-86C9                             ;   破壊: なし (HL, BC は内部で退避・復元)
-86C9                             ; ---------------------------------------------------------------
-86C9                NIBBLE_TO_SEG:      
-86C9   E5                     PUSH   h   
-86CA   C5                     PUSH   b   ; BC を退避 (C = ループカウンタ)
-86CB   6F                     MOV   l,a   
-86CC   26 00                  MVI   h,0   
-86CE   01 D6 86               LXI   b,seg_table   
-86D1   09                     DAD   b   ; HL = seg_table + nibble
-86D2   7E                     MOV   a,m   
-86D3   C1                     POP   b   ; BC を復元
-86D4   E1                     POP   h   
-86D5   C9                     RET      
-86D6                             ; ---------------------------------------------------------------
-86D6                             ; 7 セグメントパターンテーブル
-86D6                             ; 
-86D6                             ;   bit 0 = a (上)
-86D6                             ;   bit 1 = b (右上)
-86D6                             ;   bit 2 = c (右下)
-86D6                             ;   bit 3 = d (下)
-86D6                             ;   bit 4 = e (左下)
-86D6                             ;   bit 5 = f (左上)
-86D6                             ;   bit 6 = g (中)
-86D6                             ; 
-86D6                             ;       aaa
-86D6                             ;      f   b
-86D6                             ;       ggg
-86D6                             ;      e   c
-86D6                             ;       ddd
-86D6                             ; ---------------------------------------------------------------
-86D6                SEG_TABLE:      
-86D6   5C                     DB   5Ch   ; 0  (ND8080 ROM パターン)
-86D7   06                     DB   06h   ; 1
-86D8   5B                     DB   5Bh   ; 2
-86D9   4F                     DB   4Fh   ; 3
-86DA   66                     DB   66h   ; 4
-86DB   6D                     DB   6Dh   ; 5
-86DC   7D                     DB   7Dh   ; 6
-86DD   27                     DB   27h   ; 7  (ND8080 ROM パターン)
-86DE   7F                     DB   7Fh   ; 8
-86DF   6F                     DB   6Fh   ; 9
-86E0   77                     DB   77h   ; A
-86E1   7C                     DB   7Ch   ; b
-86E2   39                     DB   39h   ; C
-86E3   5E                     DB   5Eh   ; d
-86E4   79                     DB   79h   ; E
-86E5   71                     DB   71h   ; F
-86E6                             ; ===============================================================
-86E6                             ; OP_RETURN (B): トップレベルでは VM 停止
-86E6                             ; 
-86E6                             ; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
-86E6                             ; R[a] の値を 7 セグに表示して停止する。
-86E6                             ; ===============================================================
-86E6                DO_OP_RETURN:      
-86E6   CD 74 84               CALL   fetch_byte   ; A = a (戻り値のレジスタ)
-86E9   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-86EC   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
-86EF   CD 9E 86               CALL   display_hex16   
-86F2   3E 02                  MVI   a,VM_FINISHED   
-86F4   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-86F7   C3 1B 87               JMP   vm_halt   
-86FA                             ; ===============================================================
-86FA                             ; OP_STOP (Z): VM 停止
-86FA                             ; ===============================================================
-86FA                DO_OP_STOP:      
-86FA   3E 02                  MVI   a,VM_FINISHED   
-86FC   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-86FF                             ; R[1] の値を 7 セグに表示
-86FF   3E 01                  MVI   a,1   
-8701   CD 03 84               CALL   get_reg_addr   ; HL = R[1]
-8704   CD 2F 84               CALL   slot_to_value   ; HL = R[1] の値先頭
-8707   CD 9E 86               CALL   display_hex16   
-870A   C3 1B 87               JMP   vm_halt   
-870D                             ; ===============================================================
-870D                             ; エラー停止
-870D                             ; 
-870D                             ; 未対応のオペコードを踏んだとき。
-870D                             ; 現在のオペコードをエラーコードとして保存する。
-870D                             ; ===============================================================
-870D                VM_ERROR:      
-870D   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-8710   32 04 80               STA   VM_STATE_BASE + OFF_ERROR   
-8713   3E 03                  MVI   a,VM_ERROR   
-8715   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-8718   C3 1B 87               JMP   vm_halt   
-871B                             ; ===============================================================
-871B                             ; 停止 — ND80Z モニタのリモートモードへ復帰
+85C0                DO_OP_MUL:      
+85C0   CD 74 84               CALL   fetch_byte   ; A = a
+85C3   F5                     PUSH   psw   
+85C4   CD 09 84               CALL   get_reg_addr_next   ; HL = R[a+1]
+85C7   CD 2F 84               CALL   slot_to_value   ; HL = R[a+1] の値先頭
+85CA   5E                     MOV   e,m   ; E = val2_lo
+85CB   23                     INX   h   
+85CC   56                     MOV   d,m   ; D = val2_hi → DE = 乗数
+85CD   F1                     POP   psw   ; A = a
+85CE   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+85D1   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
+85D4   E5                     PUSH   h   ; 書き戻し先を退避
+85D5   4E                     MOV   c,m   
+85D6   23                     INX   h   
+85D7   46                     MOV   b,m   ; BC = 被乗数
+85D8   CD 0F 86               CALL   umul16   ; HL = BC × DE (下位 16 ビット)
+85DB   D1                     POP   d   ; DE = 書き戻し先
+85DC   7D                     MOV   a,l   
+85DD   12                     STAX   d   
+85DE   13                     INX   d   
+85DF   7C                     MOV   a,h   
+85E0   12                     STAX   d   
+85E1   C3 B0 89               JMP   vm_loop   
+85E4                             ; ---------------------------------------------------------------
+85E4                             ; OP_DIV (B): R[a] = R[a] / R[a+1]
+85E4                             ; 
+85E4                             ; 16 ビット符号付き整数の除算 (Ruby 互換の floor 除算)。
+85E4                             ; 除数 0 はエラー停止。
+85E4                             ; ---------------------------------------------------------------
+85E4                DO_OP_DIV:      
+85E4   CD 74 84               CALL   fetch_byte   ; A = a
+85E7   F5                     PUSH   psw   
+85E8   CD 09 84               CALL   get_reg_addr_next   ; HL = R[a+1]
+85EB   CD 2F 84               CALL   slot_to_value   
+85EE   5E                     MOV   e,m   
+85EF   23                     INX   h   
+85F0   56                     MOV   d,m   ; DE = 除数
+85F1                             ; ゼロ除算チェック
+85F1   7A                     MOV   a,d   
+85F2   B3                     ORA   e   
+85F3   C2 FA 85               JNZ   do_div_nonzero   
+85F6   F1                     POP   psw   
+85F7   C3 03 00               JMP   vm_error   
+85FA                DO_DIV_NONZERO:      
+85FA   F1                     POP   psw   ; A = a
+85FB   CD 03 84               CALL   get_reg_addr   
+85FE   CD 2F 84               CALL   slot_to_value   
+8601   E5                     PUSH   h   ; 書き戻し先を退避
+8602   4E                     MOV   c,m   
+8603   23                     INX   h   
+8604   46                     MOV   b,m   ; BC = 被除数
+8605   CD 21 86               CALL   sdiv16   ; BC = 商
+8608   E1                     POP   h   ; HL = 書き戻し先
+8609   71                     MOV   m,c   
+860A   23                     INX   h   
+860B   70                     MOV   m,b   
+860C   C3 B0 89               JMP   vm_loop   
+860F                             ; ---------------------------------------------------------------
+860F                             ; umul16 — 16 ビット符号なし乗算 (shift-and-add)
+860F                             ; 
+860F                             ;   入力: BC = 被乗数, DE = 乗数
+860F                             ;   出力: HL = 積の下位 16 ビット
+860F                             ;   破壊: A, DE
+860F                             ; ---------------------------------------------------------------
+860F                UMUL16:      
+860F   21 00 00               LXI   h,0   ; 積 = 0
+8612   3E 10                  MVI   a,16   ; ビットカウンタ
+8614                UMUL16_LOOP:      
+8614   29                     DAD   h   ; 積 <<= 1
+8615   EB                     XCHG      ; HL ↔ DE
+8616   29                     DAD   h   ; 乗数 <<= 1, bit15 → CY
+8617   EB                     XCHG      ; HL ↔ DE
+8618   D2 1C 86               JNC   umul16_noadd   
+861B   09                     DAD   b   ; 積 += 被乗数
+861C                UMUL16_NOADD:      
+861C   3D                     DCR   a   
+861D   C2 14 86               JNZ   umul16_loop   
+8620   C9                     RET      
+8621                             ; ---------------------------------------------------------------
+8621                             ; sdiv16 — 16 ビット符号付き除算 (floor 除算, Ruby 互換)
+8621                             ; 
+8621                             ;   入力: BC = 被除数, DE = 除数 (≠ 0)
+8621                             ;   出力: BC = 商
+8621                             ;   破壊: A, DE, HL
+8621                             ; 
+8621                             ; 符号を記録 → 絶対値 → 符号なし除算 → 符号復元。
+8621                             ; 異符号で剰余 ≠ 0 なら商を 1 減らす (floor)。
+8621                             ; ---------------------------------------------------------------
+8621                SDIV16:      
+8621   78                     MOV   a,b   
+8622   AA                     XRA   d   ; bit7 = 商の符号 (異符号なら負)
+8623   F5                     PUSH   psw   ; 符号情報を退避
+8624                             ; 被除数を正にする
+8624   78                     MOV   a,b   
+8625   E6 80                  ANI   80h   
+8627   CA 2D 86               JZ   sdiv16_chk_div   
+862A   CD 7D 86               CALL   neg_bc   
+862D                SDIV16_CHK_DIV:      
+862D                             ; 除数を正にする
+862D   7A                     MOV   a,d   
+862E   E6 80                  ANI   80h   
+8630   CA 36 86               JZ   sdiv16_do   
+8633   CD 85 86               CALL   neg_de   
+8636                SDIV16_DO:      
+8636   CD 46 86               CALL   udiv16   ; BC = |商|, HL = |剰余|
+8639   F1                     POP   psw   
+863A   E6 80                  ANI   80h   
+863C   C8                     RZ      ; 同符号 → 正の商をそのまま返す
+863D                             ; 異符号: 剰余があれば floor 調整
+863D   7C                     MOV   a,h   
+863E   B5                     ORA   l   
+863F   CA 43 86               JZ   sdiv16_neg   ; 剰余 = 0 → 単純に符号反転
+8642   03                     INX   b   ; 剰余 ≠ 0 → 商 +1 してから反転 (floor)
+8643                SDIV16_NEG:      
+8643   C3 7D 86               JMP   neg_bc   
+8646                             ; ---------------------------------------------------------------
+8646                             ; udiv16 — 16 ビット符号なし除算 (2 進長除算)
+8646                             ; 
+8646                             ;   入力: BC = 被除数, DE = 除数 (≠ 0)
+8646                             ;   出力: BC = 商, HL = 剰余
+8646                             ;   破壊: A
+8646                             ; 
+8646                             ; 被除数の MSB から 1 ビットずつ剰余にシフトし、
+8646                             ; 剰余 ≧ 除数なら減算して商ビットを立てる。
+8646                             ; ---------------------------------------------------------------
+8646                UDIV16:      
+8646   21 00 00               LXI   h,0   ; 剰余 = 0
+8649   3E 10                  MVI   a,16   
+864B   32 7C 86               STA   udiv_cnt   
+864E                UDIV16_LOOP:      
+864E                             ; BC を 1 ビット左シフト (MSB → CY)
+864E   79                     MOV   a,c   
+864F   87                     ADD   a   ; C <<= 1, bit7 → CY
+8650   4F                     MOV   c,a   
+8651   78                     MOV   a,b   
+8652   8F                     ADC   a   ; B <<= 1 + CY from C
+8653   47                     MOV   b,a   ; CY = 元の BC bit15 (被除数ビット)
+8654                             ; CY を剰余 (HL) にシフトイン
+8654   7D                     MOV   a,l   
+8655   17                     RAL      
+8656   6F                     MOV   l,a   
+8657   7C                     MOV   a,h   
+8658   17                     RAL      
+8659   67                     MOV   h,a   
+865A                             ; CY=1 なら剰余がオーバーフロー → 確実に除数以上
+865A   DA 6A 86               JC   udiv16_sub   
+865D                             ; 剰余 (HL) と 除数 (DE) を比較
+865D   7C                     MOV   a,h   
+865E   BA                     CMP   d   
+865F   DA 71 86               JC   udiv16_nosub   ; H < D → HL < DE
+8662   C2 6A 86               JNZ   udiv16_sub   ; H > D → HL > DE
+8665   7D                     MOV   a,l   
+8666   BB                     CMP   e   
+8667   DA 71 86               JC   udiv16_nosub   ; L < E → HL < DE
+866A                UDIV16_SUB:      
+866A                             ; 剰余 ≧ 除数: 減算して商ビット = 1
+866A   7D                     MOV   a,l   
+866B   93                     SUB   e   
+866C   6F                     MOV   l,a   
+866D   7C                     MOV   a,h   
+866E   9A                     SBB   d   
+866F   67                     MOV   h,a   
+8670   0C                     INR   c   ; 商の bit0 を立てる
+8671                UDIV16_NOSUB:      
+8671   3A 7C 86               LDA   udiv_cnt   ; LDA は CY に影響しない
+8674   3D                     DCR   a   ; DCR は CY に影響しない
+8675   32 7C 86               STA   udiv_cnt   
+8678   C2 4E 86               JNZ   udiv16_loop   
+867B   C9                     RET      
+867C                UDIV_CNT:      
+867C   00                     DB   0   
+867D                             ; ---------------------------------------------------------------
+867D                             ; neg_bc / neg_de — 16 ビット 2 の補数 (符号反転)
+867D                             ; ---------------------------------------------------------------
+867D                NEG_BC:      
+867D   79                     MOV   a,c   
+867E   2F                     CMA      
+867F   4F                     MOV   c,a   
+8680   78                     MOV   a,b   
+8681   2F                     CMA      
+8682   47                     MOV   b,a   
+8683   03                     INX   b   
+8684   C9                     RET      
+8685                NEG_DE:      
+8685   7B                     MOV   a,e   
+8686   2F                     CMA      
+8687   5F                     MOV   e,a   
+8688   7A                     MOV   a,d   
+8689   2F                     CMA      
+868A   57                     MOV   d,a   
+868B   13                     INX   d   
+868C   C9                     RET      
+868D                             ; vm_compare.a80 — 比較命令
+868D                             ; 
+868D                             ; OP_EQ, OP_LT, OP_LE, OP_GT, OP_GE
+868D                             ; 
+868D                             ; 結果は R[a] に true (TT_TRUE) または false (TT_FALSE) を書く。
+868D                             ; Phase 2 は整数のみ。
+868D                             ; 
+868D                             ; cmp_value16 は結果を A で返す:
+868D                             ;   A = 00h → 等しい
+868D                             ;   A = FFh → val1 < val2 (bit7 がセットされるので JM で拾える)
+868D                             ;   A = 01h → val1 > val2
+868D                             ; 
+868D                             ; OFF_OPERAND_A にレジスタ番号を保存し、結果書き込み時に再取得する。
+868D                             ; ---------------------------------------------------------------
+868D                             ; cmp_reg_pair — R[a] と R[a+1] の値を比較する (共通前処理)
+868D                             ; 
+868D                             ;   出力: A = 比較結果 (00h/FFh/01h)
+868D                             ;         OFF_OPERAND_A にレジスタ番号 a が入っている
+868D                             ;   破壊: A, B, HL, DE
+868D                             ; ---------------------------------------------------------------
+868D                CMP_REG_PAIR:      
+868D   CD 74 84               CALL   fetch_byte   
+8690   32 0B 80               STA   VM_STATE_BASE + OFF_OPERAND_A   
+8693                             ; R[a+1] の値先頭
+8693   CD 09 84               CALL   get_reg_addr_next   
+8696   CD 2F 84               CALL   slot_to_value   
+8699   EB                     XCHG      ; DE = R[a+1] 値先頭
+869A                             ; R[a] の値先頭
+869A   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
+869D   CD 03 84               CALL   get_reg_addr   
+86A0   CD 2F 84               CALL   slot_to_value   ; HL = R[a] 値先頭
+86A3   CD 48 84               CALL   cmp_value16   ; A = 結果
+86A6   C9                     RET      
+86A7                             ; ---------------------------------------------------------------
+86A7                             ; cmp_set_true / cmp_set_false — 結果をスロットに書いてループへ戻る
+86A7                             ; 
+86A7                             ; OFF_OPERAND_A から R[a] のアドレスを再計算する。
+86A7                             ; ---------------------------------------------------------------
+86A7                CMP_SET_TRUE:      
+86A7   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
+86AA   CD 03 84               CALL   get_reg_addr   
+86AD   3E 03                  MVI   a,TT_TRUE   
+86AF   CD 17 84               CALL   set_slot_special   
+86B2   C3 B0 89               JMP   vm_loop   
+86B5                CMP_SET_FALSE:      
+86B5   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
+86B8   CD 03 84               CALL   get_reg_addr   
+86BB   3E 02                  MVI   a,TT_FALSE   
+86BD   CD 17 84               CALL   set_slot_special   
+86C0   C3 B0 89               JMP   vm_loop   
+86C3                             ; ---------------------------------------------------------------
+86C3                             ; OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
+86C3                             ; 
+86C3                             ; 型タグと値の両方が一致したときだけ true。
+86C3                             ; ---------------------------------------------------------------
+86C3                DO_OP_EQ:      
+86C3   CD 74 84               CALL   fetch_byte   
+86C6   32 0B 80               STA   VM_STATE_BASE + OFF_OPERAND_A   
+86C9                             ; R[a] と R[a+1] のスロットアドレスを求める
+86C9   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+86CC   E5                     PUSH   h   ; R[a] を退避
+86CD   3A 0B 80               LDA   VM_STATE_BASE + OFF_OPERAND_A   
+86D0   CD 09 84               CALL   get_reg_addr_next   ; HL = R[a+1]
+86D3   D1                     POP   d   ; DE = R[a]
+86D4                             ; HL = R[a+1], DE = R[a]
+86D4                             ; 型タグを比べる
+86D4   46                     MOV   b,m   ; B = R[a+1].type
+86D5   1A                     LDAX   d   ; A = R[a].type
+86D6   B8                     CMP   b   
+86D7   C2 B5 86               JNZ   cmp_set_false   ; 型が違えば false
+86DA                             ; 型が同じ → 値を 2 バイト比べる
+86DA   23                     INX   h   
+86DB   23                     INX   h   ; HL = R[a+1] + 2 (値先頭)
+86DC   13                     INX   d   
+86DD   13                     INX   d   ; DE = R[a] + 2 (値先頭)
+86DE   1A                     LDAX   d   ; A = R[a].val_lo
+86DF   BE                     CMP   m   ; R[a].val_lo - R[a+1].val_lo
+86E0   C2 B5 86               JNZ   cmp_set_false   
+86E3   23                     INX   h   
+86E4   13                     INX   d   
+86E5   1A                     LDAX   d   ; A = R[a].val_hi
+86E6   BE                     CMP   m   ; R[a].val_hi - R[a+1].val_hi
+86E7   C2 B5 86               JNZ   cmp_set_false   
+86EA   C3 A7 86               JMP   cmp_set_true   ; すべて一致
+86ED                             ; ---------------------------------------------------------------
+86ED                             ; OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
+86ED                             ; ---------------------------------------------------------------
+86ED                DO_OP_LT:      
+86ED   CD 8D 86               CALL   cmp_reg_pair   ; A = 結果
+86F0   B7                     ORA   a   
+86F1   FA A7 86               JM   cmp_set_true   ; A = FFh → val1 < val2
+86F4   C3 B5 86               JMP   cmp_set_false   
+86F7                             ; ---------------------------------------------------------------
+86F7                             ; OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
+86F7                             ; ---------------------------------------------------------------
+86F7                DO_OP_LE:      
+86F7   CD 8D 86               CALL   cmp_reg_pair   
+86FA   B7                     ORA   a   
+86FB   FA A7 86               JM   cmp_set_true   ; val1 < val2
+86FE   CA A7 86               JZ   cmp_set_true   ; val1 == val2
+8701   C3 B5 86               JMP   cmp_set_false   
+8704                             ; ---------------------------------------------------------------
+8704                             ; OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
+8704                             ; ---------------------------------------------------------------
+8704                DO_OP_GT:      
+8704   CD 8D 86               CALL   cmp_reg_pair   
+8707   B7                     ORA   a   
+8708   CA B5 86               JZ   cmp_set_false   ; val1 == val2
+870B   F2 A7 86               JP   cmp_set_true   ; A = 01h → val1 > val2
+870E   C3 B5 86               JMP   cmp_set_false   ; A = FFh → val1 < val2
+8711                             ; ---------------------------------------------------------------
+8711                             ; OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
+8711                             ; ---------------------------------------------------------------
+8711                DO_OP_GE:      
+8711   CD 8D 86               CALL   cmp_reg_pair   
+8714   B7                     ORA   a   
+8715   FA B5 86               JM   cmp_set_false   ; val1 < val2
+8718   C3 A7 86               JMP   cmp_set_true   ; val1 >= val2
+871B                             ; vm_jump.a80 — ジャンプ命令
 871B                             ; 
-871B                             ; HLT だとリモートモードに戻るために手動リセット + [*(I/O)][8] が
-871B                             ; 必要になる。代わりに N80MON2D ジャンプテーブルの REMOTE エントリ
-871B                             ; (0821h) にジャンプする。REMOTE ルーチンは REMOTEMK=FFh を設定し、
-871B                             ; RST5/RST6 をリモート用ハンドラに差し替えてから START2 に入る。
-871B                             ; これにより自動的にリモートモードへ復帰する。
-871B                             ; エミュレータでは ROM 領域へのジャンプを検出して停止する。
-871B                             ; ===============================================================
-871B                VM_HALT:      
-871B                             ; LED 表示を約 3 秒間見せてからリモートモードへ復帰する。
-871B                             ; 外側ループ B=12, 内側ループ DE=0 (65536 回)
-871B                             ; 1 回 ≈ 24 クロック, 2.048 MHz → 約 0.77 秒/周 × 4 ≈ 3 秒
-871B   06 04                  MVI   b,4   
-871D                VM_HALT_OUTER:      
-871D   11 00 00               LXI   d,0   
-8720                VM_HALT_INNER:      
-8720   1B                     DCX   d   
-8721   7A                     MOV   a,d   
-8722   B3                     ORA   e   
-8723   C2 20 87               JNZ   vm_halt_inner   
-8726   05                     DCR   b   
-8727   C2 1D 87               JNZ   vm_halt_outer   
-872A   C3 21 08               JMP   00821h   ; N80MON2D REMOTE: リモートモード再入口
-872D                             ; ===============================================================
-872D                             ; 初期化
-872D                             ; ===============================================================
-872D                VM_START:      
-872D                             ; スタックポインタを設定
-872D   31 00 FE               LXI   sp,STACK_TOP + 1   
-8730                             ; VM 状態領域をゼロクリア (256 バイト)
-8730   21 00 80               LXI   h,VM_STATE_BASE   
-8733   0E 00                  MVI   c,0   ; 256 回 (0 は 256 として扱う)
-8735                VM_CLEAR_STATE:      
-8735   36 00                  MVI   m,0   
-8737   23                     INX   h   
-8738   0D                     DCR   c   
-8739   C2 35 87               JNZ   vm_clear_state   
-873C                             ; レジスタファイルをゼロクリア (256 バイト)
-873C   21 00 81               LXI   h,REG_FILE_BASE   
-873F   0E 00                  MVI   c,0   
-8741                VM_CLEAR_REGS:      
-8741   36 00                  MVI   m,0   
-8743   23                     INX   h   
-8744   0D                     DCR   c   
-8745   C2 41 87               JNZ   vm_clear_regs   
-8748                             ; IREP 0 のバイトコード長を VM 状態に設定
-8748                             ; IREP テーブルの先頭エントリから読む
-8748   3A 02 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN   
-874B   32 0E 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN   
-874E   3A 03 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1   
-8751   32 0F 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN + 1   
-8754                             ; PC = 0 (ゼロクリア済み)
-8754                             ; 実行状態を RUNNING に設定
-8754   3E 01                  MVI   a,VM_RUNNING   
-8756   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
-8759                             ; メインループへ
-8759                             ; fall through
-8759                             ; ===============================================================
-8759                             ; メインループ (fetch-decode-execute)
-8759                             ; ===============================================================
-8759                VM_LOOP:      
-8759                             ; --- 実行状態の確認 ---
-8759   3A 02 80               LDA   VM_STATE_BASE + OFF_STATUS   
-875C   FE 01                  CPI   VM_RUNNING   
-875E   C2 1B 87               JNZ   vm_halt   
-8761                             ; --- PC がバイトコード長を超えていないか ---
-8761   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   
-8764   EB                     XCHG      ; DE = PC
-8765   2A 0E 80               LHLD   VM_STATE_BASE + OFF_BYTECODE_LEN   
-8768                             ; HL = bytecode_len, DE = PC
-8768                             ; PC >= bytecode_len ならエラー
-8768   7B                     MOV   a,e   
-8769   95                     SUB   l   
-876A   7A                     MOV   a,d   
-876B   9C                     SBB   h   ; DE - HL (PC - len)
-876C   D2 03 00               JNC   vm_error   ; PC >= len → エラー
-876F                             ; --- オペコードフェッチ ---
-876F   CD 74 84               CALL   fetch_byte   ; A = opcode
-8772   32 0A 80               STA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-8775                             ; --- ステップカウント ---
-8775   2A 06 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT   
-8778   23                     INX   h   
-8779   22 06 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT   
-877C                             ; 上位 16 ビットの桁上げ (HL が 0 に戻ったとき)
-877C   7C                     MOV   a,h   
-877D   B5                     ORA   l   
-877E   C2 88 87               JNZ   vm_dispatch   
-8781   2A 08 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
-8784   23                     INX   h   
-8785   22 08 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
-8788                             ; --- ディスパッチ ---
-8788                VM_DISPATCH:      
-8788   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
-878B                             ; オペコード × 2 でジャンプテーブルのオフセットを求める
-878B   87                     ADD   a   ; A = opcode * 2 (テーブルエントリは 2 バイト)
-878C   DA 03 00               JC   vm_error   ; オーバーフロー → 未対応
-878F   5F                     MOV   e,a   
-8790   16 00                  MVI   d,0   ; DE = opcode * 2
-8792   21 AA 87               LXI   h,dispatch_table   
-8795   19                     DAD   d   ; HL = &dispatch_table[opcode]
-8796                             ; テーブル上限チェック
-8796   11 7E 88               LXI   d,dispatch_table_end   
-8799   7B                     MOV   a,e   
-879A   95                     SUB   l   
-879B   7A                     MOV   a,d   
-879C   9C                     SBB   h   ; DE - HL → dispatch_table_end - 現在位置
-879D   DA 03 00               JC   vm_error   ; テーブル範囲外
-87A0                             ; アドレスを読んでジャンプ
-87A0   5E                     MOV   e,m   ; E = 下位バイト
-87A1   23                     INX   h   
-87A2   56                     MOV   d,m   ; D = 上位バイト
-87A3   EB                     XCHG      ; HL = ハンドラアドレス
-87A4                             ; 0000h ならエラー (未実装マーカー)
-87A4   7C                     MOV   a,h   
-87A5   B5                     ORA   l   
-87A6   CA 03 00               JZ   vm_error   
-87A9   E9                     PCHL      ; ハンドラへジャンプ
-87AA                             ; ===============================================================
-87AA                             ; ディスパッチテーブル
-87AA                             ; 
-87AA                             ; オペコード番号順に 2 バイトのアドレスを並べる。
-87AA                             ; 未実装のオペコードは 0000h (vm_error で捕捉)。
-87AA                             ; ===============================================================
-87AA                DISPATCH_TABLE:      
-87AA   91 84                  DW   do_op_nop   ; 00 OP_NOP
-87AC   94 84                  DW   do_op_move   ; 01 OP_MOVE
-87AE   00 00                  DW   0000h   ; 02 OP_LOADL
-87B0   AA 84                  DW   do_op_loadi   ; 03 OP_LOADI
-87B2   BF 84                  DW   do_op_loadineg   ; 04 OP_LOADINEG
-87B4   D6 84                  DW   do_op_loadi__1   ; 05 OP_LOADI__1
-87B6   E6 84                  DW   do_op_loadi_0   ; 06 OP_LOADI_0
-87B8   EB 84                  DW   do_op_loadi_1   ; 07 OP_LOADI_1
-87BA   F0 84                  DW   do_op_loadi_2   ; 08 OP_LOADI_2
-87BC   F5 84                  DW   do_op_loadi_3   ; 09 OP_LOADI_3
-87BE   FA 84                  DW   do_op_loadi_4   ; 0A OP_LOADI_4
-87C0   FF 84                  DW   do_op_loadi_5   ; 0B OP_LOADI_5
-87C2   04 85                  DW   do_op_loadi_6   ; 0C OP_LOADI_6
-87C4   09 85                  DW   do_op_loadi_7   ; 0D OP_LOADI_7
-87C6   19 85                  DW   do_op_loadi16   ; 0E OP_LOADI16
-87C8   00 00                  DW   0000h   ; 0F OP_LOADI32
-87CA   00 00                  DW   0000h   ; 10 OP_LOADSYM
-87CC   32 85                  DW   do_op_loadnil   ; 11 OP_LOADNIL
-87CE   00 00                  DW   0000h   ; 12 OP_LOADSELF
-87D0   40 85                  DW   do_op_loadt   ; 13 OP_LOADT
-87D2   4E 85                  DW   do_op_loadf   ; 14 OP_LOADF
-87D4   00 00                  DW   0000h   ; 15 OP_GETGV
-87D6   00 00                  DW   0000h   ; 16 OP_SETGV
-87D8   00 00                  DW   0000h   ; 17 OP_GETSV
-87DA   00 00                  DW   0000h   ; 18 OP_SETSV
-87DC   00 00                  DW   0000h   ; 19 OP_GETIV
-87DE   00 00                  DW   0000h   ; 1A OP_SETIV
-87E0   00 00                  DW   0000h   ; 1B OP_GETCV
-87E2   00 00                  DW   0000h   ; 1C OP_SETCV
-87E4   00 00                  DW   0000h   ; 1D OP_GETCONST
-87E6   00 00                  DW   0000h   ; 1E OP_SETCONST
-87E8   00 00                  DW   0000h   ; 1F OP_GETMCNST
-87EA   00 00                  DW   0000h   ; 20 OP_SETMCNST
-87EC   00 00                  DW   0000h   ; 21 OP_GETUPVAR
-87EE   00 00                  DW   0000h   ; 22 OP_SETUPVAR
-87F0   00 00                  DW   0000h   ; 23 OP_GETIDX
-87F2   00 00                  DW   0000h   ; 24 OP_SETIDX
-87F4   57 86                  DW   do_op_jmp   ; 25 OP_JMP
-87F6   60 86                  DW   do_op_jmpif   ; 26 OP_JMPIF
-87F8   7F 86                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
-87FA   00 00                  DW   0000h   ; 28 OP_JMPNIL
-87FC   00 00                  DW   0000h   ; 29 OP_JMPUW
-87FE   00 00                  DW   0000h   ; 2A OP_EXCEPT
-8800   00 00                  DW   0000h   ; 2B OP_RESCUE
-8802   00 00                  DW   0000h   ; 2C OP_RAISEIF
-8804   00 00                  DW   0000h   ; 2D OP_SSEND
-8806   00 00                  DW   0000h   ; 2E OP_SSENDB
-8808   00 00                  DW   0000h   ; 2F OP_SEND
-880A   00 00                  DW   0000h   ; 30 OP_SENDB
-880C   00 00                  DW   0000h   ; 31 OP_CALL
-880E   00 00                  DW   0000h   ; 32 OP_SUPER
-8810   00 00                  DW   0000h   ; 33 OP_ARGARY
-8812   00 00                  DW   0000h   ; 34 OP_ENTER
-8814   00 00                  DW   0000h   ; 35 OP_KEY_P
-8816   00 00                  DW   0000h   ; 36 OP_KEYEND
-8818   00 00                  DW   0000h   ; 37 OP_KARG
-881A   E6 86                  DW   do_op_return   ; 38 OP_RETURN
-881C   00 00                  DW   0000h   ; 39 OP_RETURN_BLK
-881E   00 00                  DW   0000h   ; 3A OP_BREAK
-8820   00 00                  DW   0000h   ; 3B OP_BLKPUSH
-8822   5C 85                  DW   do_op_add   ; 3C OP_ADD
-8824   8C 85                  DW   do_op_addi   ; 3D OP_ADDI
-8826   74 85                  DW   do_op_sub   ; 3E OP_SUB
-8828   A6 85                  DW   do_op_subi   ; 3F OP_SUBI
-882A   00 00                  DW   0000h   ; 40 OP_MUL
-882C   00 00                  DW   0000h   ; 41 OP_DIV
-882E   F6 85                  DW   do_op_eq   ; 42 OP_EQ
-8830   20 86                  DW   do_op_lt   ; 43 OP_LT
-8832   2A 86                  DW   do_op_le   ; 44 OP_LE
-8834   37 86                  DW   do_op_gt   ; 45 OP_GT
-8836   44 86                  DW   do_op_ge   ; 46 OP_GE
-8838   00 00                  DW   0000h   ; 47 OP_ARRAY
-883A   00 00                  DW   0000h   ; 48 OP_ARRAY2
-883C   00 00                  DW   0000h   ; 49 OP_ARYCAT
-883E   00 00                  DW   0000h   ; 4A OP_ARYPUSH
-8840   00 00                  DW   0000h   ; 4B OP_ARYSPLAT
-8842   00 00                  DW   0000h   ; 4C OP_AREF
-8844   00 00                  DW   0000h   ; 4D OP_ASET
-8846   00 00                  DW   0000h   ; 4E OP_APOST
-8848   00 00                  DW   0000h   ; 4F OP_INTERN
-884A   00 00                  DW   0000h   ; 50 OP_SYMBOL
-884C   00 00                  DW   0000h   ; 51 OP_STRING
-884E   00 00                  DW   0000h   ; 52 OP_STRCAT
-8850   00 00                  DW   0000h   ; 53 OP_HASH
-8852   00 00                  DW   0000h   ; 54 OP_HASHADD
-8854   00 00                  DW   0000h   ; 55 OP_HASHCAT
-8856   00 00                  DW   0000h   ; 56 OP_LAMBDA
-8858   00 00                  DW   0000h   ; 57 OP_BLOCK
-885A   00 00                  DW   0000h   ; 58 OP_METHOD
-885C   00 00                  DW   0000h   ; 59 OP_RANGE_INC
-885E   00 00                  DW   0000h   ; 5A OP_RANGE_EXC
-8860   00 00                  DW   0000h   ; 5B OP_OCLASS
-8862   00 00                  DW   0000h   ; 5C OP_CLASS
-8864   00 00                  DW   0000h   ; 5D OP_MODULE
-8866   00 00                  DW   0000h   ; 5E OP_EXEC
-8868   00 00                  DW   0000h   ; 5F OP_DEF
-886A   00 00                  DW   0000h   ; 60 OP_ALIAS
-886C   00 00                  DW   0000h   ; 61 OP_UNDEF
-886E   00 00                  DW   0000h   ; 62 OP_SCLASS
-8870   00 00                  DW   0000h   ; 63 OP_TCLASS
-8872   00 00                  DW   0000h   ; 64 OP_DEBUG
-8874   00 00                  DW   0000h   ; 65 OP_ERR
-8876   00 00                  DW   0000h   ; 66 OP_EXT1
-8878   00 00                  DW   0000h   ; 67 OP_EXT2
-887A   00 00                  DW   0000h   ; 68 OP_EXT3
-887C   FA 86                  DW   do_op_stop   ; 69 OP_STOP
-887E                DISPATCH_TABLE_END:      
-887E                          END      
+871B                             ; OP_JMP, OP_JMPIF, OP_JMPNOT
+871B                             ; 
+871B                             ; オフセットは命令読み取り後の PC (= 次の命令の先頭) からの相対値。
+871B                             ; mruby のバイトコードは符号付き 16 ビット、ビッグエンディアン。
+871B                             ; ---------------------------------------------------------------
+871B                             ; apply_jump — PC に符号付きオフセットを加える
+871B                             ; 
+871B                             ;   入力: HL = 符号付き 16 ビットオフセット
+871B                             ;   出力: なし (PC が更新される)
+871B                             ;   破壊: A, HL, DE
+871B                             ; ---------------------------------------------------------------
+871B                APPLY_JUMP:      
+871B   EB                     XCHG      ; DE = オフセット
+871C   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   ; HL = 現在の PC
+871F   19                     DAD   d   ; HL = PC + オフセット
+8720   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
+8723   C9                     RET      
+8724                             ; ---------------------------------------------------------------
+8724                             ; OP_JMP (S): PC += signed16(a)
+8724                             ; ---------------------------------------------------------------
+8724                DO_OP_JMP:      
+8724   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
+8727   CD 1B 87               CALL   apply_jump   
+872A   C3 B0 89               JMP   vm_loop   
+872D                             ; ---------------------------------------------------------------
+872D                             ; OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
+872D                             ; 
+872D                             ; Ruby で偽なのは nil と false だけ。型タグが TT_FALSY_MAX 以下なら偽。
+872D                             ; ---------------------------------------------------------------
+872D                DO_OP_JMPIF:      
+872D   CD 74 84               CALL   fetch_byte   ; A = a (レジスタ番号)
+8730   F5                     PUSH   psw   
+8731   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
+8734   E5                     PUSH   h   ; オフセットを退避
+8735   D1                     POP   d   ; DE = オフセット
+8736   F1                     POP   psw   ; A = a
+8737   CD 03 84               CALL   get_reg_addr   ; HL = R[a] スロット先頭
+873A   CD 2D 84               CALL   get_slot_type   ; A = 型タグ
+873D   FE 03                  CPI   TT_FALSY_MAX + 1   
+873F   DA 49 87               JC   jmpif_skip   ; 型タグ <= TT_FALSY_MAX → 偽 → ジャンプしない
+8742                             ; 真 → ジャンプする
+8742   EB                     XCHG      ; HL = オフセット (DE にあった)
+8743   CD 1B 87               CALL   apply_jump   
+8746   C3 B0 89               JMP   vm_loop   
+8749                JMPIF_SKIP:      
+8749   C3 B0 89               JMP   vm_loop   
+874C                             ; ---------------------------------------------------------------
+874C                             ; OP_JMPNOT (BS): if R[a] が偽 then PC += signed16(b)
+874C                             ; ---------------------------------------------------------------
+874C                DO_OP_JMPNOT:      
+874C   CD 74 84               CALL   fetch_byte   ; A = a
+874F   F5                     PUSH   psw   
+8750   CD 8E 84               CALL   fetch_s16be   ; HL = オフセット
+8753   E5                     PUSH   h   
+8754   D1                     POP   d   ; DE = オフセット
+8755   F1                     POP   psw   ; A = a
+8756   CD 03 84               CALL   get_reg_addr   ; HL = R[a] スロット先頭
+8759   CD 2D 84               CALL   get_slot_type   ; A = 型タグ
+875C   FE 03                  CPI   TT_FALSY_MAX + 1   
+875E   D2 68 87               JNC   jmpnot_skip   ; 型タグ > TT_FALSY_MAX → 真 → ジャンプしない
+8761                             ; 偽 → ジャンプする
+8761   EB                     XCHG      ; HL = オフセット
+8762   CD 1B 87               CALL   apply_jump   
+8765   C3 B0 89               JMP   vm_loop   
+8768                JMPNOT_SKIP:      
+8768   C3 B0 89               JMP   vm_loop   
+876B                             ; vm_globals.a80 — グローバル変数アクセス (16 ビット整数)
+876B                             ; 
+876B                             ; OP_GETGV, OP_SETGV
+876B                             ; 
+876B                             ; シンボルテーブル (SYM_TABLE_BASE, 0x8300):
+876B                             ;   エントリ i (2 バイト): グローバルスロットのアドレス (LE)
+876B                             ;     0x0000 = 未対応のシンボル (メソッド名等)
+876B                             ; 
+876B                             ; グローバルスロット (GLOBALS_BASE, 0xB000):
+876B                             ;   レジスタと同じ 4 バイト形式 (型タグ + 予約 + val_lo + val_hi)
+876B                             ; ---------------------------------------------------------------
+876B                             ; OP_GETGV (BB): R[a] = global[symbols[b]]
+876B                             ; ---------------------------------------------------------------
+876B                DO_OP_GETGV:      
+876B   CD 74 84               CALL   fetch_byte   ; A = a (レジスタ番号)
+876E   F5                     PUSH   psw   
+876F   CD 74 84               CALL   fetch_byte   ; A = b (シンボルインデックス)
+8772                             ; シンボルテーブルからグローバルスロットのアドレスを取得
+8772                             ; SYM_TABLE_BASE + b * 2
+8772   87                     ADD   a   ; A = b * 2
+8773   5F                     MOV   e,a   
+8774   16 00                  MVI   d,0   
+8776   21 00 83               LXI   h,SYM_TABLE_BASE   
+8779   19                     DAD   d   ; HL = &sym_table[b]
+877A   5E                     MOV   e,m   
+877B   23                     INX   h   
+877C   56                     MOV   d,m   ; DE = グローバルスロットアドレス
+877D                             ; アドレスが 0 なら未対応シンボル
+877D   7A                     MOV   a,d   
+877E   B3                     ORA   e   
+877F   C2 86 87               JNZ   getgv_ok   
+8782   F1                     POP   psw   
+8783   C3 03 00               JMP   vm_error   
+8786                GETGV_OK:      
+8786   F1                     POP   psw   ; A = a
+8787   D5                     PUSH   d   ; グローバルアドレスを退避
+8788   CD 03 84               CALL   get_reg_addr   ; HL = R[a] (コピー先)
+878B   EB                     XCHG      ; DE = R[a]
+878C   E1                     POP   h   ; HL = グローバルスロット (コピー元)
+878D   CD 22 84               CALL   copy_slot   ; [HL] → [DE]
+8790   C3 B0 89               JMP   vm_loop   
+8793                             ; ---------------------------------------------------------------
+8793                             ; OP_SETGV (BB): global[symbols[b]] = R[a]
+8793                             ; ---------------------------------------------------------------
+8793                DO_OP_SETGV:      
+8793   CD 74 84               CALL   fetch_byte   ; A = a (レジスタ番号)
+8796   F5                     PUSH   psw   
+8797   CD 74 84               CALL   fetch_byte   ; A = b (シンボルインデックス)
+879A   87                     ADD   a   
+879B   5F                     MOV   e,a   
+879C   16 00                  MVI   d,0   
+879E   21 00 83               LXI   h,SYM_TABLE_BASE   
+87A1   19                     DAD   d   ; HL = &sym_table[b]
+87A2   5E                     MOV   e,m   
+87A3   23                     INX   h   
+87A4   56                     MOV   d,m   ; DE = グローバルスロットアドレス
+87A5   7A                     MOV   a,d   
+87A6   B3                     ORA   e   
+87A7   C2 AE 87               JNZ   setgv_ok   
+87AA   F1                     POP   psw   
+87AB   C3 03 00               JMP   vm_error   
+87AE                SETGV_OK:      
+87AE   F1                     POP   psw   ; A = a
+87AF   CD 03 84               CALL   get_reg_addr   ; HL = R[a] (コピー元)
+87B2                             ; copy_slot: [HL] → [DE]
+87B2   CD 22 84               CALL   copy_slot   
+87B5   C3 B0 89               JMP   vm_loop   
+87B8                             ; vm_send.a80 — メソッド呼び出し (組み込みメソッド限定)
+87B8                             ; 
+87B8                             ; OP_SEND, OP_SSEND
+87B8                             ; 
+87B8                             ; 組み込みメソッドのみサポート。ユーザ定義メソッドは未対応。
+87B8                             ; シンボルテーブルの値が 0x0001-0x00FF の場合メソッド ID として扱う:
+87B8                             ;   1 = !=  (不等号)
+87B8                             ;   2 = !   (論理否定)
+87B8                             ;   3 = %   (剰余, Ruby floor modulo)
+87B8                             ;   4 = abs (絶対値)
+87B8                             ; ---------------------------------------------------------------
+87B8                             ; OP_SSEND (BBB): self をレシーバに置いて SEND
+87B8                             ; 
+87B8                             ; R[a] = R[0] (self) を設定してから OP_SEND と同じ処理を行う。
+87B8                             ; ---------------------------------------------------------------
+87B8                DO_OP_SSEND:      
+87B8   CD 74 84               CALL   fetch_byte   ; A = a
+87BB   F5                     PUSH   psw   
+87BC   CD 03 84               CALL   get_reg_addr   ; HL = R[a] (コピー先)
+87BF   EB                     XCHG      ; DE = R[a]
+87C0   AF                     XRA   a   ; A = 0
+87C1   CD 03 84               CALL   get_reg_addr   ; HL = R[0] (self)
+87C4   CD 22 84               CALL   copy_slot   ; R[a] = R[0]
+87C7   F1                     POP   psw   ; A = a
+87C8   32 BB 88               STA   send_reg_a   
+87CB   CD 74 84               CALL   fetch_byte   ; A = b (シンボル)
+87CE   F5                     PUSH   psw   
+87CF   CD 74 84               CALL   fetch_byte   ; A = c (argc)
+87D2   32 BC 88               STA   send_argc   
+87D5   F1                     POP   psw   ; A = b
+87D6   C3 EA 87               JMP   send_dispatch   
+87D9                             ; ---------------------------------------------------------------
+87D9                             ; OP_SEND (BBB): R[a] = R[a].method(R[a+1], ...)
+87D9                             ; ---------------------------------------------------------------
+87D9                DO_OP_SEND:      
+87D9   CD 74 84               CALL   fetch_byte   ; A = a
+87DC   32 BB 88               STA   send_reg_a   
+87DF   CD 74 84               CALL   fetch_byte   ; A = b (シンボル)
+87E2   F5                     PUSH   psw   
+87E3   CD 74 84               CALL   fetch_byte   ; A = c (argc)
+87E6   32 BC 88               STA   send_argc   
+87E9   F1                     POP   psw   ; A = b
+87EA                SEND_DISPATCH:      
+87EA                             ; シンボルテーブルからメソッド ID を取得
+87EA   87                     ADD   a   ; b * 2
+87EB   5F                     MOV   e,a   
+87EC   16 00                  MVI   d,0   
+87EE   21 00 83               LXI   h,SYM_TABLE_BASE   
+87F1   19                     DAD   d   
+87F2   5E                     MOV   e,m   
+87F3   23                     INX   h   
+87F4   56                     MOV   d,m   ; DE = エントリ値
+87F5                             ; D != 0 ならグローバルアドレス → メソッドではない
+87F5   7A                     MOV   a,d   
+87F6   B7                     ORA   a   
+87F7   C2 03 00               JNZ   vm_error   
+87FA                             ; E = メソッド ID (0 = 未対応)
+87FA   7B                     MOV   a,e   
+87FB   B7                     ORA   a   
+87FC   CA 03 00               JZ   vm_error   
+87FF                             ; メソッドディスパッチ
+87FF   FE 01                  CPI   1   
+8801   CA 16 88               JZ   send_ne   ; != (不等号)
+8804   FE 02                  CPI   2   
+8806   CA 4B 88               JZ   send_not   ; !  (論理否定)
+8809   FE 03                  CPI   3   
+880B   CA 73 88               JZ   send_mod   ; %  (剰余)
+880E   FE 04                  CPI   4   
+8810   CA 9E 88               JZ   send_abs   ; abs (絶対値)
+8813   C3 03 00               JMP   vm_error   ; 未対応メソッド
+8816                             ; ---------------------------------------------------------------
+8816                             ; != (不等号): R[a] = (R[a] != R[a+1]) ? true : false
+8816                             ; 
+8816                             ; スロット全体 (4 バイト) をバイト比較する。
+8816                             ; 型タグも含めて比較するので異なる型は常に true。
+8816                             ; ---------------------------------------------------------------
+8816                SEND_NE:      
+8816   3A BB 88               LDA   send_reg_a   
+8819   F5                     PUSH   psw   
+881A   CD 09 84               CALL   get_reg_addr_next   ; HL = R[a+1]
+881D   EB                     XCHG      ; DE = R[a+1]
+881E   F1                     POP   psw   
+881F   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+8822   0E 04                  MVI   c,SLOT_BYTES   
+8824                SEND_NE_CMP:      
+8824   1A                     LDAX   d   
+8825   BE                     CMP   m   
+8826   C2 3D 88               JNZ   send_ne_diff   
+8829   23                     INX   h   
+882A   13                     INX   d   
+882B   0D                     DCR   c   
+882C   C2 24 88               JNZ   send_ne_cmp   
+882F                             ; 全バイト一致 → 等しい → false
+882F   3A BB 88               LDA   send_reg_a   
+8832   CD 03 84               CALL   get_reg_addr   
+8835   3E 02                  MVI   a,TT_FALSE   
+8837   CD 17 84               CALL   set_slot_special   
+883A   C3 B0 89               JMP   vm_loop   
+883D                SEND_NE_DIFF:      
+883D   3A BB 88               LDA   send_reg_a   
+8840   CD 03 84               CALL   get_reg_addr   
+8843   3E 03                  MVI   a,TT_TRUE   
+8845   CD 17 84               CALL   set_slot_special   
+8848   C3 B0 89               JMP   vm_loop   
+884B                             ; ---------------------------------------------------------------
+884B                             ; ! (論理否定): R[a] = falsy(R[a]) ? true : false
+884B                             ; 
+884B                             ; TT_FALSY_MAX (02h) 以下が偽 (TT_EMPTY, TT_NIL, TT_FALSE)。
+884B                             ; ---------------------------------------------------------------
+884B                SEND_NOT:      
+884B   3A BB 88               LDA   send_reg_a   
+884E   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+8851   7E                     MOV   a,m   ; A = 型タグ
+8852   FE 03                  CPI   TT_FALSY_MAX + 1   ; A < 3 なら偽
+8854   DA 65 88               JC   send_not_falsy   
+8857                             ; 真だった → false
+8857   3A BB 88               LDA   send_reg_a   
+885A   CD 03 84               CALL   get_reg_addr   
+885D   3E 02                  MVI   a,TT_FALSE   
+885F   CD 17 84               CALL   set_slot_special   
+8862   C3 B0 89               JMP   vm_loop   
+8865                SEND_NOT_FALSY:      
+8865                             ; 偽だった → true
+8865   3A BB 88               LDA   send_reg_a   
+8868   CD 03 84               CALL   get_reg_addr   
+886B   3E 03                  MVI   a,TT_TRUE   
+886D   CD 17 84               CALL   set_slot_special   
+8870   C3 B0 89               JMP   vm_loop   
+8873                             ; ---------------------------------------------------------------
+8873                             ; % (剰余, Ruby floor modulo): R[a] = R[a] % R[a+1]
+8873                             ; ---------------------------------------------------------------
+8873                SEND_MOD:      
+8873   3A BB 88               LDA   send_reg_a   
+8876   F5                     PUSH   psw   
+8877   CD 09 84               CALL   get_reg_addr_next   
+887A   CD 2F 84               CALL   slot_to_value   
+887D   5E                     MOV   e,m   
+887E   23                     INX   h   
+887F   56                     MOV   d,m   ; DE = 除数
+8880   7A                     MOV   a,d   
+8881   B3                     ORA   e   
+8882   C2 89 88               JNZ   send_mod_ok   
+8885   F1                     POP   psw   
+8886   C3 03 00               JMP   vm_error   ; ゼロ除算
+8889                SEND_MOD_OK:      
+8889   F1                     POP   psw   
+888A   CD 03 84               CALL   get_reg_addr   
+888D   CD 2F 84               CALL   slot_to_value   
+8890   E5                     PUSH   h   ; 書き戻し先
+8891   4E                     MOV   c,m   
+8892   23                     INX   h   
+8893   46                     MOV   b,m   ; BC = 被除数
+8894   CD BD 88               CALL   smod16   ; BC = 剰余 (除数と同符号)
+8897   E1                     POP   h   
+8898   71                     MOV   m,c   
+8899   23                     INX   h   
+889A   70                     MOV   m,b   
+889B   C3 B0 89               JMP   vm_loop   
+889E                             ; ---------------------------------------------------------------
+889E                             ; abs (絶対値): R[a] = |R[a]|
+889E                             ; ---------------------------------------------------------------
+889E                SEND_ABS:      
+889E   3A BB 88               LDA   send_reg_a   
+88A1   CD 03 84               CALL   get_reg_addr   
+88A4   CD 2F 84               CALL   slot_to_value   ; HL = 値の先頭
+88A7   23                     INX   h   ; HL → val_hi
+88A8   7E                     MOV   a,m   
+88A9   E6 80                  ANI   80h   
+88AB   CA B0 89               JZ   vm_loop   ; 正ならそのまま
+88AE   2B                     DCX   h   ; HL → val_lo
+88AF   4E                     MOV   c,m   
+88B0   23                     INX   h   
+88B1   46                     MOV   b,m   ; BC = 値
+88B2   CD 7D 86               CALL   neg_bc   
+88B5   70                     MOV   m,b   ; val_hi
+88B6   2B                     DCX   h   
+88B7   71                     MOV   m,c   ; val_lo
+88B8   C3 B0 89               JMP   vm_loop   
+88BB                             ; --- 一時変数 ---
+88BB                SEND_REG_A:      
+88BB   00                     DB   0   
+88BC                SEND_ARGC:      
+88BC   00                     DB   0   
+88BD                             ; ---------------------------------------------------------------
+88BD                             ; smod16 — 16 ビット符号付き剰余 (Ruby floor modulo)
+88BD                             ; 
+88BD                             ;   入力: BC = 被除数, DE = 除数 (≠ 0)
+88BD                             ;   出力: BC = 剰余 (除数と同符号)
+88BD                             ;   破壊: A, DE, HL
+88BD                             ; 
+88BD                             ; |被除数| mod |除数| を求めたあと、符号と floor 調整を行う。
+88BD                             ; ---------------------------------------------------------------
+88BD                SMOD16:      
+88BD                             ; 除数の符号を保存
+88BD   7A                     MOV   a,d   
+88BE   F5                     PUSH   psw   
+88BF                             ; 符号の差を保存 (bit7: 異符号なら 1)
+88BF   78                     MOV   a,b   
+88C0   AA                     XRA   d   
+88C1   F5                     PUSH   psw   
+88C2                             ; 被除数を正にする
+88C2   78                     MOV   a,b   
+88C3   E6 80                  ANI   80h   
+88C5   CA CB 88               JZ   smod_chk_div   
+88C8   CD 7D 86               CALL   neg_bc   
+88CB                SMOD_CHK_DIV:      
+88CB   7A                     MOV   a,d   
+88CC   E6 80                  ANI   80h   
+88CE   CA D4 88               JZ   smod_do   
+88D1   CD 85 86               CALL   neg_de   
+88D4                SMOD_DO:      
+88D4   D5                     PUSH   d   ; |除数| を退避
+88D5   CD 46 86               CALL   udiv16   ; BC = 商, HL = 剰余
+88D8   44                     MOV   b,h   
+88D9   4D                     MOV   c,l   ; BC = |剰余|
+88DA   78                     MOV   a,b   
+88DB   B1                     ORA   c   
+88DC   D1                     POP   d   ; DE = |除数|
+88DD   F1                     POP   psw   ; 符号差 (bit7)
+88DE   CA F3 88               JZ   smod_zero   ; 剰余 = 0
+88E1   E6 80                  ANI   80h   
+88E3   CA EC 88               JZ   smod_sign   ; 同符号 → 大きさはそのまま
+88E6                             ; 異符号: 大きさ = |除数| - |剰余|
+88E6   7B                     MOV   a,e   
+88E7   91                     SUB   c   
+88E8   4F                     MOV   c,a   
+88E9   7A                     MOV   a,d   
+88EA   98                     SBB   b   
+88EB   47                     MOV   b,a   
+88EC                SMOD_SIGN:      
+88EC   F1                     POP   psw   ; 除数の符号 (bit7)
+88ED   E6 80                  ANI   80h   
+88EF   C8                     RZ      ; 除数が正 → 正の剰余
+88F0   C3 7D 86               JMP   neg_bc   ; 除数が負 → 負にする
+88F3                SMOD_ZERO:      
+88F3   F1                     POP   psw   ; 除数の符号を捨てる
+88F4   C9                     RET      
+88F5                             ; vm_display.a80 — 7 セグメント表示
+88F5                             ; 
+88F5                             ; 16 ビット整数値を 8 桁の 16 進数に変換し、7 セグ表示バッファに書く。
+88F5                             ; 上位 4 桁はブランク（消灯）にする。
+88F5                             ; セグメントパターンは seg_table にまとめる。
+88F5                             ; ---------------------------------------------------------------
+88F5                             ; display_hex16 — 16 ビット値を 7 セグに表示
+88F5                             ; 
+88F5                             ;   入力: HL = 値の先頭 (val_lo の位置)
+88F5                             ;   出力: DISPLAY_BASE に 8 桁のセグメントパターン
+88F5                             ;   破壊: A, B, C, HL, DE
+88F5                             ; 
+88F5                             ; 8 桁表示: 上位 4 桁はブランク (消灯), 下位 4 桁が値。
+88F5                             ; val_hi の上位ニブルが桁 4、val_lo の下位ニブルが桁 7。
+88F5                             ; ---------------------------------------------------------------
+88F5                DISPLAY_HEX16:      
+88F5   E5                     PUSH   h   ; 値のアドレスを退避
+88F6                             ; 上位 4 桁をブランク (消灯) にする
+88F6   11 F8 FF               LXI   d,DISPLAY_BASE   
+88F9   AF                     XRA   a   ; A = 0 (全セグメント消灯)
+88FA   12                     STAX   d   
+88FB   13                     INX   d   
+88FC   12                     STAX   d   
+88FD   13                     INX   d   
+88FE   12                     STAX   d   
+88FF   13                     INX   d   
+8900   12                     STAX   d   
+8901   13                     INX   d   ; DE = DISPLAY_BASE + 4
+8902                             ; 値の byte1 (val_hi) から表示
+8902   E1                     POP   h   ; HL = val_lo
+8903   23                     INX   h   ; HL = val_hi
+8904   0E 02                  MVI   c,2   ; 2 バイト (= 4 ニブル)
+8906                DISPLAY_BYTE_LOOP:      
+8906                             ; 上位ニブル
+8906   7E                     MOV   a,m   
+8907   0F                     RRC      
+8908   0F                     RRC      
+8909   0F                     RRC      
+890A   0F                     RRC      
+890B   E6 0F                  ANI   0Fh   
+890D   CD 20 89               CALL   nibble_to_seg   
+8910   12                     STAX   d   
+8911   13                     INX   d   
+8912                             ; 下位ニブル
+8912   7E                     MOV   a,m   
+8913   E6 0F                  ANI   0Fh   
+8915   CD 20 89               CALL   nibble_to_seg   
+8918   12                     STAX   d   
+8919   13                     INX   d   
+891A                             ; 次のバイト (val_hi → val_lo)
+891A   2B                     DCX   h   
+891B   0D                     DCR   c   
+891C   C2 06 89               JNZ   display_byte_loop   
+891F   C9                     RET      
+8920                             ; ---------------------------------------------------------------
+8920                             ; nibble_to_seg — 4 ビット値を 7 セグパターンに変換
+8920                             ; 
+8920                             ;   入力: A = 0-F
+8920                             ;   出力: A = セグメントパターン
+8920                             ;   破壊: なし (HL, BC は内部で退避・復元)
+8920                             ; ---------------------------------------------------------------
+8920                NIBBLE_TO_SEG:      
+8920   E5                     PUSH   h   
+8921   C5                     PUSH   b   ; BC を退避 (C = ループカウンタ)
+8922   6F                     MOV   l,a   
+8923   26 00                  MVI   h,0   
+8925   01 2D 89               LXI   b,seg_table   
+8928   09                     DAD   b   ; HL = seg_table + nibble
+8929   7E                     MOV   a,m   
+892A   C1                     POP   b   ; BC を復元
+892B   E1                     POP   h   
+892C   C9                     RET      
+892D                             ; ---------------------------------------------------------------
+892D                             ; 7 セグメントパターンテーブル
+892D                             ; 
+892D                             ;   bit 0 = a (上)
+892D                             ;   bit 1 = b (右上)
+892D                             ;   bit 2 = c (右下)
+892D                             ;   bit 3 = d (下)
+892D                             ;   bit 4 = e (左下)
+892D                             ;   bit 5 = f (左上)
+892D                             ;   bit 6 = g (中)
+892D                             ; 
+892D                             ;       aaa
+892D                             ;      f   b
+892D                             ;       ggg
+892D                             ;      e   c
+892D                             ;       ddd
+892D                             ; ---------------------------------------------------------------
+892D                SEG_TABLE:      
+892D   5C                     DB   5Ch   ; 0  (ND8080 ROM パターン)
+892E   06                     DB   06h   ; 1
+892F   5B                     DB   5Bh   ; 2
+8930   4F                     DB   4Fh   ; 3
+8931   66                     DB   66h   ; 4
+8932   6D                     DB   6Dh   ; 5
+8933   7D                     DB   7Dh   ; 6
+8934   27                     DB   27h   ; 7  (ND8080 ROM パターン)
+8935   7F                     DB   7Fh   ; 8
+8936   6F                     DB   6Fh   ; 9
+8937   77                     DB   77h   ; A
+8938   7C                     DB   7Ch   ; b
+8939   39                     DB   39h   ; C
+893A   5E                     DB   5Eh   ; d
+893B   79                     DB   79h   ; E
+893C   71                     DB   71h   ; F
+893D                             ; ===============================================================
+893D                             ; OP_RETURN (B): トップレベルでは VM 停止
+893D                             ; 
+893D                             ; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
+893D                             ; R[a] の値を 7 セグに表示して停止する。
+893D                             ; ===============================================================
+893D                DO_OP_RETURN:      
+893D   CD 74 84               CALL   fetch_byte   ; A = a (戻り値のレジスタ)
+8940   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+8943   CD 2F 84               CALL   slot_to_value   ; HL = R[a] の値先頭
+8946   CD F5 88               CALL   display_hex16   
+8949   3E 02                  MVI   a,VM_FINISHED   
+894B   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+894E   C3 72 89               JMP   vm_halt   
+8951                             ; ===============================================================
+8951                             ; OP_STOP (Z): VM 停止
+8951                             ; ===============================================================
+8951                DO_OP_STOP:      
+8951   3E 02                  MVI   a,VM_FINISHED   
+8953   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+8956                             ; R[1] の値を 7 セグに表示
+8956   3E 01                  MVI   a,1   
+8958   CD 03 84               CALL   get_reg_addr   ; HL = R[1]
+895B   CD 2F 84               CALL   slot_to_value   ; HL = R[1] の値先頭
+895E   CD F5 88               CALL   display_hex16   
+8961   C3 72 89               JMP   vm_halt   
+8964                             ; ===============================================================
+8964                             ; エラー停止
+8964                             ; 
+8964                             ; 未対応のオペコードを踏んだとき。
+8964                             ; 現在のオペコードをエラーコードとして保存する。
+8964                             ; ===============================================================
+8964                VM_ERROR:      
+8964   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+8967   32 04 80               STA   VM_STATE_BASE + OFF_ERROR   
+896A   3E 03                  MVI   a,VM_ERROR   
+896C   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+896F   C3 72 89               JMP   vm_halt   
+8972                             ; ===============================================================
+8972                             ; 停止 — ND80Z モニタのリモートモードへ復帰
+8972                             ; 
+8972                             ; HLT だとリモートモードに戻るために手動リセット + [*(I/O)][8] が
+8972                             ; 必要になる。代わりに N80MON2D ジャンプテーブルの REMOTE エントリ
+8972                             ; (0821h) にジャンプする。REMOTE ルーチンは REMOTEMK=FFh を設定し、
+8972                             ; RST5/RST6 をリモート用ハンドラに差し替えてから START2 に入る。
+8972                             ; これにより自動的にリモートモードへ復帰する。
+8972                             ; エミュレータでは ROM 領域へのジャンプを検出して停止する。
+8972                             ; ===============================================================
+8972                VM_HALT:      
+8972                             ; LED 表示を約 3 秒間見せてからリモートモードへ復帰する。
+8972                             ; 外側ループ B=12, 内側ループ DE=0 (65536 回)
+8972                             ; 1 回 ≈ 24 クロック, 2.048 MHz → 約 0.77 秒/周 × 4 ≈ 3 秒
+8972   06 04                  MVI   b,4   
+8974                VM_HALT_OUTER:      
+8974   11 00 00               LXI   d,0   
+8977                VM_HALT_INNER:      
+8977   1B                     DCX   d   
+8978   7A                     MOV   a,d   
+8979   B3                     ORA   e   
+897A   C2 77 89               JNZ   vm_halt_inner   
+897D   05                     DCR   b   
+897E   C2 74 89               JNZ   vm_halt_outer   
+8981   C3 21 08               JMP   00821h   ; N80MON2D REMOTE: リモートモード再入口
+8984                             ; ===============================================================
+8984                             ; 初期化
+8984                             ; ===============================================================
+8984                VM_START:      
+8984                             ; スタックポインタを設定
+8984   31 00 FE               LXI   sp,STACK_TOP + 1   
+8987                             ; VM 状態領域をゼロクリア (256 バイト)
+8987   21 00 80               LXI   h,VM_STATE_BASE   
+898A   0E 00                  MVI   c,0   ; 256 回 (0 は 256 として扱う)
+898C                VM_CLEAR_STATE:      
+898C   36 00                  MVI   m,0   
+898E   23                     INX   h   
+898F   0D                     DCR   c   
+8990   C2 8C 89               JNZ   vm_clear_state   
+8993                             ; レジスタファイルをゼロクリア (256 バイト)
+8993   21 00 81               LXI   h,REG_FILE_BASE   
+8996   0E 00                  MVI   c,0   
+8998                VM_CLEAR_REGS:      
+8998   36 00                  MVI   m,0   
+899A   23                     INX   h   
+899B   0D                     DCR   c   
+899C   C2 98 89               JNZ   vm_clear_regs   
+899F                             ; IREP 0 のバイトコード長を VM 状態に設定
+899F                             ; IREP テーブルの先頭エントリから読む
+899F   3A 02 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN   
+89A2   32 0E 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN   
+89A5   3A 03 82               LDA   IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1   
+89A8   32 0F 80               STA   VM_STATE_BASE + OFF_BYTECODE_LEN + 1   
+89AB                             ; PC = 0 (ゼロクリア済み)
+89AB                             ; 実行状態を RUNNING に設定
+89AB   3E 01                  MVI   a,VM_RUNNING   
+89AD   32 02 80               STA   VM_STATE_BASE + OFF_STATUS   
+89B0                             ; メインループへ
+89B0                             ; fall through
+89B0                             ; ===============================================================
+89B0                             ; メインループ (fetch-decode-execute)
+89B0                             ; ===============================================================
+89B0                VM_LOOP:      
+89B0                             ; --- 実行状態の確認 ---
+89B0   3A 02 80               LDA   VM_STATE_BASE + OFF_STATUS   
+89B3   FE 01                  CPI   VM_RUNNING   
+89B5   C2 72 89               JNZ   vm_halt   
+89B8                             ; --- PC がバイトコード長を超えていないか ---
+89B8   2A 00 80               LHLD   VM_STATE_BASE + OFF_PC   
+89BB   EB                     XCHG      ; DE = PC
+89BC   2A 0E 80               LHLD   VM_STATE_BASE + OFF_BYTECODE_LEN   
+89BF                             ; HL = bytecode_len, DE = PC
+89BF                             ; PC >= bytecode_len ならエラー
+89BF   7B                     MOV   a,e   
+89C0   95                     SUB   l   
+89C1   7A                     MOV   a,d   
+89C2   9C                     SBB   h   ; DE - HL (PC - len)
+89C3   D2 03 00               JNC   vm_error   ; PC >= len → エラー
+89C6                             ; --- オペコードフェッチ ---
+89C6   CD 74 84               CALL   fetch_byte   ; A = opcode
+89C9   32 0A 80               STA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+89CC                             ; --- ステップカウント ---
+89CC   2A 06 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT   
+89CF   23                     INX   h   
+89D0   22 06 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT   
+89D3                             ; 上位 16 ビットの桁上げ (HL が 0 に戻ったとき)
+89D3   7C                     MOV   a,h   
+89D4   B5                     ORA   l   
+89D5   C2 DF 89               JNZ   vm_dispatch   
+89D8   2A 08 80               LHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
+89DB   23                     INX   h   
+89DC   22 08 80               SHLD   VM_STATE_BASE + OFF_STEP_COUNT + 2   
+89DF                             ; --- ディスパッチ ---
+89DF                VM_DISPATCH:      
+89DF   3A 0A 80               LDA   VM_STATE_BASE + OFF_CURRENT_OPCODE   
+89E2                             ; オペコード × 2 でジャンプテーブルのオフセットを求める
+89E2   87                     ADD   a   ; A = opcode * 2 (テーブルエントリは 2 バイト)
+89E3   DA 03 00               JC   vm_error   ; オーバーフロー → 未対応
+89E6   5F                     MOV   e,a   
+89E7   16 00                  MVI   d,0   ; DE = opcode * 2
+89E9   21 01 8A               LXI   h,dispatch_table   
+89EC   19                     DAD   d   ; HL = &dispatch_table[opcode]
+89ED                             ; テーブル上限チェック
+89ED   11 D5 8A               LXI   d,dispatch_table_end   
+89F0   7B                     MOV   a,e   
+89F1   95                     SUB   l   
+89F2   7A                     MOV   a,d   
+89F3   9C                     SBB   h   ; DE - HL → dispatch_table_end - 現在位置
+89F4   DA 03 00               JC   vm_error   ; テーブル範囲外
+89F7                             ; アドレスを読んでジャンプ
+89F7   5E                     MOV   e,m   ; E = 下位バイト
+89F8   23                     INX   h   
+89F9   56                     MOV   d,m   ; D = 上位バイト
+89FA   EB                     XCHG      ; HL = ハンドラアドレス
+89FB                             ; 0000h ならエラー (未実装マーカー)
+89FB   7C                     MOV   a,h   
+89FC   B5                     ORA   l   
+89FD   CA 03 00               JZ   vm_error   
+8A00   E9                     PCHL      ; ハンドラへジャンプ
+8A01                             ; ===============================================================
+8A01                             ; ディスパッチテーブル
+8A01                             ; 
+8A01                             ; オペコード番号順に 2 バイトのアドレスを並べる。
+8A01                             ; 未実装のオペコードは 0000h (vm_error で捕捉)。
+8A01                             ; ===============================================================
+8A01                DISPATCH_TABLE:      
+8A01   91 84                  DW   do_op_nop   ; 00 OP_NOP
+8A03   94 84                  DW   do_op_move   ; 01 OP_MOVE
+8A05   00 00                  DW   0000h   ; 02 OP_LOADL
+8A07   AA 84                  DW   do_op_loadi   ; 03 OP_LOADI
+8A09   BF 84                  DW   do_op_loadineg   ; 04 OP_LOADINEG
+8A0B   D6 84                  DW   do_op_loadi__1   ; 05 OP_LOADI__1
+8A0D   E6 84                  DW   do_op_loadi_0   ; 06 OP_LOADI_0
+8A0F   EB 84                  DW   do_op_loadi_1   ; 07 OP_LOADI_1
+8A11   F0 84                  DW   do_op_loadi_2   ; 08 OP_LOADI_2
+8A13   F5 84                  DW   do_op_loadi_3   ; 09 OP_LOADI_3
+8A15   FA 84                  DW   do_op_loadi_4   ; 0A OP_LOADI_4
+8A17   FF 84                  DW   do_op_loadi_5   ; 0B OP_LOADI_5
+8A19   04 85                  DW   do_op_loadi_6   ; 0C OP_LOADI_6
+8A1B   09 85                  DW   do_op_loadi_7   ; 0D OP_LOADI_7
+8A1D   19 85                  DW   do_op_loadi16   ; 0E OP_LOADI16
+8A1F   00 00                  DW   0000h   ; 0F OP_LOADI32
+8A21   00 00                  DW   0000h   ; 10 OP_LOADSYM
+8A23   32 85                  DW   do_op_loadnil   ; 11 OP_LOADNIL
+8A25   00 00                  DW   0000h   ; 12 OP_LOADSELF
+8A27   40 85                  DW   do_op_loadt   ; 13 OP_LOADT
+8A29   4E 85                  DW   do_op_loadf   ; 14 OP_LOADF
+8A2B   6B 87                  DW   do_op_getgv   ; 15 OP_GETGV
+8A2D   93 87                  DW   do_op_setgv   ; 16 OP_SETGV
+8A2F   00 00                  DW   0000h   ; 17 OP_GETSV
+8A31   00 00                  DW   0000h   ; 18 OP_SETSV
+8A33   00 00                  DW   0000h   ; 19 OP_GETIV
+8A35   00 00                  DW   0000h   ; 1A OP_SETIV
+8A37   00 00                  DW   0000h   ; 1B OP_GETCV
+8A39   00 00                  DW   0000h   ; 1C OP_SETCV
+8A3B   00 00                  DW   0000h   ; 1D OP_GETCONST
+8A3D   00 00                  DW   0000h   ; 1E OP_SETCONST
+8A3F   00 00                  DW   0000h   ; 1F OP_GETMCNST
+8A41   00 00                  DW   0000h   ; 20 OP_SETMCNST
+8A43   00 00                  DW   0000h   ; 21 OP_GETUPVAR
+8A45   00 00                  DW   0000h   ; 22 OP_SETUPVAR
+8A47   00 00                  DW   0000h   ; 23 OP_GETIDX
+8A49   00 00                  DW   0000h   ; 24 OP_SETIDX
+8A4B   24 87                  DW   do_op_jmp   ; 25 OP_JMP
+8A4D   2D 87                  DW   do_op_jmpif   ; 26 OP_JMPIF
+8A4F   4C 87                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
+8A51   00 00                  DW   0000h   ; 28 OP_JMPNIL
+8A53   00 00                  DW   0000h   ; 29 OP_JMPUW
+8A55   00 00                  DW   0000h   ; 2A OP_EXCEPT
+8A57   00 00                  DW   0000h   ; 2B OP_RESCUE
+8A59   00 00                  DW   0000h   ; 2C OP_RAISEIF
+8A5B   B8 87                  DW   do_op_ssend   ; 2D OP_SSEND
+8A5D   00 00                  DW   0000h   ; 2E OP_SSENDB
+8A5F   D9 87                  DW   do_op_send   ; 2F OP_SEND
+8A61   00 00                  DW   0000h   ; 30 OP_SENDB
+8A63   00 00                  DW   0000h   ; 31 OP_CALL
+8A65   00 00                  DW   0000h   ; 32 OP_SUPER
+8A67   00 00                  DW   0000h   ; 33 OP_ARGARY
+8A69   00 00                  DW   0000h   ; 34 OP_ENTER
+8A6B   00 00                  DW   0000h   ; 35 OP_KEY_P
+8A6D   00 00                  DW   0000h   ; 36 OP_KEYEND
+8A6F   00 00                  DW   0000h   ; 37 OP_KARG
+8A71   3D 89                  DW   do_op_return   ; 38 OP_RETURN
+8A73   00 00                  DW   0000h   ; 39 OP_RETURN_BLK
+8A75   00 00                  DW   0000h   ; 3A OP_BREAK
+8A77   00 00                  DW   0000h   ; 3B OP_BLKPUSH
+8A79   5C 85                  DW   do_op_add   ; 3C OP_ADD
+8A7B   8C 85                  DW   do_op_addi   ; 3D OP_ADDI
+8A7D   74 85                  DW   do_op_sub   ; 3E OP_SUB
+8A7F   A6 85                  DW   do_op_subi   ; 3F OP_SUBI
+8A81   C0 85                  DW   do_op_mul   ; 40 OP_MUL
+8A83   E4 85                  DW   do_op_div   ; 41 OP_DIV
+8A85   C3 86                  DW   do_op_eq   ; 42 OP_EQ
+8A87   ED 86                  DW   do_op_lt   ; 43 OP_LT
+8A89   F7 86                  DW   do_op_le   ; 44 OP_LE
+8A8B   04 87                  DW   do_op_gt   ; 45 OP_GT
+8A8D   11 87                  DW   do_op_ge   ; 46 OP_GE
+8A8F   00 00                  DW   0000h   ; 47 OP_ARRAY
+8A91   00 00                  DW   0000h   ; 48 OP_ARRAY2
+8A93   00 00                  DW   0000h   ; 49 OP_ARYCAT
+8A95   00 00                  DW   0000h   ; 4A OP_ARYPUSH
+8A97   00 00                  DW   0000h   ; 4B OP_ARYSPLAT
+8A99   00 00                  DW   0000h   ; 4C OP_AREF
+8A9B   00 00                  DW   0000h   ; 4D OP_ASET
+8A9D   00 00                  DW   0000h   ; 4E OP_APOST
+8A9F   00 00                  DW   0000h   ; 4F OP_INTERN
+8AA1   00 00                  DW   0000h   ; 50 OP_SYMBOL
+8AA3   00 00                  DW   0000h   ; 51 OP_STRING
+8AA5   00 00                  DW   0000h   ; 52 OP_STRCAT
+8AA7   00 00                  DW   0000h   ; 53 OP_HASH
+8AA9   00 00                  DW   0000h   ; 54 OP_HASHADD
+8AAB   00 00                  DW   0000h   ; 55 OP_HASHCAT
+8AAD   00 00                  DW   0000h   ; 56 OP_LAMBDA
+8AAF   00 00                  DW   0000h   ; 57 OP_BLOCK
+8AB1   00 00                  DW   0000h   ; 58 OP_METHOD
+8AB3   00 00                  DW   0000h   ; 59 OP_RANGE_INC
+8AB5   00 00                  DW   0000h   ; 5A OP_RANGE_EXC
+8AB7   00 00                  DW   0000h   ; 5B OP_OCLASS
+8AB9   00 00                  DW   0000h   ; 5C OP_CLASS
+8ABB   00 00                  DW   0000h   ; 5D OP_MODULE
+8ABD   00 00                  DW   0000h   ; 5E OP_EXEC
+8ABF   00 00                  DW   0000h   ; 5F OP_DEF
+8AC1   00 00                  DW   0000h   ; 60 OP_ALIAS
+8AC3   00 00                  DW   0000h   ; 61 OP_UNDEF
+8AC5   00 00                  DW   0000h   ; 62 OP_SCLASS
+8AC7   00 00                  DW   0000h   ; 63 OP_TCLASS
+8AC9   00 00                  DW   0000h   ; 64 OP_DEBUG
+8ACB   00 00                  DW   0000h   ; 65 OP_ERR
+8ACD   00 00                  DW   0000h   ; 66 OP_EXT1
+8ACF   00 00                  DW   0000h   ; 67 OP_EXT2
+8AD1   00 00                  DW   0000h   ; 68 OP_EXT3
+8AD3   51 89                  DW   do_op_stop   ; 69 OP_STOP
+8AD5                DISPATCH_TABLE_END:      
+8AD5                          END      
 
 
 VM_CODE_ORG:        8400 DEFINED AT LINE 6 IN vm_constants.a80
@@ -1158,8 +1663,8 @@ BYTECODE_BASE:      9000 DEFINED AT LINE 7 IN vm_constants.a80
 BYTECODE_SIZE:      1000 DEFINED AT LINE 8 IN vm_constants.a80
 POOL_BASE:          A000 DEFINED AT LINE 9 IN vm_constants.a80
 IREP_TABLE_BASE:    8200 DEFINED AT LINE 10 IN vm_constants.a80
-                    > USED AT LINE 122
                     > USED AT LINE 124
+                    > USED AT LINE 126
 VM_STATE_BASE:      8000 DEFINED AT LINE 11 IN vm_constants.a80
                     > USED AT LINE 17 IN vm_fetch.a80
                     > USED AT LINE 22 IN vm_fetch.a80
@@ -1172,36 +1677,37 @@ VM_STATE_BASE:      8000 DEFINED AT LINE 11 IN vm_constants.a80
                     > USED AT LINE 65 IN vm_compare.a80
                     > USED AT LINE 17 IN vm_jump.a80
                     > USED AT LINE 19 IN vm_jump.a80
-                    > USED AT LINE 40
-                    > USED AT LINE 48
-                    > USED AT LINE 63
-                    > USED AT LINE 64
+                    > USED AT LINE 42
+                    > USED AT LINE 50
+                    > USED AT LINE 65
                     > USED AT LINE 66
-                    > USED AT LINE 103
-                    > USED AT LINE 123
+                    > USED AT LINE 68
+                    > USED AT LINE 105
                     > USED AT LINE 125
-                    > USED AT LINE 131
-                    > USED AT LINE 141
-                    > USED AT LINE 146
+                    > USED AT LINE 127
+                    > USED AT LINE 133
+                    > USED AT LINE 143
                     > USED AT LINE 148
-                    > USED AT LINE 159
-                    > USED AT LINE 162
+                    > USED AT LINE 150
+                    > USED AT LINE 161
                     > USED AT LINE 164
-                    > USED AT LINE 169
+                    > USED AT LINE 166
                     > USED AT LINE 171
-                    > USED AT LINE 175
+                    > USED AT LINE 173
+                    > USED AT LINE 177
 REG_FILE_BASE:      8100 DEFINED AT LINE 12 IN vm_constants.a80
-                    > USED AT LINE 112
+                    > USED AT LINE 114
 REG_FILE_BASE_HI:   0081 DEFINED AT LINE 13 IN vm_constants.a80
                     > USED AT LINE 26 IN vm_util.a80
 MAX_REGS:           0040 DEFINED AT LINE 14 IN vm_constants.a80
 STACK_TOP:          FDFF DEFINED AT LINE 15 IN vm_constants.a80
-                    > USED AT LINE 100
+                    > USED AT LINE 102
 DISPLAY_BASE:       FFF8 DEFINED AT LINE 16 IN vm_constants.a80
                     > USED AT LINE 20 IN vm_display.a80
 DISPLAY_SIZE:       0008 DEFINED AT LINE 17 IN vm_constants.a80
 SLOT_BYTES:         0004 DEFINED AT LINE 21 IN vm_constants.a80
                     > USED AT LINE 86 IN vm_util.a80
+                    > USED AT LINE 88 IN vm_send.a80
 SLOT_TYPE_OFFSET:   0000 DEFINED AT LINE 22 IN vm_constants.a80
 SLOT_VALUE_OFFSET:  0002 DEFINED AT LINE 23 IN vm_constants.a80
 OFF_PC:             0000 DEFINED AT LINE 27 IN vm_constants.a80
@@ -1210,24 +1716,24 @@ OFF_PC:             0000 DEFINED AT LINE 27 IN vm_constants.a80
                     > USED AT LINE 24 IN vm_fetch.a80
                     > USED AT LINE 17 IN vm_jump.a80
                     > USED AT LINE 19 IN vm_jump.a80
-                    > USED AT LINE 146
+                    > USED AT LINE 148
 OFF_STATUS:         0002 DEFINED AT LINE 28 IN vm_constants.a80
-                    > USED AT LINE 40
-                    > USED AT LINE 48
-                    > USED AT LINE 66
-                    > USED AT LINE 131
-                    > USED AT LINE 141
+                    > USED AT LINE 42
+                    > USED AT LINE 50
+                    > USED AT LINE 68
+                    > USED AT LINE 133
+                    > USED AT LINE 143
 OFF_ERROR:          0004 DEFINED AT LINE 29 IN vm_constants.a80
-                    > USED AT LINE 64
+                    > USED AT LINE 66
 OFF_STEP_COUNT:     0006 DEFINED AT LINE 30 IN vm_constants.a80
-                    > USED AT LINE 162
                     > USED AT LINE 164
-                    > USED AT LINE 169
+                    > USED AT LINE 166
                     > USED AT LINE 171
+                    > USED AT LINE 173
 OFF_CURRENT_OPCODE: 000A DEFINED AT LINE 31 IN vm_constants.a80
-                    > USED AT LINE 63
-                    > USED AT LINE 159
-                    > USED AT LINE 175
+                    > USED AT LINE 65
+                    > USED AT LINE 161
+                    > USED AT LINE 177
 OFF_OPERAND_A:      000B DEFINED AT LINE 32 IN vm_constants.a80
                     > USED AT LINE 24 IN vm_compare.a80
                     > USED AT LINE 30 IN vm_compare.a80
@@ -1238,17 +1744,17 @@ OFF_OPERAND_A:      000B DEFINED AT LINE 32 IN vm_constants.a80
 OFF_OPERAND_B:      000C DEFINED AT LINE 33 IN vm_constants.a80
 OFF_OPERAND_C:      000D DEFINED AT LINE 34 IN vm_constants.a80
 OFF_BYTECODE_LEN:   000E DEFINED AT LINE 35 IN vm_constants.a80
-                    > USED AT LINE 123
                     > USED AT LINE 125
-                    > USED AT LINE 148
+                    > USED AT LINE 127
+                    > USED AT LINE 150
 OFF_NREGS:          0010 DEFINED AT LINE 36 IN vm_constants.a80
 OFF_CUR_IREP:       0011 DEFINED AT LINE 37 IN vm_constants.a80
 OFF_NUM_IREPS:      0012 DEFINED AT LINE 38 IN vm_constants.a80
 IREP_ENTRY_BYTES:   0008 DEFINED AT LINE 42 IN vm_constants.a80
 IREP_OFF_BYTECODE:  0000 DEFINED AT LINE 43 IN vm_constants.a80
 IREP_OFF_BYTECODE_LEN: 0002 DEFINED AT LINE 44 IN vm_constants.a80
-                    > USED AT LINE 122
                     > USED AT LINE 124
+                    > USED AT LINE 126
 IREP_OFF_POOL:      0004 DEFINED AT LINE 45 IN vm_constants.a80
 IREP_OFF_NREGS:     0006 DEFINED AT LINE 46 IN vm_constants.a80
 TT_EMPTY:           0000 DEFINED AT LINE 51 IN vm_constants.a80
@@ -1257,64 +1763,81 @@ TT_NIL:             0001 DEFINED AT LINE 52 IN vm_constants.a80
 TT_FALSE:           0002 DEFINED AT LINE 53 IN vm_constants.a80
                     > USED AT LINE 158 IN vm_load.a80
                     > USED AT LINE 50 IN vm_compare.a80
+                    > USED AT LINE 100 IN vm_send.a80
+                    > USED AT LINE 124 IN vm_send.a80
 TT_TRUE:            0003 DEFINED AT LINE 54 IN vm_constants.a80
                     > USED AT LINE 148 IN vm_load.a80
                     > USED AT LINE 44 IN vm_compare.a80
+                    > USED AT LINE 106 IN vm_send.a80
+                    > USED AT LINE 131 IN vm_send.a80
 TT_INTEGER:         0004 DEFINED AT LINE 55 IN vm_constants.a80
                     > USED AT LINE 50 IN vm_util.a80
                     > USED AT LINE 123 IN vm_load.a80
 TT_FALSY_MAX:       0002 DEFINED AT LINE 56 IN vm_constants.a80
                     > USED AT LINE 44 IN vm_jump.a80
                     > USED AT LINE 65 IN vm_jump.a80
+                    > USED AT LINE 119 IN vm_send.a80
 VM_STOPPED:         0000 DEFINED AT LINE 60 IN vm_constants.a80
 VM_RUNNING:         0001 DEFINED AT LINE 61 IN vm_constants.a80
-                    > USED AT LINE 130
-                    > USED AT LINE 142
+                    > USED AT LINE 132
+                    > USED AT LINE 144
 VM_FINISHED:        0002 DEFINED AT LINE 62 IN vm_constants.a80
-                    > USED AT LINE 39
-                    > USED AT LINE 47
-VM_ERROR:           870D DEFINED AT LINE 62
-                    > USED AT LINE 65
-                    > USED AT LINE 155
-                    > USED AT LINE 178
-                    > USED AT LINE 189
-                    > USED AT LINE 198
-OP_NOP:             0000 DEFINED AT LINE 67 IN vm_constants.a80
-OP_MOVE:            0001 DEFINED AT LINE 68 IN vm_constants.a80
-OP_LOADI:           0003 DEFINED AT LINE 69 IN vm_constants.a80
-OP_LOADINEG:        0004 DEFINED AT LINE 70 IN vm_constants.a80
-OP_LOADI__1:        0005 DEFINED AT LINE 71 IN vm_constants.a80
-OP_LOADI_0:         0006 DEFINED AT LINE 72 IN vm_constants.a80
-OP_LOADI_1:         0007 DEFINED AT LINE 73 IN vm_constants.a80
-OP_LOADI_2:         0008 DEFINED AT LINE 74 IN vm_constants.a80
-OP_LOADI_3:         0009 DEFINED AT LINE 75 IN vm_constants.a80
-OP_LOADI_4:         000A DEFINED AT LINE 76 IN vm_constants.a80
-OP_LOADI_5:         000B DEFINED AT LINE 77 IN vm_constants.a80
-OP_LOADI_6:         000C DEFINED AT LINE 78 IN vm_constants.a80
-OP_LOADI_7:         000D DEFINED AT LINE 79 IN vm_constants.a80
-OP_LOADI16:         000E DEFINED AT LINE 80 IN vm_constants.a80
-OP_LOADNIL:         0011 DEFINED AT LINE 81 IN vm_constants.a80
-OP_LOADT:           0013 DEFINED AT LINE 82 IN vm_constants.a80
-OP_LOADF:           0014 DEFINED AT LINE 83 IN vm_constants.a80
-OP_ADD:             003C DEFINED AT LINE 84 IN vm_constants.a80
-OP_SUB:             003E DEFINED AT LINE 85 IN vm_constants.a80
-OP_EQ:              0042 DEFINED AT LINE 86 IN vm_constants.a80
-OP_LT:              0043 DEFINED AT LINE 87 IN vm_constants.a80
-OP_LE:              0044 DEFINED AT LINE 88 IN vm_constants.a80
-OP_GT:              0045 DEFINED AT LINE 89 IN vm_constants.a80
-OP_GE:              0046 DEFINED AT LINE 90 IN vm_constants.a80
-OP_JMP:             0025 DEFINED AT LINE 91 IN vm_constants.a80
-OP_JMPIF:           0026 DEFINED AT LINE 92 IN vm_constants.a80
-OP_JMPNOT:          0027 DEFINED AT LINE 93 IN vm_constants.a80
-OP_STOP:            0069 DEFINED AT LINE 94 IN vm_constants.a80
-FMT_Z:              0000 DEFINED AT LINE 99 IN vm_constants.a80
-FMT_B:              0001 DEFINED AT LINE 100 IN vm_constants.a80
-FMT_BB:             0002 DEFINED AT LINE 101 IN vm_constants.a80
-FMT_BBB:            0003 DEFINED AT LINE 102 IN vm_constants.a80
-FMT_S:              0002 DEFINED AT LINE 103 IN vm_constants.a80
-FMT_BS:             0003 DEFINED AT LINE 104 IN vm_constants.a80
-FMT_BSS:            0005 DEFINED AT LINE 105 IN vm_constants.a80
-FMT_W:              0003 DEFINED AT LINE 106 IN vm_constants.a80
+                    > USED AT LINE 41
+                    > USED AT LINE 49
+VM_ERROR:           8964 DEFINED AT LINE 64
+                    > USED AT LINE 131 IN vm_arith.a80
+                    > USED AT LINE 34 IN vm_globals.a80
+                    > USED AT LINE 63 IN vm_globals.a80
+                    > USED AT LINE 59 IN vm_send.a80
+                    > USED AT LINE 63 IN vm_send.a80
+                    > USED AT LINE 73 IN vm_send.a80
+                    > USED AT LINE 150 IN vm_send.a80
+                    > USED AT LINE 67
+                    > USED AT LINE 157
+                    > USED AT LINE 180
+                    > USED AT LINE 191
+                    > USED AT LINE 200
+SYM_TABLE_BASE:     8300 DEFINED AT LINE 67 IN vm_constants.a80
+                    > USED AT LINE 24 IN vm_globals.a80
+                    > USED AT LINE 54 IN vm_globals.a80
+                    > USED AT LINE 51 IN vm_send.a80
+GLOBALS_BASE:       B000 DEFINED AT LINE 68 IN vm_constants.a80
+OP_NOP:             0000 DEFINED AT LINE 72 IN vm_constants.a80
+OP_MOVE:            0001 DEFINED AT LINE 73 IN vm_constants.a80
+OP_LOADI:           0003 DEFINED AT LINE 74 IN vm_constants.a80
+OP_LOADINEG:        0004 DEFINED AT LINE 75 IN vm_constants.a80
+OP_LOADI__1:        0005 DEFINED AT LINE 76 IN vm_constants.a80
+OP_LOADI_0:         0006 DEFINED AT LINE 77 IN vm_constants.a80
+OP_LOADI_1:         0007 DEFINED AT LINE 78 IN vm_constants.a80
+OP_LOADI_2:         0008 DEFINED AT LINE 79 IN vm_constants.a80
+OP_LOADI_3:         0009 DEFINED AT LINE 80 IN vm_constants.a80
+OP_LOADI_4:         000A DEFINED AT LINE 81 IN vm_constants.a80
+OP_LOADI_5:         000B DEFINED AT LINE 82 IN vm_constants.a80
+OP_LOADI_6:         000C DEFINED AT LINE 83 IN vm_constants.a80
+OP_LOADI_7:         000D DEFINED AT LINE 84 IN vm_constants.a80
+OP_LOADI16:         000E DEFINED AT LINE 85 IN vm_constants.a80
+OP_LOADNIL:         0011 DEFINED AT LINE 86 IN vm_constants.a80
+OP_LOADT:           0013 DEFINED AT LINE 87 IN vm_constants.a80
+OP_LOADF:           0014 DEFINED AT LINE 88 IN vm_constants.a80
+OP_ADD:             003C DEFINED AT LINE 89 IN vm_constants.a80
+OP_SUB:             003E DEFINED AT LINE 90 IN vm_constants.a80
+OP_EQ:              0042 DEFINED AT LINE 91 IN vm_constants.a80
+OP_LT:              0043 DEFINED AT LINE 92 IN vm_constants.a80
+OP_LE:              0044 DEFINED AT LINE 93 IN vm_constants.a80
+OP_GT:              0045 DEFINED AT LINE 94 IN vm_constants.a80
+OP_GE:              0046 DEFINED AT LINE 95 IN vm_constants.a80
+OP_JMP:             0025 DEFINED AT LINE 96 IN vm_constants.a80
+OP_JMPIF:           0026 DEFINED AT LINE 97 IN vm_constants.a80
+OP_JMPNOT:          0027 DEFINED AT LINE 98 IN vm_constants.a80
+OP_STOP:            0069 DEFINED AT LINE 99 IN vm_constants.a80
+FMT_Z:              0000 DEFINED AT LINE 104 IN vm_constants.a80
+FMT_B:              0001 DEFINED AT LINE 105 IN vm_constants.a80
+FMT_BB:             0002 DEFINED AT LINE 106 IN vm_constants.a80
+FMT_BBB:            0003 DEFINED AT LINE 107 IN vm_constants.a80
+FMT_S:              0002 DEFINED AT LINE 108 IN vm_constants.a80
+FMT_BS:             0003 DEFINED AT LINE 109 IN vm_constants.a80
+FMT_BSS:            0005 DEFINED AT LINE 110 IN vm_constants.a80
+FMT_W:              0003 DEFINED AT LINE 111 IN vm_constants.a80
 GET_REG_ADDR:       8403 DEFINED AT LINE 22 IN vm_util.a80
                     > USED AT LINE 38 IN vm_util.a80
                     > USED AT LINE 21 IN vm_load.a80
@@ -1331,19 +1854,37 @@ GET_REG_ADDR:       8403 DEFINED AT LINE 22 IN vm_util.a80
                     > USED AT LINE 35 IN vm_arith.a80
                     > USED AT LINE 51 IN vm_arith.a80
                     > USED AT LINE 71 IN vm_arith.a80
+                    > USED AT LINE 97 IN vm_arith.a80
+                    > USED AT LINE 134 IN vm_arith.a80
                     > USED AT LINE 31 IN vm_compare.a80
                     > USED AT LINE 43 IN vm_compare.a80
                     > USED AT LINE 49 IN vm_compare.a80
                     > USED AT LINE 63 IN vm_compare.a80
                     > USED AT LINE 42 IN vm_jump.a80
                     > USED AT LINE 63 IN vm_jump.a80
-                    > USED AT LINE 36
-                    > USED AT LINE 51
+                    > USED AT LINE 38 IN vm_globals.a80
+                    > USED AT LINE 66 IN vm_globals.a80
+                    > USED AT LINE 20 IN vm_send.a80
+                    > USED AT LINE 23 IN vm_send.a80
+                    > USED AT LINE 87 IN vm_send.a80
+                    > USED AT LINE 99 IN vm_send.a80
+                    > USED AT LINE 105 IN vm_send.a80
+                    > USED AT LINE 117 IN vm_send.a80
+                    > USED AT LINE 123 IN vm_send.a80
+                    > USED AT LINE 130 IN vm_send.a80
+                    > USED AT LINE 153 IN vm_send.a80
+                    > USED AT LINE 171 IN vm_send.a80
+                    > USED AT LINE 38
+                    > USED AT LINE 53
 GET_REG_ADDR_NEXT:  8409 DEFINED AT LINE 36 IN vm_util.a80
                     > USED AT LINE 14 IN vm_arith.a80
                     > USED AT LINE 31 IN vm_arith.a80
+                    > USED AT LINE 91 IN vm_arith.a80
+                    > USED AT LINE 121 IN vm_arith.a80
                     > USED AT LINE 26 IN vm_compare.a80
                     > USED AT LINE 66 IN vm_compare.a80
+                    > USED AT LINE 84 IN vm_send.a80
+                    > USED AT LINE 141 IN vm_send.a80
 SET_SLOT_INT16:     840D DEFINED AT LINE 49 IN vm_util.a80
                     > USED AT LINE 41 IN vm_load.a80
                     > USED AT LINE 59 IN vm_load.a80
@@ -1355,8 +1896,15 @@ SET_SLOT_SPECIAL:   8417 DEFINED AT LINE 67 IN vm_util.a80
                     > USED AT LINE 159 IN vm_load.a80
                     > USED AT LINE 45 IN vm_compare.a80
                     > USED AT LINE 51 IN vm_compare.a80
+                    > USED AT LINE 101 IN vm_send.a80
+                    > USED AT LINE 107 IN vm_send.a80
+                    > USED AT LINE 125 IN vm_send.a80
+                    > USED AT LINE 132 IN vm_send.a80
 COPY_SLOT:          8422 DEFINED AT LINE 85 IN vm_util.a80
                     > USED AT LINE 26 IN vm_load.a80
+                    > USED AT LINE 41 IN vm_globals.a80
+                    > USED AT LINE 68 IN vm_globals.a80
+                    > USED AT LINE 24 IN vm_send.a80
 COPY_SLOT_LOOP:     8424 DEFINED AT LINE 87 IN vm_util.a80
                     > USED AT LINE 93 IN vm_util.a80
 GET_SLOT_TYPE:      842D DEFINED AT LINE 103 IN vm_util.a80
@@ -1369,10 +1917,17 @@ SLOT_TO_VALUE:      842F DEFINED AT LINE 114 IN vm_util.a80
                     > USED AT LINE 36 IN vm_arith.a80
                     > USED AT LINE 52 IN vm_arith.a80
                     > USED AT LINE 72 IN vm_arith.a80
+                    > USED AT LINE 92 IN vm_arith.a80
+                    > USED AT LINE 98 IN vm_arith.a80
+                    > USED AT LINE 122 IN vm_arith.a80
+                    > USED AT LINE 135 IN vm_arith.a80
                     > USED AT LINE 27 IN vm_compare.a80
                     > USED AT LINE 32 IN vm_compare.a80
-                    > USED AT LINE 37
-                    > USED AT LINE 52
+                    > USED AT LINE 142 IN vm_send.a80
+                    > USED AT LINE 154 IN vm_send.a80
+                    > USED AT LINE 172 IN vm_send.a80
+                    > USED AT LINE 39
+                    > USED AT LINE 54
 ADD_VALUE16:        8432 DEFINED AT LINE 129 IN vm_util.a80
                     > USED AT LINE 22 IN vm_arith.a80
 SUB_VALUE16:        843B DEFINED AT LINE 150 IN vm_util.a80
@@ -1410,12 +1965,24 @@ FETCH_BYTE:         8474 DEFINED AT LINE 16 IN vm_fetch.a80
                     > USED AT LINE 48 IN vm_arith.a80
                     > USED AT LINE 66 IN vm_arith.a80
                     > USED AT LINE 68 IN vm_arith.a80
+                    > USED AT LINE 89 IN vm_arith.a80
+                    > USED AT LINE 119 IN vm_arith.a80
                     > USED AT LINE 23 IN vm_compare.a80
                     > USED AT LINE 60 IN vm_compare.a80
                     > USED AT LINE 36 IN vm_jump.a80
                     > USED AT LINE 57 IN vm_jump.a80
-                    > USED AT LINE 35
-                    > USED AT LINE 158
+                    > USED AT LINE 16 IN vm_globals.a80
+                    > USED AT LINE 18 IN vm_globals.a80
+                    > USED AT LINE 48 IN vm_globals.a80
+                    > USED AT LINE 50 IN vm_globals.a80
+                    > USED AT LINE 18 IN vm_send.a80
+                    > USED AT LINE 27 IN vm_send.a80
+                    > USED AT LINE 29 IN vm_send.a80
+                    > USED AT LINE 38 IN vm_send.a80
+                    > USED AT LINE 40 IN vm_send.a80
+                    > USED AT LINE 42 IN vm_send.a80
+                    > USED AT LINE 37
+                    > USED AT LINE 160
 FETCH_U16BE:        8484 DEFINED AT LINE 37 IN vm_fetch.a80
                     > USED AT LINE 55 IN vm_fetch.a80
 FETCH_S16BE:        848E DEFINED AT LINE 54 IN vm_fetch.a80
@@ -1424,31 +1991,31 @@ FETCH_S16BE:        848E DEFINED AT LINE 54 IN vm_fetch.a80
                     > USED AT LINE 38 IN vm_jump.a80
                     > USED AT LINE 59 IN vm_jump.a80
 DO_OP_NOP:          8491 DEFINED AT LINE 11 IN vm_load.a80
-                    > USED AT LINE 208
+                    > USED AT LINE 210
 DO_OP_MOVE:         8494 DEFINED AT LINE 17 IN vm_load.a80
-                    > USED AT LINE 209
-DO_OP_LOADI:        84AA DEFINED AT LINE 32 IN vm_load.a80
                     > USED AT LINE 211
-DO_OP_LOADINEG:     84BF DEFINED AT LINE 47 IN vm_load.a80
-                    > USED AT LINE 212
-DO_OP_LOADI__1:     84D6 DEFINED AT LINE 65 IN vm_load.a80
+DO_OP_LOADI:        84AA DEFINED AT LINE 32 IN vm_load.a80
                     > USED AT LINE 213
-DO_OP_LOADI_0:      84E6 DEFINED AT LINE 76 IN vm_load.a80
+DO_OP_LOADINEG:     84BF DEFINED AT LINE 47 IN vm_load.a80
                     > USED AT LINE 214
-DO_OP_LOADI_1:      84EB DEFINED AT LINE 79 IN vm_load.a80
+DO_OP_LOADI__1:     84D6 DEFINED AT LINE 65 IN vm_load.a80
                     > USED AT LINE 215
-DO_OP_LOADI_2:      84F0 DEFINED AT LINE 82 IN vm_load.a80
+DO_OP_LOADI_0:      84E6 DEFINED AT LINE 76 IN vm_load.a80
                     > USED AT LINE 216
-DO_OP_LOADI_3:      84F5 DEFINED AT LINE 85 IN vm_load.a80
+DO_OP_LOADI_1:      84EB DEFINED AT LINE 79 IN vm_load.a80
                     > USED AT LINE 217
-DO_OP_LOADI_4:      84FA DEFINED AT LINE 88 IN vm_load.a80
+DO_OP_LOADI_2:      84F0 DEFINED AT LINE 82 IN vm_load.a80
                     > USED AT LINE 218
-DO_OP_LOADI_5:      84FF DEFINED AT LINE 91 IN vm_load.a80
+DO_OP_LOADI_3:      84F5 DEFINED AT LINE 85 IN vm_load.a80
                     > USED AT LINE 219
-DO_OP_LOADI_6:      8504 DEFINED AT LINE 94 IN vm_load.a80
+DO_OP_LOADI_4:      84FA DEFINED AT LINE 88 IN vm_load.a80
                     > USED AT LINE 220
-DO_OP_LOADI_7:      8509 DEFINED AT LINE 97 IN vm_load.a80
+DO_OP_LOADI_5:      84FF DEFINED AT LINE 91 IN vm_load.a80
                     > USED AT LINE 221
+DO_OP_LOADI_6:      8504 DEFINED AT LINE 94 IN vm_load.a80
+                    > USED AT LINE 222
+DO_OP_LOADI_7:      8509 DEFINED AT LINE 97 IN vm_load.a80
+                    > USED AT LINE 223
 LOADI_SMALL:        850B DEFINED AT LINE 99 IN vm_load.a80
                     > USED AT LINE 78 IN vm_load.a80
                     > USED AT LINE 81 IN vm_load.a80
@@ -1458,34 +2025,78 @@ LOADI_SMALL:        850B DEFINED AT LINE 99 IN vm_load.a80
                     > USED AT LINE 93 IN vm_load.a80
                     > USED AT LINE 96 IN vm_load.a80
 DO_OP_LOADI16:      8519 DEFINED AT LINE 114 IN vm_load.a80
-                    > USED AT LINE 222
+                    > USED AT LINE 224
 DO_OP_LOADNIL:      8532 DEFINED AT LINE 135 IN vm_load.a80
-                    > USED AT LINE 225
-DO_OP_LOADT:        8540 DEFINED AT LINE 145 IN vm_load.a80
                     > USED AT LINE 227
+DO_OP_LOADT:        8540 DEFINED AT LINE 145 IN vm_load.a80
+                    > USED AT LINE 229
 DO_OP_LOADF:        854E DEFINED AT LINE 155 IN vm_load.a80
-                    > USED AT LINE 228
+                    > USED AT LINE 230
 DO_OP_ADD:          855C DEFINED AT LINE 10 IN vm_arith.a80
-                    > USED AT LINE 268
-DO_OP_SUB:          8574 DEFINED AT LINE 28 IN vm_arith.a80
                     > USED AT LINE 270
+DO_OP_SUB:          8574 DEFINED AT LINE 28 IN vm_arith.a80
+                    > USED AT LINE 272
 DO_OP_ADDI:         858C DEFINED AT LINE 45 IN vm_arith.a80
-                    > USED AT LINE 269
-DO_OP_SUBI:         85A6 DEFINED AT LINE 65 IN vm_arith.a80
                     > USED AT LINE 271
-CMP_REG_PAIR:       85C0 DEFINED AT LINE 22 IN vm_compare.a80
+DO_OP_SUBI:         85A6 DEFINED AT LINE 65 IN vm_arith.a80
+                    > USED AT LINE 273
+DO_OP_MUL:          85C0 DEFINED AT LINE 88 IN vm_arith.a80
+                    > USED AT LINE 274
+DO_OP_DIV:          85E4 DEFINED AT LINE 118 IN vm_arith.a80
+                    > USED AT LINE 275
+DO_DIV_NONZERO:     85FA DEFINED AT LINE 132 IN vm_arith.a80
+                    > USED AT LINE 129 IN vm_arith.a80
+UMUL16:             860F DEFINED AT LINE 154 IN vm_arith.a80
+                    > USED AT LINE 103 IN vm_arith.a80
+UMUL16_LOOP:        8614 DEFINED AT LINE 157 IN vm_arith.a80
+                    > USED AT LINE 166 IN vm_arith.a80
+UMUL16_NOADD:       861C DEFINED AT LINE 164 IN vm_arith.a80
+                    > USED AT LINE 162 IN vm_arith.a80
+SDIV16:             8621 DEFINED AT LINE 179 IN vm_arith.a80
+                    > USED AT LINE 140 IN vm_arith.a80
+SDIV16_CHK_DIV:     862D DEFINED AT LINE 188 IN vm_arith.a80
+                    > USED AT LINE 186 IN vm_arith.a80
+SDIV16_DO:          8636 DEFINED AT LINE 194 IN vm_arith.a80
+                    > USED AT LINE 192 IN vm_arith.a80
+SDIV16_NEG:         8643 DEFINED AT LINE 204 IN vm_arith.a80
+                    > USED AT LINE 202 IN vm_arith.a80
+UDIV16:             8646 DEFINED AT LINE 217 IN vm_arith.a80
+                    > USED AT LINE 195 IN vm_arith.a80
+                    > USED AT LINE 222 IN vm_send.a80
+UDIV16_LOOP:        864E DEFINED AT LINE 221 IN vm_arith.a80
+                    > USED AT LINE 259 IN vm_arith.a80
+UDIV16_SUB:         866A DEFINED AT LINE 246 IN vm_arith.a80
+                    > USED AT LINE 237 IN vm_arith.a80
+                    > USED AT LINE 242 IN vm_arith.a80
+UDIV16_NOSUB:       8671 DEFINED AT LINE 255 IN vm_arith.a80
+                    > USED AT LINE 241 IN vm_arith.a80
+                    > USED AT LINE 245 IN vm_arith.a80
+UDIV_CNT:           867C DEFINED AT LINE 262 IN vm_arith.a80
+                    > USED AT LINE 220 IN vm_arith.a80
+                    > USED AT LINE 256 IN vm_arith.a80
+                    > USED AT LINE 258 IN vm_arith.a80
+NEG_BC:             867D DEFINED AT LINE 268 IN vm_arith.a80
+                    > USED AT LINE 187 IN vm_arith.a80
+                    > USED AT LINE 205 IN vm_arith.a80
+                    > USED AT LINE 181 IN vm_send.a80
+                    > USED AT LINE 214 IN vm_send.a80
+                    > USED AT LINE 243 IN vm_send.a80
+NEG_DE:             8685 DEFINED AT LINE 278 IN vm_arith.a80
+                    > USED AT LINE 193 IN vm_arith.a80
+                    > USED AT LINE 219 IN vm_send.a80
+CMP_REG_PAIR:       868D DEFINED AT LINE 22 IN vm_compare.a80
                     > USED AT LINE 93 IN vm_compare.a80
                     > USED AT LINE 102 IN vm_compare.a80
                     > USED AT LINE 112 IN vm_compare.a80
                     > USED AT LINE 122 IN vm_compare.a80
-CMP_SET_TRUE:       85DA DEFINED AT LINE 41 IN vm_compare.a80
+CMP_SET_TRUE:       86A7 DEFINED AT LINE 41 IN vm_compare.a80
                     > USED AT LINE 87 IN vm_compare.a80
                     > USED AT LINE 95 IN vm_compare.a80
                     > USED AT LINE 104 IN vm_compare.a80
                     > USED AT LINE 105 IN vm_compare.a80
                     > USED AT LINE 115 IN vm_compare.a80
                     > USED AT LINE 125 IN vm_compare.a80
-CMP_SET_FALSE:      85E8 DEFINED AT LINE 47 IN vm_compare.a80
+CMP_SET_FALSE:      86B5 DEFINED AT LINE 47 IN vm_compare.a80
                     > USED AT LINE 73 IN vm_compare.a80
                     > USED AT LINE 81 IN vm_compare.a80
                     > USED AT LINE 86 IN vm_compare.a80
@@ -1494,60 +2105,114 @@ CMP_SET_FALSE:      85E8 DEFINED AT LINE 47 IN vm_compare.a80
                     > USED AT LINE 114 IN vm_compare.a80
                     > USED AT LINE 116 IN vm_compare.a80
                     > USED AT LINE 124 IN vm_compare.a80
-DO_OP_EQ:           85F6 DEFINED AT LINE 59 IN vm_compare.a80
-                    > USED AT LINE 274
-DO_OP_LT:           8620 DEFINED AT LINE 92 IN vm_compare.a80
-                    > USED AT LINE 275
-DO_OP_LE:           862A DEFINED AT LINE 101 IN vm_compare.a80
+DO_OP_EQ:           86C3 DEFINED AT LINE 59 IN vm_compare.a80
                     > USED AT LINE 276
-DO_OP_GT:           8637 DEFINED AT LINE 111 IN vm_compare.a80
+DO_OP_LT:           86ED DEFINED AT LINE 92 IN vm_compare.a80
                     > USED AT LINE 277
-DO_OP_GE:           8644 DEFINED AT LINE 121 IN vm_compare.a80
+DO_OP_LE:           86F7 DEFINED AT LINE 101 IN vm_compare.a80
                     > USED AT LINE 278
-APPLY_JUMP:         864E DEFINED AT LINE 15 IN vm_jump.a80
+DO_OP_GT:           8704 DEFINED AT LINE 111 IN vm_compare.a80
+                    > USED AT LINE 279
+DO_OP_GE:           8711 DEFINED AT LINE 121 IN vm_compare.a80
+                    > USED AT LINE 280
+APPLY_JUMP:         871B DEFINED AT LINE 15 IN vm_jump.a80
                     > USED AT LINE 27 IN vm_jump.a80
                     > USED AT LINE 48 IN vm_jump.a80
                     > USED AT LINE 69 IN vm_jump.a80
-DO_OP_JMP:          8657 DEFINED AT LINE 25 IN vm_jump.a80
-                    > USED AT LINE 245
-DO_OP_JMPIF:        8660 DEFINED AT LINE 35 IN vm_jump.a80
-                    > USED AT LINE 246
-JMPIF_SKIP:         867C DEFINED AT LINE 50 IN vm_jump.a80
-                    > USED AT LINE 45 IN vm_jump.a80
-DO_OP_JMPNOT:       867F DEFINED AT LINE 56 IN vm_jump.a80
+DO_OP_JMP:          8724 DEFINED AT LINE 25 IN vm_jump.a80
                     > USED AT LINE 247
-JMPNOT_SKIP:        869B DEFINED AT LINE 71 IN vm_jump.a80
+DO_OP_JMPIF:        872D DEFINED AT LINE 35 IN vm_jump.a80
+                    > USED AT LINE 248
+JMPIF_SKIP:         8749 DEFINED AT LINE 50 IN vm_jump.a80
+                    > USED AT LINE 45 IN vm_jump.a80
+DO_OP_JMPNOT:       874C DEFINED AT LINE 56 IN vm_jump.a80
+                    > USED AT LINE 249
+JMPNOT_SKIP:        8768 DEFINED AT LINE 71 IN vm_jump.a80
                     > USED AT LINE 66 IN vm_jump.a80
-DISPLAY_HEX16:      869E DEFINED AT LINE 17 IN vm_display.a80
-                    > USED AT LINE 38
-                    > USED AT LINE 53
-DISPLAY_BYTE_LOOP:  86AF DEFINED AT LINE 34 IN vm_display.a80
+DO_OP_GETGV:        876B DEFINED AT LINE 15 IN vm_globals.a80
+                    > USED AT LINE 231
+GETGV_OK:           8786 DEFINED AT LINE 35 IN vm_globals.a80
+                    > USED AT LINE 32 IN vm_globals.a80
+DO_OP_SETGV:        8793 DEFINED AT LINE 47 IN vm_globals.a80
+                    > USED AT LINE 232
+SETGV_OK:           87AE DEFINED AT LINE 64 IN vm_globals.a80
+                    > USED AT LINE 61 IN vm_globals.a80
+DO_OP_SSEND:        87B8 DEFINED AT LINE 17 IN vm_send.a80
+                    > USED AT LINE 255
+DO_OP_SEND:         87D9 DEFINED AT LINE 37 IN vm_send.a80
+                    > USED AT LINE 257
+SEND_DISPATCH:      87EA DEFINED AT LINE 46 IN vm_send.a80
+                    > USED AT LINE 32 IN vm_send.a80
+SEND_NE:            8816 DEFINED AT LINE 81 IN vm_send.a80
+                    > USED AT LINE 66 IN vm_send.a80
+SEND_NE_CMP:        8824 DEFINED AT LINE 89 IN vm_send.a80
+                    > USED AT LINE 96 IN vm_send.a80
+SEND_NE_DIFF:       883D DEFINED AT LINE 103 IN vm_send.a80
+                    > USED AT LINE 92 IN vm_send.a80
+SEND_NOT:           884B DEFINED AT LINE 115 IN vm_send.a80
+                    > USED AT LINE 68 IN vm_send.a80
+SEND_NOT_FALSY:     8865 DEFINED AT LINE 127 IN vm_send.a80
+                    > USED AT LINE 120 IN vm_send.a80
+SEND_MOD:           8873 DEFINED AT LINE 138 IN vm_send.a80
+                    > USED AT LINE 70 IN vm_send.a80
+SEND_MOD_OK:        8889 DEFINED AT LINE 151 IN vm_send.a80
+                    > USED AT LINE 148 IN vm_send.a80
+SEND_ABS:           889E DEFINED AT LINE 169 IN vm_send.a80
+                    > USED AT LINE 72 IN vm_send.a80
+SEND_REG_A:         88BB DEFINED AT LINE 188 IN vm_send.a80
+                    > USED AT LINE 26 IN vm_send.a80
+                    > USED AT LINE 39 IN vm_send.a80
+                    > USED AT LINE 82 IN vm_send.a80
+                    > USED AT LINE 98 IN vm_send.a80
+                    > USED AT LINE 104 IN vm_send.a80
+                    > USED AT LINE 116 IN vm_send.a80
+                    > USED AT LINE 122 IN vm_send.a80
+                    > USED AT LINE 129 IN vm_send.a80
+                    > USED AT LINE 139 IN vm_send.a80
+                    > USED AT LINE 170 IN vm_send.a80
+SEND_ARGC:          88BC DEFINED AT LINE 190 IN vm_send.a80
+                    > USED AT LINE 30 IN vm_send.a80
+                    > USED AT LINE 43 IN vm_send.a80
+SMOD16:             88BD DEFINED AT LINE 202 IN vm_send.a80
+                    > USED AT LINE 159 IN vm_send.a80
+SMOD_CHK_DIV:       88CB DEFINED AT LINE 215 IN vm_send.a80
+                    > USED AT LINE 213 IN vm_send.a80
+SMOD_DO:            88D4 DEFINED AT LINE 220 IN vm_send.a80
+                    > USED AT LINE 218 IN vm_send.a80
+SMOD_SIGN:          88EC DEFINED AT LINE 239 IN vm_send.a80
+                    > USED AT LINE 231 IN vm_send.a80
+SMOD_ZERO:          88F3 DEFINED AT LINE 244 IN vm_send.a80
+                    > USED AT LINE 229 IN vm_send.a80
+DISPLAY_HEX16:      88F5 DEFINED AT LINE 17 IN vm_display.a80
+                    > USED AT LINE 40
+                    > USED AT LINE 55
+DISPLAY_BYTE_LOOP:  8906 DEFINED AT LINE 34 IN vm_display.a80
                     > USED AT LINE 54 IN vm_display.a80
-NIBBLE_TO_SEG:      86C9 DEFINED AT LINE 64 IN vm_display.a80
+NIBBLE_TO_SEG:      8920 DEFINED AT LINE 64 IN vm_display.a80
                     > USED AT LINE 42 IN vm_display.a80
                     > USED AT LINE 48 IN vm_display.a80
-SEG_TABLE:          86D6 DEFINED AT LINE 93 IN vm_display.a80
+SEG_TABLE:          892D DEFINED AT LINE 93 IN vm_display.a80
                     > USED AT LINE 69 IN vm_display.a80
-DO_OP_RETURN:       86E6 DEFINED AT LINE 34
-                    > USED AT LINE 264
-DO_OP_STOP:         86FA DEFINED AT LINE 46
-                    > USED AT LINE 313
-VM_HALT:            871B DEFINED AT LINE 79
-                    > USED AT LINE 41
-                    > USED AT LINE 54
-                    > USED AT LINE 67
-                    > USED AT LINE 143
-VM_HALT_OUTER:      871D DEFINED AT LINE 84
+DO_OP_RETURN:       893D DEFINED AT LINE 36
+                    > USED AT LINE 266
+DO_OP_STOP:         8951 DEFINED AT LINE 48
+                    > USED AT LINE 315
+VM_HALT:            8972 DEFINED AT LINE 81
+                    > USED AT LINE 43
+                    > USED AT LINE 56
+                    > USED AT LINE 69
+                    > USED AT LINE 145
+VM_HALT_OUTER:      8974 DEFINED AT LINE 86
+                    > USED AT LINE 94
+VM_HALT_INNER:      8977 DEFINED AT LINE 88
                     > USED AT LINE 92
-VM_HALT_INNER:      8720 DEFINED AT LINE 86
-                    > USED AT LINE 90
-VM_START:           872D DEFINED AT LINE 98
+VM_START:           8984 DEFINED AT LINE 100
                     > USED AT LINE 15
-VM_CLEAR_STATE:     8735 DEFINED AT LINE 105
-                    > USED AT LINE 109
-VM_CLEAR_REGS:      8741 DEFINED AT LINE 114
-                    > USED AT LINE 118
-VM_LOOP:            8759 DEFINED AT LINE 139
+VM_CLEAR_STATE:     898C DEFINED AT LINE 107
+                    > USED AT LINE 111
+VM_CLEAR_REGS:      8998 DEFINED AT LINE 116
+                    > USED AT LINE 120
+VM_LOOP:            89B0 DEFINED AT LINE 141
                     > USED AT LINE 12 IN vm_load.a80
                     > USED AT LINE 27 IN vm_load.a80
                     > USED AT LINE 42 IN vm_load.a80
@@ -1562,6 +2227,8 @@ VM_LOOP:            8759 DEFINED AT LINE 139
                     > USED AT LINE 38 IN vm_arith.a80
                     > USED AT LINE 60 IN vm_arith.a80
                     > USED AT LINE 80 IN vm_arith.a80
+                    > USED AT LINE 110 IN vm_arith.a80
+                    > USED AT LINE 145 IN vm_arith.a80
                     > USED AT LINE 46 IN vm_compare.a80
                     > USED AT LINE 52 IN vm_compare.a80
                     > USED AT LINE 28 IN vm_jump.a80
@@ -1569,9 +2236,18 @@ VM_LOOP:            8759 DEFINED AT LINE 139
                     > USED AT LINE 51 IN vm_jump.a80
                     > USED AT LINE 70 IN vm_jump.a80
                     > USED AT LINE 72 IN vm_jump.a80
-VM_DISPATCH:        8788 DEFINED AT LINE 174
-                    > USED AT LINE 168
-DISPATCH_TABLE:     87AA DEFINED AT LINE 207
-                    > USED AT LINE 181
-DISPATCH_TABLE_END: 887E DEFINED AT LINE 314
-                    > USED AT LINE 184
+                    > USED AT LINE 42 IN vm_globals.a80
+                    > USED AT LINE 69 IN vm_globals.a80
+                    > USED AT LINE 102 IN vm_send.a80
+                    > USED AT LINE 108 IN vm_send.a80
+                    > USED AT LINE 126 IN vm_send.a80
+                    > USED AT LINE 133 IN vm_send.a80
+                    > USED AT LINE 164 IN vm_send.a80
+                    > USED AT LINE 176 IN vm_send.a80
+                    > USED AT LINE 185 IN vm_send.a80
+VM_DISPATCH:        89DF DEFINED AT LINE 176
+                    > USED AT LINE 170
+DISPATCH_TABLE:     8A01 DEFINED AT LINE 209
+                    > USED AT LINE 183
+DISPATCH_TABLE_END: 8AD5 DEFINED AT LINE 316
+                    > USED AT LINE 186
