@@ -145,6 +145,26 @@ class TestI8080Vm < Minitest::Test
     assert_equal 8, board[:board].reg_value(1)
   end
 
+  # === インスタンス変数 ===
+
+  def test_instance_var_set_get
+    board = run_ruby("@count = 42\na = @count + 8\n")
+    assert_equal :finished, board[:result]
+    assert_equal 50, board[:board].reg_value(1)
+  end
+
+  def test_instance_var_overwrite
+    board = run_ruby("@n = 0\n@n = @n + 1\na = @n\n")
+    assert_equal :finished, board[:result]
+    assert_equal 1, board[:board].reg_value(1)
+  end
+
+  def test_instance_var_and_global_separate
+    board = run_ruby("$x = 10\n@x = 20\na = $x + @x\n")
+    assert_equal :finished, board[:result]
+    assert_equal 30, board[:board].reg_value(1)
+  end
+
   # === メソッド呼び出し (SEND/SSEND) ===
 
   def test_send_ne_true

@@ -1572,8 +1572,8 @@
 8A2D   93 87                  DW   do_op_setgv   ; 16 OP_SETGV
 8A2F   00 00                  DW   0000h   ; 17 OP_GETSV
 8A31   00 00                  DW   0000h   ; 18 OP_SETSV
-8A33   00 00                  DW   0000h   ; 19 OP_GETIV
-8A35   00 00                  DW   0000h   ; 1A OP_SETIV
+8A33   6B 87                  DW   do_op_getgv   ; 19 OP_GETIV (= OP_GETGV)
+8A35   93 87                  DW   do_op_setgv   ; 1A OP_SETIV (= OP_SETGV)
 8A37   00 00                  DW   0000h   ; 1B OP_GETCV
 8A39   00 00                  DW   0000h   ; 1C OP_SETCV
 8A3B   00 00                  DW   0000h   ; 1D OP_GETCONST
@@ -2131,10 +2131,12 @@ JMPNOT_SKIP:        8768 DEFINED AT LINE 71 IN vm_jump.a80
                     > USED AT LINE 66 IN vm_jump.a80
 DO_OP_GETGV:        876B DEFINED AT LINE 15 IN vm_globals.a80
                     > USED AT LINE 231
+                    > USED AT LINE 235
 GETGV_OK:           8786 DEFINED AT LINE 35 IN vm_globals.a80
                     > USED AT LINE 32 IN vm_globals.a80
 DO_OP_SETGV:        8793 DEFINED AT LINE 47 IN vm_globals.a80
                     > USED AT LINE 232
+                    > USED AT LINE 236
 SETGV_OK:           87AE DEFINED AT LINE 64 IN vm_globals.a80
                     > USED AT LINE 61 IN vm_globals.a80
 DO_OP_SSEND:        87B8 DEFINED AT LINE 17 IN vm_send.a80

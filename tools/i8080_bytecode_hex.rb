@@ -160,7 +160,7 @@ module FaRuby
     # --- シンボルテーブルの配置 ---
     #
     # irep のシンボルテーブルを走査し、各シンボルに対応する値を書く:
-    #   - $ で始まるシンボル → グローバルスロットのアドレス (>= 0xB000)
+    #   - $ または @ で始まるシンボル → グローバルスロットのアドレス (>= 0xB000)
     #   - METHOD_IDS に含まれるシンボル → メソッド ID (0x0001-0x00FF)
     #   - それ以外 → 0x0000 (未対応マーカー)
     def place_symbol_table(mem)
@@ -173,8 +173,8 @@ module FaRuby
       irep.symbols.each_with_index do |sym, idx|
         tbl_addr = Layout::SYM_TABLE_BASE + idx * 2
 
-        if sym && sym.start_with?("$")
-          # グローバル変数 — スロットを割り当てる
+        if sym && (sym.start_with?("$") || sym.start_with?("@"))
+          # グローバル変数 / インスタンス変数 — スロットを割り当てる
           raise "グローバル変数が多すぎます (> #{Layout::MAX_GLOBALS})" if globals_count >= Layout::MAX_GLOBALS
 
           slot_addr = Layout::GLOBALS_BASE + globals_count * Layout::SLOT_BYTES
