@@ -7,6 +7,7 @@ require_relative "../tools/memory_layout"
 require_relative "../tools/opcode_table"
 require_relative "../tools/kvs_generator"
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # ブロックと上位の変数
 #
@@ -94,15 +95,15 @@ class TestBlocks < Minitest::Test
   # doc/architecture.md の「呼び出しフレームとレジスタ窓」に載せた数値。
   # 配置を変えると図が古くなるため、ここで気づけるようにしておく。
   def test_the_frame_diagram_in_the_docs_matches_the_layout
-    assert_equal 56, layout.offset_of(layout.reg_file_base), "レジスタ領域の先頭"
-    assert_equal 376, layout.offset_of(layout.frame_stack_base), "呼び出しスタックの先頭"
+    assert_equal 72, layout.offset_of(layout.reg_file_base), "レジスタ領域の先頭"
+    assert_equal 392, layout.offset_of(layout.frame_stack_base), "呼び出しスタックの先頭"
     assert_equal 10, Layout::FRAME_WORDS
     assert_equal 16, layout.max_frames
-    assert_equal 20_376, layout.frame_addr(0)
-    assert_equal 20_386, layout.frame_addr(1)
-    assert_equal 20_526, layout.frame_addr(layout.max_frames - 1)
-    # a=1 の呼び出しで窓が +56 から +60 へ進む
-    assert_equal 60, layout.offset_of(layout.reg_file_base) + 1 * SLOT_WORDS
+    assert_equal 20_392, layout.frame_addr(0)
+    assert_equal 20_402, layout.frame_addr(1)
+    assert_equal 20_542, layout.frame_addr(layout.max_frames - 1)
+    # a=1 の呼び出しで窓が +72 から +76 へ進む
+    assert_equal 76, layout.offset_of(layout.reg_file_base) + 1 * SLOT_WORDS
   end
 
   # === OP_BLOCK ===
@@ -216,8 +217,7 @@ class TestBlocks < Minitest::Test
   def run_source(source)
     skip "mrbc が見つかりません" unless mrbc_path && File.exist?(mrbc_path)
 
-    dir = File.expand_path("../tmp", __dir__)
-    Dir.mkdir(dir) unless Dir.exist?(dir)
+    dir = FaRuby::TempDir.path
     src = File.join(dir, "blocks_test.rb")
     mrb = File.join(dir, "blocks_test.mrb")
     File.binwrite(src, source)
@@ -416,6 +416,84 @@ class TestBlocks < Minitest::Test
       end
       $DM0 = n
     RUBY
+  end
+
+  # === loop ===
+  #
+  # **上限が無く、`break` でしか終わりません。** `OP_SSENDB` (self への
+  # 呼び出し) で来るので、`3.times` の `OP_SENDB` とは別命令です。
+
+  def test_loop_runs_until_break
+    assert_result 5, <<~RUBY
+      n = 0
+      loop do
+        n = n + 1
+        break if n >= 5
+      end
+      $DM0 = n
+    RUBY
+  end
+
+  # 上限を 2147483647 にする手を採らなかったので、数え上げでは終わらない。
+  # **打ち切られずに回り続けていること**を歩数で見る
+  def test_loop_does_not_end_on_its_own
+    sim = run_source(<<~RUBY)
+      n = 0
+      loop do
+        n = n + 1
+      end
+    RUBY
+
+    assert_equal VM_RUNNING, sim.status, "loop が自分で終わってしまった"
+    assert_equal 0, sim.em.read_u16(layout.error_addr)
+  end
+
+  # Ruby の loop { |i| } も i は nil。ここでは未代入のまま (偽)
+  def test_loop_passes_nothing_to_the_block
+    assert_result 1, <<~RUBY
+      got = 1
+      loop do |i|
+        got = 0 if i
+        break
+      end
+      $DM0 = got
+    RUBY
+  end
+
+  def test_loop_inside_a_method
+    assert_result 4, <<~RUBY
+      def count
+        n = 0
+        loop do
+          n = n + 1
+          break if n >= 4
+        end
+        n
+      end
+      $DM0 = count
+    RUBY
+  end
+
+  # ブロックの中の反復も積める。外側のローカルにも届く
+  def test_an_iteration_inside_loop
+    assert_result 3, <<~RUBY
+      total = 0
+      loop do
+        3.times do |i|
+          total = total + i
+        end
+        break
+      end
+      $DM0 = total
+    RUBY
+  end
+
+  # ブロック無しの loop は OP_SSEND で来る。ブロックを取るメソッドなので弾く
+  def test_loop_without_a_block_stops
+    sim = run_source("loop\n$DM0 = 1\n")
+
+    assert_equal VM_ERROR, sim.status
+    assert_equal UNKNOWN_METHOD_ERROR, sim.em.read_u16(layout.error_addr)
   end
 
   def test_break_out_of_a_hash_each

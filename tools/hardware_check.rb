@@ -26,6 +26,7 @@ require_relative "config"
 require_relative "mrb_parser"
 require_relative "plc_codegen"
 require_relative "device_syntax"
+require_relative "device_map"
 require_relative "dialect"
 require_relative "vm_constants"
 require_relative "console/plc_connection"
@@ -77,13 +78,16 @@ module FaRuby
       @config = config
       @adapter = adapter || Console::PlcConnection.create(config)
       @layout = config.layout.for_instance(0)
-      @syntax = DeviceSyntax.for_dialect(Dialect.for(config.model))
+      @dialect = Dialect.for(config.model)
+      @syntax = DeviceSyntax.for_dialect(@dialect)
       @transfer = Console::MemoryTransfer.new(@adapter, layout: @layout)
       @dir = dir
     end
 
+    # **割り付け表はプログラムではありません。** ホスト側で読むだけのものを
+    # PLC に送ろうとしないよう、名前で外します
     def programs(only = nil)
-      paths = Dir[File.join(@dir, "*.rb")].sort
+      paths = Dir[File.join(@dir, "*.rb")].reject { |p| p.end_with?(".devices.rb") }.sort
       only ? paths.select { |path| File.basename(path).include?(only) } : paths
     end
 
@@ -119,17 +123,29 @@ module FaRuby
       wanted = self.class.expectations(source)
       return Result.new(name, :skipped, "期待値なし", 0, []) if wanted.empty?
 
+      # **割り付け表はプログラムごとです。** 期待値にも割り付けた名前を
+      # 書けるよう、読み出しにも同じ読み方を渡します
+      syntax = syntax_for(path)
+
       irep = compile(path)
       return Result.new(name, :error, "mrbc 失敗", 0, []) unless irep
 
-      state = execute(irep)
+      state = execute(irep, syntax)
       unless state[:status] == VM_FINISHED
         return Result.new(name, :error,
                           "STATUS=#{state[:status_label]} ERROR=#{state[:error]} " \
                           "PC=#{state[:pc]}", 0, [])
       end
 
-      compare(name, wanted)
+      compare(name, wanted, syntax)
+    end
+
+    # プログラムが指す割り付け表でデバイスの読み方を作る
+    def syntax_for(path)
+      map = DeviceMap.for_program(path)
+      return @syntax if map.empty?
+
+      DeviceSyntax.for_dialect(@dialect, mapping: map.mapping)
     end
 
     def compile(path)
@@ -143,10 +159,10 @@ module FaRuby
     end
 
     # 転送して走らせ、終わるまで待つ
-    def execute(irep)
+    def execute(irep, syntax = @syntax)
       @transfer.write_status(VM_STOPPED)
       codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
-                               device_syntax: @syntax)
+                               device_syntax: syntax)
       @transfer.write_image(codegen.memory_image)
       @transfer.write_fixed_image(codegen.fixed_image)
       @transfer.write_status(VM_RUNNING)
@@ -160,11 +176,11 @@ module FaRuby
       state
     end
 
-    def compare(name, wanted)
+    def compare(name, wanted, syntax = @syntax)
       checked = 0
       mismatches = []
       wanted.each do |spec, expected|
-        actual = read_device(spec)
+        actual = read_device(spec, syntax)
         next if actual.nil?   # デバイスでない名前は読めない
 
         checked += 1
@@ -184,10 +200,12 @@ module FaRuby
     end
 
     # コンソールの `dev` と同じ経路で 1 つ読む
-    def read_device(spec)
-      ref = PlcCodegen.parse_device_name(spec, @syntax)
+    def read_device(spec, syntax = @syntax)
+      ref = syntax.parse_mapped_name(spec) || PlcCodegen.parse_device_name(spec, syntax)
       return nil unless ref
-      return @adapter.read_device(ref[:device_name], ref[:address]) if ref[:bit]
+
+      # **ビットは真偽値で返ってきます。** 期待値は数字で書くので 1 / 0 に直します
+      return @adapter.read_device(ref[:device_name], ref[:address]) ? 1 : 0 if ref[:bit]
 
       @adapter.read_device_width(ref[:device_name], ref[:address],
                                  ref[:access_type] || ACCESS_S)

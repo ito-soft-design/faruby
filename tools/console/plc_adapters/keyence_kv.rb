@@ -18,6 +18,9 @@ module FaRuby
           @plc = nil
         end
 
+        attr_reader :host, :port
+
+
         def connect
           @plc = PlcAccess::Protocol::Keyence::KvProtocol.new(host: @host, port: @port)
         end
@@ -33,12 +36,12 @@ module FaRuby
 
         def read_word(addr)
           ensure_connected
-          @plc["#{DEVICE_PREFIX}#{addr}"]
+          through { @plc["#{DEVICE_PREFIX}#{addr}"] }
         end
 
         def write_word(addr, value)
           ensure_connected
-          @plc["#{DEVICE_PREFIX}#{addr}"] = value
+          through { @plc["#{DEVICE_PREFIX}#{addr}"] = value }
         end
 
         def read_words(addr, count)
@@ -51,12 +54,12 @@ module FaRuby
 
         def read_device_words(device_prefix, addr, count)
           ensure_connected
-          @plc["#{device_prefix}#{addr}", count]
+          through { @plc["#{device_prefix}#{addr}", count] }
         end
 
         def write_device_words(device_prefix, addr, values)
           ensure_connected
-          @plc["#{device_prefix}#{addr}", values.size] = values
+          through { @plc["#{device_prefix}#{addr}", values.size] = values }
         end
 
         def device_name
@@ -65,12 +68,12 @@ module FaRuby
 
         def read_device(device_prefix, addr)
           ensure_connected
-          @plc["#{device_prefix}#{addr}"]
+          through { @plc["#{device_prefix}#{addr}"] }
         end
 
         def write_device(device_prefix, addr, value)
           ensure_connected
-          @plc["#{device_prefix}#{addr}"] = value
+          through { @plc["#{device_prefix}#{addr}"] = value }
         end
 
         def read_device_long(device_prefix, addr)
@@ -81,13 +84,23 @@ module FaRuby
 
         def write_device_long(device_prefix, addr, value)
           ensure_connected
-          @plc["#{device_prefix}#{addr}", 2] = split_s32(value)
+          through { @plc["#{device_prefix}#{addr}", 2] = split_s32(value) }
         end
 
         private
 
         def ensure_connected
           connect unless connected?
+        end
+
+        # **plc_access は繋がらないまま先へ進みます。** nil に対する
+        # 呼び出しになって初めて落ちるので、ここで元の話に戻します
+        def through
+          yield
+        rescue NoMethodError => e
+          raise unless e.message.include?("nil")
+
+          unreachable(e)
         end
       end
     end

@@ -62,7 +62,7 @@ class TestBenchmark < Minitest::Test
     end
   end
 
-  # 置き場はメーカーごと。**接続の設定と綴りが揃っていること**
+  # 置き場はメーカーごと。**接続の設定と名前が揃っていること**
   def test_every_protocol_has_a_counter
     assert_equal %w[keyence_kv mitsubishi_mc], Bench::COUNTERS.keys
     Bench::COUNTERS.each_value do |device, addr|

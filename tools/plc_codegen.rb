@@ -65,7 +65,17 @@ module FaRuby
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
       check_limit("文字列定数のワード数", string_constant_words, layout.max_string_words)
+      # 汎用グローバル変数 (`$foo` と `@foo`) の枠。**溢れると配列プールに重なり、
+      # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
+      check_limit("変数の数", general_global_count, layout.max_globals)
       self
+    end
+
+    # 枠を取った汎用グローバル変数の数
+    #
+    # 同じ名前は irep をまたいでも同じ枠なので、アドレスで数えます。
+    def general_global_count
+      device_mappings.select { |m| m[:general] }.map { |m| m[:z_offset] }.uniq.size
     end
 
     # EM レジスタ初期化用の KV スクリプトを生成
@@ -133,6 +143,15 @@ module FaRuby
         slot = layout.reg_slot_addr(i)
         SLOT_WORDS.times { |w| image[slot + w] = 0 }
       end
+
+      # **R[0] はトップレベルの self (main)。**
+      #
+      # mruby は `OP_LOADSELF` を書かずに R[0] が self である前提で呼び出します。
+      # 空のままだとタグが `TT_EMPTY` で、レシーバが self の組み込みメソッド
+      # (`loop`) が型検査で弾かれます。自分自身への呼び出しで渡されていくので、
+      # ここを self にすればメソッドの中でも self のままになります。
+      image[layout.reg_slot_addr(0) + SLOT_TYPE_OFFSET] = TT_OBJECT
+      image[layout.reg_slot_addr(0) + SLOT_VALUE_OFFSET] = TT_CANONICAL_VALUE.fetch(TT_OBJECT)
 
       # 汎用グローバル変数のスロットを 0 初期化する
       device_mappings.select { |m| m[:general] }.each do |m|
@@ -340,16 +359,65 @@ module FaRuby
     #   method_ids ユーザー定義メソッド名 => ID
     def symbol_mapping(sym, table_addr, idx, slots, method_ids)
       parsed = parse_device_symbol(sym) || device_syntax.parse_family(sym)
-      if parsed
+      if sym == TICKS_SYMBOL
+        # 経過時間。**普通のデバイス読みに落とします**
+        #
+        # 置き場所は VM 状態の中ですが、そこも可変領域のデバイスなので、
+        # 32 ビット符号付きで読む指定を付ければ既存の経路がそのまま通ります。
+        # 種別を増やすと `OP_GETGV` の振り分けに 1 比較増えるため、命令の
+        # 費用を上げずに済むこちらを採りました。
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_VALUE,
+          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+          address: layout.ticks_addr.to_s, z_offset: layout.ticks_addr,
+          access_type: ACCESS_L, bit: false, family: false }
+      elsif (period = CLOCK_SYMBOLS.key(sym))
+        # クロックパルス。**汎用グローバルと同じ値スロットです**
+        #
+        # 生成スクリプトがスキャンごとにタグごと書いているので、読み出しは
+        # 既存の `SYMBOL_KIND_GLOBAL` の経路に任せれば真偽値になります。
+        # 場所だけが汎用グローバルの領域ではなく VM 状態の中です。
+        slot_addr = layout.clock_slot_addr(period)
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_GLOBAL,
+          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+          address: slot_addr.to_s, z_offset: slot_addr,
+          access_type: ACCESS_L, bit: false, family: false }
+      elsif parsed
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: device_symbol_kind(parsed),
           device_type: parsed[:device_type], device_name: parsed[:device_name],
           address: parsed[:address], z_offset: parsed[:z_offset],
           access_type: parsed[:access_type], bit: parsed[:bit],
           family: parsed[:family] || false }
-      elsif sym.start_with?("$")
-        # 汎用グローバル変数は Ruby の値をそのまま持つ。**アドレスは値スロットの
-        # 先頭**で、VM が型タグごと写す。幅は使わない
+      elsif sym.start_with?("@@")
+        # **クラス変数は未対応です。** `@` の枠に入れると `@c` と区別が付かず、
+        # 命令 (`OP_SETCV`) が無いままシンボルだけが枠を取ります。
+        #
+        # Ruby もトップレベルの `@@` を許していません (3.0 以降 RuntimeError)。
+        # 通すと faRuby でしか動かないプログラムが書けてしまいます。
+        # クラスを入れるときに、クラスの表と一緒に考えます (doc/instance_vars.md)
+        raise CodegenError,
+              "#{sym} はクラス変数です。faRuby には未対応です " \
+              "(#{sym.sub('@@', '@')} のように 1 つにしてください)"
+      elsif sym.start_with?("@") || sym.start_with?("$")
+        # **`$FARUBY_` で始まる名前は faRuby の予約です。** 表に無いものは
+        # 書き間違いなので、ここで止めます。通してしまうと普通のグローバル
+        # 変数になり、いつまでも 0 を返す変数ができるだけで気づけません。
+        # 設定定数 (`FARUBY_` で始まる定数) と同じ扱いです
+        if sym.start_with?("$#{SETTING_PREFIX}") && !RESERVED_GLOBALS.include?(sym)
+          raise CodegenError,
+                "#{sym} は faRuby のグローバル変数ではありません " \
+                "(#{RESERVED_GLOBALS.join(', ')})"
+        end
+
+        # 汎用グローバル変数とインスタンス変数は Ruby の値をそのまま持つ。
+        # **アドレスは値スロットの先頭**で、VM が型タグごと写す。幅は使わない
+        #
+        # **`@foo` が同じ枠で足りるのは self が 1 つしか無いから**です。
+        # クラスが無いので、トップレベルもメソッドの中もブロックの中も self は
+        # `main` で、Ruby でもトップレベルの `@foo` は `main` のインスタンス
+        # 変数です。名前ごとに 1 枠で正しく、近似ではありません。
         slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))
         { symbol: sym, index: idx, table_addr: table_addr, general: true,
           kind: SYMBOL_KIND_GLOBAL,

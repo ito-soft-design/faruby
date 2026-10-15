@@ -11,7 +11,7 @@ module FaRuby
   # 抜けたところは変換にかけるまで分かりません。そこで、出来上がった文の
   # 両辺の型を見て、狭いほうを広げる規則をここに 1 つだけ置きます。
   #
-  # 型はラベルの控えから引きます (tools/devices.rb が配ったもの)。生成器が
+  # 型はラベルの一覧から引きます (tools/devices.rb が配ったもの)。生成器が
   # 指したものがそのまま型になるので、表を別に持つ必要がありません。
   class MelsecTypes
     # 広さの順。**狭いほうを広げます**
@@ -209,8 +209,8 @@ module FaRuby
       member ? member_type(name, member) : label_type(name)
     end
 
-    # **型は IEC の綴りで持っています** (tools/devices.rb)。取り込みの CSV が
-    # その綴りで、貼り付けの表の日本語はそこから作ります。
+    # **型は IEC の表記で持っています** (tools/devices.rb)。取り込みの CSV が
+    # その表記で、貼り付けの表の日本語はそこから作ります。
     def label_type(name)
       type = labels[name]&.type or return nil
       element = type[/\AARRAY \[[^\]]*\] OF (.+)\z/, 1] || type

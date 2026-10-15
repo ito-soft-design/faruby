@@ -96,6 +96,8 @@ class TestMethods < Minitest::Test
     "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
     "values" => [TT_HASH, TT_HASH],
     "[]" => [TT_DEVICE, TT_DEVICE],
+    # レシーバは self (トップレベルの main)
+    "loop" => [TT_OBJECT, TT_OBJECT],
   }.freeze
 
   def test_methods_sort_by_receiver_type

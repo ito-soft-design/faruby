@@ -64,7 +64,12 @@ module FaRuby
     # どの接続先を使うかを指す見出し。接続先の名前には使えない
     CURRENT_KEY = "current"
 
-    # 接続先が持てる項目。**接続情報だけ**で、配置や実行設定は機種のもの
+    # 接続先が持てる項目
+    #
+    # **接続情報だけ**で、配置や実行設定は機種のものです。
+    # デバイスの割り付けもここには書きません。**割り付けは PLC ではなく
+    # プログラムのもの**なので、プログラムの隣の Ruby ファイルに置きます
+    # (tools/device_map.rb)。
     CONNECTION_KEYS = %w[model protocol host port].freeze
 
     attr_reader :connection, :connections, :model,

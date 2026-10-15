@@ -279,6 +279,28 @@ class TestConfig < Minitest::Test
     end
   end
 
+  # === デバイスの割り付け表 ===
+
+  # **割り付けは接続先に書けないこと。** 割り付けは PLC ではなく
+  # プログラムのものなので、置き場所はプログラムの隣の Ruby ファイルです
+  # (test/test_device_map.rb)。ここに書けると 2 箇所になります
+  def test_the_device_map_does_not_belong_to_a_connection
+    yaml = <<~YAML
+      connections:
+        current: line1
+        line1:
+          model: KV-5000
+          host: 10.0.1.1
+          device_map:
+            x0: R0
+    YAML
+    with_config(yaml) do |path|
+      error = assert_raises(FaRuby::ConfigError) { FaRuby::Config.new(path) }
+
+      assert_includes error.message, "device_map"
+    end
+  end
+
   # === 既定設定 ===
 
   # **機種の欄を見れば、その機種の設定が全部揃っている**形にしてあります。

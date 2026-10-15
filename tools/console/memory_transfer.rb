@@ -75,7 +75,19 @@ module FaRuby
           nregs:           at.(layout.nregs_addr),
           nlocals:         at.(layout.nlocals_addr),
           reset_req:       at.(layout.reset_req_addr),
+          ticks:           read_ticks,
         }
+      end
+
+      # 経過時間 (ミリ秒)
+      #
+      # **選んでいるインスタンスのブロックの外にあります。** 時間は VM ごとに
+      # 違うものではないので、インスタンス 0 の場所を全インスタンスで共有して
+      # います。VM 状態を丸ごと読んだ中からは引けないため、別に読みます。
+      def read_ticks
+        lo, hi = @adapter.read_words(layout.ticks_addr, 2)
+        value = lo | (hi << 16)
+        value >= 0x8000_0000 ? value - 0x1_0000_0000 : value
       end
 
       # レジスタファイルを PLC から読み出す

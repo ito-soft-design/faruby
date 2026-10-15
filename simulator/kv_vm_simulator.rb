@@ -26,8 +26,14 @@ module FaRuby
 
     attr_reader :em, :devices, :layout
 
-    def initialize(layout: MemoryLayout.default)
+    # device_syntax はデバイス名の読み方。**番号の数え方がメーカーごとに
+    # 違います。** キーエンスの MR / R / LR はチャンネルとビットに分かれた
+    # 表記 (`MR400` は番号 64) ですが、三菱の M / L は 10 進そのままです
+    # (`M100` は番号 100)。既定のままだと三菱のプログラムを走らせたときに
+    # 別のビットを指します。
+    def initialize(layout: MemoryLayout.default, device_syntax: DeviceSyntax.keyence)
       @layout = layout
+      @device_syntax = device_syntax
       @em = EmMemory.new
       # 固定領域 (実機では FM = バンク 3 の ZF)。
       # 利用者が $ZF500 を使う場合とアドレスが重ならないよう別のメモリにする
@@ -74,7 +80,7 @@ module FaRuby
     def load_irep_and_run(irep, max_steps: 10000, encoding: ENCODING_UTF8)
       @irep = irep
       codegen = PlcCodegen.new(irep, steps_per_cycle: max_steps, layout: layout,
-                               encoding: encoding)
+                               encoding: encoding, device_syntax: @device_syntax)
       load_and_run(codegen.memory_image, codegen.fixed_image, max_steps: max_steps)
     end
 
@@ -165,8 +171,8 @@ module FaRuby
       @vm.begin_instruction(@vm.fetch_operands(op.operand_sizes))
       op.body&.call(@vm)
 
-      # **前置きだけの命令は、続けて落ちる先の本体を実行する。**
-      # mruby の vm.c と同じで、生成コードでは取り込みが前置きを実行してから
+      # **前処理だけの命令は、続けて落ちる先の本体を実行する。**
+      # mruby の vm.c と同じで、生成コードでは取り込みが前処理を実行してから
       # オペコードを書き替え、落ちる先の枝がそのまま拾う (tools/opcode_table.rb)。
       return if op.branch?
 

@@ -4,6 +4,7 @@ require "minitest/autorun"
 require "tempfile"
 
 require_relative "../simulator/kv_vm_simulator"
+require_relative "temp_dir"
 
 # mrbc を使った end-to-end テスト
 # mrbc がインストールされていない場合はスキップされます
@@ -324,7 +325,7 @@ end
 
   # F サフィックスは実数として扱われる。整数を代入すると実数に変換される
   def test_device_suffix_float_is_mapped
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write("$DM460F = 1.5\n")
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
@@ -470,6 +471,77 @@ end
     assert_equal 1, sim.em.read_u16(layout.array_sp_addr), "配列 1 つぶんだけ使う"
   end
 
+  # === 時間 ===
+  #
+  # **進める側はここでは見ません。** 経過時間もクロックパルスも、生成した
+  # スクリプトがスキャンごとに書き込むものです。シミュレータには 1 スキャンに
+  # あたるものが無いので、書き込まれた後の状態を置いて読み出しだけを確かめます。
+  # 進める側 (パルスの立ち上がりを数える) は test_kvs_generator が見ます。
+
+  def test_ticks_reads_the_elapsed_milliseconds
+    result = compile_and_run("t = $FARUBY_TICKS\n") do |sim|
+      sim.em.write_u32(layout.ticks_addr, 123_456)
+    end
+
+    assert_equal 123_456, result[:locals]["t"]
+  end
+
+  # 32 ビット符号付きで読む。**一周した後も引き算が経過ミリ秒になる**
+  def test_ticks_wraps_around_as_a_signed_32bit_value
+    # 0x7FFFFFFF (上限) の 2 ミリ秒後。一周して負になっている
+    result = compile_and_run("t = $FARUBY_TICKS\nd = t - 2147483647\n") do |sim|
+      sim.em.write_u32(layout.ticks_addr, 0x8000_0001)
+    end
+
+    assert_equal(-2_147_483_647, result[:locals]["t"], "一周すると負になる")
+    assert_equal 2, result[:locals]["d"], "差は一周しても正しい"
+  end
+
+  # 汎用グローバルの枠は使わない。**VM 状態の中にある**
+  def test_ticks_does_not_take_a_general_global_slot
+    result = compile_and_run("$foo = 7\nt = $FARUBY_TICKS\n")
+    sim = result[:sim]
+
+    assert_equal 7, sim.em.read_s32(layout.general_global_addr(0)),
+                 "$foo がスロット 0 のまま"
+  end
+
+  # === クロックパルス ===
+  #
+  # **真偽値で返ります。** 1 / 0 の整数だと Ruby では 0 も真になり、
+  # `if $FARUBY_CLOCK_1S` が常に成り立ってしまいます。
+
+  def test_the_clock_globals_are_true_or_false
+    source = <<~RUBY
+      $DM0 = 0
+      $DM1 = 0
+      $DM0 = 1 if $FARUBY_CLOCK_1S
+      $DM1 = 1 if $FARUBY_CLOCK_100MS
+    RUBY
+    sim = compile_and_run(source) do |s|
+      write_clock(s, 1000, true)
+      write_clock(s, 100, false)
+    end[:sim]
+
+    assert_equal 1, sim.devices[1].read_s16(0), "立っているパルスは真"
+    assert_equal 0, sim.devices[1].read_s16(1), "落ちているパルスは偽"
+  end
+
+  # 型タグごと写るので、真偽値のまま他へ渡せる
+  def test_a_clock_keeps_its_type_when_copied
+    sim = compile_and_run("$g = $FARUBY_CLOCK_1S\n") { |s| write_clock(s, 1000, true) }[:sim]
+
+    assert_equal FaRuby::VmConstants::TT_TRUE,
+                 sim.em.read_u16(layout.general_global_slot_addr(0))
+  end
+
+  # 点滅はデバイスへ写すだけで足りる
+  def test_a_clock_can_be_copied_to_a_bit_device
+    sim = compile_and_run("$MR100 = $FARUBY_CLOCK_1S\n") { |s| write_clock(s, 1000, true) }[:sim]
+
+    assert_equal 1, sim.global_value("$MR100")
+  end
+
   # === 同じ変数に違う型を入れ直す ===
   #
   # スロットごと上書きするので前の値は残らない。**ハッシュとデバイス参照は
@@ -527,7 +599,7 @@ end
 
   # 止まることを確かめる用。compile_and_run は完走を前提にしている
   def run_until_it_stops(source)
-    rb_file = Tempfile.new(["stop", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["stop", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
     mrb_path = rb_file.path.sub(/.rb$/, ".mrb")
@@ -812,11 +884,218 @@ end
     assert_equal [1, 0, 1], [64, 65, 66].map { |n| mr.read_u16(n) }
   end
 
+  # === インスタンス変数 ===
+
+  # **`@foo` が読み書きできること。** mrbc から通して確かめます
+  def test_an_instance_variable_holds_a_value
+    result = compile_and_run("@n = 0\n@n = @n + 1\n$DM100 = @n\n")
+
+    assert_equal 1, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(100)
+  end
+
+  # **メソッドの中も同じ self なので、同じ `@n` が見えること**
+  #
+  # faRuby にクラスは無いので、トップレベルもメソッドの中も self は `main`
+  # です。Ruby でも同じで、ここが「名前ごとに 1 枠で足りる」根拠です。
+  def test_a_method_sees_the_same_instance_variable
+    result = compile_and_run(<<~RUBY)
+      @n = 0
+      def bump
+        @n = @n + 1
+      end
+      bump
+      bump
+      bump
+      $DM101 = @n
+    RUBY
+
+    assert_equal 3, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(101)
+  end
+
+  # ブロックの中からも同じもの
+  def test_a_block_sees_the_same_instance_variable
+    result = compile_and_run("@sum = 0\n5.times { |i| @sum = @sum + i }\n$DM102 = @sum\n")
+
+    assert_equal 10, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(102)
+  end
+
+  # 値スロットなので**どの型でも持てる** (配列・文字列・実数)
+  def test_an_instance_variable_holds_any_type
+    result = compile_and_run(<<~RUBY)
+      @a = [1, 2, 3]
+      @s = "abc"
+      @f = 1.5
+      $DM103 = @a.length
+      $DM104 = @s.length
+      $DM105 = 1 if @f > 1.0
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 3, dm.read_s16(103)
+    assert_equal 3, dm.read_s16(104)
+    assert_equal 1, dm.read_s16(105)
+  end
+
+  # **`nil` から始まるので `||=` が効くこと**
+  #
+  # デバイスに割り付けた変数との違いです。デバイスは数値しか持てないので
+  # 読んだ 0 が真になり、`||=` が一度も代入されません
+  # (README の「変数を実デバイスにする」)。
+  def test_or_assign_works_on_an_instance_variable
+    result = compile_and_run("@once ||= 7\n$DM106 = @once\n")
+
+    assert_equal 7, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(106)
+  end
+
+  # `$n` と `@n` は別のもの
+  def test_a_global_and_an_instance_variable_do_not_collide
+    result = compile_and_run("$n = 1\n@n = 2\n$DM107 = $n\n$DM108 = @n\n")
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 1, dm.read_s16(107)
+    assert_equal 2, dm.read_s16(108)
+  end
+
+  # === デバイスの割り付け ===
+
+  # **割り付けた名前が実デバイスに届くこと。** mrbc から通して確かめます
+  #
+  # 表はホスト側だけのものなので、間違っていても生成は通り、**別のデバイスを
+  # 書きながら動きます。** ここで値の行き先そのものを見ます。
+  def test_a_mapped_name_reaches_the_real_device
+    syntax = FaRuby::DeviceSyntax.new(
+      FaRuby::DeviceSet.keyence,
+      mapping: { "motor" => "MR101", "count" => "DM1040", "speed" => "DM1041L" }
+    )
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $motor = true
+      $count = 7
+      $speed = 100000
+    RUBY
+    devices = result[:sim].devices
+
+    # MR101 は番号 17 (チャンネル 1 のビット 1)
+    assert_equal 1, devices[FaRuby::VmConstants::DEVICE_TYPE_MR].read_u16(17)
+    assert_equal 7, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1040)
+    # 幅は割り付け先に付いている。2 ワードで入ること
+    assert_equal 100_000, devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s32(1041)
+  end
+
+  # **割り付けた名前を添字で引けること。** 基点が 0 でないデバイス族です
+  #
+  # `$DM[i]` は DM0 からですが、`map "regs", "DM1100", 8` と書けば
+  # `$regs[0]` が DM1100 になります。**VM には足すものがありません** —
+  # 添字はデバイス番号にそのまま足され、種別と基点は実行時にシンボル表から
+  # 引いているので、表の項目を変えるだけで済みます。
+  def test_a_mapped_range_is_read_and_written_by_index
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "regs" => ["DM1100", 8] })
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $regs[0] = 11
+      $regs[7] = 77
+      8.times { |i| $regs[i] = $regs[i] + i }
+      $DM1200 = $regs[7]
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [11, 1, 2, 3, 4, 5, 6, 84], (1100..1107).map { |a| dm.read_s16(a) }
+    assert_equal 84, dm.read_s16(1200)
+  end
+
+  # **範囲の外は止まりません。** 今のところ隣のデバイスを書きます
+  #
+  # 添字は実行時に決まり、デバイス参照が持てるのはベースアドレスと種別・幅
+  # だけです。ワード数を実行時に見るには、シンボル表のエントリ (4 ワード、
+  # 予備なし) を広げることになり、固定領域の配置が全部ずれます。
+  # **分かっている穴なので形で留めておきます** (ロードマップに項目がある)。
+  def test_an_index_past_the_range_is_not_stopped_yet
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "regs" => ["DM1100", 8] })
+    result = compile_and_run("$regs[8] = 99\n", device_syntax: syntax)
+
+    assert_equal 99, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1108)
+  end
+
+  # **ふつうの変数も実デバイスにできること。** 足すものは何もありません
+  #
+  # 割り付け表に書けばシンボル表の項目がデバイスになるだけで、汎用グローバルの
+  # 枠 (`max_globals`) も使いません。デバイスなので `load` で消えず、
+  # インスタンスをまたいで共有でき、ラダーや表示器からも見えます。
+  def test_a_plain_variable_can_become_a_device
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "counter" => "DM1050" })
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $counter = 0
+      3.times { $counter = $counter + 1 }
+    RUBY
+
+    assert_equal 3, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1050)
+  end
+
+  # 割り付けても**デバイスの決まりがそのまま効く**こと
+  #
+  # 配列は連続したデバイスへ並び、文字列は文字で入り、実数は 0 方向へ
+  # 切り捨てられます。割り付けは名前の読み替えだけなので当然ですが、
+  # 「変数を実デバイスにすると配列と文字列が持てなくなる」と考えていたので
+  # 確かめました。**持てます。**
+  def test_a_mapped_variable_keeps_the_device_rules
+    syntax = FaRuby::DeviceSyntax.new(
+      FaRuby::DeviceSet.keyence,
+      mapping: { "list" => "DM1060", "name" => "DM1056", "ratio" => "DM1064" }
+    )
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      $list = [1, 2, 3]
+      $name = "abc"
+      $ratio = 1.5
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal [1, 2, 3], (1060..1062).map { |a| dm.read_s16(a) }
+    assert_equal [0x6162, 0x6300], (1056..1057).map { |a| dm.read_u16(a) }
+    assert_equal 1, dm.read_s16(1064)
+  end
+
+  # **`nil` は入れられません。** デバイスは数値しか持てないので 0 になります
+  #
+  # 止めてはいません。リテラルの `= nil` はバイトコードから見つけられるので
+  # コンパイル時に弾ける見込みですが、まだ入れていません。
+  def test_nil_through_a_mapped_name_becomes_zero
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "flag" => "DM1054" })
+    result = compile_and_run("$flag = nil\n", device_syntax: syntax)
+
+    assert_equal 0, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1054)
+  end
+
+  # **`||=` は実デバイスでは働きません。** 落とし穴なので形で留めておきます
+  #
+  # デバイスから読んだ 0 は Ruby では真なので、`$once ||= 7` は一度も代入
+  # されません。汎用グローバルなら `nil` から始まるので 7 が入ります。
+  # **同じプログラムが割り付け表の有無で違う結果になる**唯一の形です。
+  def test_or_assign_never_fires_on_a_device
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "once" => "DM1052" })
+    result = compile_and_run("$once ||= 7\n", device_syntax: syntax)
+
+    assert_equal 0, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1052)
+  end
+
+  # 割り付けた名前と実デバイスは混ぜて書ける (表は任意)
+  def test_a_mapped_name_and_a_real_device_live_together
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "count" => "DM1040" })
+    result = compile_and_run("$count = 7\n$DM1044 = 42\n", device_syntax: syntax)
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    assert_equal 7,  dm.read_s16(1040)
+    assert_equal 42, dm.read_s16(1044)
+  end
+
   private
 
   # エラー停止することを期待して実行する (compile_and_run は完了を要求する)
   def run_expecting_error(source)
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
     mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
@@ -841,9 +1120,19 @@ end
   end
 
   # Ruby ソースをコンパイル・パース・シミュレーション実行し、ローカル変数の値を返す
-  def compile_and_run(source)
+  # クロックパルスの値スロットを、生成スクリプトが書くのと同じ形で置く
+  def write_clock(sim, period, on)
+    tag = on ? FaRuby::VmConstants::TT_TRUE : FaRuby::VmConstants::TT_FALSE
+    sim.em.write_u16(layout.clock_value_addr(period),
+                     FaRuby::VmConstants::TT_CANONICAL_VALUE.fetch(tag))
+    sim.em.write_u16(layout.clock_tag_addr(period), tag)
+  end
+
+  # ブロックを渡すと、走らせる直前のシミュレータを触れる。
+  # 生成スクリプトが用意する値 (経過時間・クロックパルス) を置くのに使う。
+  def compile_and_run(source, device_syntax: nil, &before_run)
     # 一時ファイルに書き出し
-    rb_file = Tempfile.new(["test", ".rb"], "C:/tmp")
+    rb_file = Tempfile.new(["test", ".rb"], FaRuby::TempDir.path)
     rb_file.write(source)
     rb_file.close
 
@@ -857,7 +1146,12 @@ end
       # パースして実行
       data = File.binread(mrb_path)
       parser = FaRuby::MrbParser.new(data).parse
-      sim = FaRuby::KvVmSimulator.new
+      sim = if device_syntax
+              FaRuby::KvVmSimulator.new(device_syntax: device_syntax)
+            else
+              FaRuby::KvVmSimulator.new
+            end
+      before_run&.call(sim)
       sim.load_irep_and_run(parser.irep)
 
       assert_equal 2, sim.status, "VM should finish (status=2)"
