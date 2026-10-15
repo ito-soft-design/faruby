@@ -22,7 +22,8 @@
 #   0xA000 - 0xA7FF : 定数プール         (2KB)
 #   0xA800 - 0xAFFF : (free)            (2KB)
 #   0xB000 - 0xB0FF : グローバル変数      (256B, 64 スロット)
-#   0xB100 - 0xEFFF : (free)            (16KB)
+#   0xB100 - 0xB15F : フレームスタック    (96B, 8 フレーム × 12B)
+#   0xB160 - 0xEFFF : (free)            (~16KB)
 #   0xF000 - 0xFDFF : CPU スタック (SP)  (3.5KB)
 #   0xFFB8 - 0xFFF7 : ND80Z モニタワーク (RST ベクタ, レジスタ退避等)
 #   0xFFF8 - 0xFFFF : 7 セグ表示 (DIG)  (8B)
@@ -96,6 +97,41 @@ module FaRuby
     DISPLAY_BASE      = 0xFFF8
     DISPLAY_SIZE      = 8        # 8 桁
 
+    # --- フレームスタック ---
+    #
+    # ブロック呼び出し (times, loop) の復帰情報を保持するスタック。
+    # 各フレームは 12 バイト:
+    #
+    #   +0,+1  return_pc       (2B)  復帰先 PC
+    #   +2     return_irep     (1B)  復帰先 IREP 番号
+    #   +3,+4  return_reg_base (2B)  復帰先レジスタベースアドレス
+    #   +5     kind            (1B)  FRAME_KIND_*
+    #   +6,+7  index           (2B)  現在の反復カウンタ
+    #   +8,+9  limit           (2B)  反復上限
+    #   +10    outer           (1B)  外側フレーム番号 (FRAME_NONE=トップレベル)
+    #   +11    reserved        (1B)
+    FRAME_STACK_BASE  = 0xB100
+    FRAME_BYTES       = 12
+    MAX_FRAMES        = 8
+    FRAME_STACK_SIZE  = FRAME_BYTES * MAX_FRAMES  # 96B
+
+    # フレームフィールドのバイトオフセット
+    FRAME_OFF_RETURN_PC       = 0
+    FRAME_OFF_RETURN_IREP     = 2
+    FRAME_OFF_RETURN_REG_BASE = 3
+    FRAME_OFF_KIND            = 5
+    FRAME_OFF_INDEX           = 6
+    FRAME_OFF_LIMIT           = 8
+    FRAME_OFF_OUTER           = 10
+
+    # フレーム種別
+    FRAME_KIND_CALL    = 0   # メソッド呼び出し (将来用)
+    FRAME_KIND_ITERATE = 1   # times / upto
+    FRAME_KIND_LOOP    = 4   # loop (無限ループ)
+
+    # 「外側フレームなし」を表す値 (トップレベル)
+    FRAME_NONE = 0xFF
+
     # --- VM 状態領域のバイトオフセット ---
     #
     # 各フィールドはバイト境界で、16 ビット値は 2 バイト、
@@ -114,19 +150,26 @@ module FaRuby
     OFFSET_NREGS           = 0x10   # 1B  レジスタ数
     OFFSET_CUR_IREP        = 0x11   # 1B  現在の IREP 番号
     OFFSET_NUM_IREPS       = 0x12   # 1B  IREP 総数
+    OFFSET_REG_BASE        = 0x14   # 2B  レジスタウィンドウのベースアドレス
+    OFFSET_BC_BASE         = 0x16   # 2B  現在の IREP のバイトコード先頭アドレス
+    OFFSET_FRAME_SP        = 0x18   # 1B  フレームスタックポインタ (0=トップレベル)
+    OFFSET_SYM_BASE        = 0x19   # 2B  現在の IREP のシンボルテーブルアドレス
 
     # IREP テーブル 1 エントリのバイト数
     #
-    #   +0 バイトコード先頭 (2B)
-    #   +2 バイトコード長   (2B)
-    #   +4 定数プール先頭   (2B)
-    #   +6 nregs            (1B)
-    #   +7 予備             (1B)
-    IREP_ENTRY_BYTES     = 8
-    IREP_OFF_BYTECODE    = 0
+    #   +0  バイトコード先頭     (2B)
+    #   +2  バイトコード長       (2B)
+    #   +4  定数プール先頭       (2B)
+    #   +6  nregs               (1B)
+    #   +7  first_child         (1B)  最初の子 IREP 番号 (0xFF=子なし)
+    #   +8  シンボルテーブル先頭  (2B)  この IREP のシンボルテーブルアドレス
+    IREP_ENTRY_BYTES      = 10
+    IREP_OFF_BYTECODE     = 0
     IREP_OFF_BYTECODE_LEN = 2
-    IREP_OFF_POOL        = 4
-    IREP_OFF_NREGS       = 6
+    IREP_OFF_POOL         = 4
+    IREP_OFF_NREGS        = 6
+    IREP_OFF_FIRST_CHILD  = 7
+    IREP_OFF_SYM_TABLE    = 8
 
     # --- ヘルパーメソッド ---
 

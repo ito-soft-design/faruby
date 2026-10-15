@@ -1,0 +1,286 @@
+; vm_block.a80 — ブロック関連オペコード
+;
+; OP_LOADSELF, OP_BLOCK, OP_ENTER, OP_SENDB, OP_SSENDB, OP_BREAK
+
+; ---------------------------------------------------------------
+; OP_LOADSELF (B): R[a] = self (TT_OBJECT, 値 = 0)
+; ---------------------------------------------------------------
+do_op_loadself:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_OBJECT      ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  mvi m, 0              ; +2: val_lo = 0
+  inx h
+  mvi m, 0              ; +3: val_hi = 0
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_BLOCK (BB): R[a] = Proc(irep=first_child+b, outer=frame_sp)
+;
+; ブロックを TT_PROC としてレジスタに格納する。
+;   値の下位バイト = 子 irep 番号
+;   値の上位バイト = 外側フレーム番号 (現在の frame_sp)
+; ---------------------------------------------------------------
+do_op_block:
+  call fetch_byte       ; A = a
+  sta blk_reg_a
+  call fetch_byte       ; A = b (子 irep インデックス)
+  sta blk_child_idx
+
+  ; 子 irep 番号 = IREP テーブル[cur_irep].first_child + b
+  ; まず cur_irep のエントリアドレスを求める
+  lda VM_STATE_BASE + OFF_CUR_IREP
+  ; A * 10 (IREP_ENTRY_BYTES)
+  mov c, a
+  add a           ; ×2
+  mov b, a        ; B = ×2
+  mov a, c
+  add a           ; ×2
+  add a           ; ×4
+  add a           ; ×8
+  add b           ; ×10
+  mov e, a
+  mvi d, 0
+  lxi h, IREP_TABLE_BASE
+  dad d           ; HL = エントリアドレス
+  ; +7 = IREP_OFF_FIRST_CHILD
+  lxi d, IREP_OFF_FIRST_CHILD
+  dad d
+  mov a, m        ; A = first_child
+  lda blk_child_idx
+  mov b, a        ; B = child index
+  mov a, m        ; A = first_child (re-read)
+  add b           ; A = first_child + b = 子 irep 番号
+
+  ; R[a] に TT_PROC を書く
+  mov c, a        ; C = irep 番号 (val_lo)
+  lda blk_reg_a
+  call get_reg_addr ; HL = R[a]
+  mvi m, TT_PROC   ; +0: 型タグ
+  inx h
+  mvi m, 0          ; +1: 予約
+  inx h
+  mov m, c          ; +2: val_lo = irep 番号
+  inx h
+  ; val_hi = 外側フレーム番号
+  ; frame_sp == 0 (トップレベル) → FRAME_NONE
+  ; frame_sp >  0 (ブロック内)   → frame_sp - 1 (現在のフレーム)
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  ora a
+  jnz block_in_frame
+  mvi a, FRAME_NONE    ; トップレベル
+  jmp block_set_outer
+block_in_frame:
+  dcr a                 ; frame_sp - 1 = 現在のフレーム
+block_set_outer:
+  mov m, a              ; +3: val_hi = outer frame
+  jmp vm_loop
+
+blk_reg_a:    db 0
+blk_child_idx: db 0
+
+; ---------------------------------------------------------------
+; OP_ENTER (W): 引数の仕様を読み飛ばす (3 バイト)
+;
+; faRuby では引数の型検査をしないため、オペランドを消費するだけ。
+; ---------------------------------------------------------------
+do_op_enter:
+  call fetch_byte       ; 読み飛ばし (byte 1)
+  call fetch_byte       ; 読み飛ばし (byte 2)
+  call fetch_byte       ; 読み飛ばし (byte 3)
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_SSENDB (BBB): R[a] = R[0] (self) を設定してから OP_SENDB へ
+;
+; OP_SSEND と同様、R[0] (self) を R[a] にコピーしてから
+; ブロック付きメソッド呼び出しを行う。
+; ---------------------------------------------------------------
+do_op_ssendb:
+  ; オペランドをプリフェッチ
+  call fetch_byte       ; A = a
+  sta sendb_reg_a
+  call fetch_byte       ; A = b (シンボル番号)
+  sta sendb_sym_b
+  call fetch_byte       ; A = c (argc)
+  sta sendb_argc
+
+  ; R[0] → R[a] コピー (self を設定)
+  mvi a, 0
+  call get_reg_addr     ; HL = R[0]
+  push h                ; R[0] アドレス退避
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  xchg                  ; DE = R[a]
+  pop h                 ; HL = R[0]
+  call copy_slot        ; R[a] = R[0]
+
+  jmp sendb_dispatch
+
+; ---------------------------------------------------------------
+; OP_SENDB (BBB): ブロック付きメソッド呼び出し
+;
+; R[a+argc+1] にブロック (TT_PROC) があることを期待する。
+; シンボルテーブルからメソッド ID を取得し、振り分ける。
+; ---------------------------------------------------------------
+do_op_sendb:
+  call fetch_byte       ; A = a
+  sta sendb_reg_a
+  call fetch_byte       ; A = b (シンボル番号)
+  sta sendb_sym_b
+  call fetch_byte       ; A = c (argc)
+  sta sendb_argc
+
+sendb_dispatch:
+  ; シンボルテーブルからメソッド ID を取得
+  lda sendb_sym_b
+  add a           ; ×2
+  mov e, a
+  mvi d, 0
+  lhld VM_STATE_BASE + OFF_SYM_BASE
+  dad d           ; HL = sym_table[b]
+  mov a, m        ; メソッド ID (下位)
+  sta sendb_method_id
+
+  ; メソッド ID で振り分け
+  lda sendb_method_id
+  cpi 11          ; METHOD_TIMES
+  jz sendb_times
+  cpi 27          ; METHOD_LOOP
+  jz sendb_loop
+  ; 未対応のブロックメソッド
+  jmp vm_error
+
+; --- times ---
+sendb_times:
+  ; R[a] がレシーバ (整数)。limit = R[a] の値 - 1
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call slot_to_value    ; HL = 値先頭
+  mov c, m              ; C = val_lo
+  inx h
+  mov b, m              ; B = val_hi  → BC = レシーバの値
+
+  ; 0.times → ブロックを実行しない (R[a] はそのまま)
+  mov a, b
+  ora c
+  jz vm_loop            ; receiver == 0 → スキップ
+
+  ; limit = BC - 1
+  dcx b                 ; BC = limit
+
+  ; push_frame: A=レジスタ番号, B=kind, C=outer
+  ; ブロックの位置: R[a + argc + 1]
+  lda sendb_reg_a
+  push b                ; limit を退避
+  ; ブロック (TT_PROC) の情報を読む
+  lda sendb_argc
+  inr a                 ; argc + 1
+  mov b, a
+  lda sendb_reg_a
+  add b                 ; A = a + argc + 1
+  call get_reg_addr     ; HL = R[a+argc+1] (ブロック)
+  call slot_to_value    ; HL = 値先頭
+  mov a, m              ; A = irep 番号
+  sta sendb_block_irep
+  inx h
+  mov a, m              ; A = outer frame (val_hi)
+  sta sendb_block_outer
+
+  ; push_frame(a, FRAME_KIND_ITERATE, outer)
+  lda sendb_reg_a
+  mvi b, FRAME_KIND_ITERATE
+  lda sendb_block_outer
+  mov c, a
+  lda sendb_reg_a
+  call push_frame
+
+  ; フレームに limit を設定
+  ; cur_frame_addr は BC を破壊するので、先に呼ぶ
+  call cur_frame_addr   ; HL = 現在のフレーム (BC 破壊)
+  lxi d, FRAME_OFF_LIMIT
+  dad d                 ; HL = &limit
+  pop b                 ; BC = limit (ここで復帰)
+  mov m, c              ; limit_lo
+  inx h
+  mov m, b              ; limit_hi
+
+  ; ブロック引数 R[1] = 0 (初期カウンタ)
+  ; R[1] は新しい reg_base から見た R[1]
+  mvi a, 1
+  call get_reg_addr     ; HL = R[1]
+  mvi b, 0
+  mvi c, 0
+  call set_slot_int16   ; R[1] = 0
+
+  ; 子 irep に切り替え
+  lda sendb_block_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+; --- loop ---
+sendb_loop:
+  ; ブロックの位置: R[a + argc + 1]
+  lda sendb_argc
+  inr a
+  mov b, a
+  lda sendb_reg_a
+  add b                 ; A = a + argc + 1
+  call get_reg_addr     ; HL = R[a+argc+1] (ブロック)
+  call slot_to_value
+  mov a, m              ; irep 番号
+  sta sendb_block_irep
+  inx h
+  mov a, m              ; outer
+  sta sendb_block_outer
+
+  ; push_frame(a, FRAME_KIND_LOOP, outer)
+  lda sendb_reg_a
+  mvi b, FRAME_KIND_LOOP
+  lda sendb_block_outer
+  mov c, a
+  lda sendb_reg_a
+  call push_frame
+
+  ; 子 irep に切り替え
+  lda sendb_block_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+; OP_SENDB の一時変数
+sendb_reg_a:      db 0
+sendb_sym_b:      db 0
+sendb_argc:       db 0
+sendb_method_id:  db 0
+sendb_block_irep: db 0
+sendb_block_outer: db 0
+
+; ---------------------------------------------------------------
+; OP_BREAK (B): ブロックから脱出
+;
+; R[a] の値を R[0] にコピーして pop_frame。
+; ---------------------------------------------------------------
+do_op_break:
+  call fetch_byte       ; A = a
+  ; R[a] → R[0] コピー
+  call get_reg_addr     ; HL = R[a]
+  push h                ; R[a] アドレス退避
+  mvi a, 0
+  call get_reg_addr     ; HL = R[0]
+  xchg                  ; DE = R[0]
+  pop h                 ; HL = R[a]
+  call copy_slot        ; R[0] = R[a]
+
+  call pop_frame
+  jmp vm_loop

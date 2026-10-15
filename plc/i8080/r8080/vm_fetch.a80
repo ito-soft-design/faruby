@@ -11,13 +11,15 @@
 ;   破壊: HL, DE
 ;
 ; PC はバイトコード領域内のオフセット。絶対アドレスは
-; BYTECODE_BASE + PC で求めます。
+; OFF_BC_BASE + PC で求めます。ブロック内ではバイトコードベースが
+; 子 irep の先頭に変わります。
 ; ---------------------------------------------------------------
 fetch_byte:
-  lhld VM_STATE_BASE + OFF_PC   ; HL = PC (オフセット)
-  lxi d, BYTECODE_BASE
-  dad d                          ; HL = 絶対アドレス
-  mov a, m                       ; A = bytecode[PC]
+  lhld VM_STATE_BASE + OFF_PC       ; HL = PC (オフセット)
+  xchg                               ; DE = PC
+  lhld VM_STATE_BASE + OFF_BC_BASE  ; HL = 動的バイトコードベース
+  dad d                               ; HL = 絶対アドレス
+  mov a, m                            ; A = bytecode[PC]
   ; PC をインクリメント
   lhld VM_STATE_BASE + OFF_PC
   inx h

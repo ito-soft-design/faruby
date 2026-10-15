@@ -36,14 +36,20 @@ OFF_BYTECODE_LEN         EQU  0Eh  ; 2B
 OFF_NREGS                EQU  10h  ; 1B
 OFF_CUR_IREP             EQU  11h  ; 1B
 OFF_NUM_IREPS            EQU  12h  ; 1B
+OFF_REG_BASE             EQU  14h  ; 2B  レジスタウィンドウのベースアドレス
+OFF_BC_BASE              EQU  16h  ; 2B  現在の IREP のバイトコード先頭
+OFF_FRAME_SP             EQU  18h  ; 1B  フレームスタックポインタ
+OFF_SYM_BASE             EQU  19h  ; 2B  現在の IREP のシンボルテーブルアドレス
 
 ; --- IREP テーブルエントリ ---
 
-IREP_ENTRY_BYTES         EQU  08h
+IREP_ENTRY_BYTES         EQU  0Ah  ; 10 バイト/エントリ
 IREP_OFF_BYTECODE        EQU  00h  ; 2B
 IREP_OFF_BYTECODE_LEN    EQU  02h  ; 2B
 IREP_OFF_POOL            EQU  04h  ; 2B
 IREP_OFF_NREGS           EQU  06h  ; 1B
+IREP_OFF_FIRST_CHILD     EQU  07h  ; 1B  最初の子 IREP 番号 (FFh=子なし)
+IREP_OFF_SYM_TABLE       EQU  08h  ; 2B  シンボルテーブル先頭アドレス
 
 ; --- 型タグ ---
 ; TT_FALSY_MAX 以下が偽 (nil, false)
@@ -53,6 +59,8 @@ TT_NIL                   EQU  01h
 TT_FALSE                 EQU  02h
 TT_TRUE                  EQU  03h
 TT_INTEGER               EQU  04h
+TT_OBJECT                EQU  0Ah  ; self (main)
+TT_PROC                  EQU  0Ch  ; ブロック (値 = irep 番号)
 TT_FALSY_MAX             EQU  02h
 
 ; --- VM 実行状態 ---
@@ -66,6 +74,29 @@ VM_ERROR                 EQU  03h
 
 SYM_TABLE_BASE           EQU  8300h
 GLOBALS_BASE             EQU  0B000h
+
+; --- フレームスタック ---
+
+FRAME_STACK_BASE         EQU  0B100h
+FRAME_BYTES              EQU  0Ch  ; 12 バイト/フレーム
+MAX_FRAMES               EQU  08h
+
+; フレームフィールドのバイトオフセット
+FRAME_OFF_RETURN_PC      EQU  00h  ; 2B
+FRAME_OFF_RETURN_IREP    EQU  02h  ; 1B
+FRAME_OFF_RETURN_REG_BASE EQU 03h  ; 2B
+FRAME_OFF_KIND           EQU  05h  ; 1B
+FRAME_OFF_INDEX          EQU  06h  ; 2B
+FRAME_OFF_LIMIT          EQU  08h  ; 2B
+FRAME_OFF_OUTER          EQU  0Ah  ; 1B
+
+; フレーム種別
+FRAME_KIND_CALL          EQU  00h
+FRAME_KIND_ITERATE       EQU  01h  ; times / upto
+FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
+
+; 外側フレームなし (トップレベル)
+FRAME_NONE               EQU  0FFh
 
 ; --- Phase 1 オペコード ---
 

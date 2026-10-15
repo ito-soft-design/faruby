@@ -25,22 +25,99 @@
 .include "vm_jump.a80"
 .include "vm_globals.a80"
 .include "vm_send.a80"
+.include "vm_frame.a80"
+.include "vm_block.a80"
+.include "vm_upvar.a80"
 .include "vm_display.a80"
 
 ; ===============================================================
-; OP_RETURN (B): トップレベルでは VM 停止
+; OP_RETURN (B): ブロック内なら反復継続、トップレベルなら停止
 ;
-; Phase 1 ではメソッド呼び出しが無いため、常にトップレベル。
-; R[a] の値を 7 セグに表示して停止する。
+; frame_sp == 0 → トップレベル: 表示して停止
+; frame_sp > 0  → ブロック内: advance_iteration
 ; ===============================================================
 do_op_return:
   call fetch_byte         ; A = a (戻り値のレジスタ)
+  sta return_reg_a
+
+  ; フレームスタックが空ならトップレベル
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  ora a
+  jz do_op_return_top
+
+  ; ブロック内 → 反復を進める
+  jmp advance_iteration
+
+do_op_return_top:
+  lda return_reg_a
   call get_reg_addr       ; HL = R[a]
   call slot_to_value      ; HL = R[a] の値先頭
   call display_hex16
   mvi a, VM_FINISHED
   sta VM_STATE_BASE + OFF_STATUS
   jmp vm_halt
+
+return_reg_a: db 0
+
+; ===============================================================
+; advance_iteration — ブロックの 1 反復が終わった後の処理
+;
+; ITERATE (times): index++ して limit と比較。超えたら pop_frame。
+; LOOP: 常に PC=0 で再実行 (無限ループ)。
+; ===============================================================
+advance_iteration:
+  ; フレーム種別を確認
+  call cur_frame_addr     ; HL = 現在のフレーム
+  lxi d, FRAME_OFF_KIND
+  dad d
+  mov a, m                ; A = kind
+  cpi FRAME_KIND_LOOP
+  jz adv_reenter          ; loop → 常に再実行
+
+  ; --- ITERATE (times) ---
+  ; index をインクリメント
+  call cur_frame_addr
+  lxi d, FRAME_OFF_INDEX
+  dad d
+  mov c, m                ; C = index_lo
+  inx h
+  mov b, m                ; B = index_hi
+  inx b                   ; BC = index + 1
+  ; 書き戻す
+  mov m, b                ; index_hi
+  dcx h
+  mov m, c                ; index_lo
+
+  ; limit を読む (index の直後、HL=&index_lo → +2 で &limit_lo)
+  inx h                   ; → &index_hi
+  inx h                   ; → &limit_lo
+  mov e, m                ; E = limit_lo
+  inx h                   ; → &limit_hi
+  mov d, m                ; D = limit_hi
+
+  ; BC = new index, DE = limit
+  ; index > limit なら反復終了 (DE - BC でボロー発生)
+  mov a, e
+  sub c
+  mov a, d
+  sbb b
+  jc adv_done             ; index > limit → 反復終了
+
+  ; まだ反復が残っている: R[1] = index, PC = 0
+  mvi a, 1
+  call get_reg_addr       ; HL = R[1] (BC は保存される)
+  call set_slot_int16     ; R[1] = index (ブロック引数 |i|)
+
+adv_reenter:
+  ; PC = 0 で再実行
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+adv_done:
+  ; 反復完了 → フレームを破棄して親に戻る
+  call pop_frame
+  jmp vm_loop
 
 ; ===============================================================
 ; OP_STOP (Z): VM 停止
@@ -126,7 +203,34 @@ vm_clear_regs:
   lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1
   sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
 
+  ; レジスタベースを初期化 (REG_FILE_BASE)
+  lxi h, REG_FILE_BASE
+  shld VM_STATE_BASE + OFF_REG_BASE
+
+  ; バイトコードベースを IREP 0 から読んで設定
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE
+  sta VM_STATE_BASE + OFF_BC_BASE
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE + 1
+  sta VM_STATE_BASE + OFF_BC_BASE + 1
+
+  ; シンボルテーブルベースを IREP 0 から読んで設定
+  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE
+  sta VM_STATE_BASE + OFF_SYM_BASE
+  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE + 1
+  sta VM_STATE_BASE + OFF_SYM_BASE + 1
+
+  ; フレーム SP = 0 (ゼロクリア済み)
   ; PC = 0 (ゼロクリア済み)
+
+  ; R[0] = self (TT_OBJECT, 値 = 0)
+  lxi h, REG_FILE_BASE
+  mvi m, TT_OBJECT      ; +0: 型タグ
+  inx h
+  mvi m, 0               ; +1: 予約
+  inx h
+  mvi m, 0               ; +2: val_lo
+  inx h
+  mvi m, 0               ; +3: val_hi
 
   ; 実行状態を RUNNING に設定
   mvi a, VM_RUNNING
@@ -225,7 +329,7 @@ dispatch_table:
   dw 0000h            ; 0F OP_LOADI32
   dw 0000h            ; 10 OP_LOADSYM
   dw do_op_loadnil    ; 11 OP_LOADNIL
-  dw 0000h            ; 12 OP_LOADSELF
+  dw do_op_loadself   ; 12 OP_LOADSELF
   dw do_op_loadt      ; 13 OP_LOADT
   dw do_op_loadf      ; 14 OP_LOADF
   dw do_op_getgv      ; 15 OP_GETGV
@@ -240,8 +344,8 @@ dispatch_table:
   dw 0000h            ; 1E OP_SETCONST
   dw 0000h            ; 1F OP_GETMCNST
   dw 0000h            ; 20 OP_SETMCNST
-  dw 0000h            ; 21 OP_GETUPVAR
-  dw 0000h            ; 22 OP_SETUPVAR
+  dw do_op_getupvar   ; 21 OP_GETUPVAR
+  dw do_op_setupvar   ; 22 OP_SETUPVAR
   dw 0000h            ; 23 OP_GETIDX
   dw 0000h            ; 24 OP_SETIDX
   dw do_op_jmp        ; 25 OP_JMP
@@ -253,19 +357,19 @@ dispatch_table:
   dw 0000h            ; 2B OP_RESCUE
   dw 0000h            ; 2C OP_RAISEIF
   dw do_op_ssend      ; 2D OP_SSEND
-  dw 0000h            ; 2E OP_SSENDB
+  dw do_op_ssendb     ; 2E OP_SSENDB
   dw do_op_send       ; 2F OP_SEND
-  dw 0000h            ; 30 OP_SENDB
+  dw do_op_sendb      ; 30 OP_SENDB
   dw 0000h            ; 31 OP_CALL
   dw 0000h            ; 32 OP_SUPER
   dw 0000h            ; 33 OP_ARGARY
-  dw 0000h            ; 34 OP_ENTER
+  dw do_op_enter      ; 34 OP_ENTER
   dw 0000h            ; 35 OP_KEY_P
   dw 0000h            ; 36 OP_KEYEND
   dw 0000h            ; 37 OP_KARG
   dw do_op_return     ; 38 OP_RETURN
   dw 0000h            ; 39 OP_RETURN_BLK
-  dw 0000h            ; 3A OP_BREAK
+  dw do_op_break      ; 3A OP_BREAK
   dw 0000h            ; 3B OP_BLKPUSH
   dw do_op_add        ; 3C OP_ADD
   dw do_op_addi       ; 3D OP_ADDI
@@ -294,7 +398,7 @@ dispatch_table:
   dw 0000h            ; 54 OP_HASHADD
   dw 0000h            ; 55 OP_HASHCAT
   dw 0000h            ; 56 OP_LAMBDA
-  dw 0000h            ; 57 OP_BLOCK
+  dw do_op_block      ; 57 OP_BLOCK
   dw 0000h            ; 58 OP_METHOD
   dw 0000h            ; 59 OP_RANGE_INC
   dw 0000h            ; 5A OP_RANGE_EXC

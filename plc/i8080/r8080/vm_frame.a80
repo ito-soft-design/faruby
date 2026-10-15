@@ -1,0 +1,239 @@
+; vm_frame.a80 — フレームスタック管理
+;
+; ブロック呼び出し (times, loop) のフレームを管理するサブルーチン群。
+;
+;   push_frame   : 現在の状態をフレームに保存して frame_sp++
+;   pop_frame    : frame_sp-- して保存した状態を復帰
+;   switch_irep  : IREP テーブルから BC_BASE, BC_LEN, NREGS をロード
+;   get_frame_addr : フレーム番号 → メモリアドレス
+;   cur_frame_addr : 現在のフレーム (frame_sp - 1) のアドレス
+
+; ---------------------------------------------------------------
+; get_frame_addr — フレーム番号 → アドレス
+;
+;   入力: A = フレーム番号 (0-7)
+;   出力: HL = FRAME_STACK_BASE + A * 12
+;   破壊: A, B, DE
+; ---------------------------------------------------------------
+get_frame_addr:
+  mov c, a        ; C = 元の値 (退避)
+  add a           ; ×2
+  mov b, a        ; B = ×2
+  add a           ; ×4
+  add b           ; ×4 + ×2 = ×6
+  add a           ; ×12
+  mov e, a
+  mvi d, 0        ; DE = frame * 12
+  lxi h, FRAME_STACK_BASE
+  dad d           ; HL = FRAME_STACK_BASE + frame * 12
+  ret
+
+; ---------------------------------------------------------------
+; cur_frame_addr — 現在のフレーム (frame_sp - 1) のアドレス
+;
+;   入力: なし
+;   出力: HL = 現在のフレームのアドレス
+;   破壊: A, B, C, DE
+; ---------------------------------------------------------------
+cur_frame_addr:
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  dcr a
+  jmp get_frame_addr
+
+; ---------------------------------------------------------------
+; push_frame — 現在の状態をフレームに保存
+;
+;   入力: A = レシーバのレジスタ番号 (reg_base の shift に使う)
+;          B = フレーム種別 (FRAME_KIND_*)
+;          C = 外側フレーム番号 (FRAME_NONE = トップレベル)
+;   出力: なし
+;   破壊: A, B, C, HL, DE
+;
+; frame_sp のスロットに保存して frame_sp++。
+; reg_base を A*4 だけ進める (レジスタウィンドウのシフト)。
+; ---------------------------------------------------------------
+push_frame:
+  ; パラメータを退避
+  sta pf_shift_reg
+  mov a, b
+  sta pf_kind
+  mov a, c
+  sta pf_outer
+
+  ; HL = frame[frame_sp]
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  call get_frame_addr
+
+  ; +0,+1: return_pc
+  lda VM_STATE_BASE + OFF_PC
+  mov m, a
+  inx h
+  lda VM_STATE_BASE + OFF_PC + 1
+  mov m, a
+  inx h
+
+  ; +2: return_irep
+  lda VM_STATE_BASE + OFF_CUR_IREP
+  mov m, a
+  inx h
+
+  ; +3,+4: return_reg_base
+  lda VM_STATE_BASE + OFF_REG_BASE
+  mov m, a
+  inx h
+  lda VM_STATE_BASE + OFF_REG_BASE + 1
+  mov m, a
+  inx h
+
+  ; +5: kind
+  lda pf_kind
+  mov m, a
+  inx h
+
+  ; +6,+7: index = 0
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+
+  ; +8,+9: limit = 0
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+
+  ; +10: outer
+  lda pf_outer
+  mov m, a
+
+  ; reg_base += shift_reg * 4
+  lda pf_shift_reg
+  add a           ; ×2
+  add a           ; ×4
+  lhld VM_STATE_BASE + OFF_REG_BASE
+  add l
+  mov l, a
+  mvi a, 0
+  adc h
+  mov h, a
+  shld VM_STATE_BASE + OFF_REG_BASE
+
+  ; frame_sp++
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  inr a
+  sta VM_STATE_BASE + OFF_FRAME_SP
+  ret
+
+; push_frame の一時変数
+pf_shift_reg: db 0
+pf_kind:      db 0
+pf_outer:     db 0
+
+; ---------------------------------------------------------------
+; pop_frame — frame_sp-- して保存した状態を復帰
+;
+;   入力: なし
+;   出力: なし
+;   破壊: A, B, C, HL, DE
+;
+; PC, reg_base を復帰し、return_irep で switch_irep を呼ぶ。
+; ---------------------------------------------------------------
+pop_frame:
+  ; frame_sp--
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  dcr a
+  sta VM_STATE_BASE + OFF_FRAME_SP
+
+  ; HL = frame[frame_sp] (decremented value)
+  call get_frame_addr
+
+  ; +0,+1: restore return_pc
+  mov a, m
+  sta VM_STATE_BASE + OFF_PC
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_PC + 1
+  inx h
+
+  ; +2: return_irep → switch_irep 用に退避
+  mov a, m
+  sta popf_ret_irep
+  inx h
+
+  ; +3,+4: restore return_reg_base
+  mov a, m
+  sta VM_STATE_BASE + OFF_REG_BASE
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_REG_BASE + 1
+
+  ; switch_irep で BC_BASE, BC_LEN, NREGS を復帰
+  lda popf_ret_irep
+  call switch_irep
+  ret
+
+popf_ret_irep: db 0
+
+; ---------------------------------------------------------------
+; switch_irep — IREP テーブルから実行情報をロード
+;
+;   入力: A = IREP 番号
+;   出力: なし
+;   破壊: A, B, C, HL, DE
+;
+; CUR_IREP, BC_BASE, BC_LEN, NREGS を IREP テーブルから設定する。
+; ---------------------------------------------------------------
+switch_irep:
+  sta VM_STATE_BASE + OFF_CUR_IREP
+
+  ; IREP テーブルエントリのアドレス: IREP_TABLE_BASE + A * 10
+  ; A * 10 = A * 8 + A * 2
+  mov c, a        ; C = A (退避)
+  add a           ; ×2
+  mov b, a        ; B = A*2
+  mov a, c
+  add a           ; ×2
+  add a           ; ×4
+  add a           ; ×8
+  add b           ; A*8 + A*2 = A*10
+  mov e, a
+  mvi d, 0
+  lxi h, IREP_TABLE_BASE
+  dad d           ; HL = エントリアドレス
+
+  ; +0,+1: bytecode base → BC_BASE
+  mov a, m
+  sta VM_STATE_BASE + OFF_BC_BASE
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_BC_BASE + 1
+  inx h
+
+  ; +2,+3: bytecode len → BC_LEN
+  mov a, m
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
+  inx h
+
+  ; +4,+5: pool base (スキップ)
+  inx h
+  inx h
+
+  ; +6: nregs
+  mov a, m
+  sta VM_STATE_BASE + OFF_NREGS
+
+  ; +7: first_child (スキップ)
+  inx h
+
+  ; +8,+9: sym_table_base → SYM_BASE
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_SYM_BASE
+  inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_SYM_BASE + 1
+
+  ret

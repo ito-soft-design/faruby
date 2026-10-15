@@ -23,17 +23,18 @@ module FaRuby
     def initialize(mrb_data)
       @parser = MrbParser.new(mrb_data).parse
       @irep = @parser.irep
+      flatten_ireps
     end
 
-    attr_reader :irep
+    attr_reader :irep, :all_ireps
 
     # メモリイメージを構築する (アドレス => バイト のハッシュ)
     def build_memory
       mem = {}
-      place_bytecode(mem)
+      place_all_bytecodes(mem)
       place_pool(mem)
-      place_irep_table(mem)
-      place_symbol_table(mem)
+      place_all_symbol_tables(mem)
+      place_all_irep_entries(mem)
       mem
     end
 
@@ -66,15 +67,36 @@ module FaRuby
 
     private
 
-    # --- バイトコードの配置 ---
-    def place_bytecode(mem)
-      bytes = irep.instructions
-      raise "バイトコードが大きすぎます (#{bytes.size} > #{Layout::BYTECODE_SIZE})" if bytes.size > Layout::BYTECODE_SIZE
+    # --- すべての irep をフラット化 (DFS 前順) ---
+    def flatten_ireps
+      @all_ireps = []
+      collect_ireps_dfs(irep)
+    end
 
-      bytes = bytes.bytes if bytes.is_a?(String)
-      bytes.each_with_index do |byte, i|
-        mem[Layout::BYTECODE_BASE + i] = byte
+    def collect_ireps_dfs(irep_node)
+      @all_ireps << irep_node
+      irep_node.children.each { |child| collect_ireps_dfs(child) }
+    end
+
+    # --- バイトコードの配置 (全 irep) ---
+    #
+    # 各 irep のバイトコードを BYTECODE_BASE に順次配置する。
+    # @bc_addrs[i] に irep i の絶対先頭アドレスを記録する。
+    def place_all_bytecodes(mem)
+      offset = 0
+      @bc_addrs = []
+
+      @all_ireps.each do |ir|
+        @bc_addrs << (Layout::BYTECODE_BASE + offset)
+        bytes = ir.instructions
+        bytes = bytes.bytes if bytes.is_a?(String)
+        bytes.each_with_index do |byte, i|
+          mem[Layout::BYTECODE_BASE + offset + i] = byte
+        end
+        offset += ir.ilen
       end
+
+      raise "バイトコードが大きすぎます (#{offset} > #{Layout::BYTECODE_SIZE})" if offset > Layout::BYTECODE_SIZE
     end
 
     # --- 定数プールの配置 ---
@@ -120,83 +142,100 @@ module FaRuby
       mem[addr] = TT_NIL
     end
 
-    # --- IREP テーブルの配置 ---
+    # --- IREP テーブルの配置 (全 irep) ---
     #
-    # Phase 1 ではトップレベル irep (index 0) だけ。
-    def place_irep_table(mem)
-      addr = Layout::IREP_TABLE_BASE
+    # DFS 前順で番号付けした全 irep のエントリを書く。
+    # first_child は DFS 前順の性質から index + 1 (子がある場合)。
+    def place_all_irep_entries(mem)
+      @all_ireps.each_with_index do |ir, idx|
+        addr = Layout::IREP_TABLE_BASE + idx * Layout::IREP_ENTRY_BYTES
 
-      # バイトコード先頭アドレス (2B, リトルエンディアン)
-      bc_addr = Layout::BYTECODE_BASE
-      mem[addr + Layout::IREP_OFF_BYTECODE] = bc_addr & 0xFF
-      mem[addr + Layout::IREP_OFF_BYTECODE + 1] = (bc_addr >> 8) & 0xFF
+        # +0,+1: バイトコード先頭アドレス
+        bc = @bc_addrs[idx]
+        mem[addr + Layout::IREP_OFF_BYTECODE] = bc & 0xFF
+        mem[addr + Layout::IREP_OFF_BYTECODE + 1] = (bc >> 8) & 0xFF
 
-      # バイトコード長 (2B)
-      bc_len = irep.ilen
-      mem[addr + Layout::IREP_OFF_BYTECODE_LEN] = bc_len & 0xFF
-      mem[addr + Layout::IREP_OFF_BYTECODE_LEN + 1] = (bc_len >> 8) & 0xFF
+        # +2,+3: バイトコード長
+        mem[addr + Layout::IREP_OFF_BYTECODE_LEN] = ir.ilen & 0xFF
+        mem[addr + Layout::IREP_OFF_BYTECODE_LEN + 1] = (ir.ilen >> 8) & 0xFF
 
-      # 定数プール先頭アドレス (2B)
-      pool_addr = Layout::POOL_BASE
-      mem[addr + Layout::IREP_OFF_POOL] = pool_addr & 0xFF
-      mem[addr + Layout::IREP_OFF_POOL + 1] = (pool_addr >> 8) & 0xFF
+        # +4,+5: 定数プール先頭 (全 irep で共有)
+        pool_addr = Layout::POOL_BASE
+        mem[addr + Layout::IREP_OFF_POOL] = pool_addr & 0xFF
+        mem[addr + Layout::IREP_OFF_POOL + 1] = (pool_addr >> 8) & 0xFF
 
-      # nregs (1B)
-      mem[addr + Layout::IREP_OFF_NREGS] = irep.nregs
+        # +6: nregs
+        mem[addr + Layout::IREP_OFF_NREGS] = ir.nregs
 
-      # 予備 (1B)
-      mem[addr + Layout::IREP_OFF_NREGS + 1] = 0
+        # +7: first_child (DFS 前順 → 子があれば index + 1)
+        first_child = ir.children.empty? ? 0xFF : idx + 1
+        mem[addr + Layout::IREP_OFF_FIRST_CHILD] = first_child
+
+        # +8,+9: シンボルテーブル先頭アドレス
+        sym = @sym_addrs[idx]
+        mem[addr + Layout::IREP_OFF_SYM_TABLE] = sym & 0xFF
+        mem[addr + Layout::IREP_OFF_SYM_TABLE + 1] = (sym >> 8) & 0xFF
+      end
     end
 
     # 組み込みメソッド名 → メソッド ID のマッピング
-    # vm_send.a80 の send_dispatch と一致させること
+    # vm_send.a80 / vm_block.a80 の dispatch と一致させること
     METHOD_IDS = {
-      "!=" => 1,
-      "!"  => 2,
-      "%"  => 3,
-      "abs" => 4,
+      "!="    => 1,
+      "!"     => 2,
+      "%"     => 3,
+      "abs"   => 4,
+      "times" => 11,
+      "loop"  => 27,
     }.freeze
 
-    # --- シンボルテーブルの配置 ---
+    # --- シンボルテーブルの配置 (全 irep) ---
     #
-    # irep のシンボルテーブルを走査し、各シンボルに対応する値を書く:
-    #   - $ または @ で始まるシンボル → グローバルスロットのアドレス (>= 0xB000)
-    #   - METHOD_IDS に含まれるシンボル → メソッド ID (0x0001-0x00FF)
-    #   - それ以外 → 0x0000 (未対応マーカー)
-    def place_symbol_table(mem)
-      return if irep.symbols.empty?
-
-      raise "シンボルが多すぎます (#{irep.symbols.size} > #{Layout::MAX_SYMBOLS})" if irep.symbols.size > Layout::MAX_SYMBOLS
-
+    # 各 irep のシンボルを SYM_TABLE_BASE に順次配置する。
+    # 同名のグローバル/インスタンス変数は同じスロットを共有する。
+    # @sym_addrs[i] に irep i のシンボルテーブル先頭アドレスを記録する。
+    def place_all_symbol_tables(mem)
+      sym_cursor = Layout::SYM_TABLE_BASE
+      @sym_addrs = []
+      globals_map = {}   # シンボル名 => スロットアドレス (重複排除)
       globals_count = 0
 
-      irep.symbols.each_with_index do |sym, idx|
-        tbl_addr = Layout::SYM_TABLE_BASE + idx * 2
+      @all_ireps.each do |ir|
+        @sym_addrs << sym_cursor
 
-        if sym && (sym.start_with?("$") || sym.start_with?("@"))
-          # グローバル変数 / インスタンス変数 — スロットを割り当てる
-          raise "グローバル変数が多すぎます (> #{Layout::MAX_GLOBALS})" if globals_count >= Layout::MAX_GLOBALS
+        ir.symbols.each_with_index do |sym, idx|
+          tbl_addr = sym_cursor + idx * 2
 
-          slot_addr = Layout::GLOBALS_BASE + globals_count * Layout::SLOT_BYTES
-          globals_count += 1
+          if sym && (sym.start_with?("$") || sym.start_with?("@"))
+            # グローバル/インスタンス変数 — 同名なら同じスロットを再利用
+            if globals_map.key?(sym)
+              slot_addr = globals_map[sym]
+            else
+              raise "グローバル変数が多すぎます (> #{Layout::MAX_GLOBALS})" if globals_count >= Layout::MAX_GLOBALS
 
-          # シンボルテーブルにスロットアドレスを書く
-          mem[tbl_addr]     = slot_addr & 0xFF
-          mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+              slot_addr = Layout::GLOBALS_BASE + globals_count * Layout::SLOT_BYTES
+              globals_map[sym] = slot_addr
+              globals_count += 1
+              place_slot_nil(mem, slot_addr)
+            end
 
-          # グローバルスロットを nil で初期化
-          place_slot_nil(mem, slot_addr)
-        elsif sym && METHOD_IDS.key?(sym)
-          # 組み込みメソッド — メソッド ID を書く
-          mid = METHOD_IDS[sym]
-          mem[tbl_addr]     = mid & 0xFF
-          mem[tbl_addr + 1] = 0   # 上位バイト = 0 → メソッド ID
-        else
-          # 未対応 — アドレス 0
-          mem[tbl_addr]     = 0
-          mem[tbl_addr + 1] = 0
+            mem[tbl_addr]     = slot_addr & 0xFF
+            mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+          elsif sym && METHOD_IDS.key?(sym)
+            mid = METHOD_IDS[sym]
+            mem[tbl_addr]     = mid & 0xFF
+            mem[tbl_addr + 1] = 0
+          else
+            mem[tbl_addr]     = 0
+            mem[tbl_addr + 1] = 0
+          end
         end
+
+        sym_cursor += ir.symbols.size * 2
       end
+
+      total = sym_cursor - Layout::SYM_TABLE_BASE
+      raise "シンボルテーブルが大きすぎます (#{total} > #{Layout::SYM_TABLE_SIZE})" if total > Layout::SYM_TABLE_SIZE
     end
 
     # --- Intel HEX レコード生成 ---

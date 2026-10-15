@@ -48,7 +48,7 @@ send_dispatch:
   add a                 ; b * 2
   mov e, a
   mvi d, 0
-  lxi h, SYM_TABLE_BASE
+  lhld VM_STATE_BASE + OFF_SYM_BASE
   dad d
   mov e, m
   inx h

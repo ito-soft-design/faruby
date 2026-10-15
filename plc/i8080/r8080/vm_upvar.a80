@@ -1,0 +1,129 @@
+; vm_upvar.a80 — 外側スコープの変数アクセス
+;
+; OP_GETUPVAR, OP_SETUPVAR
+;
+; ブロック内から外側のローカル変数にアクセスする。
+; outer フレーム chain を level 段辿って reg_base を求める。
+
+; ---------------------------------------------------------------
+; upvar_base — 外側スコープのレジスタベースアドレスを求める
+;
+;   入力: A = level (何段外側か)
+;   出力: HL = 外側スコープの reg_base アドレス
+;   破壊: A, B, C, DE
+;
+; outer chain を level 段辿る。FRAME_NONE に達したら
+; REG_FILE_BASE (トップレベル) を返す。
+; ---------------------------------------------------------------
+upvar_base:
+  mov b, a              ; B = level (残り段数)
+  ; まず現在のフレームの outer を読む
+  lda VM_STATE_BASE + OFF_FRAME_SP
+  dcr a                 ; 現在のフレーム = frame_sp - 1
+  sta upvar_frame
+
+upvar_loop:
+  ; outer フレーム番号を読む
+  lda upvar_frame
+  call get_frame_addr   ; HL = フレームアドレス
+  lxi d, FRAME_OFF_OUTER
+  dad d
+  mov a, m              ; A = outer frame 番号
+
+  cpi FRAME_NONE
+  jz upvar_toplevel     ; トップレベルに達した
+
+  sta upvar_frame       ; 次のフレーム
+
+  dcr b
+  jnz upvar_loop        ; まだ辿る段がある
+
+  ; level 回辿り終わった — upvar_frame の reg_base を返す
+  lda upvar_frame
+  call get_frame_addr   ; HL = フレームアドレス
+  lxi d, FRAME_OFF_RETURN_REG_BASE
+  dad d
+  mov e, m
+  inx h
+  mov d, m              ; DE = return_reg_base
+  xchg                  ; HL = return_reg_base
+  ret
+
+upvar_toplevel:
+  lxi h, REG_FILE_BASE
+  ret
+
+upvar_frame: db 0
+
+; ---------------------------------------------------------------
+; OP_GETUPVAR (BBB): R[a] = upvar[level].R[b]
+;
+;   a = コピー先レジスタ
+;   b = 外側スコープのレジスタ番号
+;   c = level (何段外側か)
+; ---------------------------------------------------------------
+do_op_getupvar:
+  call fetch_byte       ; A = a
+  sta upvar_reg_a
+  call fetch_byte       ; A = b (外側のレジスタ番号)
+  sta upvar_reg_b
+  call fetch_byte       ; A = c (level)
+
+  ; 外側の reg_base を求める
+  call upvar_base       ; HL = 外側の reg_base
+
+  ; 外側の R[b] のアドレス = base + b * 4
+  lda upvar_reg_b
+  add a           ; ×2
+  add a           ; ×4
+  add l
+  mov l, a
+  mvi a, 0
+  adc h
+  mov h, a        ; HL = 外側の R[b]
+
+  ; R[a] にコピー
+  push h          ; コピー元退避
+  lda upvar_reg_a
+  call get_reg_addr ; HL = R[a]
+  xchg            ; DE = R[a] (コピー先)
+  pop h           ; HL = 外側の R[b] (コピー元)
+  call copy_slot
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_SETUPVAR (BBB): upvar[level].R[b] = R[a]
+;
+;   a = コピー元レジスタ
+;   b = 外側スコープのレジスタ番号
+;   c = level (何段外側か)
+; ---------------------------------------------------------------
+do_op_setupvar:
+  call fetch_byte       ; A = a
+  sta upvar_reg_a
+  call fetch_byte       ; A = b
+  sta upvar_reg_b
+  call fetch_byte       ; A = c (level)
+
+  ; 外側の reg_base を求める
+  call upvar_base       ; HL = 外側の reg_base
+
+  ; 外側の R[b] のアドレス = base + b * 4
+  lda upvar_reg_b
+  add a
+  add a
+  add l
+  mov l, a
+  mvi a, 0
+  adc h
+  mov h, a        ; HL = 外側の R[b]
+  xchg            ; DE = 外側の R[b] (コピー先)
+
+  ; R[a] からコピー
+  lda upvar_reg_a
+  call get_reg_addr ; HL = R[a] (コピー元)
+  call copy_slot
+  jmp vm_loop
+
+upvar_reg_a: db 0
+upvar_reg_b: db 0

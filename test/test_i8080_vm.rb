@@ -466,6 +466,64 @@ class TestI8080Vm < Minitest::Test
     assert_equal "    1000", board[:board].display_text
   end
 
+  # === ブロック (times / loop) ===
+
+  def test_times_basic
+    # 3.times { |i| @sum = @sum + i } → @sum = 0+1+2 = 3
+    board = run_ruby(<<~RUBY)
+      @sum = 0
+      3.times { |i| @sum = @sum + i }
+      a = @sum
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(1)
+  end
+
+  def test_times_five
+    # 5.times { |i| @sum = @sum + i } → @sum = 0+1+2+3+4 = 10
+    board = run_ruby(<<~RUBY)
+      @sum = 0
+      5.times { |i| @sum = @sum + i }
+      a = @sum
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 10, board[:board].reg_value(1)
+  end
+
+  def test_times_zero
+    # 0.times は本体を実行しない
+    board = run_ruby(<<~RUBY)
+      @n = 42
+      0.times { |i| @n = 0 }
+      a = @n
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 42, board[:board].reg_value(1)
+  end
+
+  def test_loop_break
+    board = run_ruby(<<~RUBY)
+      @n = 0
+      loop do
+        break if @n > 4
+        @n = @n + 1
+      end
+      a = @n
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(1)
+  end
+
+  def test_times_upvar
+    # ブロック内から外側のローカル変数にアクセス (GETUPVAR / SETUPVAR)
+    board = run_ruby(<<~RUBY)
+      a = 0
+      5.times { a = a + 1 }
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(1)
+  end
+
   # === SimVm との相互検証 ===
   #
   # 同じ Ruby プログラムを SimVm と i8080 VM で実行し、
