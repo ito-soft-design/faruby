@@ -111,11 +111,11 @@ module FaRuby
     # PC を指す layout.pc_addr とは別物なので混同しないこと
     def indexed_base = "#{layout.device_name}0"
 
-    # 固定領域 (FM) をインデックス修飾で指すときの基点
+    # 固定領域をインデックス修飾で指すときの基点
     #
-    # FM は ZF をバンクに分けたもの。スクリプトの先頭で FRSET でバンクを
-    # 選んであるため、ここではバンクを意識せず 0-32767 のアドレスで指せる
-    def fixed_indexed_base = "#{layout.fixed_device_name}0"
+    # **バンクの先頭デバイス** (バンク 3 なら ZF98304)。Z に載るのはそこからの
+    # オフセットだけなので、16 ビットで足ります。バンクの切り替えは要りません
+    def fixed_indexed_base = layout.fixed_device(0)
 
     # --- Z に載せたアドレスで 1 ワードを指す ---
     #
@@ -123,7 +123,7 @@ module FaRuby
     # インデックスレジスタを算法全体の一時変数に使っているので、そこは
     # 機種によらず同じまま、指し方だけを差し替えます。
     def word_at(z, offset = 0)  = "#{layout.device_name}#{offset}:Z#{z}"
-    def fixed_at(z, offset = 0) = "#{layout.fixed_device_name}#{offset}:Z#{z}"
+    def fixed_at(z, offset = 0) = "#{layout.fixed_device(offset)}:Z#{z}"
 
     # --- インスタンス相対のデバイス参照 ---
 
@@ -343,7 +343,8 @@ module FaRuby
 
     # 定数プールの index_expr 番目。**固定領域 (FM) にあります**
     def pool_slot(key, index_expr, z: nil)
-      slot_ref(key, index_expr, pool_offset, z: z, device: layout.fixed_device_name)
+      slot_ref(key, index_expr, pool_offset, z: z,
+               device: layout.fixed_device_name, device_base: layout.fixed_host_base)
     end
 
     # 別のフレームのレジスタ
@@ -392,12 +393,12 @@ module FaRuby
     #
     # **同じスロットを 2 度指すときは行を出しません** (key で覚えます)。
     # 命令 1 つの中で R[a] を何度も触るため、毎回 Z を組み直すと無駄が出ます。
-    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name)
+    def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name, device_base: 0)
       return @slot_cache[key] if @slot_cache.key?(key)
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
       @emitter.line "Z#{z} = #{words_of(index_expr)} + #{base_expr}"
-      @slot_cache[key] = build_slot(z, device)
+      @slot_cache[key] = build_slot(z, device, device_base)
     end
 
     # 添字をワード単位に直す
@@ -414,9 +415,12 @@ module FaRuby
     end
 
     # Z 1 本でタグと値の両方を指す。**型サフィックスはデバイス側**に付ける
-    def build_slot(z, device)
-      value = VmConstants::SLOT_VALUE_OFFSET
-      Slot.new("#{device}#{VmConstants::SLOT_TYPE_OFFSET}:Z#{z}",
+    #
+    # `device_base` は固定領域のためのものです。**バンクの先頭デバイスが
+    # 入ります。** Z に載っているのはそこからのオフセットなので、ここで足します
+    def build_slot(z, device, device_base = 0)
+      value = device_base + VmConstants::SLOT_VALUE_OFFSET
+      Slot.new("#{device}#{device_base + VmConstants::SLOT_TYPE_OFFSET}:Z#{z}",
                "#{device}#{value}.L:Z#{z}",
                "#{device}#{value}.F:Z#{z}",
                ->(offset) { "#{device}#{value + offset}:Z#{z}" })
@@ -607,7 +611,7 @@ module FaRuby
     # **区切り記号が KV と違います** (`EM0:Z3` に対して `D0Z3`)。Z を算法の
     # 一時変数として使うところは KV と同じままです。
     def word_at(z, offset = 0)  = "#{layout.device_name}#{offset}Z#{z}"
-    def fixed_at(z, offset = 0) = "#{fixed_device}#{offset}Z#{z}"
+    def fixed_at(z, offset = 0) = "#{layout.fixed_device(offset)}Z#{z}"
 
     # --- 実行中の irep の領域 ---
 
@@ -620,7 +624,7 @@ module FaRuby
 
     # インデックス修飾の基点。KV と同じ形で使えます
     def indexed_base = "#{layout.device_name}0"
-    def fixed_indexed_base = "#{fixed_device}0"
+    def fixed_indexed_base = layout.fixed_device(0)
 
     # Z に組み立てる絶対アドレスの項
     #

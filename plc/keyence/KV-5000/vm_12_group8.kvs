@@ -24,10 +24,10 @@ IF EM54:Z9 <= 105 THEN
     IF EM6:Z9 = 83 THEN
       ' OP_HASH (BB): R[a] = { R[a] => R[a+1], .. } (b 組)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' ハッシュは配列 2 本。空きスロットが 2 つ要る
       Z2 = EM39:Z9 + 1
@@ -71,15 +71,15 @@ IF EM54:Z9 <= 105 THEN
     ELSE IF EM6:Z9 = 87 THEN
       ' OP_BLOCK (BB): R[a] = 子 irep b から作ったブロック
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
       Z3 = EM30:Z9 * 8 + EM38:Z9
       Z4 = Z3 + 5
-      EM16:Z9 = FM0:Z4 + EM8:Z9
+      EM16:Z9 = ZF98304:Z4 + EM8:Z9
       IF EM16:Z9 >= EM36:Z9 THEN
         ' 指す先の irep が無い
         EM1:Z9 = 3
@@ -98,15 +98,15 @@ IF EM54:Z9 <= 105 THEN
     ELSE IF EM6:Z9 = 88 THEN
       ' OP_METHOD (BB): R[a] = 子 irep b への参照
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
       Z3 = EM30:Z9 * 8 + EM38:Z9
       Z4 = Z3 + 5
-      EM16:Z9 = FM0:Z4 + EM8:Z9
+      EM16:Z9 = ZF98304:Z4 + EM8:Z9
       IF EM16:Z9 >= EM36:Z9 THEN
         ' 指す先の irep が無い
         EM1:Z9 = 3
@@ -121,25 +121,25 @@ IF EM54:Z9 <= 105 THEN
     ELSE IF EM6:Z9 = 95 THEN
       ' OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
-      Z5 = FM0:Z3   ' メソッド番号
+      Z5 = ZF98304:Z3   ' メソッド番号
       Z7 = Z3 + 2
-      Z8 = FM0:Z7   ' 引数の数
+      Z8 = ZF98304:Z7   ' 引数の数
       Z7 = Z3 + 3
-      Z4 = FM0:Z7   ' シンボル種別
+      Z4 = ZF98304:Z7   ' シンボル種別
       IF Z4 <> 2 THEN
         EM1:Z9 = 3
         EM2:Z9 = 3
         BREAK
       END IF
       Z3 = Z3 + 1
-      Z5 = FM0:Z3   ' ユーザー定義メソッドID
+      Z5 = ZF98304:Z3   ' ユーザー定義メソッドID
       IF Z5 = 0 THEN
         ' 組み込みと同じ名前は再定義できない
         EM1:Z9 = 3
@@ -163,7 +163,7 @@ IF EM54:Z9 <= 105 THEN
     ELSE IF EM6:Z9 = 99 THEN
       ' OP_TCLASS (B): R[a] = 定義先クラス (トップレベルは main)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = 0

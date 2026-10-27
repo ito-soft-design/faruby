@@ -157,25 +157,6 @@ module FaRuby
 
     # --- ファイルレジスタのバンク ---
     #
-    # 固定領域は FM (ZF をバンクに分けたもの) に置いてあります。触る前に
-    # FRSET でバンクを選び、抜けるときに 0 に戻します。
-    #
-    # **現在のバンクを読む命令が無いため、Z のように退避して戻せません。**
-    # ラダーが 0 以外のバンクを使っていると壊すことになります。
-
-    def select_fixed_bank
-      note "固定領域 (#{layout.fixed_device_name}) のバンクを選ぶ"
-      note "現在のバンクを読む命令が無いため、抜けるときは 0 に戻す"
-      bank = dialect.select_bank(layout.fixed_bank)
-      line bank if bank
-    end
-
-    def restore_fixed_bank
-      note "ファイルレジスタのバンクを 0 に戻す"
-      bank = dialect.select_bank(0)
-      line bank if bank
-    end
-
     # --- 行の組み立て ---
 
     # 1 文を出す。**方言は dialect が決める** (KV 向けはそのまま出す)
@@ -3284,7 +3265,6 @@ module FaRuby
       e.blank
 
       e.save_z_registers
-      e.select_fixed_bank
       e.blank
 
       e.each_instance do
@@ -3303,7 +3283,6 @@ module FaRuby
       end
 
       e.blank
-      e.restore_fixed_bank
       e.restore_z_registers
       "#{e.lines.join("\n")}\n"
     end
@@ -3408,7 +3387,6 @@ module FaRuby
       emit_header(e)
       e.blank
       e.save_z_registers
-      e.select_fixed_bank
       e.blank
       emit_tick_update(e)
       e.note "外側 (インスタンス) の回数をラダーへ渡す"
@@ -3432,7 +3410,6 @@ module FaRuby
       emit_header(e)
       e.blank
       e.save_z_registers
-      e.select_fixed_bank
       e.blank
       e.note "ブロックの先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
       e.line "Z#{KvsEmitter::Z_INSTANCE} = #{layout.base}"
@@ -3454,7 +3431,6 @@ module FaRuby
       e.dedent
       e.line "NEXT"
       e.blank
-      e.restore_fixed_bank
       e.restore_z_registers
       finish(e)
     end
@@ -3535,7 +3511,6 @@ module FaRuby
       e = KvsEmitter.new(layout: layout, dialect: dialect)
       emit_box_header(e, "後始末", "外側 FOR の後")
       e.blank
-      e.restore_fixed_bank
       e.restore_z_registers
       finish(e)
     end
@@ -3669,16 +3644,10 @@ module FaRuby
       e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
              "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
       e.note ""
-      bank = e.dialect.select_bank(layout.fixed_bank)
-      e.note "実行中に変わらないものは #{layout.fixed_device_name} " \
-             "(#{layout.fixed_host_device} をバンク #{layout.fixed_bank} に分けたもの) に置く。"
-      if bank
-        e.note "スクリプトの先頭で #{bank} を実行済みのため、" \
-               "#{layout.fixed_device_name} のアドレスで直接指せる。"
-      else
-        e.note "**バンクを選ぶ手立てが無く常に 0 です。** ホスト側も同じ " \
-               "バンクへ書くので食い違いません (memory.fixed_bank)。"
-      end
+      e.note "実行中に変わらないものは #{layout.fixed_device_name} のバンク " \
+             "#{layout.fixed_bank} (#{layout.fixed_device(0)} から) に置く。"
+      e.note "**基点をリテラルで書いて相対で指すので、バンクの切り替えは要らない。**"
+      e.note "ホストも同じアドレスで書くため食い違わない (memory.fixed_bank)。"
       e.note "インスタンス#{layout.instance_index}のブロックは " \
              "#{layout.fixed_device(layout.fixed_origin)}-" \
              "#{layout.fixed_device(layout.fixed_origin + layout.fixed_instance_size - 1)}:"

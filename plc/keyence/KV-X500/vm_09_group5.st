@@ -24,14 +24,14 @@ IF EM54:Z9 <= 56 THEN
     IF EM6:Z9 = 39 THEN
       // OP_JMPNOT (BS): if R[a] が偽 (nil/false) then PC += signed16(b)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // 16bit big-endian: hi byte, lo byte
       Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := FM0:Z1;
+      Z3 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := FM0:Z1;
+      Z4 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       EM8:Z9 := Z3 * 256 + Z4;
       IF EM8:Z9 >= 32768 THEN
@@ -45,14 +45,14 @@ IF EM54:Z9 <= 56 THEN
     ELSIF EM6:Z9 = 40 THEN
       // OP_JMPNIL (BS): if R[a] が nil then PC += signed16(b)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // 16bit big-endian: hi byte, lo byte
       Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := FM0:Z1;
+      Z3 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := FM0:Z1;
+      Z4 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       EM8:Z9 := Z3 * 256 + Z4;
       IF EM8:Z9 >= 32768 THEN
@@ -66,21 +66,21 @@ IF EM54:Z9 <= 56 THEN
     ELSIF EM6:Z9 = 47 THEN
       // OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM9:Z9 := FM0:Z1;
+      EM9:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // シンボル表参照 (4ワード/エントリ)
       Z3 := EM8:Z9 * 4 + EM35:Z9;
-      Z5 := FM0:Z3;   // メソッド番号
+      Z5 := ZF98304:Z3;   // メソッド番号
       Z7 := Z3 + 2;
-      Z8 := FM0:Z7;   // 引数の数
+      Z8 := ZF98304:Z7;   // 引数の数
       Z7 := Z3 + 3;
-      Z4 := FM0:Z7;   // シンボル種別
+      Z4 := ZF98304:Z7;   // シンボル種別
       IF Z4 <> 2 THEN
         // メソッド名でないシンボルへの呼び出し
         EM1:Z9 := 3;
@@ -88,7 +88,7 @@ IF EM54:Z9 <= 56 THEN
         EXIT;
       END_IF;
       Z3 := Z3 + 1;
-      Z6 := FM0:Z3;   // ユーザー定義メソッドID
+      Z6 := ZF98304:Z3;   // ユーザー定義メソッドID
       IF Z5 <> 0 THEN
         // 組み込みメソッド。フレームを積まずその場で計算する
         IF EM9:Z9 <> Z8 THEN
@@ -1212,11 +1212,11 @@ IF EM54:Z9 <= 56 THEN
         EM30:Z9 := Z5;
         // IREP テーブルから実行中の irep の情報を写す
         Z1 := Z5 * 8 + EM38:Z9;
-        EM33:Z9 := FM0:Z1;
-        EM10:Z9 := FM1:Z1;
-        EM34:Z9 := FM2:Z1;
-        EM35:Z9 := FM3:Z1;
-        EM11:Z9 := FM4:Z1;
+        EM33:Z9 := ZF98304:Z1;
+        EM10:Z9 := ZF98305:Z1;
+        EM34:Z9 := ZF98306:Z1;
+        EM35:Z9 := ZF98307:Z1;
+        EM11:Z9 := ZF98308:Z1;
         // レジスタ窓が領域からはみ出さないこと
         EM16:Z9 := EM32:Z9 + EM11:Z9 * 4;
         IF EM16:Z9 > 392 THEN
@@ -1230,21 +1230,21 @@ IF EM54:Z9 <= 56 THEN
     ELSIF EM6:Z9 = 48 THEN
       // OP_SENDB (BBB): R[a].symbols[b](R[a+1]..) { ブロック }
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM9:Z9 := FM0:Z1;
+      EM9:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // シンボル表参照 (4ワード/エントリ)
       Z3 := EM8:Z9 * 4 + EM35:Z9;
-      Z5 := FM0:Z3;   // メソッド番号
+      Z5 := ZF98304:Z3;   // メソッド番号
       Z7 := Z3 + 2;
-      Z8 := FM0:Z7;   // 引数の数
+      Z8 := ZF98304:Z7;   // 引数の数
       Z7 := Z3 + 3;
-      Z4 := FM0:Z7;   // シンボル種別
+      Z4 := ZF98304:Z7;   // シンボル種別
       IF Z4 <> 2 THEN
         EM1:Z9 := 3;
         EM2:Z9 := 3;
@@ -1483,11 +1483,11 @@ IF EM54:Z9 <= 56 THEN
         EM30:Z9 := Z6;
         // IREP テーブルから実行中の irep の情報を写す
         Z1 := Z6 * 8 + EM38:Z9;
-        EM33:Z9 := FM0:Z1;
-        EM10:Z9 := FM1:Z1;
-        EM34:Z9 := FM2:Z1;
-        EM35:Z9 := FM3:Z1;
-        EM11:Z9 := FM4:Z1;
+        EM33:Z9 := ZF98304:Z1;
+        EM10:Z9 := ZF98305:Z1;
+        EM34:Z9 := ZF98306:Z1;
+        EM35:Z9 := ZF98307:Z1;
+        EM11:Z9 := ZF98308:Z1;
         // レジスタ窓が領域からはみ出さないこと
         EM16:Z9 := EM32:Z9 + EM11:Z9 * 4;
         IF EM16:Z9 > 392 THEN
@@ -1503,13 +1503,13 @@ IF EM54:Z9 <= 56 THEN
       // OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
       // 24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := FM0:Z1;
+      Z3 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := FM0:Z1;
+      Z4 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       EM8:Z9 := Z3 * 256 + Z4;   // aspec の下位2バイト
       // 必須引数の数 = aspec >> 18。上位バイトを 4 で割った値と同じ
@@ -1558,7 +1558,7 @@ IF EM54:Z9 <= 56 THEN
     ELSIF EM6:Z9 = 56 THEN
       // OP_RETURN (B): R[b] を返して呼び出し元へ (トップレベルでは VM 停止)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       IF EM31:Z9 = 0 THEN
         // トップレベルの return は VM 停止
@@ -1629,11 +1629,11 @@ IF EM54:Z9 <= 56 THEN
             EM30:Z9 := Z5;
             // IREP テーブルから実行中の irep の情報を写す
             Z1 := Z5 * 8 + EM38:Z9;
-            EM33:Z9 := FM0:Z1;
-            EM10:Z9 := FM1:Z1;
-            EM34:Z9 := FM2:Z1;
-            EM35:Z9 := FM3:Z1;
-            EM11:Z9 := FM4:Z1;
+            EM33:Z9 := ZF98304:Z1;
+            EM10:Z9 := ZF98305:Z1;
+            EM34:Z9 := ZF98306:Z1;
+            EM35:Z9 := ZF98307:Z1;
+            EM11:Z9 := ZF98308:Z1;
           END_IF;
         ELSE
           // R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので
@@ -1651,11 +1651,11 @@ IF EM54:Z9 <= 56 THEN
           EM30:Z9 := Z5;
           // IREP テーブルから実行中の irep の情報を写す
           Z1 := Z5 * 8 + EM38:Z9;
-          EM33:Z9 := FM0:Z1;
-          EM10:Z9 := FM1:Z1;
-          EM34:Z9 := FM2:Z1;
-          EM35:Z9 := FM3:Z1;
-          EM11:Z9 := FM4:Z1;
+          EM33:Z9 := ZF98304:Z1;
+          EM10:Z9 := ZF98305:Z1;
+          EM34:Z9 := ZF98306:Z1;
+          EM35:Z9 := ZF98307:Z1;
+          EM11:Z9 := ZF98308:Z1;
         END_IF;
       END_IF;
 

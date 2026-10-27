@@ -781,9 +781,9 @@ end
     irep = build_irep(nregs: 2, pool: [[:int32, 99]])
     script = FaRuby::PlcCodegen.new(irep).generate
 
-    # プールは固定領域 (FM) に出力される
-    assert_includes script, "FM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
-    assert_includes script, "FM#{layout.pool_addr(0)}.L = 99"
+    # プールは固定領域に出力される。**バンクの先頭を足した絶対アドレス**
+    assert_includes script, "#{layout.fixed_device(layout.pool_type_addr(0))} = #{TT_INTEGER}"
+    assert_includes script, "#{layout.fixed_device_long(layout.pool_addr(0))} = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
     # 窓が呼び出しごとにずれるため、irep の nregs ではなく領域全体を回る
     assert_includes script,

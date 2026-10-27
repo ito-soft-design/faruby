@@ -335,4 +335,62 @@ class TestMemoryLayout < Minitest::Test
     refute_includes source, default_start
     refute_includes source, "#{Layout.default.device(Layout.default.z_save_addr(1))} = Z1"
   end
+
+  # === 固定領域の指し方 ===
+
+  # **バンクの先頭デバイスを基点にした相対指定。** 配置は 0 を基点に計算し、
+  # 指すときだけ基点を足す
+  def test_the_fixed_area_is_addressed_from_the_start_of_its_bank
+    l = build(fixed_bank: 3)
+
+    assert_equal 0, l.irep_table_base, "配置は 0 を基点に計算する"
+    assert_equal 98_304, l.fixed_host_base
+    assert_equal "ZF98304", l.fixed_device(l.irep_table_base)
+    assert_equal "ZF98432.L", l.fixed_device_long(l.bytecode_base)
+  end
+
+  # **スクリプトとホストで同じアドレス。** 以前はスクリプトが FM (バンク相対)、
+  # ホストが ZF (絶対) で、食い違うと命令が全部 0 に見えた
+  def test_the_host_and_the_script_point_at_the_same_word
+    l = build(fixed_bank: 3)
+
+    assert_equal "ZF", l.fixed_host_device
+    assert_equal l.fixed_device_name, l.fixed_host_device
+    assert_equal "ZF#{l.fixed_host_addr(l.bytecode_base)}", l.fixed_device(l.bytecode_base)
+  end
+
+  # **生成コードは基点をリテラルで書き、Z にはオフセットだけを載せる。**
+  # これで Z が 16 ビットのままバンク 3 を指せる (両機種の実機で確認済み)
+  def test_the_script_puts_only_the_offset_in_the_index_register
+    source = FaRuby::KvsGenerator.new(layout: build(fixed_bank: 3)).source
+
+    assert_includes source, "ZF98304:Z1"
+    refute_includes source, "FRSET", "バンクの切り替えは要らない"
+    refute_match(/\bFM\d/, source, "FM では指さない")
+  end
+
+  # バンクを変えると基点だけが動く。オフセットは変わらない
+  #
+  # **ラダーの `$ZF` は動きません。** 固定領域と同じデバイスを使いますが、
+  # 別物です (利用者が書いた番号をそのまま指します)
+  def test_changing_the_bank_moves_only_the_base
+    bank0 = build(fixed_bank: 0)
+    bank3 = build(fixed_bank: 3)
+
+    assert_equal bank3.fixed_offset_of(bank3.bytecode_base),
+                 bank0.fixed_offset_of(bank0.bytecode_base)
+    assert_equal "ZF0", bank0.fixed_device(bank0.irep_table_base)
+    assert_equal "ZF98304", bank3.fixed_device(bank3.irep_table_base)
+
+    source = FaRuby::KvsGenerator.new(layout: bank3).source
+
+    assert_includes source, "ZF0.L:Z6", "ラダーの $ZF の基点はバンクによらず 0"
+  end
+
+  # **オフセットはインデックスレジスタに載せるので 16 ビットに収める**
+  def test_a_fixed_area_that_overflows_the_index_register_is_rejected
+    error = assert_raises(FaRuby::LayoutError) { build(max_bytecode: 70_000) }
+
+    assert_match(/16 ビット/, error.message)
+  end
 end
