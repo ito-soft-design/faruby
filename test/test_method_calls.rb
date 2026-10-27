@@ -186,8 +186,24 @@ class TestMethodCalls < Minitest::Test
 
   # === エラー ===
 
-  def test_calling_an_undefined_method_stops_the_vm
-    assert_stops_with UNKNOWN_METHOD_ERROR, "$DM0 = nosuch\n"
+  # **`def` がどこにも無ければ転送前に止まる。** 綴り間違いがこれ
+  def test_calling_a_method_with_no_definition_stops_before_transfer
+    error = assert_raises(FaRuby::CodegenError) { run_source("$DM0 = nosuch\n") }
+
+    assert_includes error.message, "nosuch"
+  end
+
+  # **`def` があって、まだ実行されていないときは実行時に止まる。**
+  # 定義が通るかどうかは走らせてみないと分からないので、ここは残る
+  def test_calling_a_method_before_its_def_runs_stops_the_vm
+    assert_stops_with UNKNOWN_METHOD_ERROR, <<~RUBY
+      if $DM100 > 0
+        def late
+          1
+        end
+      end
+      $DM0 = late
+    RUBY
   end
 
   def test_wrong_argument_count_stops_the_vm

@@ -7,6 +7,7 @@ require_relative "mrb_parser"
 require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
+require_relative "disasm"
 require "plc_access"
 
 module FaRuby
@@ -62,6 +63,7 @@ module FaRuby
       check_limit("定数プールのエントリ数", list.sum { |i| i.pool.size }, layout.max_pool)
       check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
       check_symbols_per_irep(list)
+      check_undefined_methods(list)
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -94,6 +96,45 @@ module FaRuby
             "**1 つの irep が持てる名前は 256 までです** " \
             "(mruby がオペランドを 2 バイトにする `OP_EXT2` を出し、faRuby は" \
             "それを実装していません)。メソッドに分けてください"
+    end
+
+    # メソッド呼び出しの命令。どれもオペランド b がメソッド名
+    CALL_OPCODES = %i[OP_SEND OP_SSEND OP_SENDB OP_SSENDB].freeze
+
+    # 呼んでいるのに `def` がどこにも無いメソッド
+    #
+    # **実行すれば必ずエラー 3 になります。** メソッド表の枠は名前ごとに
+    # 作りますが、中身を入れるのは `OP_DEF` なので、定義が無ければ
+    # 「まだ def が実行されていない」のまま止まります。綴り間違いが
+    # 実機まで届かないよう、ここで止めます。
+    #
+    # **条件付きの `def` は通します。** どこか 1 つでも `OP_DEF` の相手に
+    # なっていれば、実行時に定義されるかどうかは分かりません。見るのは
+    # 「どの irep にも無い」ことだけなので、見逃しはあっても誤検出はありません。
+    def check_undefined_methods(ireps)
+      defined_names = []
+      called = {}
+      ireps.each_with_index do |irep, index|
+        Disassembler.new(irep).disassemble.each do |inst|
+          # **オペランド b を名前として読めるのはこの命令だけ。** ほかの
+          # 命令では飛び先や即値が入っていて、引くと別の名前に当たる
+          next unless inst[:name] == :OP_DEF || CALL_OPCODES.include?(inst[:name])
+
+          name = irep.symbols[inst[:operands][1].to_i]
+          next unless name
+
+          defined_names << name if inst[:name] == :OP_DEF
+          called[name] ||= index unless inst[:name] == :OP_DEF || BUILTIN_METHODS.key?(name)
+        end
+      end
+
+      missing = called.keys - defined_names
+      return if missing.empty?
+
+      raise CodegenError,
+            "定義されていないメソッドを呼んでいます (#{missing.join(', ')})。" \
+            "**`def` がどこにもありません。** 綴りを確かめてください " \
+            "(実行すると ERROR=3 で止まります)"
     end
 
     # 枠を取った汎用グローバル変数の数

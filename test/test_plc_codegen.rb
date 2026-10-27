@@ -721,6 +721,62 @@ end
     assert_includes error.message, "トップレベル"
   end
 
+  # === 定義されていないメソッド ===
+  #
+  # 綴り間違いは実行してみるまで分からなかった (ERROR=3)。転送前に止める
+
+  # OP_SSEND a b c (self へのメソッド呼び出し)
+  def send_self(sym_index) = [45, 1, sym_index, 0].pack("C*")
+
+  # OP_DEF a b (メソッド表への登録)
+  def define_method_op(sym_index) = [95, 1, sym_index].pack("C*")
+
+  def test_calling_a_method_that_is_never_defined_stops
+    irep = build_irep(symbols: %w[write_outputs],
+                      instructions: send_self(0) + "\x69")
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(irep).validate!
+    end
+
+    assert_includes error.message, "write_outputs"
+    assert_includes error.message, "ERROR=3"
+  end
+
+  # 同じ名前に def があれば通る
+  def test_a_defined_method_passes
+    irep = build_irep(symbols: %w[write_outputs],
+                      instructions: define_method_op(0) + send_self(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **def は別の irep にあってもよい。** メソッドの中で呼ぶ形がこれ
+  def test_the_definition_may_live_in_another_irep
+    child = build_irep(symbols: %w[helper], instructions: send_self(0) + "\x69")
+    parent = build_irep(symbols: %w[helper],
+                        instructions: define_method_op(0) + "\x69")
+    parent.add_child(child)
+
+    FaRuby::PlcCodegen.new(parent).validate!
+  end
+
+  # 組み込みメソッドは def が要らない
+  def test_builtin_methods_need_no_definition
+    irep = build_irep(symbols: %w[length], instructions: send_self(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **オペランド b を名前として読むのは呼び出しと def だけ。** ほかの命令では
+  # 飛び先や即値が入っていて、シンボル表を引くと別の名前に当たる
+  def test_other_opcodes_are_not_read_as_method_names
+    # OP_LOADI a b。b = 0 だが名前ではない
+    irep = build_irep(symbols: %w[never_defined], instructions: [3, 1, 0].pack("C*") + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
   # **メソッドに分ければ合計は超えられる。** 番号は irep ごとだから
   def test_the_limit_is_per_irep_not_total
     limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP
