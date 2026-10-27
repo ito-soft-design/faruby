@@ -667,16 +667,20 @@ end
   # **枠を超えたら止める。** 溢れると次に並ぶ配列プールに重なり、
   # 配列を壊しながら動くので気づきにくい
   #
-  # **既定の設定では先にシンボル数で止まります** (どちらも 100 で、変数は
-  # 必ずシンボルを 1 つ使うため)。ここが効くのは `max_symbols` を増やした
-  # 配置です。順番で隠れていても検査そのものは要ります
+  # **変数はシンボルも 1 つ使うので、どちらが先に効くかは配置で決まります。**
+  # 既定はどちらも同じ数なので、シンボル数に余裕を持たせた配置で見ます
+  def small(globals)
+    FaRuby::MemoryLayout.from_config("max_globals" => globals,
+                                     "max_symbols" => globals * 2)
+  end
+
   def test_too_many_variables_stops
-    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
-    names = (1..roomy.max_globals).map { |i| "$v#{i}" }
-    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
+    layout = small(20)
+    names = (1..layout.max_globals).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: layout).validate!
 
     error = assert_raises(FaRuby::CodegenError) do
-      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: layout).validate!
     end
 
     assert_includes error.message, "変数の数"
@@ -684,14 +688,49 @@ end
 
   # `$foo` と `@foo` は同じ枠を分け合う
   def test_globals_and_instance_variables_share_the_limit
-    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
-    names = (1..roomy.max_globals).map { |i| "@v#{i}" }
+    layout = small(20)
+    names = (1..layout.max_globals).map { |i| "@v#{i}" }
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: layout).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # === 1 つの irep が持てる名前の数 ===
+
+  # **256 を超えたらコンパイル時に止める。**
+  #
+  # オペランドが 1 バイトなので、超えると mruby は `OP_EXT2` を置いて
+  # 2 バイトにします。faRuby は実装していないため、通すと実行時に
+  # 「未知のオペコード 103」で止まります (実測)。
+  def test_too_many_names_in_one_irep_stops
+    limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => limit * 2,
+                                             "max_globals" => limit * 2,
+                                             "max_bytecode" => 20_000)
+    names = (1..limit).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
 
     error = assert_raises(FaRuby::CodegenError) do
       FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
     end
 
-    assert_includes error.message, "変数の数"
+    assert_includes error.message, "OP_EXT2"
+    assert_includes error.message, "トップレベル"
+  end
+
+  # **メソッドに分ければ合計は超えられる。** 番号は irep ごとだから
+  def test_the_limit_is_per_irep_not_total
+    limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => limit * 2,
+                                             "max_globals" => limit * 2,
+                                             "max_bytecode" => 20_000)
+    irep = build_irep(symbols: (1..limit).map { |i| "$a#{i}" })
+    irep.add_child(build_irep(symbols: (1..limit).map { |i| "$b#{i}" }))
+
+    FaRuby::PlcCodegen.new(irep, layout: roomy).validate!
   end
 
   # 同じ名前は irep をまたいでも 1 枠。アドレスで数える

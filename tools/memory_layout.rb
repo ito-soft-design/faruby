@@ -333,10 +333,10 @@ module FaRuby
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "fixed_base" => 0, "fixed_align" => 1000, "fixed_bank" => FIXED_BANK,
       "fixed_device" => FIXED_DEVICE_NAME, "fixed_host_device" => FIXED_HOST_DEVICE,
-      "max_regs" => 80, "max_bytecode" => 3000,
-      "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
+      "max_regs" => 80, "max_bytecode" => 5500,
+      "max_pool" => 150, "max_symbols" => 300, "max_globals" => 300,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
-      "max_arrays" => 16, "max_array_len" => 12,
+      "max_arrays" => 32, "max_array_len" => 12,
       "max_string_words" => 500,
     }.freeze
 
@@ -379,7 +379,7 @@ module FaRuby
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
-                   align: 1000, max_regs: 80, max_bytecode: 3000,
+                   align: 1000, max_regs: 80, max_bytecode: 5500,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 64,
                    max_arrays: 16, max_array_len: 12, max_string_words: 500,

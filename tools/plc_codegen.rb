@@ -61,6 +61,7 @@ module FaRuby
       check_limit("バイトコード長", list.sum(&:ilen), layout.max_bytecode)
       check_limit("定数プールのエントリ数", list.sum { |i| i.pool.size }, layout.max_pool)
       check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
+      check_symbols_per_irep(list)
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -69,6 +70,30 @@ module FaRuby
       # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
       check_limit("変数の数", general_global_count, layout.max_globals)
       self
+    end
+
+    # 1 つの irep が持てる名前の数
+    #
+    # **オペランドが 1 バイトなので 256 までです。** これを超えると mruby は
+    # `OP_EXT2` を置いてオペランドを 2 バイトにします (実測: 256 個目の
+    # `$v256 = 256` から出ます)。faRuby は `OP_EXT*` を実装していないので、
+    # 通すと実行時に「未知のオペコード 103」で止まります。
+    #
+    # **数えるのは irep ごと**です。オペランドはその irep のシンボル表の
+    # 何番目かを指すので、メソッドに分ければ合計はこれを超えられます。
+    MAX_SYMBOLS_PER_IREP = 256
+
+    def check_symbols_per_irep(ireps)
+      over = ireps.each_with_index.find { |irep, _| irep.symbols.size > MAX_SYMBOLS_PER_IREP }
+      return unless over
+
+      irep, index = over
+      raise CodegenError,
+            "#{index.zero? ? 'トップレベル' : "irep #{index}"}の名前が多すぎます " \
+            "(#{irep.symbols.size} > #{MAX_SYMBOLS_PER_IREP})。" \
+            "**1 つの irep が持てる名前は 256 までです** " \
+            "(mruby がオペランドを 2 バイトにする `OP_EXT2` を出し、faRuby は" \
+            "それを実装していません)。メソッドに分けてください"
     end
 
     # 枠を取った汎用グローバル変数の数
