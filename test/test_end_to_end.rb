@@ -1080,6 +1080,54 @@ end
     assert_equal 0, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1052)
   end
 
+  # **`@` でも実デバイスに届くこと。** 写して回す手順を書かずに済む形
+  #
+  # 入力を `@` に写してから使う書き方 (`read_inputs` / `write_outputs`) が
+  # 要らなくなります。`@` が指すのは `main` のインスタンス変数 1 つだけなので、
+  # 名前からデバイスを引いて構いません。
+  def test_a_mapped_instance_variable_reaches_the_real_device
+    syntax = FaRuby::DeviceSyntax.new(
+      FaRuby::DeviceSet.keyence,
+      mapping: { "lamp" => "MR101", "count" => "DM1040" }
+    )
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      @lamp = true
+      @count = 7
+      $DM1044 = 1 if @lamp
+      $DM1045 = @count
+    RUBY
+    dm = result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM]
+
+    # MR101 は番号 17 (チャンネル 1 のビット 1)
+    assert_equal 1, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_MR].read_u16(17)
+    assert_equal 7, dm.read_s16(1040)
+    # 読み直しても同じものを指す
+    assert_equal 1, dm.read_s16(1044)
+    assert_equal 7, dm.read_s16(1045)
+  end
+
+  # **枠を使わないこと。** 表に載せた `@` は値スロットを取らない
+  def test_a_mapped_instance_variable_takes_no_slot
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "count" => "DM1040" })
+    result = compile_and_run("@count = 7\n@timer = 1\n", device_syntax: syntax)
+    codegen = FaRuby::PlcCodegen.new(result[:irep], device_syntax: syntax)
+
+    assert_equal 1, codegen.general_global_count, "@timer のぶんだけ残る"
+  end
+
+  # 表に無い `@` は変数のまま。`nil` も `||=` も Ruby どおり
+  def test_an_unmapped_instance_variable_keeps_or_assign
+    syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,
+                                      mapping: { "count" => "DM1040" })
+    result = compile_and_run(<<~RUBY, device_syntax: syntax)
+      @timer ||= 7
+      $DM1046 = @timer
+    RUBY
+
+    assert_equal 7, result[:sim].devices[FaRuby::VmConstants::DEVICE_TYPE_DM].read_s16(1046)
+  end
+
   # 割り付けた名前と実デバイスは混ぜて書ける (表は任意)
   def test_a_mapped_name_and_a_real_device_live_together
     syntax = FaRuby::DeviceSyntax.new(FaRuby::DeviceSet.keyence,

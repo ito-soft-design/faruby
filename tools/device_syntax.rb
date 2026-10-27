@@ -152,9 +152,18 @@ module FaRuby
     # **幅サフィックスは名前を引いてから付けます。** `$x0L` は表の `x0L` を
     # 先に探し、無ければ `x0` を引いて `.L` を付けます。表に書いた名前が
     # そのまま勝つので、`x0L` という名前も作れます。
+    #
+    # **`@` でも引きます。** 表に載せた名前は `@run_btn` と書いても実デバイスに
+    # なるので、入力を写して回す手順 (`read_inputs` / `write_outputs`) が
+    # 要らなくなります。`@@` はクラス変数なので除きます (未対応)。
+    #
+    # **`@` が指すのは `main` のインスタンス変数 1 つだけ**なので、名前から
+    # デバイスを引いて構いません。クラスを入れるとオブジェクトごとに別の
+    # `@foo` ができるため、そのときは表に載せられるものを絞る必要があります
+    # (doc/instance_vars.md)。
     def parse_mapped(sym)
       return nil if @mapping.empty?
-      return nil unless sym.start_with?("$")
+      return nil unless sym.start_with?("$") || (sym.start_with?("@") && !sym.start_with?("@@"))
 
       name = sym[1..]
       return mapped_entry(@mapping[name], nil, sym) if @mapping.key?(name)

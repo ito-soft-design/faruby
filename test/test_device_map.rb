@@ -46,6 +46,38 @@ class TestDeviceMap < Minitest::Test
     assert_nil parsed[:access_type]
   end
 
+  # === `@` でも引く ===
+  #
+  # **写して回す手順を書かずに済むようにするためです。** 表に載せた名前は
+  # `@run_btn` と書いても実デバイスになるので、`read_inputs` /
+  # `write_outputs` で `$` と `@` の間を写す必要がありません。
+
+  def test_an_instance_variable_reads_the_mapped_device
+    assert_equal plain.parse_symbol("$MR100"), syntax.parse_symbol("@x0")
+    assert_equal plain.parse_symbol("$DM200"), syntax.parse_symbol("@y0")
+  end
+
+  # `$` と `@` でまったく同じものになる (枠も速度も同じ)
+  def test_the_sigil_does_not_change_the_result
+    assert_equal syntax.parse_symbol("$x0"), syntax.parse_symbol("@x0")
+  end
+
+  def test_the_width_suffix_works_on_an_instance_variable
+    assert_equal ACCESS_L, syntax.parse_symbol("@y0L")[:access_type]
+    assert_equal "DM", syntax.parse_symbol("@y0L")[:device_name]
+  end
+
+  # 表に無い `@` は今までどおり変数のまま
+  def test_an_unmapped_instance_variable_is_not_a_device
+    assert_nil syntax.parse_symbol("@timer1")
+  end
+
+  # **クラス変数は引きません。** 未対応なので、plc_codegen が止めます
+  def test_a_class_variable_is_not_looked_up
+    assert_nil syntax(MAP.merge("@x0" => "MR100")).parse_symbol("@@x0")
+    assert_nil syntax.parse_symbol("@@x0")
+  end
+
   # === 幅サフィックス ===
 
   # **名前を引いてから幅を付けます。** 逆にすると `$y0L` の `y0L` を
