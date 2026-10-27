@@ -777,6 +777,57 @@ end
     FaRuby::PlcCodegen.new(irep).validate!
   end
 
+  # === 代入されていない変数 ===
+
+  # OP_GETGV a b / OP_SETGV a b
+  def read_var(sym_index)  = [21, 1, sym_index].pack("C*")
+  def write_var(sym_index) = [22, 1, sym_index].pack("C*")
+
+  # OP_GETIV a b / OP_SETIV a b (`@foo`。同じ枠を使う)
+  def read_ivar(sym_index)  = [25, 1, sym_index].pack("C*")
+  def write_ivar(sym_index) = [26, 1, sym_index].pack("C*")
+
+  def test_reading_a_variable_that_is_never_assigned_stops
+    irep = build_irep(symbols: %w[@conv_out], instructions: read_ivar(0) + "\x69")
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(irep).validate!
+    end
+
+    assert_includes error.message, "@conv_out"
+    assert_includes error.message, "nil"
+  end
+
+  def test_a_variable_that_is_assigned_passes
+    irep = build_irep(symbols: %w[@conv_out],
+                      instructions: write_ivar(0) + read_ivar(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **`@foo` と `$foo` は同じ枠。** 代入が別の irep にあってもよい
+  def test_the_assignment_may_live_in_another_irep
+    child = build_irep(symbols: %w[$flag], instructions: read_var(0) + "\x69")
+    parent = build_irep(symbols: %w[$flag], instructions: write_var(0) + "\x69")
+    parent.add_child(child)
+
+    FaRuby::PlcCodegen.new(parent).validate!
+  end
+
+  # **デバイスは読むだけで正しい。** 入力はラダーが書く
+  def test_devices_may_be_read_only
+    irep = build_irep(symbols: %w[$DM100], instructions: read_var(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # faRuby が用意する名前も読むだけ
+  def test_faruby_names_may_be_read_only
+    irep = build_irep(symbols: %w[$FARUBY_TICKS], instructions: read_var(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
   # **メソッドに分ければ合計は超えられる。** 番号は irep ごとだから
   def test_the_limit_is_per_irep_not_total
     limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP

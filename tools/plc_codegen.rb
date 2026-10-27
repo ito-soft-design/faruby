@@ -8,6 +8,7 @@ require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
 require_relative "disasm"
+require "set"
 require "plc_access"
 
 module FaRuby
@@ -64,6 +65,7 @@ module FaRuby
       check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
       check_symbols_per_irep(list)
       check_undefined_methods(list)
+      check_read_only_variables(list)
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -135,6 +137,48 @@ module FaRuby
             "定義されていないメソッドを呼んでいます (#{missing.join(', ')})。" \
             "**`def` がどこにもありません。** 綴りを確かめてください " \
             "(実行すると ERROR=3 で止まります)"
+    end
+
+    # 変数の読み書きの命令。どれもオペランド b が名前
+    #
+    # `@foo` (OP_GETIV / OP_SETIV) と `$foo` (OP_GETGV / OP_SETGV) は同じ枠を
+    # 分け合うので、読み書きもまとめて数えます
+    READ_OPCODES  = %i[OP_GETGV OP_GETIV].freeze
+    WRITE_OPCODES = %i[OP_SETGV OP_SETIV].freeze
+
+    # 読むだけで、どこにも代入が無い変数
+    #
+    # **必ず `nil` です。** 枠は取れるので転送も実行も通り、そこを通る分岐が
+    # 黙って成立しなくなります。綴り間違いがこの形で出ます。
+    #
+    # **見るのは汎用グローバルだけです。** デバイス (`$DM100`)・割り付けた名前・
+    # faRuby が用意する名前 (`$FARUBY_TICKS`) は読むだけで正しいので外します。
+    #
+    # **条件付きの代入は通します。** `OP_SETGV` / `OP_SETIV` の相手に 1 度でも
+    # なっていれば、そこを通るかどうかは実行時にしか分かりません。
+    def check_read_only_variables(ireps)
+      general = device_mappings.select { |m| m[:general] }.map { |m| m[:symbol] }.to_set
+      read = {}
+      written = []
+      ireps.each do |irep|
+        Disassembler.new(irep).disassemble.each do |inst|
+          reading = READ_OPCODES.include?(inst[:name])
+          next unless reading || WRITE_OPCODES.include?(inst[:name])
+
+          name = irep.symbols[inst[:operands][1].to_i]
+          next unless name && general.include?(name)
+
+          reading ? read[name] ||= true : written << name
+        end
+      end
+
+      missing = read.keys - written
+      return if missing.empty?
+
+      raise CodegenError,
+            "代入されていない変数を読んでいます (#{missing.join(', ')})。" \
+            "**どこにも代入がないので必ず nil になります。** 綴りを確かめて" \
+            "ください (デバイスや割り付けた名前なら読むだけで構いません)"
     end
 
     # 枠を取った汎用グローバル変数の数
