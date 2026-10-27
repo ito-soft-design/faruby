@@ -24,7 +24,7 @@ IF EM54:Z9 <= 82 THEN
     IF EM6:Z9 = 67 THEN
       // OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -69,7 +69,7 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 68 THEN
       // OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -114,7 +114,7 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 69 THEN
       // OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -159,7 +159,7 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 70 THEN
       // OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -204,13 +204,13 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 71 THEN
       // OP_ARRAY (BB): R[a] = [R[a] .. R[a+b-1]]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // プールの空きスロットを取る。返さないので使い切ったら止まる
-      IF EM39:Z9 >= 16 THEN
+      IF EM39:Z9 >= 32 THEN
         EM1:Z9 := 3;
         EM2:Z9 := 10;
         EXIT;
@@ -222,7 +222,7 @@ IF EM54:Z9 <= 82 THEN
         EXIT;
       END_IF;
       // スロットの見出し
-      Z2 := EM39:Z9 * 52 + 1016 + Z9;
+      Z2 := EM39:Z9 * 52 + 1816 + Z9;
       EM0:Z2 := EM8:Z9;
       // 要素を写す。要素数 0 (空配列) では引き算もしない
       // EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
@@ -243,16 +243,16 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 72 THEN
       // OP_ARRAY2 (BBB): R[a] = [R[b] .. R[b+c-1]]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM9:Z9 := FM0:Z1;
+      EM9:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // プールの空きスロットを取る。返さないので使い切ったら止まる
-      IF EM39:Z9 >= 16 THEN
+      IF EM39:Z9 >= 32 THEN
         EM1:Z9 := 3;
         EM2:Z9 := 10;
         EXIT;
@@ -264,7 +264,7 @@ IF EM54:Z9 <= 82 THEN
         EXIT;
       END_IF;
       // スロットの見出し
-      Z2 := EM39:Z9 * 52 + 1016 + Z9;
+      Z2 := EM39:Z9 * 52 + 1816 + Z9;
       EM0:Z2 := EM9:Z9;
       // 要素を写す。要素数 0 (空配列) では引き算もしない
       // EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
@@ -285,17 +285,17 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 81 THEN
       // OP_STRING (BB): R[a] = pool[b] の複製 (文字列)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z2 := EM8:Z9 * 4 + EM34:Z9;
       // 文字列は値スロットに入らない。位置とバイト数だけが入っている
-      Z3 := FM1:Z2;   // 文字列領域の位置 (ワード)
-      Z4 := FM2:Z2;   // バイト数
+      Z3 := ZF98305:Z2;   // 文字列領域の位置 (ワード)
+      Z4 := ZF98306:Z2;   // バイト数
       // プールの空きスロットを取る。返さないので使い切ったら止まる
-      IF EM39:Z9 >= 16 THEN
+      IF EM39:Z9 >= 32 THEN
         EM1:Z9 := 3;
         EM2:Z9 := 10;
         EXIT;
@@ -307,7 +307,7 @@ IF EM54:Z9 <= 82 THEN
         EXIT;
       END_IF;
       // スロットの見出しはバイト数
-      Z5 := EM39:Z9 * 52 + 1016 + Z9;
+      Z5 := EM39:Z9 * 52 + 1816 + Z9;
       EM0:Z5 := Z4;
       // ワード単位で写す。並びが同じなので詰め替えは要らない
       // 奇数バイトのときは最後のワードの下位バイトが 0 になる
@@ -315,9 +315,9 @@ IF EM54:Z9 <= 82 THEN
       IF Z6 > 0 THEN
         Z6 := Z6 - 1;
         FOR Z7 := 0 TO Z6 DO
-          Z8 := Z7 + Z3 + EM38:Z9 + 4128;
+          Z8 := Z7 + Z3 + EM38:Z9 + 7428;
           Z2 := Z7 + Z5 + 4;
-          EM0:Z2 := FM0:Z8;
+          EM0:Z2 := ZF98304:Z8;
         END_FOR;
       END_IF;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
@@ -328,7 +328,7 @@ IF EM54:Z9 <= 82 THEN
     ELSIF EM6:Z9 = 82 THEN
       // OP_STRCAT (B): R[a] = R[a] + R[a+1] (文字列を継ぎ足す)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -343,9 +343,9 @@ IF EM54:Z9 <= 82 THEN
         EXIT;
       END_IF;
       Z3 := EM1.L:Z1;
-      Z3 := Z3 * 52 + 1016 + Z9;
+      Z3 := Z3 * 52 + 1816 + Z9;
       Z4 := EM1.L:Z2;
-      Z4 := Z4 * 52 + 1016 + Z9;
+      Z4 := Z4 * 52 + 1816 + Z9;
       EM16.L:Z9 := EM0:Z3;
       EM18.L:Z9 := EM0:Z4;
       // 1 スロットに収まること

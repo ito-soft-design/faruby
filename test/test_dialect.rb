@@ -110,7 +110,6 @@ class TestDialect < Minitest::Test
       assert_equal text, kvs.statement(text)
     end
     assert_equal "' 見出し", kvs.comment("見出し")
-    assert_equal "FRSET(3)", kvs.select_bank(3)
   end
 
   # === ST ===
@@ -159,12 +158,6 @@ class TestDialect < Minitest::Test
   def test_st_keeps_calls_and_adds_a_semicolon
     assert_equal "SET(T0:Z6);", st.statement("SET(T0:Z6)")
     assert_equal "RES(MR0:Z6);", st.statement("RES(MR0:Z6)")
-  end
-
-  # **バンクを選ぶ手立てが無く、常に 0 です。** 行そのものを出さない
-  def test_st_has_no_bank_selection
-    assert_nil st.select_bank(3)
-    assert_equal "", st.statement("FRSET(3)")
   end
 
   def test_st_comments_use_double_slash

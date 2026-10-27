@@ -17,7 +17,7 @@ IF EM1:Z9 <> 1 THEN
 ELSE
   ' === FETCH OPCODE ===
   Z1 = EM0:Z9 + EM33:Z9
-  EM6:Z9 = FM0:Z1
+  EM6:Z9 = ZF98304:Z1
   EM0:Z9 = EM0:Z9 + 1
   INC(EM3.L:Z9)   ' 累計実行命令数
 
@@ -35,7 +35,7 @@ ELSE
   IF EM6:Z9 = 45 THEN
     ' オペランド a を覗く。枝の中で読み直すので PC は進めない
     Z1 = EM0:Z9 + EM33:Z9
-    EM7:Z9 = FM0:Z1
+    EM7:Z9 = ZF98304:Z1
     ' self をレシーバ位置に置く (mruby の regs[a] = regs[0])
     Z3 = 0 + EM32:Z9 + Z9
     Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
@@ -48,7 +48,7 @@ ELSE
   IF EM6:Z9 = 46 THEN
     ' オペランド a を覗く。枝の中で読み直すので PC は進めない
     Z1 = EM0:Z9 + EM33:Z9
-    EM7:Z9 = FM0:Z1
+    EM7:Z9 = ZF98304:Z1
     ' self をレシーバ位置に置く (mruby の regs[a] = regs[0])
     Z3 = 0 + EM32:Z9 + Z9
     Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9

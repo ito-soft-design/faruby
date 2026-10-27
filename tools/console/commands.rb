@@ -297,11 +297,8 @@ module FaRuby
         puts "  実行中に変わる領域 (#{layout.device_name})"
         print_regions(layout.regions) { |addr| layout.device(addr) }
         puts ""
-        puts "  実行中に変わらない領域 (#{layout.fixed_device_name} = " \
-             "#{layout.fixed_host_device} をバンク #{layout.fixed_bank} に分けたもの)"
-        print_regions(layout.fixed_regions) do |addr|
-          "#{layout.fixed_device(addr)} (#{layout.fixed_host_device}#{layout.fixed_host_addr(addr)})"
-        end
+        puts "  実行中に変わらない領域 (#{layout.fixed_device_name} のバンク #{layout.fixed_bank})"
+        print_regions(layout.fixed_regions) { |addr| layout.fixed_device(addr) }
         puts ""
         puts "  ラダーがこの範囲を使用していないことを確認してください。"
         puts "  範囲を変えるには faruby.yml の memory 節を編集し、"

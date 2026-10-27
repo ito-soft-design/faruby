@@ -24,16 +24,16 @@ IF EM54:Z9 <= 38 THEN
     IF EM6:Z9 = 30 THEN
       // OP_SETCONST (BB): FARUBY_ の設定なら VM 状態へ書く
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z3 := EM8:Z9 * 4 + EM35:Z9;
       Z4 := Z3 + 3;
-      Z5 := FM0:Z4;   // シンボル種別
+      Z5 := ZF98304:Z4;   // シンボル種別
       IF Z5 = 3 THEN
-        Z6 := FM0:Z3;   // 設定番号
+        Z6 := ZF98304:Z3;   // 設定番号
         Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
         IF Z6 = 1 THEN
           // 固定長でデバイスへ書いたときの余りを埋めるバイト
@@ -44,13 +44,13 @@ IF EM54:Z9 <= 38 THEN
     ELSIF EM6:Z9 = 33 THEN
       // OP_GETUPVAR (BBB): R[a] = 外側 c 段の R[b]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM9:Z9 := FM0:Z1;
+      EM9:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       IF EM31:Z9 = 0 THEN
         // トップレベルには外側が無い
@@ -92,13 +92,13 @@ IF EM54:Z9 <= 38 THEN
     ELSIF EM6:Z9 = 34 THEN
       // OP_SETUPVAR (BBB): 外側 c 段の R[b] = R[a]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM9:Z9 := FM0:Z1;
+      EM9:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF EM31:Z9 = 0 THEN
@@ -140,7 +140,7 @@ IF EM54:Z9 <= 38 THEN
     ELSIF EM6:Z9 = 35 THEN
       // OP_GETIDX (B): R[a] = R[a][R[a+1]] (デバイス・配列・文字列)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -186,12 +186,12 @@ IF EM54:Z9 <= 38 THEN
             EXIT;
           END_IF;
           // プールの空きスロットを取る。返さないので使い切ったら止まる
-          IF EM39:Z9 >= 16 THEN
+          IF EM39:Z9 >= 32 THEN
             EM1:Z9 := 3;
             EM2:Z9 := 10;
             EXIT;
           END_IF;
-          Z3 := EM39:Z9 * 52 + 1016 + Z9;
+          Z3 := EM39:Z9 * 52 + 1816 + Z9;
           EM0:Z3 := EM44:Z9;
           // ワード単位で写す。並びが同じなので詰め替えは要らない
           EM45:Z9 := EM44:Z9 + 1;
@@ -404,7 +404,7 @@ IF EM54:Z9 <= 38 THEN
       ELSIF EM0:Z1 = 8 THEN
         // スロットの見出し。R[a] を書き換える前に読む
         Z4 := EM1.L:Z1;
-        Z4 := Z4 * 52 + 1016 + Z9;
+        Z4 := Z4 * 52 + 1816 + Z9;
         EM18.L:Z9 := EM0:Z4;   // 要素数
         // 負の添字は後ろから数える (Ruby の a[-1] は最後の要素)
         EM16.L:Z9 := EM1.L:Z2;
@@ -427,10 +427,10 @@ IF EM54:Z9 <= 38 THEN
       ELSIF EM0:Z1 = 9 THEN
         // 鍵の配列の見出し。R[a] を書き換える前に読む
         Z4 := EM1:Z1;
-        Z4 := Z4 * 52 + 1016 + Z9;
+        Z4 := Z4 * 52 + 1816 + Z9;
         EM18.L:Z9 := EM0:Z4;   // 組の数
         Z5 := EM2:Z1;   // 値の配列
-        Z5 := Z5 * 52 + 1016 + Z9;
+        Z5 := Z5 * 52 + 1816 + Z9;
         // 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
         EM16.L:Z9 := -1;
         IF EM18.L:Z9 > 0 THEN
@@ -448,10 +448,10 @@ IF EM54:Z9 <= 38 THEN
                   EM46:Z9 := Z3;
                   EM43:Z9 := 0;
                   Z3 := EM1.L:Z7;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   EM44:Z9 := EM0:Z3;   // バイト数
                   Z3 := EM1.L:Z2;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   IF EM44:Z9 = EM0:Z3 THEN
                     // バイト数が同じ。ここから中身を見る
                     EM43:Z9 := 1;
@@ -461,11 +461,11 @@ IF EM54:Z9 <= 38 THEN
                       EM45:Z9 := EM45:Z9 - 1;
                       FOR EM42:Z9 := 0 TO EM45:Z9 DO
                         Z3 := EM1.L:Z7;
-                        Z3 := Z3 * 52 + 1016 + Z9;
+                        Z3 := Z3 * 52 + 1816 + Z9;
                         Z3 := EM42:Z9 + Z3 + 4;
                         EM44:Z9 := EM0:Z3;
                         Z3 := EM1.L:Z2;
-                        Z3 := Z3 * 52 + 1016 + Z9;
+                        Z3 := Z3 * 52 + 1816 + Z9;
                         Z3 := EM42:Z9 + Z3 + 4;
                         IF EM44:Z9 <> EM0:Z3 THEN
                           EM43:Z9 := 0;
@@ -499,7 +499,7 @@ IF EM54:Z9 <= 38 THEN
         END_IF;
       ELSIF EM0:Z1 = 7 THEN
         Z4 := EM1.L:Z1;
-        Z4 := Z4 * 52 + 1016 + Z9;
+        Z4 := Z4 * 52 + 1816 + Z9;
         EM16.L:Z9 := EM1.L:Z2;
         IF EM16.L:Z9 < 0 THEN
           // 負の添字は後ろから数える。文字数が要るので一度なめる
@@ -646,13 +646,13 @@ IF EM54:Z9 <= 38 THEN
             EM0:Z1 := 1;
           ELSE
             // プールの空きスロットを取る。返さないので使い切ったら止まる
-            IF EM39:Z9 >= 16 THEN
+            IF EM39:Z9 >= 32 THEN
               EM1:Z9 := 3;
               EM2:Z9 := 10;
               EXIT;
             END_IF;
             Z3 := EM39:Z9;
-            Z3 := Z3 * 52 + 1016 + Z9;
+            Z3 := Z3 * 52 + 1816 + Z9;
             EM16.L:Z9 := 0;   // 新しいスロットは空から始める
             EM18.L:Z9 := EM51:Z9 - EM50:Z9;   // その文字のバイト数
             IF EM18.L:Z9 > 0 THEN
@@ -742,7 +742,7 @@ IF EM54:Z9 <= 38 THEN
     ELSIF EM6:Z9 = 36 THEN
       // OP_SETIDX (B): R[a][R[a+1]] = R[a+2] (デバイス・配列)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -779,7 +779,7 @@ IF EM54:Z9 <= 38 THEN
           Z7 := Z8 / 16;
           // 文字列スロットの見出し
           Z4 := EM1.L:Z3;
-          Z4 := Z4 * 52 + 1016 + Z9;
+          Z4 := Z4 * 52 + 1816 + Z9;
           EM18.L:Z9 := EM0:Z4;   // バイト数
           // 書く長さと埋めるバイトを決める
           IF Z7 = 0 THEN
@@ -890,7 +890,7 @@ IF EM54:Z9 <= 38 THEN
           END_IF;
           // スロットの見出しと書き先の先頭。どちらもループの中で動かさない
           Z4 := EM1.L:Z3;
-          Z4 := Z4 * 52 + 1016 + Z9;
+          Z4 := Z4 * 52 + 1816 + Z9;
           EM44:Z9 := Z6;   // 書き先の先頭
           EM18.L:Z9 := EM0:Z4;   // 要素数
           // 数値でない要素があった印。FOR を出てから判定する
@@ -1244,7 +1244,7 @@ IF EM54:Z9 <= 38 THEN
       ELSIF EM0:Z1 = 8 THEN
         // スロットの見出し。R[a] を書き換える前に読む
         Z4 := EM1.L:Z1;
-        Z4 := Z4 * 52 + 1016 + Z9;
+        Z4 := Z4 * 52 + 1816 + Z9;
         EM18.L:Z9 := EM0:Z4;   // 要素数
         // 負の添字は後ろから数える (Ruby の a[-1] は最後の要素)
         EM16.L:Z9 := EM1.L:Z2;
@@ -1285,10 +1285,10 @@ IF EM54:Z9 <= 38 THEN
       ELSIF EM0:Z1 = 9 THEN
         // 鍵の配列の見出し。R[a] を書き換える前に読む
         Z4 := EM1:Z1;
-        Z4 := Z4 * 52 + 1016 + Z9;
+        Z4 := Z4 * 52 + 1816 + Z9;
         EM18.L:Z9 := EM0:Z4;   // 組の数
         Z5 := EM2:Z1;   // 値の配列
-        Z5 := Z5 * 52 + 1016 + Z9;
+        Z5 := Z5 * 52 + 1816 + Z9;
         // 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
         EM16.L:Z9 := -1;
         IF EM18.L:Z9 > 0 THEN
@@ -1306,10 +1306,10 @@ IF EM54:Z9 <= 38 THEN
                   EM46:Z9 := Z3;
                   EM43:Z9 := 0;
                   Z3 := EM1.L:Z7;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   EM44:Z9 := EM0:Z3;   // バイト数
                   Z3 := EM1.L:Z2;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   IF EM44:Z9 = EM0:Z3 THEN
                     // バイト数が同じ。ここから中身を見る
                     EM43:Z9 := 1;
@@ -1319,11 +1319,11 @@ IF EM54:Z9 <= 38 THEN
                       EM45:Z9 := EM45:Z9 - 1;
                       FOR EM42:Z9 := 0 TO EM45:Z9 DO
                         Z3 := EM1.L:Z7;
-                        Z3 := Z3 * 52 + 1016 + Z9;
+                        Z3 := Z3 * 52 + 1816 + Z9;
                         Z3 := EM42:Z9 + Z3 + 4;
                         EM44:Z9 := EM0:Z3;
                         Z3 := EM1.L:Z2;
-                        Z3 := Z3 * 52 + 1016 + Z9;
+                        Z3 := Z3 * 52 + 1816 + Z9;
                         Z3 := EM42:Z9 + Z3 + 4;
                         IF EM44:Z9 <> EM0:Z3 THEN
                           EM43:Z9 := 0;
@@ -1384,10 +1384,10 @@ IF EM54:Z9 <= 38 THEN
       // OP_JMP (S): PC += signed16(a)
       // 16bit big-endian: hi byte, lo byte
       Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := FM0:Z1;
+      Z3 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := FM0:Z1;
+      Z4 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       EM7:Z9 := Z3 * 256 + Z4;
       IF EM7:Z9 >= 32768 THEN
@@ -1398,14 +1398,14 @@ IF EM54:Z9 <= 38 THEN
     ELSIF EM6:Z9 = 38 THEN
       // OP_JMPIF (BS): if R[a] が真 then PC += signed16(b)
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       // 16bit big-endian: hi byte, lo byte
       Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := FM0:Z1;
+      Z3 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := FM0:Z1;
+      Z4 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       EM8:Z9 := Z3 * 256 + Z4;
       IF EM8:Z9 >= 32768 THEN

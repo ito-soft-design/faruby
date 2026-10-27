@@ -16,8 +16,8 @@
 (* *)
 (* D デバイスを使用。 *)
 (* *)
-(* インスタンスごとに 2000 ワードのブロックを使います。 *)
-(*   インスタンス0  D4000-D5999 *)
+(* インスタンスごとに 4000 ワードのブロックを使います。 *)
+(*   インスタンス0  D4000-D7999 *)
 (* *)
 (* 実行中のブロック先頭は Z9 に載っています。 *)
 (* ブロック内の位置はオフセットをインデックス修飾で足して指します。 *)
@@ -46,15 +46,16 @@
 (*   +392~ = 呼び出しスタック (10ワード/段) *)
 (*   +552~ = メソッド表 (1ワード/メソッド) *)
 (*   +616~ = 汎用グローバル変数 (値スロット 4ワード/変数) *)
-(*   +1016~ = 配列プール (52ワード/スロット: 要素数 + 予備 + 要素12個) *)
+(*   +1816~ = 配列プール (52ワード/スロット: 要素数 + 予備 + 要素12個) *)
 (* *)
-(* 実行中に変わらないものは ZR (ZR をバンク 0 に分けたもの) に置く。 *)
-(* **バンクを選ぶ手立てが無く常に 0 です。** ホスト側も同じ バンクへ書くので食い違いません (memory.fixed_bank)。 *)
-(* インスタンス0のブロックは ZR0-ZR4999: *)
+(* 実行中に変わらないものは ZR のバンク 0 (ZR0 から) に置く。 *)
+(* **基点をリテラルで書いて相対で指すので、バンクの切り替えは要らない。** *)
+(* ホストも同じアドレスで書くため食い違わない (memory.fixed_bank)。 *)
+(* インスタンス0のブロックは ZR0-ZR7999: *)
 (*   ZR0~ = IREPテーブル (8ワード/irep) *)
 (*   ZR128~ = バイトコード (1バイト/1ワード) *)
-(*   ZR3128~ = 定数プール (値スロット 4ワード/エントリ) *)
-(*   ZR3728~ = シンボル表 (4ワード/エントリ) *)
+(*   ZR5628~ = 定数プール (値スロット 4ワード/エントリ) *)
+(*   ZR6228~ = シンボル表 (4ワード/エントリ) *)
 (* *)
 (* バイトコード・定数プール・シンボル表は全 irep で 1 つの領域を分け合う。 *)
 (* irep ごとの位置は IREP テーブルにあり、切り替え時に VM 状態へ写す。 *)
@@ -84,8 +85,6 @@ VMZSAVE[5] := Z6;
 VMZSAVE[6] := Z7;
 VMZSAVE[7] := Z8;
 VMZSAVE[8] := Z9;
-(* 固定領域 (ZR) のバンクを選ぶ *)
-(* 現在のバンクを読む命令が無いため、抜けるときは 0 に戻す *)
 
 (* ブロックの先頭を Z9 に載せる *)
 Z9 := 4000;
@@ -713,12 +712,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           EXIT;
         END_IF;
         (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-        IF VMARRAYSP >= 16 THEN
+        IF VMARRAYSP >= 32 THEN
           VMSTATUS := 3;
           VMERROR := 10;
           EXIT;
         END_IF;
-        Z3 := VMARRAYSP * 52 + 5016;
+        Z3 := VMARRAYSP * 52 + 5816;
         D0Z3 := VMSTRTEMP;
         (* ワード単位で写す。並びが同じなので詰め替えは要らない *)
         VMSTRLIMIT := VMSTRTEMP + 1;
@@ -803,7 +802,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         Z7 := Z8 / 16;
         (* 文字列スロットの見出し *)
         Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* バイト数 *)
         (* 書く長さと埋めるバイトを決める *)
         IF Z7 = 0 THEN
@@ -930,7 +929,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
         (* スロットの見出しと書き先の先頭。どちらもループの中で動かさない *)
         Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMSTRTEMP := Z6;   (* 書き先の先頭 *)
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
         (* 数値でない要素があった印。FOR を出てから判定する *)
@@ -1530,12 +1529,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             EXIT;
           END_IF;
           (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-          IF VMARRAYSP >= 16 THEN
+          IF VMARRAYSP >= 32 THEN
             VMSTATUS := 3;
             VMERROR := 10;
             EXIT;
           END_IF;
-          Z3 := VMARRAYSP * 52 + 5016;
+          Z3 := VMARRAYSP * 52 + 5816;
           D0Z3 := VMSTRTEMP;
           (* ワード単位で写す。並びが同じなので詰め替えは要らない *)
           VMSTRLIMIT := VMSTRTEMP + 1;
@@ -1867,7 +1866,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 8 THEN
         (* スロットの見出し。R[a] を書き換える前に読む *)
         Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
         (* 負の添字は後ろから数える (Ruby の a[-1] は最後の要素) *)
         VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
@@ -1890,10 +1889,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
         (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
         Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
         Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1;   (* 値の配列 *)
-        Z5 := Z5 * 52 + 5016;
+        Z5 := Z5 * 52 + 5816;
         (* 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ) *)
         VMTEMP32L := -1;
         IF VMTEMP32BL > 0 THEN
@@ -1911,10 +1910,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   VMSTRSAVEDZ := Z3;
                   VMSTRFLAG := 0;
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   VMSTRTEMP := D0Z3;   (* バイト数 *)
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   IF VMSTRTEMP = D0Z3 THEN
                     (* バイト数が同じ。ここから中身を見る *)
                     VMSTRFLAG := 1;
@@ -1924,11 +1923,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                       VMSTRLIMIT := VMSTRLIMIT - 1;
                       FOR VMSTRINDEX := 0 TO VMSTRLIMIT DO
                         Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                        Z3 := Z3 * 52 + 5016;
+                        Z3 := Z3 * 52 + 5816;
                         Z3 := VMSTRINDEX + Z3 + 4;
                         VMSTRTEMP := D0Z3;
                         Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                        Z3 := Z3 * 52 + 5016;
+                        Z3 := Z3 * 52 + 5816;
                         Z3 := VMSTRINDEX + Z3 + 4;
                         IF VMSTRTEMP <> D0Z3 THEN
                           VMSTRFLAG := 0;
@@ -1962,7 +1961,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 7 THEN
         Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
         IF VMTEMP32L < 0 THEN
           (* 負の添字は後ろから数える。文字数が要るので一度なめる *)
@@ -2123,13 +2122,13 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 1;
           ELSE
             (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-            IF VMARRAYSP >= 16 THEN
+            IF VMARRAYSP >= 32 THEN
               VMSTATUS := 3;
               VMERROR := 10;
               EXIT;
             END_IF;
             Z3 := VMARRAYSP;
-            Z3 := Z3 * 52 + 5016;
+            Z3 := Z3 * 52 + 5816;
             VMTEMP32L := 0;   (* 新しいスロットは空から始める *)
             VMTEMP32BL := INT_TO_DINT(VMSTRFOUNDEND) - INT_TO_DINT(VMSTRFOUND);   (* その文字のバイト数 *)
             IF VMTEMP32BL > 0 THEN
@@ -2307,7 +2306,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           Z7 := Z8 / 16;
           (* 文字列スロットの見出し *)
           Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 2].SLNUM));
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* バイト数 *)
           (* 書く長さと埋めるバイトを決める *)
           IF Z7 = 0 THEN
@@ -2434,7 +2433,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
           (* スロットの見出しと書き先の先頭。どちらもループの中で動かさない *)
           Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 2].SLNUM));
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMSTRTEMP := Z6;   (* 書き先の先頭 *)
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
           (* 数値でない要素があった印。FOR を出てから判定する *)
@@ -2877,7 +2876,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 8 THEN
         (* スロットの見出し。R[a] を書き換える前に読む *)
         Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
         (* 負の添字は後ろから数える (Ruby の a[-1] は最後の要素) *)
         VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
@@ -2918,10 +2917,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
         (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
         Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-        Z4 := Z4 * 52 + 5016;
+        Z4 := Z4 * 52 + 5816;
         VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
         Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1;   (* 値の配列 *)
-        Z5 := Z5 * 52 + 5016;
+        Z5 := Z5 * 52 + 5816;
         (* 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ) *)
         VMTEMP32L := -1;
         IF VMTEMP32BL > 0 THEN
@@ -2939,10 +2938,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   VMSTRSAVEDZ := Z3;
                   VMSTRFLAG := 0;
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   VMSTRTEMP := D0Z3;   (* バイト数 *)
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   IF VMSTRTEMP = D0Z3 THEN
                     (* バイト数が同じ。ここから中身を見る *)
                     VMSTRFLAG := 1;
@@ -2952,11 +2951,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                       VMSTRLIMIT := VMSTRLIMIT - 1;
                       FOR VMSTRINDEX := 0 TO VMSTRLIMIT DO
                         Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                        Z3 := Z3 * 52 + 5016;
+                        Z3 := Z3 * 52 + 5816;
                         Z3 := VMSTRINDEX + Z3 + 4;
                         VMSTRTEMP := D0Z3;
                         Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                        Z3 := Z3 * 52 + 5016;
+                        Z3 := Z3 * 52 + 5816;
                         Z3 := VMSTRINDEX + Z3 + 4;
                         IF VMSTRTEMP <> D0Z3 THEN
                           VMSTRFLAG := 0;
@@ -3243,10 +3242,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 VMSTRSAVEDZ := Z3;
                 VMSTRFLAG := 0;
                 Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-                Z3 := Z3 * 52 + 5016;
+                Z3 := Z3 * 52 + 5816;
                 VMSTRTEMP := D0Z3;   (* バイト数 *)
                 Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                Z3 := Z3 * 52 + 5016;
+                Z3 := Z3 * 52 + 5816;
                 IF VMSTRTEMP = D0Z3 THEN
                   (* バイト数が同じ。ここから中身を見る *)
                   VMSTRFLAG := 1;
@@ -3256,11 +3255,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                     VMSTRLIMIT := VMSTRLIMIT - 1;
                     FOR VMSTRINDEX := 0 TO VMSTRLIMIT DO
                       Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-                      Z3 := Z3 * 52 + 5016;
+                      Z3 := Z3 * 52 + 5816;
                       Z3 := VMSTRINDEX + Z3 + 4;
                       VMSTRTEMP := D0Z3;
                       Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                      Z3 := Z3 * 52 + 5016;
+                      Z3 := Z3 * 52 + 5816;
                       Z3 := VMSTRINDEX + Z3 + 4;
                       IF VMSTRTEMP <> D0Z3 THEN
                         VMSTRFLAG := 0;
@@ -3582,12 +3581,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
             (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
             Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
           ELSE
             (* スロットの見出し。R[a] を書き換える前に読む *)
             Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 7 THEN
               (* 文字列は文字数を返す。バイト数ではない *)
@@ -3671,12 +3670,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
             (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
             Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
           ELSE
             (* スロットの見出し。R[a] を書き換える前に読む *)
             Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
           END_IF;
           IF VMTEMP32BL = 0 THEN
@@ -3793,9 +3792,9 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               EXIT;
             END_IF;
             Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z3 := Z3 * 52 + 5016;
+            Z3 := Z3 * 52 + 5816;
             Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32L := INT_TO_DINT(D0Z3);
             VMTEMP32BL := INT_TO_DINT(D0Z4);
             (* 1 スロットに収まること *)
@@ -3865,7 +3864,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           ELSIF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 8 THEN
             (* スロットの見出し。R[a] を書き換える前に読む *)
             Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
             IF VMTEMP32BL >= 12 THEN
               (* 1 スロットの容量がいっぱい *)
@@ -3891,7 +3890,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* push *)
           (* スロットの見出し。R[a] を書き換える前に読む *)
           Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
           IF VMTEMP32BL >= 12 THEN
             (* 1 スロットの容量がいっぱい *)
@@ -3911,7 +3910,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* key? *)
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
           Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
           (* 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ) *)
           VMTEMP32L := -1;
@@ -3930,10 +3929,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                     VMSTRSAVEDZ := Z3;
                     VMSTRFLAG := 0;
                     Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                    Z3 := Z3 * 52 + 5016;
+                    Z3 := Z3 * 52 + 5816;
                     VMSTRTEMP := D0Z3;   (* バイト数 *)
                     Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                    Z3 := Z3 * 52 + 5016;
+                    Z3 := Z3 * 52 + 5816;
                     IF VMSTRTEMP = D0Z3 THEN
                       (* バイト数が同じ。ここから中身を見る *)
                       VMSTRFLAG := 1;
@@ -3943,11 +3942,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                         VMSTRLIMIT := VMSTRLIMIT - 1;
                         FOR VMSTRINDEX := 0 TO VMSTRLIMIT DO
                           Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[(Z7 - 4000) / 4].SLNUM));
-                          Z3 := Z3 * 52 + 5016;
+                          Z3 := Z3 * 52 + 5816;
                           Z3 := VMSTRINDEX + Z3 + 4;
                           VMSTRTEMP := D0Z3;
                           Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                          Z3 := Z3 * 52 + 5016;
+                          Z3 := Z3 * 52 + 5816;
                           Z3 := VMSTRINDEX + Z3 + 4;
                           IF VMSTRTEMP <> D0Z3 THEN
                             VMSTRFLAG := 0;
@@ -3979,19 +3978,19 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         ELSIF Z5 = 24 THEN
           (* keys *)
           (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-          IF VMARRAYSP >= 16 THEN
+          IF VMARRAYSP >= 32 THEN
             VMSTATUS := 3;
             VMERROR := 10;
             EXIT;
           END_IF;
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
           Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
           Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1;   (* 値の配列 *)
-          Z5 := Z5 * 52 + 5016;
+          Z5 := Z5 * 52 + 5816;
           (* 新しいスロットの見出し。組の数がそのまま要素数になる *)
-          Z2 := VMARRAYSP * 52 + 5016;
+          Z2 := VMARRAYSP * 52 + 5816;
           D0Z2 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));
           (* 写す。組の数 0 (空ハッシュ) では引き算もしない *)
           IF VMTEMP32BL > 0 THEN
@@ -4012,19 +4011,19 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         ELSIF Z5 = 25 THEN
           (* values *)
           (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-          IF VMARRAYSP >= 16 THEN
+          IF VMARRAYSP >= 32 THEN
             VMSTATUS := 3;
             VMERROR := 10;
             EXIT;
           END_IF;
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
           Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
           Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1;   (* 値の配列 *)
-          Z5 := Z5 * 52 + 5016;
+          Z5 := Z5 * 52 + 5816;
           (* 新しいスロットの見出し。組の数がそのまま要素数になる *)
-          Z2 := VMARRAYSP * 52 + 5016;
+          Z2 := VMARRAYSP * 52 + 5816;
           D0Z2 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));
           (* 写す。組の数 0 (空ハッシュ) では引き算もしない *)
           IF VMTEMP32BL > 0 THEN
@@ -4125,12 +4124,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               EXIT;
             END_IF;
             (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-            IF VMARRAYSP >= 16 THEN
+            IF VMARRAYSP >= 32 THEN
               VMSTATUS := 3;
               VMERROR := 10;
               EXIT;
             END_IF;
-            Z4 := VMARRAYSP * 52 + 5016;
+            Z4 := VMARRAYSP * 52 + 5816;
             D0Z4 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));
             IF VMTEMP32BL > 0 THEN
               Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));
@@ -4630,12 +4629,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
           Z4 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 組の数 *)
         ELSE
           (* スロットの見出し。R[a] を書き換える前に読む *)
           Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-          Z4 := Z4 * 52 + 5016;
+          Z4 := Z4 * 52 + 5816;
           VMTEMP32BL := INT_TO_DINT(D0Z4);   (* 要素数 *)
         END_IF;
         VMTEMP32L := 0;
@@ -4702,14 +4701,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
           Z4 := 0 + VMREGBASE + 4000;
           Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 5016;
+          Z7 := Z7 * 52 + 5816;
           Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
           Z5 := Z5 * 4 + Z7 + 4;
           VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
           VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
           Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
           Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 5016;
+          Z7 := Z7 * 52 + 5816;
           Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
           Z5 := Z5 * 4 + Z7 + 4;
           VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
@@ -4723,7 +4722,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMTEMP32B := D1Z4;
           VMTEMP32BHI := D2Z4;
           Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-          Z7 := Z7 * 52 + 5016;
+          Z7 := Z7 * 52 + 5816;
           Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
           Z5 := Z5 * 4 + Z7 + 4;
           VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
@@ -4844,14 +4843,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
               Z4 := 0 + VMREGBASE + 4000;
               Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-              Z7 := Z7 * 52 + 5016;
+              Z7 := Z7 * 52 + 5816;
               Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
               Z5 := Z5 * 4 + Z7 + 4;
               VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
               VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
               Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
               Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-              Z7 := Z7 * 52 + 5016;
+              Z7 := Z7 * 52 + 5816;
               Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
               Z5 := Z5 * 4 + Z7 + 4;
               VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
@@ -4865,7 +4864,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMTEMP32B := D1Z4;
               VMTEMP32BHI := D2Z4;
               Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-              Z7 := Z7 * 52 + 5016;
+              Z7 := Z7 * 52 + 5816;
               Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
               Z5 := Z5 * 4 + Z7 + 4;
               VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
@@ -4979,16 +4978,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         ELSE
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 7 THEN
             (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-            IF VMARRAYSP >= 16 THEN
+            IF VMARRAYSP >= 32 THEN
               VMSTATUS := 3;
               VMERROR := 10;
               EXIT;
             END_IF;
             Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z4 := Z4 * 52 + 5016;
+            Z4 := Z4 * 52 + 5816;
             VMTEMP32L := INT_TO_DINT(D0Z4);
             Z5 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-            Z5 := Z5 * 52 + 5016;
+            Z5 := Z5 * 52 + 5816;
             VMTEMP32BL := INT_TO_DINT(D0Z5);
             (* 1 スロットに収まること *)
             Z6 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L)) + WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));
@@ -4998,7 +4997,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               EXIT;
             END_IF;
             (* 新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま *)
-            Z3 := VMARRAYSP * 52 + 5016;
+            Z3 := VMARRAYSP * 52 + 5816;
             D0Z3 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
             VMSTRLIMIT := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L)) + 1;
             VMSTRLIMIT := VMSTRLIMIT / 2;
@@ -5302,10 +5301,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMSTRSAVEDZ := Z3;
             VMSTRFLAG := 0;
             Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-            Z3 := Z3 * 52 + 5016;
+            Z3 := Z3 * 52 + 5816;
             VMSTRTEMP := D0Z3;   (* バイト数 *)
             Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-            Z3 := Z3 * 52 + 5016;
+            Z3 := Z3 * 52 + 5816;
             IF VMSTRTEMP = D0Z3 THEN
               (* バイト数が同じ。ここから中身を見る *)
               VMSTRFLAG := 1;
@@ -5315,11 +5314,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 VMSTRLIMIT := VMSTRLIMIT - 1;
                 FOR VMSTRINDEX := 0 TO VMSTRLIMIT DO
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   Z3 := VMSTRINDEX + Z3 + 4;
                   VMSTRTEMP := D0Z3;
                   Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-                  Z3 := Z3 * 52 + 5016;
+                  Z3 := Z3 * 52 + 5816;
                   Z3 := VMSTRINDEX + Z3 + 4;
                   IF VMSTRTEMP <> D0Z3 THEN
                     VMSTRFLAG := 0;
@@ -5531,7 +5530,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMOPERANDB := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-      IF VMARRAYSP >= 16 THEN
+      IF VMARRAYSP >= 32 THEN
         VMSTATUS := 3;
         VMERROR := 10;
         EXIT;
@@ -5543,7 +5542,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
       (* スロットの見出し *)
-      Z2 := VMARRAYSP * 52 + 5016;
+      Z2 := VMARRAYSP * 52 + 5816;
       D0Z2 := VMOPERANDB;
       (* 要素を写す。要素数 0 (空配列) では引き算もしない *)
       (* EM は16ビット符号なしのため、0 - 1 は 65535 になり得る *)
@@ -5569,7 +5568,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMOPERANDC := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-      IF VMARRAYSP >= 16 THEN
+      IF VMARRAYSP >= 32 THEN
         VMSTATUS := 3;
         VMERROR := 10;
         EXIT;
@@ -5581,7 +5580,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
       (* スロットの見出し *)
-      Z2 := VMARRAYSP * 52 + 5016;
+      Z2 := VMARRAYSP * 52 + 5816;
       D0Z2 := VMOPERANDC;
       (* 要素を写す。要素数 0 (空配列) では引き算もしない *)
       (* EM は16ビット符号なしのため、0 - 1 は 65535 になり得る *)
@@ -5608,7 +5607,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       Z3 := VMFSLOTW[(VMCURPOOL) / 4 + VMOPERANDB].SLW0;   (* 文字列領域の位置 (ワード) *)
       Z4 := VMFSLOTW[(VMCURPOOL) / 4 + VMOPERANDB].SLW1;   (* バイト数 *)
       (* プールの空きスロットを取る。返さないので使い切ったら止まる *)
-      IF VMARRAYSP >= 16 THEN
+      IF VMARRAYSP >= 32 THEN
         VMSTATUS := 3;
         VMERROR := 10;
         EXIT;
@@ -5620,7 +5619,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
       (* スロットの見出しはバイト数 *)
-      Z5 := VMARRAYSP * 52 + 5016;
+      Z5 := VMARRAYSP * 52 + 5816;
       D0Z5 := Z4;
       (* ワード単位で写す。並びが同じなので詰め替えは要らない *)
       (* 奇数バイトのときは最後のワードの下位バイトが 0 になる *)
@@ -5628,7 +5627,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z6 > 0 THEN
         Z6 := Z6 - 1;
         FOR Z7 := 0 TO Z6 DO
-          Z8 := Z7 + Z3 + VMIREPTABLE + 4128;
+          Z8 := Z7 + Z3 + VMIREPTABLE + 7428;
           Z2 := Z7 + Z5 + 4;
           D0Z2 := ZR0Z8;
         END_FOR;
@@ -5652,9 +5651,9 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
       Z3 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
-      Z3 := Z3 * 52 + 5016;
+      Z3 := Z3 * 52 + 5816;
       Z4 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
-      Z4 := Z4 * 52 + 5016;
+      Z4 := Z4 * 52 + 5816;
       VMTEMP32L := INT_TO_DINT(D0Z3);
       VMTEMP32BL := INT_TO_DINT(D0Z4);
       (* 1 スロットに収まること *)
@@ -5739,7 +5738,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMPC := VMPC + 1;
       (* ハッシュは配列 2 本。空きスロットが 2 つ要る *)
       Z2 := VMARRAYSP + 1;
-      IF Z2 >= 16 THEN
+      IF Z2 >= 32 THEN
         VMSTATUS := 3;
         VMERROR := 10;
         EXIT;
@@ -5751,7 +5750,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
       (* 鍵の配列と値の配列の見出し *)
-      Z2 := VMARRAYSP * 52 + 5016;
+      Z2 := VMARRAYSP * 52 + 5816;
       Z3 := Z2 + 52;
       D0Z2 := VMOPERANDB;
       D0Z3 := VMOPERANDB;
@@ -5891,7 +5890,6 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
 
 END_FOR;
 
-(* ファイルレジスタのバンクを 0 に戻す *)
 (* インデックスレジスタの復元 *)
 Z1 := VMZSAVE[0];
 Z2 := VMZSAVE[1];

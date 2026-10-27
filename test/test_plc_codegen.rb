@@ -667,16 +667,20 @@ end
   # **枠を超えたら止める。** 溢れると次に並ぶ配列プールに重なり、
   # 配列を壊しながら動くので気づきにくい
   #
-  # **既定の設定では先にシンボル数で止まります** (どちらも 100 で、変数は
-  # 必ずシンボルを 1 つ使うため)。ここが効くのは `max_symbols` を増やした
-  # 配置です。順番で隠れていても検査そのものは要ります
+  # **変数はシンボルも 1 つ使うので、どちらが先に効くかは配置で決まります。**
+  # 既定はどちらも同じ数なので、シンボル数に余裕を持たせた配置で見ます
+  def small(globals)
+    FaRuby::MemoryLayout.from_config("max_globals" => globals,
+                                     "max_symbols" => globals * 2)
+  end
+
   def test_too_many_variables_stops
-    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
-    names = (1..roomy.max_globals).map { |i| "$v#{i}" }
-    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
+    layout = small(20)
+    names = (1..layout.max_globals).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: layout).validate!
 
     error = assert_raises(FaRuby::CodegenError) do
-      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: layout).validate!
     end
 
     assert_includes error.message, "変数の数"
@@ -684,14 +688,156 @@ end
 
   # `$foo` と `@foo` は同じ枠を分け合う
   def test_globals_and_instance_variables_share_the_limit
-    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => 300)
-    names = (1..roomy.max_globals).map { |i| "@v#{i}" }
+    layout = small(20)
+    names = (1..layout.max_globals).map { |i| "@v#{i}" }
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: layout).validate!
+    end
+
+    assert_includes error.message, "変数の数"
+  end
+
+  # === 1 つの irep が持てる名前の数 ===
+
+  # **256 を超えたらコンパイル時に止める。**
+  #
+  # オペランドが 1 バイトなので、超えると mruby は `OP_EXT2` を置いて
+  # 2 バイトにします。faRuby は実装していないため、通すと実行時に
+  # 「未知のオペコード 103」で止まります (実測)。
+  def test_too_many_names_in_one_irep_stops
+    limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => limit * 2,
+                                             "max_globals" => limit * 2,
+                                             "max_bytecode" => 20_000)
+    names = (1..limit).map { |i| "$v#{i}" }
+    FaRuby::PlcCodegen.new(build_irep(symbols: names), layout: roomy).validate!
 
     error = assert_raises(FaRuby::CodegenError) do
       FaRuby::PlcCodegen.new(build_irep(symbols: names + ["$over"]), layout: roomy).validate!
     end
 
-    assert_includes error.message, "変数の数"
+    assert_includes error.message, "OP_EXT2"
+    assert_includes error.message, "トップレベル"
+  end
+
+  # === 定義されていないメソッド ===
+  #
+  # 綴り間違いは実行してみるまで分からなかった (ERROR=3)。転送前に止める
+
+  # OP_SSEND a b c (self へのメソッド呼び出し)
+  def send_self(sym_index) = [45, 1, sym_index, 0].pack("C*")
+
+  # OP_DEF a b (メソッド表への登録)
+  def define_method_op(sym_index) = [95, 1, sym_index].pack("C*")
+
+  def test_calling_a_method_that_is_never_defined_stops
+    irep = build_irep(symbols: %w[write_outputs],
+                      instructions: send_self(0) + "\x69")
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(irep).validate!
+    end
+
+    assert_includes error.message, "write_outputs"
+    assert_includes error.message, "ERROR=3"
+  end
+
+  # 同じ名前に def があれば通る
+  def test_a_defined_method_passes
+    irep = build_irep(symbols: %w[write_outputs],
+                      instructions: define_method_op(0) + send_self(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **def は別の irep にあってもよい。** メソッドの中で呼ぶ形がこれ
+  def test_the_definition_may_live_in_another_irep
+    child = build_irep(symbols: %w[helper], instructions: send_self(0) + "\x69")
+    parent = build_irep(symbols: %w[helper],
+                        instructions: define_method_op(0) + "\x69")
+    parent.add_child(child)
+
+    FaRuby::PlcCodegen.new(parent).validate!
+  end
+
+  # 組み込みメソッドは def が要らない
+  def test_builtin_methods_need_no_definition
+    irep = build_irep(symbols: %w[length], instructions: send_self(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **オペランド b を名前として読むのは呼び出しと def だけ。** ほかの命令では
+  # 飛び先や即値が入っていて、シンボル表を引くと別の名前に当たる
+  def test_other_opcodes_are_not_read_as_method_names
+    # OP_LOADI a b。b = 0 だが名前ではない
+    irep = build_irep(symbols: %w[never_defined], instructions: [3, 1, 0].pack("C*") + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # === 代入されていない変数 ===
+
+  # OP_GETGV a b / OP_SETGV a b
+  def read_var(sym_index)  = [21, 1, sym_index].pack("C*")
+  def write_var(sym_index) = [22, 1, sym_index].pack("C*")
+
+  # OP_GETIV a b / OP_SETIV a b (`@foo`。同じ枠を使う)
+  def read_ivar(sym_index)  = [25, 1, sym_index].pack("C*")
+  def write_ivar(sym_index) = [26, 1, sym_index].pack("C*")
+
+  def test_reading_a_variable_that_is_never_assigned_stops
+    irep = build_irep(symbols: %w[@conv_out], instructions: read_ivar(0) + "\x69")
+
+    error = assert_raises(FaRuby::CodegenError) do
+      FaRuby::PlcCodegen.new(irep).validate!
+    end
+
+    assert_includes error.message, "@conv_out"
+    assert_includes error.message, "nil"
+  end
+
+  def test_a_variable_that_is_assigned_passes
+    irep = build_irep(symbols: %w[@conv_out],
+                      instructions: write_ivar(0) + read_ivar(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **`@foo` と `$foo` は同じ枠。** 代入が別の irep にあってもよい
+  def test_the_assignment_may_live_in_another_irep
+    child = build_irep(symbols: %w[$flag], instructions: read_var(0) + "\x69")
+    parent = build_irep(symbols: %w[$flag], instructions: write_var(0) + "\x69")
+    parent.add_child(child)
+
+    FaRuby::PlcCodegen.new(parent).validate!
+  end
+
+  # **デバイスは読むだけで正しい。** 入力はラダーが書く
+  def test_devices_may_be_read_only
+    irep = build_irep(symbols: %w[$DM100], instructions: read_var(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # faRuby が用意する名前も読むだけ
+  def test_faruby_names_may_be_read_only
+    irep = build_irep(symbols: %w[$FARUBY_TICKS], instructions: read_var(0) + "\x69")
+
+    FaRuby::PlcCodegen.new(irep).validate!
+  end
+
+  # **メソッドに分ければ合計は超えられる。** 番号は irep ごとだから
+  def test_the_limit_is_per_irep_not_total
+    limit = FaRuby::PlcCodegen::MAX_SYMBOLS_PER_IREP
+    roomy = FaRuby::MemoryLayout.from_config("max_symbols" => limit * 2,
+                                             "max_globals" => limit * 2,
+                                             "max_bytecode" => 20_000)
+    irep = build_irep(symbols: (1..limit).map { |i| "$a#{i}" })
+    irep.add_child(build_irep(symbols: (1..limit).map { |i| "$b#{i}" }))
+
+    FaRuby::PlcCodegen.new(irep, layout: roomy).validate!
   end
 
   # 同じ名前は irep をまたいでも 1 枠。アドレスで数える
@@ -742,9 +888,9 @@ end
     irep = build_irep(nregs: 2, pool: [[:int32, 99]])
     script = FaRuby::PlcCodegen.new(irep).generate
 
-    # プールは固定領域 (FM) に出力される
-    assert_includes script, "FM#{layout.pool_type_addr(0)} = #{TT_INTEGER}"
-    assert_includes script, "FM#{layout.pool_addr(0)}.L = 99"
+    # プールは固定領域に出力される。**バンクの先頭を足した絶対アドレス**
+    assert_includes script, "#{layout.fixed_device(layout.pool_type_addr(0))} = #{TT_INTEGER}"
+    assert_includes script, "#{layout.fixed_device_long(layout.pool_addr(0))} = 99"
     # レジスタクリアは 4 ワード/スロットの範囲を回る
     # 窓が呼び出しごとにずれるため、irep の nregs ではなく領域全体を回る
     assert_includes script,

@@ -24,7 +24,7 @@ IF EM54:Z9 <= 66 THEN
     IF EM6:Z9 = 58 THEN
       // OP_BREAK (B): 反復を打ち切って R[a] を返す
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       IF EM31:Z9 = 0 THEN
         // 反復の外での break
@@ -52,16 +52,16 @@ IF EM54:Z9 <= 66 THEN
       EM30:Z9 := Z5;
       // IREP テーブルから実行中の irep の情報を写す
       Z1 := Z5 * 8 + EM38:Z9;
-      EM33:Z9 := FM0:Z1;
-      EM10:Z9 := FM1:Z1;
-      EM34:Z9 := FM2:Z1;
-      EM35:Z9 := FM3:Z1;
-      EM11:Z9 := FM4:Z1;
+      EM33:Z9 := ZF98304:Z1;
+      EM10:Z9 := ZF98305:Z1;
+      EM34:Z9 := ZF98306:Z1;
+      EM35:Z9 := ZF98307:Z1;
+      EM11:Z9 := ZF98308:Z1;
 
     ELSIF EM6:Z9 = 60 THEN
       // OP_ADD (B): R[a] = R[a] + R[a+1]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -80,16 +80,16 @@ IF EM54:Z9 <= 66 THEN
         ELSE
           IF EM0:Z1 = 7 THEN
             // プールの空きスロットを取る。返さないので使い切ったら止まる
-            IF EM39:Z9 >= 16 THEN
+            IF EM39:Z9 >= 32 THEN
               EM1:Z9 := 3;
               EM2:Z9 := 10;
               EXIT;
             END_IF;
             Z4 := EM1.L:Z1;
-            Z4 := Z4 * 52 + 1016 + Z9;
+            Z4 := Z4 * 52 + 1816 + Z9;
             EM16.L:Z9 := EM0:Z4;
             Z5 := EM1.L:Z2;
-            Z5 := Z5 * 52 + 1016 + Z9;
+            Z5 := Z5 * 52 + 1816 + Z9;
             EM18.L:Z9 := EM0:Z5;
             // 1 スロットに収まること
             Z6 := EM16.L:Z9 + EM18.L:Z9;
@@ -99,7 +99,7 @@ IF EM54:Z9 <= 66 THEN
               EXIT;
             END_IF;
             // 新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま
-            Z3 := EM39:Z9 * 52 + 1016 + Z9;
+            Z3 := EM39:Z9 * 52 + 1816 + Z9;
             EM0:Z3 := EM16.L:Z9;
             EM45:Z9 := EM16.L:Z9 + 1;
             EM45:Z9 := EM45:Z9 / 2;
@@ -164,10 +164,10 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 61 THEN
       // OP_ADDI (BB): R[a] = R[a] + b
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF EM0:Z1 = 5 THEN
@@ -181,7 +181,7 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 62 THEN
       // OP_SUB (B): R[a] = R[a] - R[a+1]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -206,10 +206,10 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 63 THEN
       // OP_SUBI (BB): R[a] = R[a] - b
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := FM0:Z1;
+      EM8:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF EM0:Z1 = 5 THEN
@@ -223,7 +223,7 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 64 THEN
       // OP_MUL (B): R[a] = R[a] * R[a+1]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -248,7 +248,7 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 65 THEN
       // OP_DIV (B): R[a] = R[a] / R[a+1]
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -345,7 +345,7 @@ IF EM54:Z9 <= 66 THEN
     ELSIF EM6:Z9 = 66 THEN
       // OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false
       Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := FM0:Z1;
+      EM7:Z9 := ZF98304:Z1;
       EM0:Z9 := EM0:Z9 + 1;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
@@ -401,10 +401,10 @@ IF EM54:Z9 <= 66 THEN
             EM46:Z9 := Z3;
             EM43:Z9 := 0;
             Z3 := EM1.L:Z1;
-            Z3 := Z3 * 52 + 1016 + Z9;
+            Z3 := Z3 * 52 + 1816 + Z9;
             EM44:Z9 := EM0:Z3;   // バイト数
             Z3 := EM1.L:Z2;
-            Z3 := Z3 * 52 + 1016 + Z9;
+            Z3 := Z3 * 52 + 1816 + Z9;
             IF EM44:Z9 = EM0:Z3 THEN
               // バイト数が同じ。ここから中身を見る
               EM43:Z9 := 1;
@@ -414,11 +414,11 @@ IF EM54:Z9 <= 66 THEN
                 EM45:Z9 := EM45:Z9 - 1;
                 FOR EM42:Z9 := 0 TO EM45:Z9 DO
                   Z3 := EM1.L:Z1;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   Z3 := EM42:Z9 + Z3 + 4;
                   EM44:Z9 := EM0:Z3;
                   Z3 := EM1.L:Z2;
-                  Z3 := Z3 * 52 + 1016 + Z9;
+                  Z3 := Z3 * 52 + 1816 + Z9;
                   Z3 := EM42:Z9 + Z3 + 4;
                   IF EM44:Z9 <> EM0:Z3 THEN
                     EM43:Z9 := 0;

@@ -33,15 +33,21 @@
 # irep ごとの位置は IREP テーブルに入れ、実行時にそこから引きます。
 # 子 irep (メソッドの本体) を扱うために、アドレスを定数で焼き込めなくなりました。
 #
-# ## FM と ZF
+# ## 固定領域は ZF をバンクの先頭から相対で指す
 #
-# FM は ZF をバンクに分けたもので、`FRSET(n)` で切り替えます。faRuby はバンク 3 を
-# 使い、スクリプトの先頭で `FRSET(3)`、末尾で `FRSET(0)` に戻します (現在のバンクを
-# 読む命令が無いため、Z のような退避ができません)。
+# **スクリプトもホストも同じ ZF の絶対アドレスで触ります。** 配置は 0 を基点に
+# 計算し、指すときだけ `fixed_bank` の先頭デバイスを足します。バンク 3 なら
+# 先頭は ZF98304 で、`ZF98304:Z1` (Z1 はブロック内のオフセット) と書きます。
 #
-# **スクリプトからは FM、ホストからは ZF 絶対アドレスで触ります。** バンク 3 の
-# FM0 は ZF#{FIXED_BANK_SIZE * 3} に当たります。FM のアドレスは 0-32767 なので
-# 16 ビットに収まり、インデックスレジスタ Z に載せられます。
+# **基点をリテラルで書くので Z は 16 ビットのままで足ります。** オフセットは
+# 0 から `fixed_instance_size * instances` までなので Z に載り、バンクを
+# 切り替える必要がありません。
+#
+# 以前は `FRSET(n)` でバンクを選び、FM0-32767 で指していました。**KV-X500 には
+# バンクを選ぶ手立てが無く**、機種ごとに違うバンク (KV-5000 はバンク 3、
+# KV-X500 はバンク 0) を使うことになっていました。相対指定にしたことで
+# **どちらも同じ ZF を使い**、`FRSET` も要らなくなりました
+# (両機種の実機で確認済み。doc/architecture.md)。
 #
 # アドレスは生成される vm_core.kvs に定数として焼き込まれます。設定を変えたら
 # `rake vm_core` で再生成し、KV Studio に取り込み直す必要があります。
@@ -65,32 +71,29 @@ module FaRuby
     # 気づけません (実機で 1 度やりました。doc/melsec.md)。
     VM_STATE_WORDS = 72
 
-    # --- 固定領域 (FM) ---
+    # --- 固定領域 ---
     #
-    # FM は ZF をバンクに分けたもの。1 バンク 32768 ワードで、n = 0-3。
-    #
-    # **どのバンクを使うかは機種ごとの設定です** (`memory.fixed_bank`)。
-    # KV スクリプトは `FRSET(n)` で選べるのでバンク 3 を使い、他と離して
-    # おけます。**KV-X500 にはバンクを選ぶ手立てが無く、常にバンク 0 です。**
-    # ホストは ZF の絶対アドレスで書くため、ここが食い違うとスクリプトは
-    # 空のバンクを読み、命令が全部 0 に見えます (実機で 1 度やりました)。
+    # **どのバンクの先頭を基点にするかが機種ごとの設定です** (`memory.fixed_bank`)。
+    # 1 バンク 32768 ワードで n = 0-3。キーエンスはラダーと離しておけるバンク 3 を
+    # 使い、`ZF98304` を基点に相対で指します。**三菱の ZR にバンクは無い**ので
+    # 0 です (doc/melsec.md)。
     FIXED_BANK_SIZE = 32_768
-    FIXED_BANK      = 3   # 既定 (KV スクリプト)
+    FIXED_BANK      = 3   # 既定 (キーエンス)
 
-    # スクリプトから見たデバイス名 (バンク切り替え後)。既定はキーエンス
-    FIXED_DEVICE_NAME = "FM"
-
-    # ホストから見たデバイス名。バンクを跨いだ絶対アドレスで触る
+    # 固定領域に使うデバイス名。既定はキーエンス。三菱は ZR
     #
-    # **三菱はどちらも ZR です。** バンクが無いので、スクリプトとホストで
-    # 名前もアドレスも同じになります (doc/melsec.md)。
-    FIXED_HOST_DEVICE = "ZF"
+    # **スクリプトとホストで同じ名前・同じアドレスです。** バンクを切り替えず
+    # 基点からの相対で指すため、食い違う余地がありません。
+    FIXED_DEVICE_NAME = "ZF"
+
+    # ブロック内のオフセットの上限。**インデックスレジスタ Z は 16 ビット**
+    MAX_FIXED_OFFSET = 65_535
 
     # IREP テーブル 1 エントリのワード数
     #   +0 バイトコード先頭 / +1 バイトコード長 / +2 定数プール先頭
     #   +3 シンボル表先頭   / +4 nregs          / +5-7 予備
     #
-    # 位置はいずれも FM の絶対アドレス。FM は 0-32767 なので Z に載せられる。
+    # 位置はいずれも固定領域の先頭からのオフセット。16 ビットなので Z に載る。
     IREP_TABLE_STRIDE  = 8
     IREP_BYTECODE      = 0
     IREP_BYTECODE_LEN  = 1
@@ -332,11 +335,11 @@ module FaRuby
     DEFAULTS = {
       "device" => "EM", "base" => 0, "instances" => 1, "align" => 1000,
       "fixed_base" => 0, "fixed_align" => 1000, "fixed_bank" => FIXED_BANK,
-      "fixed_device" => FIXED_DEVICE_NAME, "fixed_host_device" => FIXED_HOST_DEVICE,
-      "max_regs" => 80, "max_bytecode" => 3000,
-      "max_pool" => 150, "max_symbols" => 100, "max_globals" => 100,
+      "fixed_device" => FIXED_DEVICE_NAME,
+      "max_regs" => 80, "max_bytecode" => 5500,
+      "max_pool" => 150, "max_symbols" => 300, "max_globals" => 300,
       "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
-      "max_arrays" => 16, "max_array_len" => 12,
+      "max_arrays" => 32, "max_array_len" => 12,
       "max_string_words" => 500,
     }.freeze
 
@@ -374,17 +377,17 @@ module FaRuby
         max_string_words: c["max_string_words"],
         fixed_base: c["fixed_base"], fixed_align: c["fixed_align"],
         fixed_bank: c["fixed_bank"],
-        fixed_device_name: c["fixed_device"], fixed_host_device: c["fixed_host_device"]
+        fixed_device_name: c["fixed_device"]
       )
     end
 
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
-                   align: 1000, max_regs: 80, max_bytecode: 3000,
+                   align: 1000, max_regs: 80, max_bytecode: 5500,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
                    max_ireps: 16, max_frames: 16, max_methods: 64,
                    max_arrays: 16, max_array_len: 12, max_string_words: 500,
                    fixed_base: 0, fixed_align: 1000, fixed_bank: FIXED_BANK,
-                   fixed_device_name: FIXED_DEVICE_NAME, fixed_host_device: FIXED_HOST_DEVICE)
+                   fixed_device_name: FIXED_DEVICE_NAME)
       @device_name    = device_name
       @base           = Integer(base)
       @instances      = Integer(instances)
@@ -394,7 +397,6 @@ module FaRuby
       @fixed_align    = Integer(fixed_align)
       @fixed_bank     = Integer(fixed_bank)
       @fixed_device_name = fixed_device_name || FIXED_DEVICE_NAME
-      @fixed_host_device = fixed_host_device || FIXED_HOST_DEVICE
       @max_regs       = Integer(max_regs)
       @max_bytecode   = Integer(max_bytecode)
       @max_pool       = Integer(max_pool)
@@ -421,7 +423,7 @@ module FaRuby
         max_arrays: max_arrays, max_array_len: max_array_len,
         max_string_words: max_string_words,
         fixed_base: fixed_base, fixed_align: fixed_align, fixed_bank: fixed_bank,
-        fixed_device_name: fixed_device_name, fixed_host_device: fixed_host_device
+        fixed_device_name: fixed_device_name
       )
     end
 
@@ -475,14 +477,17 @@ module FaRuby
     # スロット内の i ワード目 (文字列は値スロットではなく生のワード列)
     def string_word_addr(slot, index) = array_slot_addr(slot) + ARRAY_HEADER_WORDS + index
 
-    # --- ホストから見た固定領域 ---
+    # --- 固定領域を指すときの基点 ---
     #
-    # スクリプトは FRSET でバンクを選んでから FM で触りますが、ホストには
-    # バンクを選ぶ手段が無いため ZF の絶対アドレスで触ります。**どちらも
-    # 同じ `fixed_bank` から出しているので、食い違いません。**
+    # **配置は 0 を基点に計算し、指すときだけバンクの先頭を足します。**
+    # スクリプトもホストも同じアドレスになるため、食い違う余地がありません。
+    # 基点はリテラルで書くので、Z に載るのはオフセットだけです。
     def fixed_host_base = fixed_bank * FIXED_BANK_SIZE
-    def fixed_host_addr(fm_addr) = fixed_host_base + fm_addr
-    attr_reader :fixed_device_name, :fixed_host_device
+    def fixed_host_addr(offset) = fixed_host_base + offset
+    attr_reader :fixed_device_name
+
+    # ホストから見た名前。スクリプトと同じ
+    def fixed_host_device = fixed_device_name
 
     # 可変領域の合計 (パディングを含まない)
     def content_size
@@ -640,9 +645,9 @@ module FaRuby
     def device(addr)      = "#{device_name}#{addr}"
     def device_long(addr) = "#{device_name}#{addr}.L"
 
-    # 固定領域はスクリプトからは FM で触る (FRSET でバンクを選んだ後)
-    def fixed_device(addr)      = "#{fixed_device_name}#{addr}"
-    def fixed_device_long(addr) = "#{fixed_device_name}#{addr}.L"
+    # 固定領域は**バンクの先頭を足した絶対アドレス**で指す
+    def fixed_device(offset)      = "#{fixed_device_name}#{fixed_host_addr(offset)}"
+    def fixed_device_long(offset) = "#{fixed_device_name}#{fixed_host_addr(offset)}.L"
 
     # --- 表示用 ---
 
@@ -702,10 +707,13 @@ module FaRuby
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end
 
-      return if fixed_last_addr < FIXED_BANK_SIZE
+      # **オフセットはインデックスレジスタに載せます。** 基点はリテラルなので
+      # バンクをまたいでも構いませんが、ここは 16 ビットに収めます
+      return if fixed_last_addr <= MAX_FIXED_OFFSET
 
-      raise LayoutError, "固定領域がバンクに収まりません " \
-                         "(#{fixed_device_name}#{fixed_last_addr} > #{FIXED_BANK_SIZE - 1})"
+      raise LayoutError, "固定領域が大きすぎます " \
+                         "(先頭から #{fixed_last_addr} ワード目 > #{MAX_FIXED_OFFSET})。" \
+                         "**インデックスレジスタが 16 ビットです**"
     end
   end
 end

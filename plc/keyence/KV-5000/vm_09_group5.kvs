@@ -24,14 +24,14 @@ IF EM54:Z9 <= 56 THEN
     IF EM6:Z9 = 39 THEN
       ' OP_JMPNOT (BS): if R[a] が偽 (nil/false) then PC += signed16(b)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' 16bit big-endian: hi byte, lo byte
       Z1 = EM0:Z9 + EM33:Z9
-      Z3 = FM0:Z1
+      Z3 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      Z4 = FM0:Z1
+      Z4 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       EM8:Z9 = Z3 * 256 + Z4
       IF EM8:Z9 >= 32768 THEN
@@ -45,14 +45,14 @@ IF EM54:Z9 <= 56 THEN
     ELSE IF EM6:Z9 = 40 THEN
       ' OP_JMPNIL (BS): if R[a] が nil then PC += signed16(b)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' 16bit big-endian: hi byte, lo byte
       Z1 = EM0:Z9 + EM33:Z9
-      Z3 = FM0:Z1
+      Z3 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      Z4 = FM0:Z1
+      Z4 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       EM8:Z9 = Z3 * 256 + Z4
       IF EM8:Z9 >= 32768 THEN
@@ -66,21 +66,21 @@ IF EM54:Z9 <= 56 THEN
     ELSE IF EM6:Z9 = 47 THEN
       ' OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM9:Z9 = FM0:Z1
+      EM9:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
-      Z5 = FM0:Z3   ' メソッド番号
+      Z5 = ZF98304:Z3   ' メソッド番号
       Z7 = Z3 + 2
-      Z8 = FM0:Z7   ' 引数の数
+      Z8 = ZF98304:Z7   ' 引数の数
       Z7 = Z3 + 3
-      Z4 = FM0:Z7   ' シンボル種別
+      Z4 = ZF98304:Z7   ' シンボル種別
       IF Z4 <> 2 THEN
         ' メソッド名でないシンボルへの呼び出し
         EM1:Z9 = 3
@@ -88,7 +88,7 @@ IF EM54:Z9 <= 56 THEN
         BREAK
       END IF
       Z3 = Z3 + 1
-      Z6 = FM0:Z3   ' ユーザー定義メソッドID
+      Z6 = ZF98304:Z3   ' ユーザー定義メソッドID
       IF Z5 <> 0 THEN
         ' 組み込みメソッド。フレームを積まずその場で計算する
         IF EM9:Z9 <> Z8 THEN
@@ -236,10 +236,10 @@ IF EM54:Z9 <= 56 THEN
                 EM46:Z9 = Z3
                 EM43:Z9 = 0
                 Z3 = EM1.L:Z1
-                Z3 = Z3 * 52 + 1016 + Z9
+                Z3 = Z3 * 52 + 1816 + Z9
                 EM44:Z9 = EM0:Z3   ' バイト数
                 Z3 = EM1.L:Z2
-                Z3 = Z3 * 52 + 1016 + Z9
+                Z3 = Z3 * 52 + 1816 + Z9
                 IF EM44:Z9 = EM0:Z3 THEN
                   ' バイト数が同じ。ここから中身を見る
                   EM43:Z9 = 1
@@ -249,11 +249,11 @@ IF EM54:Z9 <= 56 THEN
                     EM45:Z9 = EM45:Z9 - 1
                     FOR EM42:Z9 = 0 TO EM45:Z9
                       Z3 = EM1.L:Z1
-                      Z3 = Z3 * 52 + 1016 + Z9
+                      Z3 = Z3 * 52 + 1816 + Z9
                       Z3 = EM42:Z9 + Z3 + 4
                       EM44:Z9 = EM0:Z3
                       Z3 = EM1.L:Z2
-                      Z3 = Z3 * 52 + 1016 + Z9
+                      Z3 = Z3 * 52 + 1816 + Z9
                       Z3 = EM42:Z9 + Z3 + 4
                       IF EM44:Z9 <> EM0:Z3 THEN
                         EM43:Z9 = 0
@@ -490,12 +490,12 @@ IF EM54:Z9 <= 56 THEN
           IF EM0:Z1 = 9 THEN
             ' 鍵の配列の見出し。R[a] を書き換える前に読む
             Z4 = EM1:Z1
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM18.L:Z9 = EM0:Z4   ' 組の数
           ELSE
             ' スロットの見出し。R[a] を書き換える前に読む
             Z4 = EM1.L:Z1
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM18.L:Z9 = EM0:Z4   ' 要素数
             IF EM0:Z1 = 7 THEN
               ' 文字列は文字数を返す。バイト数ではない
@@ -572,12 +572,12 @@ IF EM54:Z9 <= 56 THEN
           IF EM0:Z1 = 9 THEN
             ' 鍵の配列の見出し。R[a] を書き換える前に読む
             Z4 = EM1:Z1
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM18.L:Z9 = EM0:Z4   ' 組の数
           ELSE
             ' スロットの見出し。R[a] を書き換える前に読む
             Z4 = EM1.L:Z1
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM18.L:Z9 = EM0:Z4   ' 要素数
           END IF
           IF EM18.L:Z9 = 0 THEN
@@ -640,9 +640,9 @@ IF EM54:Z9 <= 56 THEN
               BREAK
             END IF
             Z3 = EM1.L:Z1
-            Z3 = Z3 * 52 + 1016 + Z9
+            Z3 = Z3 * 52 + 1816 + Z9
             Z4 = EM1.L:Z2
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM16.L:Z9 = EM0:Z3
             EM18.L:Z9 = EM0:Z4
             ' 1 スロットに収まること
@@ -693,7 +693,7 @@ IF EM54:Z9 <= 56 THEN
           ELSE IF EM0:Z1 = 8 THEN
             ' スロットの見出し。R[a] を書き換える前に読む
             Z4 = EM1.L:Z1
-            Z4 = Z4 * 52 + 1016 + Z9
+            Z4 = Z4 * 52 + 1816 + Z9
             EM18.L:Z9 = EM0:Z4   ' 要素数
             IF EM18.L:Z9 >= 12 THEN
               ' 1 スロットの容量がいっぱい
@@ -719,7 +719,7 @@ IF EM54:Z9 <= 56 THEN
           ' push
           ' スロットの見出し。R[a] を書き換える前に読む
           Z4 = EM1.L:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 要素数
           IF EM18.L:Z9 >= 12 THEN
             ' 1 スロットの容量がいっぱい
@@ -739,7 +739,7 @@ IF EM54:Z9 <= 56 THEN
           ' key?
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 組の数
           ' 鍵を先頭から探す。一致は型と値の両方 (Ruby の eql? と同じ)
           EM16.L:Z9 = -1
@@ -758,10 +758,10 @@ IF EM54:Z9 <= 56 THEN
                     EM46:Z9 = Z3
                     EM43:Z9 = 0
                     Z3 = EM1.L:Z7
-                    Z3 = Z3 * 52 + 1016 + Z9
+                    Z3 = Z3 * 52 + 1816 + Z9
                     EM44:Z9 = EM0:Z3   ' バイト数
                     Z3 = EM1.L:Z2
-                    Z3 = Z3 * 52 + 1016 + Z9
+                    Z3 = Z3 * 52 + 1816 + Z9
                     IF EM44:Z9 = EM0:Z3 THEN
                       ' バイト数が同じ。ここから中身を見る
                       EM43:Z9 = 1
@@ -771,11 +771,11 @@ IF EM54:Z9 <= 56 THEN
                         EM45:Z9 = EM45:Z9 - 1
                         FOR EM42:Z9 = 0 TO EM45:Z9
                           Z3 = EM1.L:Z7
-                          Z3 = Z3 * 52 + 1016 + Z9
+                          Z3 = Z3 * 52 + 1816 + Z9
                           Z3 = EM42:Z9 + Z3 + 4
                           EM44:Z9 = EM0:Z3
                           Z3 = EM1.L:Z2
-                          Z3 = Z3 * 52 + 1016 + Z9
+                          Z3 = Z3 * 52 + 1816 + Z9
                           Z3 = EM42:Z9 + Z3 + 4
                           IF EM44:Z9 <> EM0:Z3 THEN
                             EM43:Z9 = 0
@@ -807,19 +807,19 @@ IF EM54:Z9 <= 56 THEN
         ELSE IF Z5 = 24 THEN
           ' keys
           ' プールの空きスロットを取る。返さないので使い切ったら止まる
-          IF EM39:Z9 >= 16 THEN
+          IF EM39:Z9 >= 32 THEN
             EM1:Z9 = 3
             EM2:Z9 = 10
             BREAK
           END IF
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 組の数
           Z5 = EM2:Z1   ' 値の配列
-          Z5 = Z5 * 52 + 1016 + Z9
+          Z5 = Z5 * 52 + 1816 + Z9
           ' 新しいスロットの見出し。組の数がそのまま要素数になる
-          Z2 = EM39:Z9 * 52 + 1016 + Z9
+          Z2 = EM39:Z9 * 52 + 1816 + Z9
           EM0:Z2 = EM18.L:Z9
           ' 写す。組の数 0 (空ハッシュ) では引き算もしない
           IF EM18.L:Z9 > 0 THEN
@@ -840,19 +840,19 @@ IF EM54:Z9 <= 56 THEN
         ELSE IF Z5 = 25 THEN
           ' values
           ' プールの空きスロットを取る。返さないので使い切ったら止まる
-          IF EM39:Z9 >= 16 THEN
+          IF EM39:Z9 >= 32 THEN
             EM1:Z9 = 3
             EM2:Z9 = 10
             BREAK
           END IF
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 組の数
           Z5 = EM2:Z1   ' 値の配列
-          Z5 = Z5 * 52 + 1016 + Z9
+          Z5 = Z5 * 52 + 1816 + Z9
           ' 新しいスロットの見出し。組の数がそのまま要素数になる
-          Z2 = EM39:Z9 * 52 + 1016 + Z9
+          Z2 = EM39:Z9 * 52 + 1816 + Z9
           EM0:Z2 = EM18.L:Z9
           ' 写す。組の数 0 (空ハッシュ) では引き算もしない
           IF EM18.L:Z9 > 0 THEN
@@ -954,12 +954,12 @@ IF EM54:Z9 <= 56 THEN
               BREAK
             END IF
             ' プールの空きスロットを取る。返さないので使い切ったら止まる
-            IF EM39:Z9 >= 16 THEN
+            IF EM39:Z9 >= 32 THEN
               EM1:Z9 = 3
               EM2:Z9 = 10
               BREAK
             END IF
-            Z4 = EM39:Z9 * 52 + 1016 + Z9
+            Z4 = EM39:Z9 * 52 + 1816 + Z9
             EM0:Z4 = EM18.L:Z9
             IF EM18.L:Z9 > 0 THEN
               Z7 = EM18.L:Z9
@@ -1236,11 +1236,11 @@ IF EM54:Z9 <= 56 THEN
         EM30:Z9 = Z5
         ' IREP テーブルから実行中の irep の情報を写す
         Z1 = Z5 * 8 + EM38:Z9
-        EM33:Z9 = FM0:Z1
-        EM10:Z9 = FM1:Z1
-        EM34:Z9 = FM2:Z1
-        EM35:Z9 = FM3:Z1
-        EM11:Z9 = FM4:Z1
+        EM33:Z9 = ZF98304:Z1
+        EM10:Z9 = ZF98305:Z1
+        EM34:Z9 = ZF98306:Z1
+        EM35:Z9 = ZF98307:Z1
+        EM11:Z9 = ZF98308:Z1
         ' レジスタ窓が領域からはみ出さないこと
         EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
         IF EM16:Z9 > 392 THEN
@@ -1254,21 +1254,21 @@ IF EM54:Z9 <= 56 THEN
     ELSE IF EM6:Z9 = 48 THEN
       ' OP_SENDB (BBB): R[a].symbols[b](R[a+1]..) { ブロック }
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM9:Z9 = FM0:Z1
+      EM9:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
-      Z5 = FM0:Z3   ' メソッド番号
+      Z5 = ZF98304:Z3   ' メソッド番号
       Z7 = Z3 + 2
-      Z8 = FM0:Z7   ' 引数の数
+      Z8 = ZF98304:Z7   ' 引数の数
       Z7 = Z3 + 3
-      Z4 = FM0:Z7   ' シンボル種別
+      Z4 = ZF98304:Z7   ' シンボル種別
       IF Z4 <> 2 THEN
         EM1:Z9 = 3
         EM2:Z9 = 3
@@ -1402,12 +1402,12 @@ IF EM54:Z9 <= 56 THEN
         IF EM0:Z1 = 9 THEN
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 組の数
         ELSE
           ' スロットの見出し。R[a] を書き換える前に読む
           Z4 = EM1.L:Z1
-          Z4 = Z4 * 52 + 1016 + Z9
+          Z4 = Z4 * 52 + 1816 + Z9
           EM18.L:Z9 = EM0:Z4   ' 要素数
         END IF
         EM16.L:Z9 = 0
@@ -1473,14 +1473,14 @@ IF EM54:Z9 <= 56 THEN
           ' h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
           Z4 = 0 + EM32:Z9 + Z9
           Z7 = EM1:Z4   ' スロット番号
-          Z7 = Z7 * 52 + 1016 + Z9
+          Z7 = Z7 * 52 + 1816 + Z9
           Z5 = EM16.L:Z9
           Z5 = Z5 * 4 + Z7 + 4
           EM1.L:Z2 = EM1.L:Z5
           EM0:Z2 = EM0:Z5
           Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
           Z7 = EM2:Z4   ' スロット番号
-          Z7 = Z7 * 52 + 1016 + Z9
+          Z7 = Z7 * 52 + 1816 + Z9
           Z5 = EM16.L:Z9
           Z5 = Z5 * 4 + Z7 + 4
           EM1.L:Z2 = EM1.L:Z5
@@ -1492,7 +1492,7 @@ IF EM54:Z9 <= 56 THEN
           ' **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
           ' 載っていて、これから要素の位置を出すのに使う
           Z7 = EM1.L:Z4   ' スロット番号
-          Z7 = Z7 * 52 + 1016 + Z9
+          Z7 = Z7 * 52 + 1816 + Z9
           Z5 = EM16.L:Z9
           Z5 = Z5 * 4 + Z7 + 4
           EM1.L:Z2 = EM1.L:Z5
@@ -1507,11 +1507,11 @@ IF EM54:Z9 <= 56 THEN
         EM30:Z9 = Z6
         ' IREP テーブルから実行中の irep の情報を写す
         Z1 = Z6 * 8 + EM38:Z9
-        EM33:Z9 = FM0:Z1
-        EM10:Z9 = FM1:Z1
-        EM34:Z9 = FM2:Z1
-        EM35:Z9 = FM3:Z1
-        EM11:Z9 = FM4:Z1
+        EM33:Z9 = ZF98304:Z1
+        EM10:Z9 = ZF98305:Z1
+        EM34:Z9 = ZF98306:Z1
+        EM35:Z9 = ZF98307:Z1
+        EM11:Z9 = ZF98308:Z1
         ' レジスタ窓が領域からはみ出さないこと
         EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
         IF EM16:Z9 > 392 THEN
@@ -1527,13 +1527,13 @@ IF EM54:Z9 <= 56 THEN
       ' OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
       ' 24bit big-endian。16ビットに収まらないため上位バイトと下位2バイトに分ける
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      Z3 = FM0:Z1
+      Z3 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      Z4 = FM0:Z1
+      Z4 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       EM8:Z9 = Z3 * 256 + Z4   ' aspec の下位2バイト
       ' 必須引数の数 = aspec >> 18。上位バイトを 4 で割った値と同じ
@@ -1582,7 +1582,7 @@ IF EM54:Z9 <= 56 THEN
     ELSE IF EM6:Z9 = 56 THEN
       ' OP_RETURN (B): R[b] を返して呼び出し元へ (トップレベルでは VM 停止)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       IF EM31:Z9 = 0 THEN
         ' トップレベルの return は VM 停止
@@ -1610,14 +1610,14 @@ IF EM54:Z9 <= 56 THEN
               ' h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
               Z4 = 0 + EM32:Z9 + Z9
               Z7 = EM1:Z4   ' スロット番号
-              Z7 = Z7 * 52 + 1016 + Z9
+              Z7 = Z7 * 52 + 1816 + Z9
               Z5 = EM16.L:Z9
               Z5 = Z5 * 4 + Z7 + 4
               EM1.L:Z2 = EM1.L:Z5
               EM0:Z2 = EM0:Z5
               Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
               Z7 = EM2:Z4   ' スロット番号
-              Z7 = Z7 * 52 + 1016 + Z9
+              Z7 = Z7 * 52 + 1816 + Z9
               Z5 = EM16.L:Z9
               Z5 = Z5 * 4 + Z7 + 4
               EM1.L:Z2 = EM1.L:Z5
@@ -1629,7 +1629,7 @@ IF EM54:Z9 <= 56 THEN
               ' **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
               ' 載っていて、これから要素の位置を出すのに使う
               Z7 = EM1.L:Z4   ' スロット番号
-              Z7 = Z7 * 52 + 1016 + Z9
+              Z7 = Z7 * 52 + 1816 + Z9
               Z5 = EM16.L:Z9
               Z5 = Z5 * 4 + Z7 + 4
               EM1.L:Z2 = EM1.L:Z5
@@ -1653,11 +1653,11 @@ IF EM54:Z9 <= 56 THEN
             EM30:Z9 = Z5
             ' IREP テーブルから実行中の irep の情報を写す
             Z1 = Z5 * 8 + EM38:Z9
-            EM33:Z9 = FM0:Z1
-            EM10:Z9 = FM1:Z1
-            EM34:Z9 = FM2:Z1
-            EM35:Z9 = FM3:Z1
-            EM11:Z9 = FM4:Z1
+            EM33:Z9 = ZF98304:Z1
+            EM10:Z9 = ZF98305:Z1
+            EM34:Z9 = ZF98306:Z1
+            EM35:Z9 = ZF98307:Z1
+            EM11:Z9 = ZF98308:Z1
           END IF
         ELSE
           ' R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので
@@ -1675,11 +1675,11 @@ IF EM54:Z9 <= 56 THEN
           EM30:Z9 = Z5
           ' IREP テーブルから実行中の irep の情報を写す
           Z1 = Z5 * 8 + EM38:Z9
-          EM33:Z9 = FM0:Z1
-          EM10:Z9 = FM1:Z1
-          EM34:Z9 = FM2:Z1
-          EM35:Z9 = FM3:Z1
-          EM11:Z9 = FM4:Z1
+          EM33:Z9 = ZF98304:Z1
+          EM10:Z9 = ZF98305:Z1
+          EM34:Z9 = ZF98306:Z1
+          EM35:Z9 = ZF98307:Z1
+          EM11:Z9 = ZF98308:Z1
         END IF
       END IF
 

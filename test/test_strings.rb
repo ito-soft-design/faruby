@@ -579,8 +579,8 @@ class TestStrings < Minitest::Test
     sim = run_source(<<~RUBY)
       s = "abcdefghijklmnop"
       i = 0
-      while i < 16
-        t = s[i]
+      while i < #{layout.max_arrays + 1}
+        t = s[0]
         i = i + 1
       end
     RUBY
@@ -686,7 +686,7 @@ class TestStrings < Minitest::Test
   def test_a_read_takes_a_pool_slot
     sim = run_source(<<~RUBY)
       i = 0
-      while i < 20
+      while i < #{layout.max_arrays + 1}
         s = $DM800T4
         i = i + 1
       end

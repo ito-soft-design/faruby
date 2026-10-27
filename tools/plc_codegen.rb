@@ -7,6 +7,8 @@ require_relative "mrb_parser"
 require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
+require_relative "disasm"
+require "set"
 require "plc_access"
 
 module FaRuby
@@ -61,6 +63,9 @@ module FaRuby
       check_limit("バイトコード長", list.sum(&:ilen), layout.max_bytecode)
       check_limit("定数プールのエントリ数", list.sum { |i| i.pool.size }, layout.max_pool)
       check_limit("シンボル数", list.sum { |i| i.symbols.size }, layout.max_symbols)
+      check_symbols_per_irep(list)
+      check_undefined_methods(list)
+      check_read_only_variables(list)
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -69,6 +74,111 @@ module FaRuby
       # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
       check_limit("変数の数", general_global_count, layout.max_globals)
       self
+    end
+
+    # 1 つの irep が持てる名前の数
+    #
+    # **オペランドが 1 バイトなので 256 までです。** これを超えると mruby は
+    # `OP_EXT2` を置いてオペランドを 2 バイトにします (実測: 256 個目の
+    # `$v256 = 256` から出ます)。faRuby は `OP_EXT*` を実装していないので、
+    # 通すと実行時に「未知のオペコード 103」で止まります。
+    #
+    # **数えるのは irep ごと**です。オペランドはその irep のシンボル表の
+    # 何番目かを指すので、メソッドに分ければ合計はこれを超えられます。
+    MAX_SYMBOLS_PER_IREP = 256
+
+    def check_symbols_per_irep(ireps)
+      over = ireps.each_with_index.find { |irep, _| irep.symbols.size > MAX_SYMBOLS_PER_IREP }
+      return unless over
+
+      irep, index = over
+      raise CodegenError,
+            "#{index.zero? ? 'トップレベル' : "irep #{index}"}の名前が多すぎます " \
+            "(#{irep.symbols.size} > #{MAX_SYMBOLS_PER_IREP})。" \
+            "**1 つの irep が持てる名前は 256 までです** " \
+            "(mruby がオペランドを 2 バイトにする `OP_EXT2` を出し、faRuby は" \
+            "それを実装していません)。メソッドに分けてください"
+    end
+
+    # メソッド呼び出しの命令。どれもオペランド b がメソッド名
+    CALL_OPCODES = %i[OP_SEND OP_SSEND OP_SENDB OP_SSENDB].freeze
+
+    # 呼んでいるのに `def` がどこにも無いメソッド
+    #
+    # **実行すれば必ずエラー 3 になります。** メソッド表の枠は名前ごとに
+    # 作りますが、中身を入れるのは `OP_DEF` なので、定義が無ければ
+    # 「まだ def が実行されていない」のまま止まります。綴り間違いが
+    # 実機まで届かないよう、ここで止めます。
+    #
+    # **条件付きの `def` は通します。** どこか 1 つでも `OP_DEF` の相手に
+    # なっていれば、実行時に定義されるかどうかは分かりません。見るのは
+    # 「どの irep にも無い」ことだけなので、見逃しはあっても誤検出はありません。
+    def check_undefined_methods(ireps)
+      defined_names = []
+      called = {}
+      ireps.each_with_index do |irep, index|
+        Disassembler.new(irep).disassemble.each do |inst|
+          # **オペランド b を名前として読めるのはこの命令だけ。** ほかの
+          # 命令では飛び先や即値が入っていて、引くと別の名前に当たる
+          next unless inst[:name] == :OP_DEF || CALL_OPCODES.include?(inst[:name])
+
+          name = irep.symbols[inst[:operands][1].to_i]
+          next unless name
+
+          defined_names << name if inst[:name] == :OP_DEF
+          called[name] ||= index unless inst[:name] == :OP_DEF || BUILTIN_METHODS.key?(name)
+        end
+      end
+
+      missing = called.keys - defined_names
+      return if missing.empty?
+
+      raise CodegenError,
+            "定義されていないメソッドを呼んでいます (#{missing.join(', ')})。" \
+            "**`def` がどこにもありません。** 綴りを確かめてください " \
+            "(実行すると ERROR=3 で止まります)"
+    end
+
+    # 変数の読み書きの命令。どれもオペランド b が名前
+    #
+    # `@foo` (OP_GETIV / OP_SETIV) と `$foo` (OP_GETGV / OP_SETGV) は同じ枠を
+    # 分け合うので、読み書きもまとめて数えます
+    READ_OPCODES  = %i[OP_GETGV OP_GETIV].freeze
+    WRITE_OPCODES = %i[OP_SETGV OP_SETIV].freeze
+
+    # 読むだけで、どこにも代入が無い変数
+    #
+    # **必ず `nil` です。** 枠は取れるので転送も実行も通り、そこを通る分岐が
+    # 黙って成立しなくなります。綴り間違いがこの形で出ます。
+    #
+    # **見るのは汎用グローバルだけです。** デバイス (`$DM100`)・割り付けた名前・
+    # faRuby が用意する名前 (`$FARUBY_TICKS`) は読むだけで正しいので外します。
+    #
+    # **条件付きの代入は通します。** `OP_SETGV` / `OP_SETIV` の相手に 1 度でも
+    # なっていれば、そこを通るかどうかは実行時にしか分かりません。
+    def check_read_only_variables(ireps)
+      general = device_mappings.select { |m| m[:general] }.map { |m| m[:symbol] }.to_set
+      read = {}
+      written = []
+      ireps.each do |irep|
+        Disassembler.new(irep).disassemble.each do |inst|
+          reading = READ_OPCODES.include?(inst[:name])
+          next unless reading || WRITE_OPCODES.include?(inst[:name])
+
+          name = irep.symbols[inst[:operands][1].to_i]
+          next unless name && general.include?(name)
+
+          reading ? read[name] ||= true : written << name
+        end
+      end
+
+      missing = read.keys - written
+      return if missing.empty?
+
+      raise CodegenError,
+            "代入されていない変数を読んでいます (#{missing.join(', ')})。" \
+            "**どこにも代入がないので必ず nil になります。** 綴りを確かめて" \
+            "ください (デバイスや割り付けた名前なら読むだけで構いません)"
     end
 
     # 枠を取った汎用グローバル変数の数

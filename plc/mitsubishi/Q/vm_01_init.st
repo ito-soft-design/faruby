@@ -22,8 +22,6 @@ VMZSAVE[5] := Z6;
 VMZSAVE[6] := Z7;
 VMZSAVE[7] := Z8;
 VMZSAVE[8] := Z9;
-(* 固定領域 (ZR) のバンクを選ぶ *)
-(* 現在のバンクを読む命令が無いため、抜けるときは 0 に戻す *)
 
 
 (* === 電源投入後の最初のスキャン === *)
@@ -59,7 +57,7 @@ IF VMFIRSTSCAN THEN
     VMSLOT[(Z1 - 4000) / 4].SLTAG := 10;
 
     (* 汎用グローバル変数クリア (型タグを TT_EMPTY に) *)
-    FOR VMLOOPCOUNTER := 154 TO 253 DO
+    FOR VMLOOPCOUNTER := 154 TO 453 DO
       VMSLOT[VMLOOPCOUNTER].SLTAG := 0;
     END_FOR;
 
@@ -101,7 +99,7 @@ IF VMRESETREQ = 1 THEN
   VMSLOT[(Z1 - 4000) / 4].SLTAG := 10;
 
   (* 汎用グローバル変数クリア (型タグを TT_EMPTY に) *)
-  FOR VMLOOPCOUNTER := 154 TO 253 DO
+  FOR VMLOOPCOUNTER := 154 TO 453 DO
     VMSLOT[VMLOOPCOUNTER].SLTAG := 0;
   END_FOR;
 
@@ -110,7 +108,6 @@ IF VMRESETREQ = 1 THEN
 END_IF;
 
 
-(* ファイルレジスタのバンクを 0 に戻す *)
 (* インデックスレジスタの復元 *)
 Z1 := VMZSAVE[0];
 Z2 := VMZSAVE[1];

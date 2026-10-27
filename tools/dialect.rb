@@ -46,9 +46,6 @@ module FaRuby
     # コメント 1 行
     def comment(text) = text.empty? ? "'" : "' #{text}"
 
-    # ファイルレジスタのバンクを選ぶ。nil を返すと行そのものを出さない
-    def select_bank(bank) = "FRSET(#{bank})"
-
     # 実数を整数へ代入したときに四捨五入されるか
     #
     # **KV スクリプトは 0 方向へ切り捨てます** (実機で確認済み)。生成コードは
@@ -181,7 +178,6 @@ module FaRuby
   #   打ち切り   BREAK            → EXIT;
   #   シフト     SLA / SRA        → SHL / SHR
   #   符号反転   NEG(x)           → -(x)
-  #   バンク     FRSET(n)         → 無し (常に 0)
   #
   # **`INC(x)` は使わず `x := x + 1;` に開きます。** ST にあるか分からない
   # ためで、開いても意味は同じです。
@@ -199,9 +195,6 @@ module FaRuby
 
     # KV-5000 と同じ
     def first_scan_pulse = "CR2008"
-
-    # バンクは常に 0 なので選ぶ手立てが無い
-    def select_bank(_bank) = nil
 
     # **ST の実数→整数は四捨五入です** (実機で確認済み)。
     #
@@ -252,7 +245,6 @@ module FaRuby
       when /\AIF (.+) THEN\z/ then "IF #{functions(Regexp.last_match(1))} THEN"
       when /\AFOR (.+?) = (.+?) TO (.+?)( STEP (.+))?\z/ then for_open(Regexp.last_match)
       when /\AINC\((.+)\)\z/ then increment(Regexp.last_match(1))
-      when /\AFRSET\(\d+\)\z/ then ""
       when /\A[A-Z]+\([^=]*\)\z/ then "#{code};"   # SET / RES などの呼び出し
       else assignment(code)
       end

@@ -24,18 +24,18 @@ IF EM54:Z9 <= 25 THEN
     IF EM6:Z9 = 16 THEN
       ' OP_LOADSYM (BB): R[a] = symbols[b] (シンボル)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
-      Z5 = FM0:Z3   ' メソッド番号
+      Z5 = ZF98304:Z3   ' メソッド番号
       Z7 = Z3 + 2
-      Z8 = FM0:Z7   ' 引数の数
+      Z8 = ZF98304:Z7   ' 引数の数
       Z7 = Z3 + 3
-      Z4 = FM0:Z7   ' シンボル種別
+      Z4 = ZF98304:Z7   ' シンボル種別
       IF Z4 <> 2 THEN
         ' デバイス名や変数名はシンボルとして扱えない
         EM1:Z9 = 3
@@ -43,7 +43,7 @@ IF EM54:Z9 <= 25 THEN
         BREAK
       END IF
       Z3 = Z3 + 1
-      Z6 = FM0:Z3   ' シンボルの通し番号
+      Z6 = ZF98304:Z3   ' シンボルの通し番号
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = Z6
       EM0:Z1 = 6
@@ -51,7 +51,7 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 17 THEN
       ' OP_LOADNIL (B): R[a] = nil
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = 0
@@ -60,7 +60,7 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 18 THEN
       ' OP_LOADSELF (B): R[a] = self (main)
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = 0
@@ -69,7 +69,7 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 19 THEN
       ' OP_LOADT (B): R[a] = true
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = 1
@@ -78,7 +78,7 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 20 THEN
       ' OP_LOADF (B): R[a] = false
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
       EM1.L:Z1 = 0
@@ -87,20 +87,20 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 21 THEN
       ' OP_GETGV (BB): R[a] = global[symbols[b]]
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
       Z4 = Z3 + 1
-      Z5 = FM0:Z3
-      Z6 = FM0:Z4
+      Z5 = ZF98304:Z3
+      Z6 = ZF98304:Z4
       Z7 = Z3 + 2
-      Z8 = FM0:Z7
+      Z8 = ZF98304:Z7
       Z7 = Z3 + 3
-      Z1 = FM0:Z7   ' シンボル種別
+      Z1 = ZF98304:Z7   ' シンボル種別
       ' レジスタアドレス
       Z2 = EM7:Z9 * 4 + EM32:Z9 + Z9
       ' 種別で 4 つに分ける。いちばん多い普通のデバイスがここで決まる
@@ -360,12 +360,12 @@ IF EM54:Z9 <= 25 THEN
           BREAK
         END IF
         ' プールの空きスロットを取る。返さないので使い切ったら止まる
-        IF EM39:Z9 >= 16 THEN
+        IF EM39:Z9 >= 32 THEN
           EM1:Z9 = 3
           EM2:Z9 = 10
           BREAK
         END IF
-        Z3 = EM39:Z9 * 52 + 1016 + Z9
+        Z3 = EM39:Z9 * 52 + 1816 + Z9
         EM0:Z3 = EM44:Z9
         ' ワード単位で写す。並びが同じなので詰め替えは要らない
         EM45:Z9 = EM44:Z9 + 1
@@ -404,20 +404,20 @@ IF EM54:Z9 <= 25 THEN
     ELSE IF EM6:Z9 = 22 THEN
       ' OP_SETGV (BB): global[symbols[b]] = R[a]
       Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = FM0:Z1
+      EM7:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = FM0:Z1
+      EM8:Z9 = ZF98304:Z1
       EM0:Z9 = EM0:Z9 + 1
       ' シンボル表参照 (4ワード/エントリ)
       Z3 = EM8:Z9 * 4 + EM35:Z9
       Z4 = Z3 + 1
-      Z5 = FM0:Z3
-      Z6 = FM0:Z4
+      Z5 = ZF98304:Z3
+      Z6 = ZF98304:Z4
       Z7 = Z3 + 2
-      Z8 = FM0:Z7
+      Z8 = ZF98304:Z7
       Z7 = Z3 + 3
-      Z1 = FM0:Z7   ' シンボル種別
+      Z1 = ZF98304:Z7   ' シンボル種別
       ' レジスタアドレス
       Z2 = EM7:Z9 * 4 + EM32:Z9 + Z9
       IF Z1 = 5 THEN
@@ -443,7 +443,7 @@ IF EM54:Z9 <= 25 THEN
         Z7 = Z8 / 16
         ' 文字列スロットの見出し
         Z4 = EM1.L:Z2
-        Z4 = Z4 * 52 + 1016 + Z9
+        Z4 = Z4 * 52 + 1816 + Z9
         EM18.L:Z9 = EM0:Z4   ' バイト数
         ' 書く長さと埋めるバイトを決める
         IF Z7 = 0 THEN
@@ -560,7 +560,7 @@ IF EM54:Z9 <= 25 THEN
         END IF
         ' スロットの見出しと書き先の先頭。どちらもループの中で動かさない
         Z4 = EM1.L:Z2
-        Z4 = Z4 * 52 + 1016 + Z9
+        Z4 = Z4 * 52 + 1816 + Z9
         EM44:Z9 = Z6   ' 書き先の先頭
         EM18.L:Z9 = EM0:Z4   ' 要素数
         ' 数値でない要素があった印。FOR を出てから判定する

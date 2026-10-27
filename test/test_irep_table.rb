@@ -139,13 +139,13 @@ class TestIrepTable < Minitest::Test
                           irep(bytes: [0] * 17, symbols: %w[twice], nregs: 7)])
     entries = codegen(top).irep_entries
 
-    assert_equal [0, 128, 3128, 3728], [layout.irep_table_addr(0), layout.bytecode_base,
+    assert_equal [0, 128, 5628, 6228], [layout.irep_table_addr(0), layout.bytecode_base,
                                         layout.pool_base, layout.device_table_base],
                  "doc/architecture.md の図の領域先頭"
     assert_equal [8, 16], [layout.irep_table_addr(1), layout.irep_table_addr(2)]
     assert_equal [128, 156, 169], entries.map { |e| e[:bytecode_base] }
     # 引数を持たない irep 1 はシンボルを使わないので表を占有しない
-    assert_equal [3728, 3740, 3740], entries.map { |e| e[:symbol_base] }
+    assert_equal [6228, 6240, 6240], entries.map { |e| e[:symbol_base] }
     assert_equal [1, 3, 3], entries.map { |e| e[:first_child] }
   end
 
