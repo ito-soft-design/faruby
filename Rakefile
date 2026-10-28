@@ -7,9 +7,14 @@ Rake::TestTask.new(:test) do |t|
   t.test_files = FileList["test/test_*.rb"]
 end
 
-desc "Start faRuby console"
+desc "Start faRuby console (CONNECTION=name で接続先を選べる)"
 task :console do
-  system("cmd /c chcp 65001 >nul && ruby tools/console.rb")
+  # **CONNECTION は他のタスクと同じに揃えます。** 渡さないと黙って
+  # connections.current の相手に繋ぎ、別の PLC を狙ったつもりで
+  # 気づけません (`rake console CONNECTION=iQ_R` で実際にやりました)
+  name = ENV["CONNECTION"]
+  option = name ? " --connection #{name}" : ""
+  system("cmd /c chcp 65001 >nul && ruby tools/console.rb#{option}")
 end
 
 desc "Regenerate the VM scripts for every model from tools/opcode_table.rb"

@@ -154,9 +154,15 @@ $ rake console
 PLC   : line1 / KV-5000 (keyence_kv) @ 10.0.1.201:8501
 ```
 
-1 台だけなら `current` は省けます。一度だけ別の相手にするなら
-`ruby tools/console.rb --connection line2`、照合は
-`rake transfer CONNECTION=line2` です。
+1 台だけなら `current` は省けます。**一度だけ別の相手にするなら `CONNECTION`
+を付けます。** PLC に触るタスクはどれも同じ書き方です。
+
+```bash
+rake console  CONNECTION=line2
+rake transfer CONNECTION=line2
+rake hw       CONNECTION=line2
+rake bench    CONNECTION=line2
+```
 
 接続先が機種を決め、機種の設定 (実行・メモリ配置) がそのまま付いてきます。
 
