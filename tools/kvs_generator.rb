@@ -1008,6 +1008,47 @@ module FaRuby
       end
     end
 
+    # R[a] = クラス (OP_CLASS / OP_GETCONST)
+    #
+    # **実行時にクラスを作りません。** ホストがコンパイル時に番号を振って
+    # シンボル表の 1 ワード目に入れてあるので、読んで置くだけです。
+    def load_class(name, sym_name, error_code)
+      method_table_lookup(sym_name)
+      if_("Z4 <> #{SYMBOL_KIND_CLASS}") do
+        note "クラス名でないシンボルを定数として読もうとした"
+        vm_error(error_code)
+      end
+      dest = reg_slot(name)
+      line "#{dest.value} = Z5   ' クラス番号"
+      line "#{dest.tag} = #{TT_CLASS}"
+    end
+
+    # クラス本体を R[a] を self として実行する (OP_EXEC)
+    #
+    # **メソッド呼び出しと同じ経路です。** 窓を R[a] までずらすので、本体から
+    # 見た R[0] が R[a] (そのクラス) になり、中の OP_TCLASS がそれを読みます。
+    def exec_class_body(name, child_name, error_code, depth_code)
+      child_irep_into(scratch_lo, child_name, error_code)
+      line "Z5 = #{scratch_lo}   ' クラス本体の irep"
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE)
+      line "#{state(layout.call_argc_addr)} = 0"
+      switch_to_irep("Z5", depth_code)
+      line "#{pc} = 0"
+    end
+
+    # R[a] = self (OP_TCLASS)
+    #
+    # **クラス本体ではそのクラスになります。** OP_EXEC が窓をずらしているので
+    # R[0] がそのクラスで、トップレベルでは main (TT_OBJECT の 0) です。
+    def target_class(name)
+      note "定義先は self。クラス本体ではそのクラス、トップレベルでは main"
+      self_slot = devices.reg_slot([:reg_self, name], "0", z: Z_VALUE)
+      dest = reg_slot(name)
+      line "#{dest.value} = #{self_slot.value}"
+      line "#{dest.tag} = #{self_slot.tag}"
+    end
+
     # メソッド表に symbols[b] = R[a+1] を登録する (OP_DEF)
     #
     # 名前はホスト側でユーザー定義メソッド ID に解決済みです。シンボル表は
@@ -2483,7 +2524,7 @@ module FaRuby
 
     # --- 組み込みメソッドの本体 ---
 
-# 探索の行をクラス番号から求めて Z<z> に置く
+    # 探索の行をクラス番号から求めて Z<z> に置く
 #
 # **メソッド表は クラス × 名前**です。行はレシーバ (OP_DEF では定義先) の
 # クラスで決まり、クラスでもオブジェクトでもなければ main の 0 行目を

@@ -343,6 +343,13 @@ module FaRuby
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_CLASS
+          image[m[:table_addr]]     = m[:class_number]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = 0
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_SETTING
           image[m[:table_addr]]     = m[:setting]
           image[m[:table_addr] + 1] = 0
@@ -575,6 +582,13 @@ module FaRuby
                 "(#{SETTING_NAMES.keys.join(', ')})"
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: SYMBOL_KIND_SETTING, setting: setting }
+      elsif class_numbers.key?(sym)
+        # クラス名。**実行時に作らないので番号を置くだけです**
+        #
+        # 名前だけではメソッド名と区別が付かないため、`OP_CLASS` /
+        # `OP_GETCONST` のオペランドに出てきたかどうかで決めています。
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_CLASS, class_number: class_numbers[sym] }
       else
         code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
         # **すべての名前**に 1 から通し番号を振る。シンボル表は irep ごとに
@@ -775,6 +789,11 @@ module FaRuby
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_CLASS
+          lines.concat(class_table_lines(m))
+          next
+        end
+
         kind = ACCESS_NAMES[m[:access_type] || ACCESS_BIT]
         if m[:general]
           lines << "#{layout.fixed_device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
@@ -791,6 +810,18 @@ module FaRuby
 
       lines.concat(generate_general_global_clear(mappings))
       lines
+    end
+
+    # クラス名のエントリ。1 ワード目がクラス番号 (メソッド表の行)
+    def class_table_lines(mapping)
+      addr = mapping[:table_addr]
+      [
+        "#{layout.fixed_device(addr)} = #{mapping[:class_number]}    ' #{mapping[:symbol]} クラス番号",
+        "#{layout.fixed_device(addr + 1)} = 0",
+        "#{layout.fixed_device(addr + 2)} = 0",
+        "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_CLASS}    " \
+        "' #{mapping[:symbol]} クラス名",
+      ]
     end
 
     # メソッド名のエントリ。VM は名前ではなく番号で振り分ける

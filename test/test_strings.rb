@@ -804,12 +804,22 @@ class TestStrings < Minitest::Test
     refute_includes inside, "BREAK", "FOR の中で BREAK すると FOR を抜けるだけになる"
   end
 
+  # **`OP_GETCONST` はクラスのために入りました。** 設定を読み戻すためでは
+  # ありません。クラス名でないシンボルは種別が合わず止まります
   def test_string_opcodes_are_implemented
     codes = FaRuby::OpcodeTable.codes
 
     assert_includes codes, 0x51, "OP_STRING が未実装"
     assert_includes codes, 0x1E, "OP_SETCONST が未実装"
-    refute_includes codes, 0x1D, "OP_GETCONST は実装しない (設定を読む必要が無い)"
+  end
+
+  # 設定定数を読み戻そうとすると止まる (種別が SYMBOL_KIND_CLASS でない)
+  def test_reading_back_a_setting_constant_stops
+    source = FaRuby::KvsGenerator.new.source
+    branch = source[/R\[a\] = 定数 symbols\[b\].*?END IF/m]
+
+    refute_nil branch, "OP_GETCONST の枝が見つからない"
+    assert_includes branch, "#{SYMBOL_KIND_CLASS}", "クラス名の種別を見ていない"
   end
 
   private

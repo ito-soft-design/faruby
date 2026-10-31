@@ -393,13 +393,36 @@ module FaRuby
         vm.if_nil(:a) { vm.jump_relative(:b) }
       end
 
+      # --- クラス ---
+      #
+      # **クラスは実行時に作りません。** ホストがコンパイル時に番号を振って
+      # シンボル表に入れてあるので、OP_CLASS も OP_GETCONST も読んで置くだけ。
+      # 本体を走らせる OP_EXEC だけがフレームを積む。
+
+      defs << OpcodeDef.new(0x5C, "R[a] = クラス symbols[b]") do |vm|
+        vm.load_class(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
+      defs << OpcodeDef.new(0x1D, "R[a] = 定数 symbols[b] (クラス)") do |vm|
+        vm.load_class(:a, :b, UNKNOWN_METHOD_ERROR)
+      end
+
+      # クラス本体を R[a] を self として実行する
+      #
+      # **メソッド呼び出しと同じ経路。** レジスタ窓を R[a] までずらすので、
+      # 本体から見た R[0] が R[a] (そのクラス) になり、中の OP_TCLASS が
+      # それを読む。
+      defs << OpcodeDef.new(0x5E, "クラス本体 (子 irep b) を R[a] を self として実行") do |vm|
+        vm.exec_class_body(:a, :b, IREP_INDEX_ERROR, CALL_DEPTH_ERROR)
+      end
+
       # --- メソッドの定義 ---
       #
       # def は OP_TCLASS + OP_METHOD + OP_DEF の3命令になる。
-      # トップレベルにクラスは無いため、定義先は self (main) 固定。
+      # 定義先は self で、クラス本体ではそのクラス、トップレベルでは main。
 
-      defs << OpcodeDef.new(0x63, "R[a] = 定義先クラス (トップレベルは main)") do |vm|
-        vm.set_reg_special(:a, VmConstants::TT_OBJECT)
+      defs << OpcodeDef.new(0x63, "R[a] = 定義先クラス (self。トップレベルは main)") do |vm|
+        vm.target_class(:a)
       end
 
       defs << OpcodeDef.new(0x58, "R[a] = 子 irep b への参照") do |vm|

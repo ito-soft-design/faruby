@@ -1,5 +1,5 @@
 ' =======================================
-' faRuby VM - オペコード 0x43 - 0x52
+' faRuby VM - オペコード 0x48 - 0x5F
 ' =======================================
 ' 【自動生成】このファイルを直接編集しないでください。
 '   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 ' 並び順と役割は vm_02_prologue.kvs の先頭にあります。
 
 ' 担当外の番号はここで素通りする。**判定はループの外に置く。**
-' 見るのは上限だけ。67 未満は手前の群が実行して
+' 見るのは上限だけ。72 未満は手前の群が実行して
 ' 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 82 THEN
+IF EM54:Z9 <= 95 THEN
 
   ' 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   ' 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,226 +21,7 @@ IF EM54:Z9 <= 82 THEN
   ' BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 = 1 TO 1
 
-    IF EM6:Z9 = 67 THEN
-      ' OP_LT (B): R[a] = (R[a] < R[a+1]) ? true : false
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          IF EM1.F:Z1 < EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.F:Z1 < EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          IF EM1.L:Z1 < EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.L:Z1 < EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      END IF
-
-    ELSE IF EM6:Z9 = 68 THEN
-      ' OP_LE (B): R[a] = (R[a] <= R[a+1]) ? true : false
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          IF EM1.F:Z1 <= EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.F:Z1 <= EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          IF EM1.L:Z1 <= EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.L:Z1 <= EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      END IF
-
-    ELSE IF EM6:Z9 = 69 THEN
-      ' OP_GT (B): R[a] = (R[a] > R[a+1]) ? true : false
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          IF EM1.F:Z1 > EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.F:Z1 > EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          IF EM1.L:Z1 > EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.L:Z1 > EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      END IF
-
-    ELSE IF EM6:Z9 = 70 THEN
-      ' OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          IF EM1.F:Z1 >= EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.F:Z1 >= EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          IF EM1.L:Z1 >= EM1.F:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        ELSE
-          IF EM1.L:Z1 >= EM1.L:Z2 THEN
-            EM1.L:Z1 = 1
-            EM0:Z1 = 3
-          ELSE
-            EM1.L:Z1 = 0
-            EM0:Z1 = 2
-          END IF
-        END IF
-      END IF
-
-    ELSE IF EM6:Z9 = 71 THEN
-      ' OP_ARRAY (BB): R[a] = [R[a] .. R[a+b-1]]
-      Z1 = EM0:Z9 + EM33:Z9
-      EM7:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      Z1 = EM0:Z9 + EM33:Z9
-      EM8:Z9 = ZF98304:Z1
-      EM0:Z9 = EM0:Z9 + 1
-      ' プールの空きスロットを取る。返さないので使い切ったら止まる
-      IF EM39:Z9 >= 32 THEN
-        EM1:Z9 = 3
-        EM2:Z9 = 10
-        BREAK
-      END IF
-      IF EM8:Z9 > 12 THEN
-        ' 1 スロットの容量を超える要素数
-        EM1:Z9 = 3
-        EM2:Z9 = 10
-        BREAK
-      END IF
-      ' スロットの見出し
-      Z2 = EM39:Z9 * 52 + 2008 + Z9
-      EM0:Z2 = EM8:Z9
-      ' 要素を写す。要素数 0 (空配列) では引き算もしない
-      ' EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
-      IF EM8:Z9 > 0 THEN
-        Z3 = EM8:Z9 - 1
-        FOR Z4 = 0 TO Z3
-          Z5 = (EM7:Z9 + Z4) * 4 + EM32:Z9 + Z9
-          Z6 = Z4 * 4 + Z2 + 4
-          EM1.L:Z6 = EM1.L:Z5
-          EM0:Z6 = EM0:Z5
-        NEXT
-      END IF
-      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
-      EM1.L:Z1 = EM39:Z9   ' スロット番号
-      EM0:Z1 = 8
-      EM39:Z9 = EM39:Z9 + 1
-
-    ELSE IF EM6:Z9 = 72 THEN
+    IF EM6:Z9 = 72 THEN
       ' OP_ARRAY2 (BBB): R[a] = [R[b] .. R[b+c-1]]
       Z1 = EM0:Z9 + EM33:Z9
       EM7:Z9 = ZF98304:Z1
@@ -393,6 +174,230 @@ IF EM54:Z9 <= 82 THEN
       ' 長さを更新する
       EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
       EM0:Z3 = EM16.L:Z9
+
+    ELSE IF EM6:Z9 = 83 THEN
+      ' OP_HASH (BB): R[a] = { R[a] => R[a+1], .. } (b 組)
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' ハッシュは配列 2 本。空きスロットが 2 つ要る
+      Z2 = EM39:Z9 + 1
+      IF Z2 >= 32 THEN
+        EM1:Z9 = 3
+        EM2:Z9 = 10
+        BREAK
+      END IF
+      IF EM8:Z9 > 12 THEN
+        ' 1 スロットの容量を超える組の数
+        EM1:Z9 = 3
+        EM2:Z9 = 10
+        BREAK
+      END IF
+      ' 鍵の配列と値の配列の見出し
+      Z2 = EM39:Z9 * 52 + 2008 + Z9
+      Z3 = Z2 + 52
+      EM0:Z2 = EM8:Z9
+      EM0:Z3 = EM8:Z9
+      ' 組を写す。組の数 0 (空ハッシュ) では引き算もしない
+      IF EM8:Z9 > 0 THEN
+        Z4 = EM8:Z9 - 1
+        FOR Z5 = 0 TO Z4
+          Z6 = (EM7:Z9 + Z5 * 2) * 4 + EM32:Z9 + Z9   ' 鍵
+          Z7 = Z5 * 4 + Z2 + 4
+          EM1.L:Z7 = EM1.L:Z6
+          EM0:Z7 = EM0:Z6
+          Z6 = (EM7:Z9 + Z5 * 2 + 1) * 4 + EM32:Z9 + Z9   ' 値
+          Z7 = Z5 * 4 + Z3 + 4
+          EM1.L:Z7 = EM1.L:Z6
+          EM0:Z7 = EM0:Z6
+        NEXT
+      END IF
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1:Z1 = EM39:Z9   ' 鍵の配列
+      Z2 = EM39:Z9 + 1
+      EM2:Z1 = Z2   ' 値の配列
+      EM0:Z1 = 9
+      EM39:Z9 = Z2 + 1
+
+    ELSE IF EM6:Z9 = 87 THEN
+      ' OP_BLOCK (BB): R[a] = 子 irep b から作ったブロック
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
+      Z3 = EM30:Z9 * 8 + EM38:Z9
+      Z4 = Z3 + 5
+      EM16:Z9 = ZF98304:Z4 + EM8:Z9
+      IF EM16:Z9 >= EM36:Z9 THEN
+        ' 指す先の irep が無い
+        EM1:Z9 = 3
+        EM2:Z9 = 7
+        BREAK
+      END IF
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1:Z1 = EM16:Z9   ' 本体の irep
+      Z4 = 65535
+      IF EM31:Z9 > 0 THEN
+        Z4 = EM31:Z9 - 1
+      END IF
+      EM2:Z1 = Z4   ' 定義元のフレーム
+      EM0:Z1 = 12
+
+    ELSE IF EM6:Z9 = 88 THEN
+      ' OP_METHOD (BB): R[a] = 子 irep b への参照
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
+      Z3 = EM30:Z9 * 8 + EM38:Z9
+      Z4 = Z3 + 5
+      EM16:Z9 = ZF98304:Z4 + EM8:Z9
+      IF EM16:Z9 >= EM36:Z9 THEN
+        ' 指す先の irep が無い
+        EM1:Z9 = 3
+        EM2:Z9 = 7
+        BREAK
+      END IF
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1:Z1 = EM16:Z9   ' 本体の irep
+      EM2:Z1 = 65535   ' メソッドは外側を見ない
+      EM0:Z1 = 12
+
+    ELSE IF EM6:Z9 = 92 THEN
+      ' OP_CLASS (BB): R[a] = クラス symbols[b]
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' シンボル表参照 (4ワード/エントリ)
+      Z3 = EM8:Z9 * 4 + EM35:Z9
+      Z5 = ZF98304:Z3   ' メソッド番号
+      Z7 = Z3 + 2
+      Z8 = ZF98304:Z7   ' 引数の数
+      Z7 = Z3 + 3
+      Z4 = ZF98304:Z7   ' シンボル種別
+      IF Z4 <> 6 THEN
+        ' クラス名でないシンボルを定数として読もうとした
+        EM1:Z9 = 3
+        EM2:Z9 = 3
+        BREAK
+      END IF
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      EM1.L:Z1 = Z5   ' クラス番号
+      EM0:Z1 = 13
+
+    ELSE IF EM6:Z9 = 94 THEN
+      ' OP_EXEC (BB): クラス本体 (子 irep b) を R[a] を self として実行
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' 実行中の irep の最初の子の番号に、親から見た子の番号を足す
+      Z3 = EM30:Z9 * 8 + EM38:Z9
+      Z4 = Z3 + 5
+      EM16:Z9 = ZF98304:Z4 + EM8:Z9
+      IF EM16:Z9 >= EM36:Z9 THEN
+        ' 指す先の irep が無い
+        EM1:Z9 = 3
+        EM2:Z9 = 7
+        BREAK
+      END IF
+      Z5 = EM16:Z9   ' クラス本体の irep
+      IF EM31:Z9 >= 16 THEN
+        ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+        EM1:Z9 = 3
+        EM2:Z9 = 5
+        BREAK
+      END IF
+      ' 戻り先を積む
+      Z3 = EM31:Z9 * 10 + 392 + Z9
+      EM0:Z3 = EM0:Z9
+      EM1:Z3 = EM30:Z9
+      EM2:Z3 = EM32:Z9
+      EM4:Z3 = 65535
+      EM5:Z3 = 0
+      ' レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+      EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+      EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
+      EM31:Z9 = EM31:Z9 + 1
+      EM37:Z9 = 0
+      EM30:Z9 = Z5
+      ' IREP テーブルから実行中の irep の情報を写す
+      Z1 = Z5 * 8 + EM38:Z9
+      EM33:Z9 = ZF98304:Z1
+      EM10:Z9 = ZF98305:Z1
+      EM34:Z9 = ZF98306:Z1
+      EM35:Z9 = ZF98307:Z1
+      EM11:Z9 = ZF98308:Z1
+      ' レジスタ窓が領域からはみ出さないこと
+      EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+      IF EM16:Z9 > 392 THEN
+        EM1:Z9 = 3
+        EM2:Z9 = 5
+        BREAK
+      END IF
+      EM0:Z9 = 0
+
+    ELSE IF EM6:Z9 = 95 THEN
+      ' OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
+      Z1 = EM0:Z9 + EM33:Z9
+      EM7:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      Z1 = EM0:Z9 + EM33:Z9
+      EM8:Z9 = ZF98304:Z1
+      EM0:Z9 = EM0:Z9 + 1
+      ' シンボル表参照 (4ワード/エントリ)
+      Z3 = EM8:Z9 * 4 + EM35:Z9
+      Z5 = ZF98304:Z3   ' メソッド番号
+      Z7 = Z3 + 2
+      Z8 = ZF98304:Z7   ' 引数の数
+      Z7 = Z3 + 3
+      Z4 = ZF98304:Z7   ' シンボル種別
+      IF Z4 <> 2 THEN
+        EM1:Z9 = 3
+        EM2:Z9 = 3
+        BREAK
+      END IF
+      Z3 = Z3 + 1
+      Z5 = ZF98304:Z3   ' ユーザー定義メソッドID
+      IF Z5 = 0 THEN
+        ' 組み込みと同じ名前は再定義できない
+        EM1:Z9 = 3
+        EM2:Z9 = 3
+        BREAK
+      END IF
+      Z2 = (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9
+      IF EM0:Z2 <> 12 THEN
+        EM1:Z9 = 3
+        EM2:Z9 = 3
+        BREAK
+      END IF
+      ' メソッド表 (クラス × 名前 => 本体の irep 番号)
+      Z1 = EM7:Z9 * 4 + EM32:Z9 + Z9
+      ' 探索の行。レシーバのクラス (main は 0 行目)
+      Z6 = 0
+      IF EM0:Z1 = 13 THEN
+        Z6 = EM1:Z1
+      END IF
+      Z6 = Z6 * 32
+      Z3 = Z6 + Z5 + 552 + Z9
+      EM0:Z3 = EM1:Z2
+      ' OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
+      EM1.L:Z1 = EM8:Z9
+      EM0:Z1 = 6
 
     ELSE
       ' 未知のオペコード: エラー
