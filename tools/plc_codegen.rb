@@ -69,6 +69,8 @@ module FaRuby
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
+      # 0 行目はトップレベル (`main`) なので、クラスは max_classes - 1 まで
+      check_limit("クラスの数", class_numbers.size + 1, layout.max_classes)
       check_limit("文字列定数のワード数", string_constant_words, layout.max_string_words)
       # 汎用グローバル変数 (`$foo` と `@foo`) の枠。**溢れると配列プールに重なり、
       # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
@@ -102,6 +104,32 @@ module FaRuby
 
     # メソッド呼び出しの命令。どれもオペランド b がメソッド名
     CALL_OPCODES = %i[OP_SEND OP_SSEND OP_SENDB OP_SSENDB].freeze
+
+    # 定数 (クラス) を指す命令。どれもオペランド b がクラス名
+    CLASS_OPCODES = %i[OP_CLASS OP_GETCONST].freeze
+
+    # プログラムに出てくるクラス名 => クラス番号
+    #
+    # **クラスはコンパイル時に分かります。** `OP_CLASS` / `OP_GETCONST` の
+    # オペランドから名前を集め、出てきた順に 1 から番号を振ります。
+    # **0 番はトップレベル (`main`)** で、上位の `def` もそこに入ります。
+    #
+    # 名前だけでは定数と区別が付きません (`Counter` はメソッド名にも
+    # なり得る) ので、バイトコードを見て決めます。
+    def class_numbers
+      @class_numbers ||= begin
+        numbers = {}
+        irep_entries.each do |entry|
+          Disassembler.new(entry[:irep]).disassemble.each do |inst|
+            next unless CLASS_OPCODES.include?(inst[:name])
+
+            name = entry[:irep].symbols[inst[:operands][1].to_i]
+            numbers[name] ||= numbers.size + 1 if name
+          end
+        end
+        numbers
+      end
+    end
 
     # 呼んでいるのに `def` がどこにも無いメソッド
     #
@@ -244,7 +272,9 @@ module FaRuby
 
       # メソッド表 (ユーザー定義メソッド ID => 本体の irep 番号)
       # 登録は OP_DEF が実行時に行うため、ここでは未定義で埋める
-      layout.max_methods.times { |id| image[layout.method_table_addr(id)] = METHOD_UNDEFINED }
+      layout.method_table_words.times do |i|
+        image[layout.method_table_base + i] = METHOD_UNDEFINED
+      end
       # 実行はトップレベルの irep から始まる
       current_irep_state(top).each { |addr, value| image[addr] = value }
 
@@ -777,8 +807,8 @@ module FaRuby
 
     # メソッド表を未定義で埋める。登録は OP_DEF が実行時に行う
     def generate_method_table_clear
-      ["' --- Clear Method Table (#{layout.max_methods} entries) ---",
-       "FOR Z1 = #{layout.method_table_base} TO #{layout.method_table_base + layout.max_methods - 1}",
+      ["' --- Clear Method Table (#{layout.max_classes} classes x #{layout.max_methods}) ---",
+       "FOR Z1 = #{layout.method_table_base} TO #{layout.method_table_base + layout.method_table_words - 1}",
        "    #{layout.device_name}0:Z1 = #{METHOD_UNDEFINED}",
        "NEXT"]
     end

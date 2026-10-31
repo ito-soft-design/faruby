@@ -30,7 +30,9 @@ class TestMemoryLayout < Minitest::Test
     assert_equal Layout::VM_STATE_WORDS, l.reg_file_base
     assert_equal l.reg_file_base + 10 * SLOT_WORDS, l.frame_stack_base
     assert_equal l.frame_stack_base + l.max_frames * Layout::FRAME_WORDS, l.method_table_base
-    assert_equal l.method_table_base + l.max_methods, l.general_global_base
+    # メソッド表は クラス × 名前。0 行目はトップレベル (main)
+    assert_equal l.max_classes * l.max_methods, l.method_table_words
+    assert_equal l.method_table_base + l.method_table_words, l.general_global_base
 
     # 固定領域 (FM) は別のブロック
     assert_equal l.fixed_origin, l.irep_table_base

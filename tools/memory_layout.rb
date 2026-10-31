@@ -17,7 +17,7 @@
 #   +0                    VM状態 (VM_STATE_WORDS)
 #                         レジスタスタック      max_regs    × 4
 #                         呼び出しスタック      max_frames  × 10
-#                         メソッド表            max_methods × 1
+#                         メソッド表            max_classes × max_methods
 #                         汎用グローバル変数    max_globals × 4
 #                         配列プール            max_arrays  × (2 + max_array_len × 4)
 #
@@ -338,7 +338,8 @@ module FaRuby
       "fixed_device" => FIXED_DEVICE_NAME,
       "max_regs" => 80, "max_bytecode" => 5500,
       "max_pool" => 150, "max_symbols" => 300, "max_globals" => 300,
-      "max_ireps" => 16, "max_frames" => 16, "max_methods" => 64,
+      "max_ireps" => 16, "max_frames" => 16, "max_methods" => 32,
+      "max_classes" => 8,
       "max_arrays" => 32, "max_array_len" => 12,
       "max_string_words" => 500,
     }.freeze
@@ -346,7 +347,8 @@ module FaRuby
     attr_reader :device_name, :base, :instances, :instance_index, :align,
                 :fixed_base, :fixed_align, :fixed_bank,
                 :max_regs, :max_bytecode, :max_pool, :max_symbols, :max_globals,
-                :max_ireps, :max_frames, :max_methods, :max_arrays, :max_array_len,
+                :max_ireps, :max_frames, :max_methods, :max_classes,
+                :max_arrays, :max_array_len,
                 :max_string_words
 
     # faruby_default.yml だけから作った配置 (既定の機種のもの)
@@ -373,6 +375,7 @@ module FaRuby
         max_pool: c["max_pool"], max_symbols: c["max_symbols"],
         max_globals: c["max_globals"], max_ireps: c["max_ireps"],
         max_frames: c["max_frames"], max_methods: c["max_methods"],
+        max_classes: c["max_classes"],
         max_arrays: c["max_arrays"], max_array_len: c["max_array_len"],
         max_string_words: c["max_string_words"],
         fixed_base: c["fixed_base"], fixed_align: c["fixed_align"],
@@ -384,7 +387,7 @@ module FaRuby
     def initialize(device_name: "EM", base: 0, instances: 1, instance_index: 0,
                    align: 1000, max_regs: 80, max_bytecode: 5500,
                    max_pool: 150, max_symbols: 100, max_globals: 100,
-                   max_ireps: 16, max_frames: 16, max_methods: 64,
+                   max_ireps: 16, max_frames: 16, max_methods: 32, max_classes: 8,
                    max_arrays: 16, max_array_len: 12, max_string_words: 500,
                    fixed_base: 0, fixed_align: 1000, fixed_bank: FIXED_BANK,
                    fixed_device_name: FIXED_DEVICE_NAME)
@@ -405,6 +408,7 @@ module FaRuby
       @max_ireps      = Integer(max_ireps)
       @max_frames     = Integer(max_frames)
       @max_methods    = Integer(max_methods)
+      @max_classes    = Integer(max_classes)
       @max_arrays     = Integer(max_arrays)
       @max_array_len  = Integer(max_array_len)
       @max_string_words = Integer(max_string_words)
@@ -420,6 +424,7 @@ module FaRuby
         align: align, max_regs: max_regs, max_bytecode: max_bytecode,
         max_pool: max_pool, max_symbols: max_symbols, max_globals: max_globals,
         max_ireps: max_ireps, max_frames: max_frames, max_methods: max_methods,
+        max_classes: max_classes,
         max_arrays: max_arrays, max_array_len: max_array_len,
         max_string_words: max_string_words,
         fixed_base: fixed_base, fixed_align: fixed_align, fixed_bank: fixed_bank,
@@ -438,7 +443,7 @@ module FaRuby
     def reg_file_base       = vm_state_base + VM_STATE_WORDS
     def frame_stack_base    = reg_file_base + max_regs * SLOT_WORDS
     def method_table_base   = frame_stack_base + max_frames * FRAME_WORDS
-    def general_global_base = method_table_base + max_methods
+    def general_global_base = method_table_base + method_table_words
     def array_pool_base     = general_global_base + max_globals * SLOT_WORDS
 
     # 配列スロット 1 個のワード数。全スロット同じ
@@ -492,7 +497,7 @@ module FaRuby
     # 可変領域の合計 (パディングを含まない)
     def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
-        max_methods + max_globals * SLOT_WORDS + max_arrays * array_slot_words
+        method_table_words + max_globals * SLOT_WORDS + max_arrays * array_slot_words
     end
 
     # 固定領域の合計 (パディングを含まない)
@@ -625,7 +630,15 @@ module FaRuby
     def frame_addr(index)      = frame_stack_base + index * FRAME_WORDS
 
     # ユーザー定義メソッド ID => 本体の irep 番号 (0 = 未定義)
-    def method_table_addr(id)  = method_table_base + id
+# メソッド表は **クラス × 名前**
+    #
+    # **呼ぶ側はレシーバのクラスを知りません。** `c.value` の `c` がどの
+    # クラスかは実行時に決まるので、探索も実行時です。1 本の表 (名前 → irep)
+    # では、2 つのクラスが同じ名前を定義した時点で衝突します。
+    #
+    # 0 行目はトップレベル (`main`) です。
+    def method_table_words = max_classes * max_methods
+    def method_table_addr(class_number, id) = method_table_base + class_number * max_methods + id
 
     # 汎用グローバル変数。デバイスマッピングテーブルには「値ワード」の
     # アドレスを格納するため、GETGV/SETGV の EM デバイス経路をそのまま流用できる
@@ -702,7 +715,8 @@ module FaRuby
       { "max_regs" => @max_regs, "max_bytecode" => @max_bytecode, "max_pool" => @max_pool,
         "max_symbols" => @max_symbols, "max_globals" => @max_globals,
         "max_ireps" => @max_ireps, "max_frames" => @max_frames,
-        "max_methods" => @max_methods, "max_arrays" => @max_arrays,
+        "max_methods" => @max_methods, "max_classes" => @max_classes,
+        "max_arrays" => @max_arrays,
         "max_array_len" => @max_array_len }.each do |name, value|
         raise LayoutError, "#{name} は 1 以上にしてください (#{value})" if value < 1
       end

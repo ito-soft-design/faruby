@@ -169,6 +169,14 @@ module FaRuby
       write_bool(index, cmp(op, numeric_value(index), numeric_value(index + 1)))
     end
 
+    # R[a] = self (OP_TCLASS)。**クラス本体ではそのクラスになります**
+    def target_class(name) = move_reg_from_self(name)
+
+    # R[a] = R[0]
+    def move_reg_from_self(name)
+      write_slot(operand(name), read_reg_tag(0), read_reg(0))
+    end
+
     def set_reg_special(name, tag)
       write_slot(operand(name), tag, TT_CANONICAL_VALUE.fetch(tag))
     end
@@ -581,9 +589,71 @@ module FaRuby
       body = operand(name) + 1
       return vm_error(error_code) unless read_reg_tag(body) == TT_PROC
 
+      # 定義先は R[a]。`OP_TCLASS` がクラス本体ではそのクラス、
+      # トップレベルでは main (`TT_OBJECT` の 0) を置いている
+      class_number = class_of_reg(operand(name))
+      return vm_error(error_code) unless class_number
+
       # 本体の irep は値スロットの下位ワード (上位は定義元のフレーム)
-      @em.write_u16(layout.method_table_addr(method_id), @em.read_u16(reg_addr(body)))
+      @em.write_u16(layout.method_table_addr(class_number, method_id),
+                    @em.read_u16(reg_addr(body)))
       write_slot(operand(name), TT_SYMBOL, operand(sym_name))
+    end
+
+    # レジスタが指すクラスの番号。クラスでなければ nil
+    #
+    # **`main` もクラスの 0 行目です。** トップレベルの self は `TT_OBJECT` の
+    # 値 0 で、`def` はそこへ登録されます。
+    def class_of_reg(index)
+      case read_reg_tag(index)
+      when TT_CLASS then read_reg(index)
+      when TT_OBJECT then read_reg(index).zero? ? CLASS_MAIN : object_class(read_reg(index))
+      end
+    end
+
+    # オブジェクトのクラス。**まだオブジェクトを作れないので使われません**
+    #
+    # `new` を入れたら、プールのスロットの見出しからクラス番号を読みます
+    # (doc/classes.md の段階 2)。
+    def object_class(_slot) = nil
+
+    # レシーバのクラス。メソッド探索の行を決める
+    #
+    # **クラスでもオブジェクトでもなければ main の行を見ます。** `3.times` の
+    # ブロックの中では R[0] がレシーバ (整数) になっていて self が残らないため、
+    # `OP_SSEND` のレシーバが整数で届きます。1 本の表だったころと同じ行を
+    # 引くので、いまのプログラムの動きは変わりません。
+    #
+    # **オブジェクトを入れたら見直すところです** (doc/classes.md の段階 3)。
+    def receiver_class(index) = class_of_reg(index) || CLASS_MAIN
+
+    # R[a] = クラス (OP_CLASS / OP_GETCONST)
+    #
+    # **実行時にクラスを作りません。** ホストがコンパイル時に番号を振って
+    # シンボル表に入れてあるので、読んで置くだけです。
+    def load_class(name, sym_name, error_code)
+      class_number, _unused, _argc, kind = device_entry(operand(sym_name))
+      return vm_error(error_code) unless kind == SYMBOL_KIND_CLASS
+
+      write_slot(operand(name), TT_CLASS, class_number)
+    end
+
+    # クラス本体を実行する (OP_EXEC)
+    #
+    # **メソッド呼び出しと同じ経路です。** フレームを積んでレジスタ窓を
+    # R[a] までずらすので、本体から見た R[0] が R[a] (そのクラス) になり、
+    # 中の `OP_TCLASS` がそれを読みます。
+    def exec_class_body(name, child_name, error_code, depth_code)
+      index = child_irep(child_name)
+      return vm_error(error_code) unless index
+      return vm_error(depth_code) if frame_sp >= layout.max_frames
+
+      push_frame(operand(name) * SLOT_WORDS)
+      @em.write_u16(layout.call_argc_addr, 0)
+      switch_to_irep(index)
+      return vm_error(depth_code) unless register_window_fits?
+
+      @em.write_u16(layout.pc_addr, 0)
     end
 
     # R[a] = self.メソッド(R[a+1]..) (OP_SSEND)
@@ -598,7 +668,11 @@ module FaRuby
     def call_user_method(index, method_id, argc, unknown_code, depth_code)
       return vm_error(unknown_code) if method_id == METHOD_ID_NONE
 
-      irep = @em.read_u16(layout.method_table_addr(method_id))
+      # **行はレシーバのクラスで決まります。** 呼ぶ側は知らないので実行時
+      class_number = receiver_class(index)
+      return vm_error(unknown_code) unless class_number
+
+      irep = @em.read_u16(layout.method_table_addr(class_number, method_id))
       return vm_error(unknown_code) if irep == METHOD_UNDEFINED
       return vm_error(depth_code) if frame_sp >= layout.max_frames
 

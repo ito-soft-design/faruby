@@ -1024,8 +1024,9 @@ module FaRuby
       end
       body = reg_next_slot(name)
       if_("#{body.tag} <> #{TT_PROC}") { vm_error(error_code) }
-      note "メソッド表 (ID => 本体の irep 番号)"
-      line "Z3 = Z5 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      note "メソッド表 (クラス × 名前 => 本体の irep 番号)"
+      class_row_into(6, name)
+      line "Z3 = Z6 + Z5 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
       line "#{word_at(3)} = #{body.word(0)}"
       note "OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる"
       dest = reg_slot(name)
@@ -1055,7 +1056,8 @@ module FaRuby
         note "組み込みでもユーザー定義でもない"
         vm_error(unknown_code)
       end
-      line "Z3 = Z6 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+      class_row_into(7, name)
+      line "Z3 = Z7 + Z6 + #{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
       line "Z5 = #{word_at(3)}   ' 本体の irep 番号"
       if_("Z5 = #{METHOD_UNDEFINED}") do
         note "まだ def が実行されていない"
@@ -2481,7 +2483,22 @@ module FaRuby
 
     # --- 組み込みメソッドの本体 ---
 
-    # シンボル表からメソッド番号・引数の数・種別を読む
+# 探索の行をクラス番号から求めて Z<z> に置く
+#
+# **メソッド表は クラス × 名前**です。行はレシーバ (OP_DEF では定義先) の
+# クラスで決まり、クラスでもオブジェクトでもなければ main の 0 行目を
+# 見ます。`3.times` のブロックの中では R[0] がレシーバ (整数) になって
+# self が残らないため、`OP_SSEND` のレシーバが整数で届きます。
+# 1 本の表だったころと同じ行なので、いまのプログラムの動きは変わりません。
+def class_row_into(z, name)
+  slot = reg_slot(name)
+  note "探索の行。レシーバのクラス (main は 0 行目)"
+  line "Z#{z} = 0"
+  if_("#{slot.tag} = #{TT_CLASS}") { line "Z#{z} = #{slot.word(0)}" }
+  line "Z#{z} = Z#{z} * #{layout.max_methods}"
+end
+
+# シンボル表からメソッド番号・引数の数・種別を読む
     #
     # Z5 = メソッド番号, Z8 = 引数の数, Z4 = 種別
     # Z1 / Z2 は使わない。この後レジスタスロットの参照に使うため。
@@ -3638,7 +3655,8 @@ module FaRuby
       e.note "  +#{layout.offset_of(layout.reg_file_base)}~ = レジスタスタック (値スロット #{SLOT_WORDS}ワード/レジスタ)"
       e.note "  +#{layout.offset_of(layout.frame_stack_base)}~ = 呼び出しスタック " \
              "(#{MemoryLayout::FRAME_WORDS}ワード/段)"
-      e.note "  +#{layout.offset_of(layout.method_table_base)}~ = メソッド表 (1ワード/メソッド)"
+      e.note "  +#{layout.offset_of(layout.method_table_base)}~ = メソッド表 " \
+             "(クラス #{layout.max_classes} × 名前 #{layout.max_methods})"
       e.note "  +#{layout.offset_of(layout.general_global_base)}~ = 汎用グローバル変数 " \
              "(値スロット #{SLOT_WORDS}ワード/変数)"
       e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
