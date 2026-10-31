@@ -1934,6 +1934,12 @@ module FaRuby
         vm_finish
       end
       line "Z3 = #{top_frame_expr}"
+      note "**new は戻り値を写さない。** R[0] に残っているのは確保した"
+      note "オブジェクトで、それがそのまま Counter.new の値になる"
+      if_else_block("#{word_at(3, MemoryLayout::FRAME_KIND)} = " \
+                    "#{MemoryLayout::FRAME_KIND_NEW}") do
+        pop_frame
+      end
       if_else_block("#{word_at(3, MemoryLayout::FRAME_KIND)} >= " \
                     "#{MemoryLayout::FRAME_KIND_ITERATE}") do
         advance_iteration
@@ -1945,6 +1951,7 @@ module FaRuby
       line "#{dest.value} = #{src.value}"
       line "#{dest.tag} = #{src.tag}"
       pop_frame
+      end_block
       end_block
       end_block
     end
@@ -2222,19 +2229,25 @@ module FaRuby
 
       if_else_block("Z5 <> #{METHOD_NONE}") do
         note "組み込みメソッド。フレームを積まずその場で計算する"
-        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
+        builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code,
+                         depth_code)
       end
       call_user_method(name, argc_name, unknown_code, depth_code)
       end_block
     end
 
     # Z5 (メソッド番号) と Z8 (引数の数) を読んだ後の共通部分
-    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code)
-      if_("#{operand(argc_name)} <> Z8") do
-        note "引数の数が定義と違う"
-        note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
-        note "普通の呼び出しでは引数の数と一致し、スプラットやキーワード付きは弾かれる"
-        vm_error(unknown_code)
+    def builtin_dispatch(name, argc_name, unknown_code, type_code, zero_code, heap_code,
+                         depth_code)
+      note "new だけは引数の数を突き合わせない。クラスごとに違うので"
+      note "initialize の OP_ENTER に任せる"
+      if_("Z5 <> #{METHOD_NEW}") do
+        if_("#{operand(argc_name)} <> Z8") do
+          note "引数の数が定義と違う"
+          note "オペランドは位置引数とキーワード引数の数を4ビットずつ詰めたもの。"
+          note "普通の呼び出しでは引数の数と一致し、スプラットやキーワード付きは弾かれる"
+          vm_error(unknown_code)
+        end
       end
 
       dest = reg_slot(name)
@@ -2248,7 +2261,8 @@ module FaRuby
         first = false
         indent
         note METHOD_NAMES.fetch(code)
-        method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
+        method_body(code, name, dest, rhs, type_code, zero_code, heap_code,
+                    argc_name, depth_code)
         dedent
       end
       line "ELSE"
@@ -2524,6 +2538,50 @@ module FaRuby
 
     # --- 組み込みメソッドの本体 ---
 
+# Class#new。オブジェクトを確保して initialize を呼ぶ
+#
+# **レシーバはクラスです** (`TT_CLASS`)。プールのスロットを 1 つ取り、
+# 見出しにクラス番号を入れ、値スロットをインスタンス変数に使います。
+#
+# **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
+# 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
+def new_object(name, argc_name, heap_code, depth_code)
+  dest = reg_slot(name)
+  note "クラス番号を控える。R[a] はオブジェクトで上書きする"
+  line "Z8 = #{dest.word(0)}"
+  note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+  if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+  line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+       "#{block_offset(layout.array_pool_base)}"
+  line "#{word_at(3, MemoryLayout::OBJECT_CLASS)} = Z8   ' クラス番号"
+  note "インスタンス変数は未代入 (TT_EMPTY) から始める"
+  line "Z4 = Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+  line "Z5 = Z4 + #{layout.max_array_len * SLOT_WORDS - 1}"
+  line "FOR Z6 = Z4 TO Z5"
+  indent
+  line "#{word_at(6)} = 0"
+  dedent
+  line "NEXT"
+  line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
+  line "#{dest.tag} = #{TT_OBJECT}"
+  line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+
+  note "initialize があれば呼ぶ。名前の ID はホストが load で書いている"
+  if_("#{state(layout.init_method_id_addr)} <> 0") do
+    line "Z3 = Z8 * #{layout.max_methods} + #{state(layout.init_method_id_addr)} + " \
+         "#{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
+    line "Z5 = #{word_at(3)}   ' initialize の irep"
+    if_("Z5 <> #{METHOD_UNDEFINED}") do
+      push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
+                 outer: MemoryLayout::FRAME_NONE,
+                 kind: MemoryLayout::FRAME_KIND_NEW)
+      line "#{state(layout.call_argc_addr)} = #{operand(argc_name)}"
+      switch_to_irep("Z5", depth_code)
+      line "#{pc} = 0"
+    end
+  end
+end
+
     # 探索の行をクラス番号から求めて Z<z> に置く
 #
 # **メソッド表は クラス × 名前**です。行はレシーバ (OP_DEF では定義先) の
@@ -2553,7 +2611,8 @@ end
       line "Z4 = #{fixed_at(7)}   ' シンボル種別"
     end
 
-    def method_body(code, name, dest, rhs, type_code, zero_code, heap_code)
+    def method_body(code, name, dest, rhs, type_code, zero_code, heap_code,
+                    argc_name = nil, depth_code = nil)
       case code
       when METHOD_NE    then eq_into(dest, rhs, negate: true)
       when METHOD_NOT   then not_into(dest)
@@ -2578,6 +2637,7 @@ end
       when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
       when METHOD_VALUES then hash_column_into(dest, Z_HASH_VALUES, heap_code)
       when METHOD_SLICE  then slice_into(dest, rhs, reg_third_slot(name), type_code, heap_code)
+      when METHOD_NEW    then new_object(name, argc_name, heap_code, depth_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end

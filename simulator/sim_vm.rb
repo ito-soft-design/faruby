@@ -110,6 +110,44 @@ module FaRuby
       set_reg_arith(name, :add)
     end
 
+    # Class#new。オブジェクトを確保して initialize を呼ぶ
+    #
+    # **レシーバはクラスです** (`TT_CLASS`)。プールのスロットを 1 つ取り、
+    # 見出しにクラス番号を入れ、値スロットをインスタンス変数に使います。
+    #
+    # **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
+    # 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
+    def new_object(index, argc, heap_code, depth_code)
+      slot = array_sp
+      return vm_error(heap_code) if slot >= layout.max_arrays
+
+      class_number = read_reg(index)
+      base = layout.array_slot_addr(slot)
+      @em.write_u16(base + MemoryLayout::OBJECT_CLASS, class_number)
+      # インスタンス変数は未代入 (TT_EMPTY) から始める
+      layout.max_array_len.times do |i|
+      SLOT_WORDS.times { |w| @em.write_u16(layout.array_element_addr(slot, i) + w, 0) }
+      end
+      # **値は スロット + 1 です。** 0 は main なので、そのままだと
+      # スロット 0 のオブジェクトと見分けが付きません
+      write_slot(index, TT_OBJECT, slot + 1)
+      @em.write_u16(layout.array_sp_addr, slot + 1)
+
+      init_id = @em.read_u16(layout.init_method_id_addr)
+      return if init_id.zero?
+
+      irep = @em.read_u16(layout.method_table_addr(class_number, init_id))
+      return if irep == METHOD_UNDEFINED
+      return vm_error(depth_code) if frame_sp >= layout.max_frames
+
+      push_frame(index * SLOT_WORDS, kind: MemoryLayout::FRAME_KIND_NEW)
+      @em.write_u16(layout.call_argc_addr, argc)
+      switch_to_irep(irep)
+      return vm_error(depth_code) unless register_window_fits?
+
+      @em.write_u16(layout.pc_addr, 0)
+    end
+
     # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
     def concat_new_string(index, heap_code)
       slot = array_sp
@@ -611,11 +649,12 @@ module FaRuby
       end
     end
 
-    # オブジェクトのクラス。**まだオブジェクトを作れないので使われません**
+    # オブジェクトのクラス。見出しに入れたクラス番号を読む
     #
-    # `new` を入れたら、プールのスロットの見出しからクラス番号を読みます
-    # (doc/classes.md の段階 2)。
-    def object_class(_slot) = nil
+    # **値は スロット + 1** です (0 は main)。
+    def object_class(value)
+      @em.read_u16(layout.array_slot_addr(value - 1) + MemoryLayout::OBJECT_CLASS)
+    end
 
     # レシーバのクラス。メソッド探索の行を決める
     #
@@ -722,9 +761,11 @@ module FaRuby
       return vm_finish if frame_sp.zero?
 
       addr = layout.frame_addr(current_frame)
-      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) >= MemoryLayout::FRAME_KIND_ITERATE
-        return advance_iteration(addr)
-      end
+      kind = @em.read_u16(addr + MemoryLayout::FRAME_KIND)
+      # **`new` は戻り値を写しません。** R[0] に残っているのは確保した
+      # オブジェクトで、それがそのまま `Counter.new` の値になります
+      return pop_frame if kind == MemoryLayout::FRAME_KIND_NEW
+      return advance_iteration(addr) if kind >= MemoryLayout::FRAME_KIND_ITERATE
 
       # R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所
       index = operand(name)
@@ -889,20 +930,22 @@ module FaRuby
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
       unless code == METHOD_NONE
         return dispatch_builtin(code, index, operand(argc_name), argc,
-                                unknown_code, type_code, zero_code, heap_code)
+                                unknown_code, type_code, zero_code, heap_code, depth_code)
       end
 
       call_user_method(index, method_id, operand(argc_name), unknown_code, depth_code)
     end
 
     def dispatch_builtin(code, index, given_argc, argc, unknown_code, type_code,
-                         zero_code, heap_code)
+                         zero_code, heap_code, depth_code)
       # ブロックを取るメソッドはブロック無しでは呼べない
       return vm_error(unknown_code) unless BUILTIN_PLAIN_METHODS.key?(code)
-      return vm_error(unknown_code) unless given_argc == argc
+      # **new だけ引数の数を突き合わせません。** クラスごとに違うので
+      # initialize の OP_ENTER に任せます
+      return vm_error(unknown_code) if code != METHOD_NEW && given_argc != argc
       return vm_error(type_code) unless receiver_type_ok?(code, read_reg_tag(index))
 
-      apply_method(code, index, type_code, zero_code, heap_code)
+      apply_method(code, index, given_argc, type_code, zero_code, heap_code, depth_code)
     end
 
     # メソッド番号からレシーバに要求される型を検査する
@@ -1361,7 +1404,7 @@ module FaRuby
     # 組み込みメソッドの本体
     #
     # 生成コードは実数を単精度で扱うため、実数の結果は write_float で丸める。
-    def apply_method(code, index, type_code, zero_code, heap_code)
+    def apply_method(code, index, argc, type_code, zero_code, heap_code, depth_code)
       case code
       when METHOD_NE    then send_ne(index)
       when METHOD_NOT   then write_bool(index, read_reg_tag(index) <= TT_FALSY_MAX)
@@ -1386,6 +1429,7 @@ module FaRuby
       when METHOD_KEYS   then send_hash_column(index, 0, heap_code)
       when METHOD_VALUES then send_hash_column(index, 1, heap_code)
       when METHOD_SLICE  then send_slice(index, type_code, heap_code)
+      when METHOD_NEW    then new_object(index, argc, heap_code, depth_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end

@@ -209,6 +209,12 @@ module FaRuby
             "ください (デバイスや割り付けた名前なら読むだけで構いません)"
     end
 
+    # `new` が引く initialize の名前 ID。定義されていなければ 0
+    #
+    # **名前の ID は出会った順なので定数になりません。** VM が実行時に
+    # 引けるよう、load のときに VM 状態へ 1 ワード書いておきます。
+    def init_method_id = method_ids.fetch("initialize", 0)
+
     # 枠を取った汎用グローバル変数の数
     #
     # 同じ名前は irep をまたいでも同じ枠なので、アドレスで数えます。
@@ -266,6 +272,8 @@ module FaRuby
       image[layout.str_encoding_addr] = @encoding
       # FARUBY_STR_FILL を書かないプログラムのための既定値
       image[layout.str_fill_addr] = 0
+      # `new` が引く initialize の名前 ID。無ければ 0 で、呼ばずに終わる
+      image[layout.init_method_id_addr] = init_method_id
       image[layout.reg_base_addr] = layout.offset_of(layout.reg_file_base)
       image[layout.irep_table_addr_addr] = layout.irep_table_base
       image[layout.num_symbols_addr] = irep_entries.sum { |e| e[:irep].symbols.size }
@@ -681,6 +689,8 @@ module FaRuby
       lines << "#{layout.device(layout.array_sp_addr)} = 0          ' ARRAY_SP = プールの先頭"
       lines << "#{layout.device(layout.str_encoding_addr)} = #{@encoding}          ' STR_ENCODING"
       lines << "#{layout.device(layout.str_fill_addr)} = 0          ' STR_FILL"
+      lines << "#{layout.device(layout.init_method_id_addr)} = #{init_method_id}" \
+               "          ' initialize の名前 ID"
       lines << "#{layout.device(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
                "          ' REG_BASE"
       lines << ""

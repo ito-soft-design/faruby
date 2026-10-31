@@ -98,6 +98,7 @@ class TestMethods < Minitest::Test
     "[]" => [TT_DEVICE, TT_DEVICE],
     # レシーバは self (トップレベルの main)
     "loop" => [TT_OBJECT, TT_OBJECT],
+    "new" => [TT_CLASS, TT_CLASS],
   }.freeze
 
   def test_methods_sort_by_receiver_type

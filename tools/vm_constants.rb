@@ -331,6 +331,11 @@ module FaRuby
     # **末尾に置くのは番号を振り直さずに済ませるため**です。番号はレシーバの
     # 型ごとに連続していればよく、タグの大小とは関係しません。
     METHOD_LOOP    = 27
+    # Class#new。**レシーバはクラスで、引数の数は initialize が決めます**
+    #
+    # 組み込みは引数の数を表と突き合わせますが、`new` はクラスごとに違う
+    # ので、その検査だけ飛ばして `OP_ENTER` に任せます。
+    METHOD_NEW     = 28
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -353,7 +358,8 @@ module FaRuby
       [METHOD_PUSH,    TT_ARRAY,   TT_ARRAY, "配列"],
       [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
       [METHOD_SLICE,   TT_DEVICE,  TT_DEVICE, "デバイス参照"],
-      [nil,            TT_OBJECT,  TT_OBJECT, "self"],
+      [METHOD_LOOP,    TT_OBJECT,  TT_OBJECT, "self"],
+      [nil,            TT_CLASS,   TT_CLASS,  "クラス"],
     ].freeze
 
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
@@ -400,6 +406,8 @@ module FaRuby
       "values" => [METHOD_VALUES, 0],
       "[]"     => [METHOD_SLICE,  2],
       "loop"   => [METHOD_LOOP,   0],
+      # 引数の数は initialize が決めるので、ここの 0 は使いません
+      "new"    => [METHOD_NEW,    0],
     }.freeze
 
     # ブロックを取るメソッド。OP_SENDB でしか呼べない

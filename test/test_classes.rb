@@ -15,9 +15,8 @@ require_relative "temp_dir"
 # 作り直しになったのはメソッド表で、1 本 (名前 → irep) から **クラス × 名前**
 # になりました。呼ぶ側はレシーバのクラスを知らないので、探索は実行時です。
 #
-# **まだインスタンスを作れません** (`new` は段階 2)。確かめるのは、クラスを
-# 定義して最後まで走ることと、表のどの行に入ったかです。設計は
-# [クラスの計画](../doc/classes.md)。
+# `new` も入りました (段階 2)。**インスタンス変数はまだクラスごとでは
+# なく共有です** (段階 3)。設計は [クラスの計画](../doc/classes.md)。
 class TestClasses < Minitest::Test
   include FaRuby::VmConstants
 
@@ -195,5 +194,85 @@ class TestClasses < Minitest::Test
     names = (1...layout.max_classes).map { |i| "class C#{i}\nend\n" }.join
 
     FaRuby::PlcCodegen.new(compile(names)).validate!
+  end
+
+  # --- new ---
+
+  # **`new` はただの `OP_SEND`** です。レシーバがクラスの組み込みメソッド
+  def test_new_returns_an_object_and_its_method_runs
+    sim, = run_source(<<~SRC)
+      class Counter
+        def up
+          7
+        end
+      end
+      c = Counter.new
+      $DM0 = c.up
+    SRC
+
+    assert_equal VM_FINISHED, sim.status, "完了しなかった (error=#{error_of(sim)})"
+    assert_equal 7, dm0(sim)
+  end
+
+  # **`initialize` があれば呼びます。** 引数の数は `OP_ENTER` が見ます
+  def test_initialize_runs_with_its_arguments
+    sim, = run_source(<<~SRC)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+      end
+      c = Counter.new(5)
+      $DM0 = c.value
+    SRC
+
+    assert_equal VM_FINISHED, sim.status, "完了しなかった (error=#{error_of(sim)})"
+    assert_equal 5, dm0(sim), "initialize が走っていない"
+  end
+
+  # **戻り値で上書きされないこと。** initialize の戻り値ではなくオブジェクト
+  def test_new_returns_the_object_not_initializes_value
+    sim, = run_source(<<~SRC)
+      class Counter
+        def initialize
+          99
+        end
+        def up
+          7
+        end
+      end
+      $DM0 = Counter.new.up
+    SRC
+
+    assert_equal VM_FINISHED, sim.status, "完了しなかった (error=#{error_of(sim)})"
+    assert_equal 7, dm0(sim), "initialize の戻り値がオブジェクトを上書きした"
+  end
+
+  # オブジェクトはプールのスロットを 1 つ使う
+  def test_an_object_takes_one_pool_slot
+    sim, = run_source(<<~SRC)
+      class Counter
+        def up
+          1
+        end
+      end
+      a = Counter.new
+      b = Counter.new
+      $DM0 = a.up + b.up
+    SRC
+
+    assert_equal 2, dm0(sim)
+    assert_equal 2, sim.em.read_u16(layout.array_sp_addr), "スロットを 2 つ使っていない"
+  end
+
+  # **レシーバがクラスでなければ `new` は呼べません**
+  def test_new_on_a_non_class_stops
+    sim, = run_source("$DM0 = 1.new\n")
+
+    assert_equal VM_ERROR, sim.status
+    assert_equal 4, error_of(sim), "レシーバの型エラーで止まらない"
   end
 end

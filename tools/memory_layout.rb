@@ -138,6 +138,17 @@ module FaRuby
     # 回すと終わってしまい、年単位で動く PLC に合いません。`break` でしか
     # 終わらないので、上限の比較を飛ばす種別を持たせます。
     FRAME_KIND_LOOP     = 4
+    # `new` が initialize を呼ぶときのフレーム
+    #
+    # **戻り値を写しません。** ふつうの OP_RETURN は呼ばれた側の R[a] を
+    # R[0] (呼んだ側の R[a]) へ写しますが、それでは initialize の戻り値が
+    # 確保したオブジェクトを上書きします。反復のフレームと同じ扱いで、
+    # R[0] に残ったオブジェクトがそのまま呼び出しの値になります。
+    #
+    # **反復の判定 (FRAME_KIND_ITERATE 以上) に入らないよう 0 の側に
+    # 置けません。** 1 比較で済ませている並びを崩さないため、反復の後ろに
+    # 置いて「反復かつ上限なし」の経路から外す判定を 1 つ足しています。
+    FRAME_KIND_NEW      = 5
 
     # 配列プール 1 スロットの見出し
     #
@@ -161,6 +172,10 @@ module FaRuby
     # 同じ理由でスロットの大きさも 4 の倍数になります (4 + 12 × 4 = 52)。
     ARRAY_HEADER_WORDS = 4
     ARRAY_LENGTH       = 0
+    # オブジェクトはこの見出しにクラス番号を入れ、値スロットを
+    # インスタンス変数に使う。**配列の要素数と同じ位置**だが、型タグで
+    # 経路が分かれるので混ざらない
+    OBJECT_CLASS       = 0
 
     # 「フレームが無い」を表す番号。トップレベルで定義されたブロックの定義元
     #
@@ -209,6 +224,13 @@ module FaRuby
     # 引くとスキャンタイムが延びるため、切り替え時にここへ写して使います。
     # 固定領域の位置 (CUR_*) は FM の絶対アドレス。可変領域の位置 (REG_BASE) は
     # ブロック先頭からのオフセットで、生成コードが Z9 を足す。
+    # initialize の名前 ID (ホストが load で書く。無ければ 0)
+    #
+    # `new` は「そのクラスの initialize」を引く必要がありますが、名前の
+    # ID はホストが出会った順に振るので定数になりません。**load のときに
+    # 1 ワード書いておけば、VM は読むだけで済みます。**
+    OFFSET_INIT_METHOD_ID  = 27
+
     OFFSET_CUR_IREP        = 30
     OFFSET_FRAME_SP        = 31  # 呼び出しフレームの段数 (0 = トップレベル)
     OFFSET_REG_BASE        = 32  # レジスタ窓の先頭 (ブロック内オフセット)
@@ -558,6 +580,7 @@ module FaRuby
     def call_argc_addr       = vm_state_base + OFFSET_CALL_ARGC
     def irep_table_addr_addr = vm_state_base + OFFSET_IREP_TABLE
     def array_sp_addr        = vm_state_base + OFFSET_ARRAY_SP
+    def init_method_id_addr  = vm_state_base + OFFSET_INIT_METHOD_ID
     def str_encoding_addr    = vm_state_base + OFFSET_STR_ENCODING
     def str_fill_addr        = vm_state_base + OFFSET_STR_FILL
     def str_index_addr       = vm_state_base + OFFSET_STR_INDEX
