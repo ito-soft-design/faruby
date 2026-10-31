@@ -1162,6 +1162,7 @@ h["n"] += 2
 | [doc/plc_devices.md](doc/plc_devices.md) | デバイスの種類とアクセス幅。機種ごとの対応状況 |
 | [doc/string.md](doc/string.md) | 文字コードとデバイスへの出し方 |
 | [doc/heap.md](doc/heap.md) | 配列・文字列の置き場所と個数の上限 |
+| [doc/classes.md](doc/classes.md) | クラスの計画 (未実装) |
 | [doc/melsec.md](doc/melsec.md) | 三菱 (Q / iQ-R) の事前設定と注意点 |
 | [doc/testing.md](doc/testing.md) | PC 上のテストと実機での確認の進め方 |
 
