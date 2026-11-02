@@ -25,6 +25,9 @@ require_relative "memory_layout"
 require_relative "vm_constants"
 
 module FaRuby
+  # 生成コードを組み立てられない
+  class GeneratorError < StandardError; end
+
   # インデックスレジスタの退避・復元
   #
   # **Z はラダーと共有する資源です。** faRuby が作業用に書き換えるので、
@@ -393,12 +396,31 @@ module FaRuby
     #
     # **同じスロットを 2 度指すときは行を出しません** (key で覚えます)。
     # 命令 1 つの中で R[a] を何度も触るため、毎回 Z を組み直すと無駄が出ます。
+    #
+    # **覚えた行がどの枝の中だったかも覚えます。** 別の枝から使おうとすると
+    # 止めます。載せる行を通らずに Z を読むことになり、生成コードは通って
+    # しまうので実機で初めて分かります (OP_SEND のクラスの行がそうでした)。
     def slot_ref(key, index_expr, base_expr, z: nil, device: layout.device_name, device_base: 0)
-      return @slot_cache[key] if @slot_cache.key?(key)
+      if (cached = @slot_cache[key])
+        slot, path = cached
+        return slot if branch_reachable?(path)
+
+        raise GeneratorError,
+              "#{key.inspect} のアドレスを載せた行は別の枝の中にあります。" \
+              "枝に入る前に載せてください (載せた枝 #{path.inspect} / " \
+              "いまの枝 #{@emitter.block_path.inspect})"
+      end
 
       z ||= key == [:reg, :a] ? Z_PRIMARY : Z_SECONDARY
       @emitter.line "Z#{z} = #{words_of(index_expr)} + #{base_expr}"
-      @slot_cache[key] = build_slot(z, device, device_base)
+      @slot_cache[key] = [build_slot(z, device, device_base), @emitter.block_path]
+      @slot_cache[key].first
+    end
+
+    # 覚えた枝がいまの枝から見て手前にあるか (道筋の前方一致)
+    def branch_reachable?(path)
+      now = @emitter.block_path
+      path.each_with_index.all? { |id, i| now[i] == id }
     end
 
     # 添字をワード単位に直す

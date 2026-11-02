@@ -78,11 +78,21 @@ module FaRuby
                    features: Features.all)
       @lines = []
       @level = level
+      @block_path = []
+      @blocks_opened = 0
       @layout = layout
       @dialect = dialect
       @features = features
       @devices = dialect.devices_for(layout, self)
     end
+
+    # いま開いている枝の道筋
+    #
+    # **字下げの深さだけでは兄弟の枝を見分けられません。** 枝を開くたびに
+    # 別の番号を振るので、道筋が前方一致するかどうかで「同じ流れの中か」が
+    # 分かります。アドレスを Z に載せた行が別の枝の中にあると、そこを通らずに
+    # 読むことになるため、devices がこれを見て弾きます。
+    def block_path = @block_path.dup
 
     # この機種に載せる組み込みメソッド
     #
@@ -199,8 +209,16 @@ module FaRuby
     end
     alias comment note
 
-    def indent = @level += 1
-    def dedent = @level -= 1
+    def indent
+      @level += 1
+      @blocks_opened += 1
+      @block_path << @blocks_opened
+    end
+
+    def dedent
+      @level -= 1
+      @block_path.pop
+    end
 
     # 命令ごとにインデックスレジスタの割り当てをリセットする
     def begin_instruction = devices.forget_slots
@@ -2299,6 +2317,13 @@ module FaRuby
       end
       line "Z3 = Z3 + 1"
       line "Z6 = #{fixed_at(3)}   ' ユーザー定義メソッドID"
+
+      # **レシーバのアドレスは枝に入る前に載せます。** どちらの枝も読みます —
+      # 組み込みは型の検査と計算に、ユーザー定義はクラスの行を引くために。
+      # 組み込みの枝の中で載せていたので、ユーザー定義ではその行を通らず、
+      # Z に残っていたバイトコードのアドレスをタグとして読んでいました
+      # (クラスでもオブジェクトでもないと見えるので 0 行目 = main に落ちる)。
+      reg_slot(name)
 
       if_else_block("Z5 <> #{METHOD_NONE}") do
         note "組み込みメソッド。フレームを積まずその場で計算する"

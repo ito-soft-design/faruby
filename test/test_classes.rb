@@ -468,6 +468,51 @@ class TestClasses < Minitest::Test
     end
   end
 
+  # **レシーバのアドレスを枝に入る前に載せていること**
+  #
+  # 枝が有るだけでは足りません。KV はアドレスを Z に組み立ててから指すので、
+  # 載せる行が組み込みの枝の中にあると、ユーザー定義の枝ではその行を通らず、
+  # Z に残っていたバイトコードのアドレスをタグとして読みます。**クラスでも
+  # オブジェクトでもないと見えるので 0 行目 (main) に落ち、名前が重なって
+  # いなければ ERROR=3、重なっていれば黙って main の方を呼びます。**
+  #
+  # KV-5000 の実機でこうなっていました。三菱は添字で直に指すので出ません。
+  def test_the_receiver_address_is_loaded_before_the_builtin_split
+    %w[KV-5000 KV-X500].each do |model|
+      source = FaRuby::KvsGenerator.new(dialect: FaRuby::Dialect.for(model)).source
+      before = source[/ユーザー定義メソッドID.*?組み込みメソッド。フレームを積まず/m]
+
+      refute_nil before, "#{model}: OP_SEND の振り分けが見つからない"
+      assert_match(/^\s*Z1 :?= .*#{FaRuby::VmConstants::SLOT_WORDS}/, before,
+                   "#{model}: **レシーバのアドレスが枝の中で載っている**。" \
+                   "ユーザー定義の枝はその行を通らない")
+    end
+  end
+
+  # 上を一般に防ぐ仕掛け。枝をまたいで Z を使い回そうとしたら生成で止まる
+  def test_an_address_taken_in_one_branch_cannot_be_used_in_another
+    emitter = FaRuby::KvsEmitter.new(layout: layout, dialect: FaRuby::Dialect.for("KV-5000"))
+    emitter.begin_instruction
+
+    error = assert_raises(FaRuby::GeneratorError) do
+      emitter.if_("Z5 = 1") { emitter.send(:reg_slot, :a) }
+      emitter.if_("Z5 = 2") { emitter.send(:reg_slot, :a) }
+    end
+
+    assert_includes error.message, "別の枝"
+  end
+
+  # 同じ流れの中なら使い回せる (行は 1 回しか出ない)
+  def test_an_address_taken_before_a_branch_is_reused_inside_it
+    emitter = FaRuby::KvsEmitter.new(layout: layout, dialect: FaRuby::Dialect.for("KV-5000"))
+    emitter.begin_instruction
+    emitter.send(:reg_slot, :a)
+    emitter.if_("Z5 = 1") { emitter.send(:reg_slot, :a) }
+
+    assert_equal 1, emitter.lines.count { |l| l.match?(/^\s*Z1 = /) },
+                 "アドレスを載せる行が 1 回で済んでいない"
+  end
+
   # `new` が確保したオブジェクトの見出しにクラス番号を書くこと
   def test_the_generated_new_writes_the_class_number
     FaRuby::Dialect.all.each do |dialect|
