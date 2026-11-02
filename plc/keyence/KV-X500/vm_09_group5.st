@@ -1219,6 +1219,13 @@ IF EM54:Z9 <= 62 THEN
         IF EM0:Z1 = 13 THEN
           Z7 := EM1:Z1;
         END_IF;
+        IF EM0:Z1 = 10 THEN
+          // オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main)
+          IF EM1:Z1 <> 0 THEN
+            Z7 := (EM1:Z1 - 1) * 52 + 2008 + Z9;
+            Z7 := EM0:Z7;
+          END_IF;
+        END_IF;
         Z7 := Z7 * 32;
         Z3 := Z7 + Z6 + 552 + Z9;
         Z5 := EM0:Z3;   // 本体の irep 番号

@@ -2790,6 +2790,13 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 13 THEN
           Z7 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
         END_IF;
+        IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 10 THEN
+          (* オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main) *)
+          IF VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 <> 0 THEN
+            Z7 := (VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 - 1) * 52 + 6008;
+            Z7 := D0Z7;
+          END_IF;
+        END_IF;
         Z7 := Z7 * 32;
         Z3 := Z7 + Z6 + 552 + Z9;
         Z5 := D0Z3;   (* 本体の irep 番号 *)
@@ -4061,6 +4068,13 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       Z6 := 0;
       IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 13 THEN
         Z6 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
+      END_IF;
+      IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 10 THEN
+        (* オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main) *)
+        IF VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 <> 0 THEN
+          Z6 := (VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 - 1) * 52 + 6008;
+          Z6 := D0Z6;
+        END_IF;
       END_IF;
       Z6 := Z6 * 32;
       Z3 := Z6 + Z5 + 552 + Z9;

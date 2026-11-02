@@ -444,4 +444,36 @@ class TestClasses < Minitest::Test
 
     assert_equal 0, codegen.general_global_count, "@x @y が枠を取ってしまっている"
   end
+  # --- 生成物とシミュレータが食い違わないこと ---
+  #
+  # **実機で ERROR=3 が出て気づきました。** シミュレータには
+  # 「オブジェクトなら見出しのクラス番号を読む」枝があるのに、生成器には
+  # 入っていませんでした。クラスのテストは全部シミュレータで走るので、
+  # 874 件が通ったまま実機だけが落ちました。
+  #
+  # **型の枝は生成物の側でも見ます。** 片方だけ直すと同じことが起きます。
+
+  def test_the_generated_lookup_reads_the_class_from_an_object
+    FaRuby::Dialect.all.each do |dialect|
+      source = FaRuby::KvsGenerator.new(dialect: dialect).source
+      row = source[/探索の行.*?\n(?:.*\n){0,12}/m]
+
+      refute_nil row, "#{dialect.model}: 探索の行が見つからない"
+      # **番号では見ません。** タグ 10 は 1 命令 10 ワードのフレームにも
+      # 出てくるので、`"10"` を探すと枝が無くても当たってしまいます
+      # (このテストを書いたとき実際に空振りしました)
+      assert_includes row, "オブジェクトは見出しのクラス番号",
+                      "#{dialect.model}: **オブジェクトの枝が無い** " \
+                      "(a.value が main の行を引いて ERROR=3 になる)"
+    end
+  end
+
+  # `new` が確保したオブジェクトの見出しにクラス番号を書くこと
+  def test_the_generated_new_writes_the_class_number
+    FaRuby::Dialect.all.each do |dialect|
+      source = FaRuby::KvsGenerator.new(dialect: dialect).source
+
+      assert_includes source, "クラス番号", "#{dialect.model}: 見出しに書いていない"
+    end
+  end
 end

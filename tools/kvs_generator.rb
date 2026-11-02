@@ -2662,15 +2662,23 @@ end
 # 見ます。`3.times` のブロックの中では R[0] がレシーバ (整数) になって
 # self が残らないため、`OP_SSEND` のレシーバが整数で届きます。
 # 1 本の表だったころと同じ行なので、いまのプログラムの動きは変わりません。
-def class_row_into(z, name)
-  slot = reg_slot(name)
-  note "探索の行。レシーバのクラス (main は 0 行目)"
-  line "Z#{z} = 0"
-  if_("#{slot.tag} = #{TT_CLASS}") { line "Z#{z} = #{slot.word(0)}" }
-  line "Z#{z} = Z#{z} * #{layout.max_methods}"
-end
+    def class_row_into(z, name)
+      slot = reg_slot(name)
+      note "探索の行。レシーバのクラス (main は 0 行目)"
+      line "Z#{z} = 0"
+      if_("#{slot.tag} = #{TT_CLASS}") { line "Z#{z} = #{slot.word(0)}" }
+      if_("#{slot.tag} = #{TT_OBJECT}") do
+        note "オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main)"
+        if_("#{slot.word(0)} <> 0") do
+          line "Z#{z} = (#{slot.word(0)} - 1) * #{layout.array_slot_words} + " \
+               "#{block_offset(layout.array_pool_base)}"
+          line "Z#{z} = #{word_at(z, MemoryLayout::OBJECT_CLASS)}"
+        end
+      end
+      line "Z#{z} = Z#{z} * #{layout.max_methods}"
+    end
 
-# シンボル表からメソッド番号・引数の数・種別を読む
+    # シンボル表からメソッド番号・引数の数・種別を読む
     #
     # Z5 = メソッド番号, Z8 = 引数の数, Z4 = 種別
     # Z1 / Z2 は使わない。この後レジスタスロットの参照に使うため。

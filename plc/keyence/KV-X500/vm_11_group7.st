@@ -392,6 +392,13 @@ IF EM54:Z9 <= 95 THEN
       IF EM0:Z1 = 13 THEN
         Z6 := EM1:Z1;
       END_IF;
+      IF EM0:Z1 = 10 THEN
+        // オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main)
+        IF EM1:Z1 <> 0 THEN
+          Z6 := (EM1:Z1 - 1) * 52 + 2008 + Z9;
+          Z6 := EM0:Z6;
+        END_IF;
+      END_IF;
       Z6 := Z6 * 32;
       Z3 := Z6 + Z5 + 552 + Z9;
       EM0:Z3 := EM1:Z2;
