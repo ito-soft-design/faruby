@@ -87,47 +87,54 @@ module FaRuby
       self
     end
 
-    # 外した機能を使っていないか
-    #
-    # **実機で「未知のオペコード」にはしません。** 転送してから止まるのでは
-    # 気づくのが遅すぎます。機能を外した機種 (MELSEC Q など) に、その機能を
-    # 使ったプログラムを送ろうとしたら、ここで止めます。
-    #
-    # 見るのは **命令と組み込みメソッドの名前**です。どちらもバイトコードに
-    # 残るので、ソースを読み直す必要はありません。
-    #
-    # **メソッドは機能に帰着させません。** `length` は配列もハッシュも文字列も
-    # 使うので、どの型のつもりで書いたかはバイトコードから決まりません。
-    # 名前をそのまま挙げ、外した機能の一覧を添えます。
-    def check_features(ireps)
-      return if features.all?
+# このプログラムが使っている、この機種に無い機能
+#
+# **設定を見て答えます** (`features`)。全機能の機種では必ず空です。
+#
+# 見るのは **命令と組み込みメソッドの名前**で、どちらもバイトコードに
+# 残るのでソースを読み直す必要はありません。
+#
+# **メソッドは機能に帰着させません。** `length` は配列もハッシュも文字列も
+# 使うので、どの型のつもりで書いたかはバイトコードから決まりません。
+# 名前をそのまま挙げます。
+def unsupported_features(ireps = irep_entries.map { |e| e[:irep] })
+  return [] if features.all?
 
-      used = Set.new
-      ireps.each do |irep|
-        Disassembler.new(irep).disassemble.each do |inst|
-          used << inst[:name]
-          next unless CALL_OPCODES.include?(inst[:name])
+  used = Set.new
+  ireps.each do |irep|
+    Disassembler.new(irep).disassemble.each do |inst|
+      used << inst[:name]
+      next unless CALL_OPCODES.include?(inst[:name])
 
-          name = irep.symbols[inst[:operands][1].to_i]
-          used << :"method:#{name}" if name
-        end
-      end
-
-      # 命令は 1 つの機能のものなので、何を使ったか言い切れる
-      found = features.disabled.select do |feature|
-        Features::OPCODES.fetch(feature, []).any? { |op| used.include?(op) }
-      end
-      methods = features.removed_methods.select { |m| used.include?(:"method:#{m}") }
-      return if found.empty? && methods.empty?
-
-      parts = found.map { |f| Features::EXAMPLES.fetch(f) }
-      parts << "外した型のメソッド (#{methods.join(', ')})" unless methods.empty?
-      raise FeatureError,
-            "この機種では#{parts.join(' と ')}を使えません。" \
-            "**プログラム容量が足りないため設定で外しています** " \
-            "(#{features.disabled.join(' / ')} が無効。faruby.yml の features)。" \
-            "doc/melsec.md"
+      name = irep.symbols[inst[:operands][1].to_i]
+      used << :"method:#{name}" if name
     end
+  end
+
+  # 命令は 1 つの機能のものなので、何を使ったか言い切れる
+  parts = features.disabled.select do |feature|
+    Features::OPCODES.fetch(feature, []).any? { |op| used.include?(op) }
+  end.map { |f| Features::EXAMPLES.fetch(f) }
+  methods = features.removed_methods.select { |m| used.include?(:"method:#{m}") }
+  parts << "外した型のメソッド (#{methods.join(', ')})" unless methods.empty?
+  parts
+end
+
+# 外した機能を使っていないか
+#
+# **実機で「未知のオペコード」にはしません。** 転送してから止まるのでは
+# 気づくのが遅すぎます。機能を外した機種 (MELSEC Q など) に、その機能を
+# 使ったプログラムを送ろうとしたら、ここで止めます。
+def check_features(ireps)
+  parts = unsupported_features(ireps)
+  return if parts.empty?
+
+  raise FeatureError,
+        "この機種では#{parts.join(' と ')}を使えません。" \
+        "**プログラム容量が足りないため設定で外しています** " \
+        "(#{features.disabled.join(' / ')} が無効。faruby.yml の features)。" \
+        "doc/melsec.md"
+end
 
     # 1 つの irep が持てる名前の数
     #

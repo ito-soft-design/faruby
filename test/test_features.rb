@@ -190,4 +190,35 @@ class TestFeatures < Minitest::Test
 
     FaRuby::PlcCodegen.new(irep, layout: kv.layout, features: kv.features).validate!
   end
+
+  # --- 実機確認 ---
+
+  # **飛ばす判断は設定から出します。** 例外を捕まえるのではなく述語で聞く
+  def test_the_predicate_answers_from_the_config
+    q = FaRuby::Config.defaults.for_model("Q")
+    irep = compile(%($DM100 = "abc"))
+
+    codegen = FaRuby::PlcCodegen.new(irep, layout: q.layout, features: q.features,
+                                     device_syntax: FaRuby::DeviceSyntax.melsec)
+
+    refute_empty codegen.unsupported_features
+    assert_includes codegen.unsupported_features.join, "文字列"
+  end
+
+  def test_the_predicate_is_empty_for_a_full_feature_model
+    kv = FaRuby::Config.defaults.for_model("KV-5000")
+    irep = compile(%($DM100 = "abc"))
+
+    codegen = FaRuby::PlcCodegen.new(irep, layout: kv.layout, features: kv.features)
+
+    assert_empty codegen.unsupported_features
+  end
+
+  # **実機確認は飛ばします。** エラーにすると 17 本が赤くなって意味が薄れる
+  def test_the_hardware_check_skips_instead_of_erroring
+    source = File.read(File.expand_path("../tools/hardware_check.rb", __dir__), encoding: "utf-8")
+
+    assert_includes source, "unsupported_features", "設定を見ていない"
+    assert_match(/unsupported_features.*\n.*:skipped/m, source, "飛ばしていない")
+  end
 end

@@ -130,6 +130,12 @@ module FaRuby
       irep = compile(path)
       return Result.new(name, :error, "mrbc 失敗", 0, []) unless irep
 
+      # **設定で外した機能を使うプログラムは飛ばします** (tools/features.rb)。
+      # 容量が足りない機種 (MELSEC Q) は文字列・配列・ハッシュを載せて
+      # いません。エラーではないので、飛ばした理由を出します
+      missing = codegen_for(irep, syntax).unsupported_features
+      return Result.new(name, :skipped, "#{missing.join(' / ')} は無効", 0, []) unless missing.empty?
+
       state = execute(irep, syntax)
       unless state[:status] == VM_FINISHED
         return Result.new(name, :error,
@@ -158,12 +164,18 @@ module FaRuby
       irep
     end
 
+    # この機種向けのコードジェネレータ
+    #
+    # **機種の設定をそのまま渡します。** メモリ配置も機能も機種のものです
+    def codegen_for(irep, syntax = @syntax)
+      PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
+                     device_syntax: syntax, features: @config.features)
+    end
+
     # 転送して走らせ、終わるまで待つ
     def execute(irep, syntax = @syntax)
       @transfer.write_status(VM_STOPPED)
-      codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
-                               device_syntax: syntax,
-                               features: @config.features)
+      codegen = codegen_for(irep, syntax)
       @transfer.write_image(codegen.memory_image)
       @transfer.write_fixed_image(codegen.fixed_image)
       @transfer.write_status(VM_RUNNING)
