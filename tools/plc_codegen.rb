@@ -8,6 +8,7 @@ require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
 require_relative "disasm"
+require_relative "features"
 require "set"
 require "plc_access"
 
@@ -23,13 +24,20 @@ module FaRuby
     # encoding はソースの文字コード (ENCODING_*)。バイト列の変換には使わず、
     # `length` と `[]` が文字の切れ目を見つけるために VM へ渡すだけです。
     def initialize(irep, steps_per_cycle: 50, layout: MemoryLayout.default,
-                   encoding: ENCODING_UTF8, device_syntax: DeviceSyntax.keyence)
+                   encoding: ENCODING_UTF8, device_syntax: DeviceSyntax.keyence,
+                   features: Features.all)
       @irep = irep
       @steps_per_cycle = steps_per_cycle
       @layout = layout
       @encoding = encoding
       @device_syntax = device_syntax
+      @features = features
     end
+
+    # この機種に載せる機能 (tools/features.rb)
+    #
+    # **外した機能を使っていたら転送の前に止めます。**
+    attr_reader :features
 
     # Ruby プログラムに書いたデバイスの読み方
     #
@@ -66,6 +74,7 @@ module FaRuby
       check_symbols_per_irep(list)
       check_undefined_methods(list)
       check_read_only_variables(list)
+      check_features(list)
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -76,6 +85,48 @@ module FaRuby
       # 配列を壊しながら動きます。** 他の領域と同じく転送する前に止めます
       check_limit("変数の数", general_global_count, layout.max_globals)
       self
+    end
+
+    # 外した機能を使っていないか
+    #
+    # **実機で「未知のオペコード」にはしません。** 転送してから止まるのでは
+    # 気づくのが遅すぎます。機能を外した機種 (MELSEC Q など) に、その機能を
+    # 使ったプログラムを送ろうとしたら、ここで止めます。
+    #
+    # 見るのは **命令と組み込みメソッドの名前**です。どちらもバイトコードに
+    # 残るので、ソースを読み直す必要はありません。
+    #
+    # **メソッドは機能に帰着させません。** `length` は配列もハッシュも文字列も
+    # 使うので、どの型のつもりで書いたかはバイトコードから決まりません。
+    # 名前をそのまま挙げ、外した機能の一覧を添えます。
+    def check_features(ireps)
+      return if features.all?
+
+      used = Set.new
+      ireps.each do |irep|
+        Disassembler.new(irep).disassemble.each do |inst|
+          used << inst[:name]
+          next unless CALL_OPCODES.include?(inst[:name])
+
+          name = irep.symbols[inst[:operands][1].to_i]
+          used << :"method:#{name}" if name
+        end
+      end
+
+      # 命令は 1 つの機能のものなので、何を使ったか言い切れる
+      found = features.disabled.select do |feature|
+        Features::OPCODES.fetch(feature, []).any? { |op| used.include?(op) }
+      end
+      methods = features.removed_methods.select { |m| used.include?(:"method:#{m}") }
+      return if found.empty? && methods.empty?
+
+      parts = found.map { |f| Features::EXAMPLES.fetch(f) }
+      parts << "外した型のメソッド (#{methods.join(', ')})" unless methods.empty?
+      raise FeatureError,
+            "この機種では#{parts.join(' と ')}を使えません。" \
+            "**プログラム容量が足りないため設定で外しています** " \
+            "(#{features.disabled.join(' / ')} が無効。faruby.yml の features)。" \
+            "doc/melsec.md"
     end
 
     # 1 つの irep が持てる名前の数

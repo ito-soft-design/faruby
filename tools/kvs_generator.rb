@@ -17,6 +17,7 @@
 
 require_relative "vm_constants"
 require_relative "dialect"
+require_relative "features"
 require_relative "devices"
 require_relative "memory_layout"
 require_relative "opcode_table"
@@ -73,13 +74,35 @@ module FaRuby
 
     attr_reader :dialect
 
-    def initialize(level: 0, layout: MemoryLayout.default, dialect: KvsDialect.new)
+    def initialize(level: 0, layout: MemoryLayout.default, dialect: KvsDialect.new,
+                   features: Features.all)
       @lines = []
       @level = level
       @layout = layout
       @dialect = dialect
+      @features = features
       @devices = dialect.devices_for(layout, self)
     end
+
+    # この機種に載せる組み込みメソッド
+    #
+    # **ここが OP_SEND の 24% の出どころです。** 外した型のメソッド
+    # (`push` / `keys` / `<<` など) を落とすと振り分けごと消えます。
+    def plain_methods
+      BUILTIN_PLAIN_METHODS.select { |_, name| features.method?(name) }
+    end
+
+    # ブロックを取るメソッド。`each` は配列とハッシュのものなので外れ得る
+    def block_methods
+      BLOCK_METHODS.select { |code| features.method?(METHOD_NAMES.fetch(code)) }
+    end
+
+    # この機種に載せる機能 (tools/features.rb)
+    #
+    # **外した型の枝は生成しません。** かさばっているのは命令そのもの
+    # ではなく、`OP_SEND` や `OP_GETIDX` のような共有する命令の中の型
+    # ごとの枝だからです。
+    attr_reader :features
 
     # この機種で指せるビットデバイス
     #
@@ -586,29 +609,18 @@ module FaRuby
       note "デバイス族そのものへの代入 ($DM = 1) は意味を持たない"
       vm_error(0x16)
       dedent
-      chain_head(false, "#{slot.tag} = #{TT_STRING}")
-      indent
-      store_string_into_device(slot, 0x16)
-      dedent
-      chain_head(false, "#{slot.tag} = #{TT_ARRAY}")
-      indent
-      store_array_into_device(slot, 0x16)
-      dedent
-      chain_head(false, "#{slot.tag} = #{TT_HASH}")
-      indent
-      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
-      vm_error(0x16)
-      dedent
-      line "ELSE"
-      indent
-      if_("Z8 >= #{ACCESS_STR}") do
-        note "文字列の桁 (T) に文字列以外を書こうとした"
-        vm_error(0x16)
+      # **桁の検査はここでは枝ではなく `ELSE` の中です。** 連枝の続きなので
+      # 枝が全部外れても閉じる必要があり、閉じるのは呼ぶ側です
+      write_value_branches(slot, 0x16, first: false, width_branch: false) do
+        if features.strings?
+          if_("Z8 >= #{ACCESS_STR}") do
+            note "文字列の桁 (T) に文字列以外を書こうとした"
+            vm_error(0x16)
+          end
+        end
+        prepare_write_scratches(slot)
+        device_dispatch(:write, slot: slot, error_code: 0x16)
       end
-      prepare_write_scratches(slot)
-      device_dispatch(:write, slot: slot, error_code: 0x16)
-      dedent
-      line "END IF"
     end
 
     # 文字列をデバイスへ書く
@@ -711,22 +723,32 @@ module FaRuby
       line "IF #{ref.tag} = #{TT_DEVICE} THEN"
       indent
       device_ref_lookup(ref, index.value, error_code)
-      if_else_block("Z8 >= #{ACCESS_STR}") { load_string_from_device(ref, error_code, heap_code) }
-      device_dispatch(:read, slot: ref, error_code: error_code)
-      end_block
+      if features.strings?
+        if_else_block("Z8 >= #{ACCESS_STR}") { load_string_from_device(ref, error_code, heap_code) }
+        device_dispatch(:read, slot: ref, error_code: error_code)
+        end_block
+      else
+        device_dispatch(:read, slot: ref, error_code: error_code)
+      end
       dedent
-      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
-      indent
-      load_array_index(ref, index)
-      dedent
-      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
-      indent
-      load_hash_index(ref, index)
-      dedent
-      line "ELSE IF #{ref.tag} = #{TT_STRING} THEN"
-      indent
-      load_string_index(ref, index, heap_code)
-      dedent
+      if features.arrays?
+        line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+        indent
+        load_array_index(ref, index)
+        dedent
+      end
+      if features.hashes?
+        line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+        indent
+        load_hash_index(ref, index)
+        dedent
+      end
+      if features.strings?
+        line "ELSE IF #{ref.tag} = #{TT_STRING} THEN"
+        indent
+        load_string_index(ref, index, heap_code)
+        dedent
+      end
       line "ELSE IF #{ref.tag} = #{TT_INTEGER} THEN"
       indent
       load_integer_bit(ref, index, error_code)
@@ -759,7 +781,51 @@ module FaRuby
       end_block
     end
 
-    # R[a][R[a+1]] = R[a+2]
+    # デバイスへ書く値の型で分ける
+    #
+    # **外した型の枝は出しません。** 全部外れると分岐そのものが消え、
+    # 数値をそのまま書くだけになります (Q で 1 割ほど効きます)。
+    # `first:` が偽なら、外側の連枝がすでに開いています (`OP_SETGV` は種別の
+    # 連枝の続きです)。その場合は枝が全部外れても `ELSE` を閉じる必要があります。
+    def write_value_branches(value, error_code, first: true, width_branch: true, &plain)
+      branches = []
+      if features.strings?
+        branches << ["#{value.tag} = #{TT_STRING}", -> { store_string_into_device(value, error_code) }]
+      end
+      if features.arrays?
+        branches << ["#{value.tag} = #{TT_ARRAY}", -> { store_array_into_device(value, error_code) }]
+      end
+      if features.hashes?
+        branches << ["#{value.tag} = #{TT_HASH}", lambda {
+          note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
+          vm_error(error_code)
+        }]
+      end
+      if features.strings? && width_branch
+        branches << ["Z8 >= #{ACCESS_STR}", lambda {
+          note "文字列の桁 (T) に文字列以外を書こうとした"
+          vm_error(error_code)
+        }]
+      end
+
+      # 枝が無く、連枝も開いていなければ分岐そのものが要らない
+      return plain.call if branches.empty? && first
+
+      branches.each do |condition, body|
+        chain_head(first, condition)
+        first = false
+        indent
+        body.call
+        dedent
+      end
+      line "ELSE"
+      indent
+      plain.call
+      dedent
+      line "END IF"
+    end
+
+# R[a][R[a+1]] = R[a+2]
     def store_device_index(name, error_code, heap_code)
       ref = reg_slot(name)
       index = reg_next_slot(name)
@@ -768,39 +834,23 @@ module FaRuby
       line "IF #{ref.tag} = #{TT_DEVICE} THEN"
       indent
       device_ref_lookup(ref, index.value, error_code)
-      chain_head(true, "#{value.tag} = #{TT_STRING}")
-      indent
-      store_string_into_device(value, error_code)
+      write_value_branches(value, error_code) do
+        prepare_write_scratches(value)
+        device_dispatch(:write, slot: value, error_code: error_code)
+      end
       dedent
-      chain_head(false, "#{value.tag} = #{TT_ARRAY}")
-      indent
-      store_array_into_device(value, error_code)
-      dedent
-      chain_head(false, "#{value.tag} = #{TT_HASH}")
-      indent
-      note "ハッシュはデバイスへ写せない。鍵の並べ方が決まらない"
-      vm_error(error_code)
-      dedent
-      chain_head(false, "Z8 >= #{ACCESS_STR}")
-      indent
-      note "文字列の桁 (T) に文字列以外を書こうとした"
-      vm_error(error_code)
-      dedent
-      line "ELSE"
-      indent
-      prepare_write_scratches(value)
-      device_dispatch(:write, slot: value, error_code: error_code)
-      dedent
-      line "END IF"
-      dedent
-      line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
-      indent
-      store_array_index(ref, index, value, error_code, heap_code)
-      dedent
-      line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
-      indent
-      store_hash_index(ref, index, value, heap_code)
-      dedent
+      if features.arrays?
+        line "ELSE IF #{ref.tag} = #{TT_ARRAY} THEN"
+        indent
+        store_array_index(ref, index, value, error_code, heap_code)
+        dedent
+      end
+      if features.hashes?
+        line "ELSE IF #{ref.tag} = #{TT_HASH} THEN"
+        indent
+        store_hash_index(ref, index, value, heap_code)
+        dedent
+      end
       line "ELSE"
       indent
       note "デバイス参照・配列・ハッシュ以外への添字代入は未対応"
@@ -2118,7 +2168,7 @@ module FaRuby
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
       note "ブロックを取るメソッドはレシーバの型で並んでいるため連続していない"
       line "Z6 = 0"
-      BLOCK_METHODS.each { |code| if_("Z5 = #{code}") { line "Z6 = 1" } }
+      block_methods.each { |code| if_("Z5 = #{code}") { line "Z6 = 1" } }
       if_("Z6 = 0") do
         note "ブロックを取らないメソッドにブロックを渡した"
         vm_error(unknown_code)
@@ -2279,7 +2329,7 @@ module FaRuby
       check_receiver_type(dest, type_code)
 
       first = true
-      BUILTIN_PLAIN_METHODS.each_key do |code|
+      plain_methods.each_key do |code|
         chain_head(first, "Z5 = #{code}")
         first = false
         indent
@@ -3288,11 +3338,17 @@ end
     attr_reader :dialect
 
     def initialize(opcodes = OpcodeTable.all, layout: MemoryLayout.default,
-                   dialect: KvsDialect.new)
+                   dialect: KvsDialect.new, features: Features.all)
       @layout = layout
       @dialect = dialect
+      @features = features
+      # **機種の段階と設定の機能、両方で絞ります。** 段階は方言が持つ
+      # 「その機種に書いたところまで」、機能は設定で外したものです
       @opcodes = dialect.select_opcodes(opcodes)
+                        .select { |op| features.opcode?(OpcodeTable::MRUBY_OPCODES[op.code]&.first) }
     end
+
+    attr_reader :features
 
     # デコード対象のオペコードを保持するデバイス
     def opcode_var = query.opcode
@@ -3301,7 +3357,7 @@ end
     def dispatch_var = query.state(layout.dispatch_addr)
 
     # 行を出さずにデバイス式だけを尋ねるための emitter
-    def query = @query ||= KvsEmitter.new(layout: layout, dialect: dialect)
+    def query = @query ||= KvsEmitter.new(layout: layout, dialect: dialect, features: features)
 
     # ラダーに置く順のファイル名 (番号付き)
     #
@@ -3389,7 +3445,7 @@ end
 
     # リセットハンドラ (毎スキャン実行、RESET_REQ = 1 のインスタンスだけ動く)
     def build_init_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       z = KvsEmitter::Z_PRIMARY
 
       e.note "======================================="
@@ -3524,7 +3580,7 @@ end
 
     # [前口上] ラダーの外側 FOR の前に 1 回だけ動く
     def build_prologue_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       emit_header(e)
       e.blank
       e.save_z_registers
@@ -3547,7 +3603,7 @@ end
     # **インスタンスは 1 つです。** VM 状態を型付きラベルで指すので、
     # 先頭をずらして使い回すことができません (tools/devices.rb)。
     def build_body_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       emit_header(e)
       e.blank
       e.save_z_registers
@@ -3578,7 +3634,7 @@ end
 
     # [頭出し] 外側 FOR の中、内側 FOR の前
     def build_instance_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       emit_box_header(e, "インスタンスの頭出し", "外側 FOR の中、内側 FOR の前")
       e.blank
       e.note "次のインスタンスのブロック先頭を Z#{KvsEmitter::Z_INSTANCE} に載せる"
@@ -3602,7 +3658,7 @@ end
 
     # [取り込み] 内側 FOR の中、群のスクリプトの前
     def build_fetch_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       emit_box_header(e, "命令の取り込み", "内側 FOR の中、群のスクリプトの前")
       e.blank
       e.note "**止まっていたら、どの群の範囲にも入らない番号を置く。**"
@@ -3622,7 +3678,7 @@ end
 
     # [群 n] 内側 FOR の中。自分の担当番号だけ実行する
     def build_group_source(group, index)
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       range = group_range(index)
       emit_box_header(e, format("オペコード 0x%02X - 0x%02X", range.first, range.last),
                       "内側 FOR の中 (#{index + 1} 番目の群)")
@@ -3649,7 +3705,7 @@ end
 
     # [後始末] ラダーの外側 FOR の後に 1 回だけ動く
     def build_epilogue_source
-      e = KvsEmitter.new(layout: layout, dialect: dialect)
+      e = KvsEmitter.new(layout: layout, dialect: dialect, features: features)
       emit_box_header(e, "後始末", "外側 FOR の後")
       e.blank
       e.restore_z_registers

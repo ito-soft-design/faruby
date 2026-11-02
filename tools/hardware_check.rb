@@ -162,7 +162,8 @@ module FaRuby
     def execute(irep, syntax = @syntax)
       @transfer.write_status(VM_STOPPED)
       codegen = PlcCodegen.new(irep, steps_per_cycle: @config.steps_per_cycle, layout: @layout,
-                               device_syntax: syntax)
+                               device_syntax: syntax,
+                               features: @config.features)
       @transfer.write_image(codegen.memory_image)
       @transfer.write_fixed_image(codegen.fixed_image)
       @transfer.write_status(VM_RUNNING)

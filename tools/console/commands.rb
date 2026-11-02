@@ -170,7 +170,8 @@ module FaRuby
         end
 
         codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
-                                 device_syntax: device_syntax)
+                                 device_syntax: device_syntax,
+                                 features: @config.features)
         mutable = @transfer.write_image(codegen.memory_image)
         fixed = @transfer.write_fixed_image(codegen.fixed_image)
         ireps = codegen.irep_entries
@@ -254,7 +255,8 @@ module FaRuby
         end
 
         codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
-                                 device_syntax: device_syntax)
+                                 device_syntax: device_syntax,
+                                 features: @config.features)
         results = [@transfer.verify_image(codegen.memory_image),
                    @transfer.verify_fixed_image(codegen.fixed_image)]
         total = results.sum { |r| r[:total] }
@@ -356,7 +358,8 @@ module FaRuby
 
         puts "=== Global Variables ==="
         codegen = PlcCodegen.new(@last_irep, steps_per_cycle: @config.steps_per_cycle, layout: layout,
-                                 device_syntax: device_syntax)
+                                 device_syntax: device_syntax,
+                                 features: @config.features)
 
         # 割り当ては codegen と同一のロジックを使う (汎用グローバルの採番を含む)
         codegen.device_mappings.each do |m|

@@ -51,6 +51,7 @@
 require "yaml"
 require_relative "dialect"
 require_relative "memory_layout"
+require_relative "features"
 
 module FaRuby
   # 設定が不正・不足している場合に発生
@@ -74,7 +75,7 @@ module FaRuby
 
     attr_reader :connection, :connections, :model,
                 :plc_protocol, :plc_host, :plc_port,
-                :mrbc_path, :steps_per_cycle, :layout,
+                :mrbc_path, :steps_per_cycle, :layout, :features,
                 :config_path, :default_path
 
     # config_path: 利用者設定のパス (nil なら自動探索)
@@ -110,6 +111,9 @@ module FaRuby
       @mrbc_path       = merged.dig("mrbc", "path") || find_mrbc
       @steps_per_cycle = merged.dig("vm", "steps_per_cycle")
       @layout          = MemoryLayout.from_config(merged["memory"] || {})
+      # **容量が足りない機種は機能を外せます** (tools/features.rb)。
+      # 既定は全部載せます
+      @features        = Features.new(merged["features"] || {})
     end
 
     # 既定値のみの設定 (生成スクリプトの再現性を保つために使う)

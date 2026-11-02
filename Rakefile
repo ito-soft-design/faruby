@@ -31,9 +31,15 @@ task :vm_core do
   config = FaRuby::Config.new
   stale = []
   FaRuby::Dialect.all.each do |dialect|
-    layout = config.for_model(dialect.model).layout
+    model = config.for_model(dialect.model)
+    layout = model.layout
+    # **容量が足りない機種は機能を外します** (tools/features.rb)。外した
+    # 機能のコードは生成物から丸ごと落ちます
+    features = model.features
     puts "#{dialect.model} (#{dialect.name}): #{layout}"
-    generator = FaRuby::KvsGenerator.new(layout: layout, dialect: dialect)
+    puts "  機能: #{features}" unless features.all?
+    generator = FaRuby::KvsGenerator.new(layout: layout, dialect: dialect,
+                                         features: features)
     FileUtils.mkdir_p(generator.output_dir)
     changed = generator.write!
     if changed.empty?
