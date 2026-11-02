@@ -215,6 +215,68 @@ module FaRuby
     # 引けるよう、load のときに VM 状態へ 1 ワード書いておきます。
     def init_method_id = method_ids.fetch("initialize", 0)
 
+    # irep の番号 => その irep が属するクラスの番号
+    #
+    # **ホストは木をたどれるので、実行時に探す必要がありません。** クラス本体は
+    # `OP_EXEC` が指す子 irep で、メソッドの本体はその子です。`OP_CLASS` が
+    # どのレジスタにどのクラスを置いたかを覚えておけば、`OP_EXEC` の相手が
+    # どのクラスの本体かが分かります。
+    #
+    # 子の通し番号は `first_child + 親から見た子の番号` で引けます (irep は
+    # 階層ごとに並べてあるため)。
+    def class_of_irep
+      @class_of_irep ||= begin
+        owner = { 0 => CLASS_MAIN }
+        irep_entries.each_with_index do |entry, index|
+          in_register = {}
+          Disassembler.new(entry[:irep]).disassemble.each do |inst|
+            a, b = inst[:operands]
+            case inst[:name]
+            when :OP_CLASS, :OP_GETCONST
+              name = entry[:irep].symbols[b.to_i]
+              in_register[a] = class_numbers[name] if name
+            when :OP_EXEC
+              # クラス本体。**その中の def はこのクラスのもの**
+              body = entry[:first_child] + b.to_i
+              owner[body] = in_register[a] if in_register[a]
+            when :OP_METHOD
+              # メソッドの本体は、それを定義している irep と同じクラス
+              child = entry[:first_child] + b.to_i
+              owner[child] = owner[index] if owner.key?(index)
+            end
+          end
+        end
+        owner
+      end
+    end
+
+    # クラス番号 => そのクラスのインスタンス変数の名前 => 何番目か
+    #
+    # **コンパイル時に決まります。** どの irep がどのクラスのメソッドかが
+    # 分かるので、`@n` が「そのクラスの何番目か」も分かります。実行時に
+    # 名前を照合する必要がありません。
+    def ivar_indexes
+      @ivar_indexes ||= begin
+        table = {}
+        irep_entries.each_with_index do |entry, index|
+          number = class_of_irep[index]
+          next if number.nil? || number == CLASS_MAIN
+
+          names = table[number] ||= {}
+          Disassembler.new(entry[:irep]).disassemble.each do |inst|
+            next unless IVAR_OPCODES.include?(inst[:name])
+
+            name = entry[:irep].symbols[inst[:operands][1].to_i]
+            names[name] ||= names.size if name
+          end
+        end
+        table
+      end
+    end
+
+    # インスタンス変数を読み書きする命令
+    IVAR_OPCODES = %i[OP_GETIV OP_SETIV].freeze
+
     # 枠を取った汎用グローバル変数の数
     #
     # 同じ名前は irep をまたいでも同じ枠なので、アドレスで数えます。

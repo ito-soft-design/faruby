@@ -275,4 +275,73 @@ class TestClasses < Minitest::Test
     assert_equal VM_ERROR, sim.status
     assert_equal 4, error_of(sim), "レシーバの型エラーで止まらない"
   end
+
+  # --- `@` の下ごしらえ (段階 3 の前半) ---
+  #
+  # **ホストは木をたどれるので、実行時に探す必要がありません。** まだ VM は
+  # これを使っていません (`@` は共有のまま)。
+
+  def test_the_host_knows_which_class_owns_each_irep
+    _sim, codegen = run_source(<<~SRC)
+      class Counter
+        def initialize
+          @n = 1
+        end
+        def value
+          @n
+        end
+      end
+      class Other
+        def initialize
+          @label = 2
+        end
+        def label
+          @label
+        end
+      end
+    SRC
+
+    counter = codegen.class_numbers.fetch("Counter")
+    other = codegen.class_numbers.fetch("Other")
+    owners = codegen.class_of_irep
+
+    assert_equal CLASS_MAIN, owners[0], "トップレベルは main"
+    assert_includes owners.values, counter
+    assert_includes owners.values, other
+    # 本体もメソッドも同じクラスのもの
+    assert_equal 3, owners.values.count(counter), "クラス本体と 2 つのメソッド"
+  end
+
+  # **`@n` が何番目かはコンパイル時に決まります**
+  def test_instance_variables_are_numbered_per_class
+    _sim, codegen = run_source(<<~SRC)
+      class Counter
+        def initialize(n)
+          @n = n
+          @max = 10
+        end
+        def value
+          @n
+        end
+      end
+      class Other
+        def initialize
+          @label = 1
+        end
+        def label
+          @label
+        end
+      end
+      @top = 3
+      $DM0 = @top
+    SRC
+
+    counter = codegen.ivar_indexes.fetch(codegen.class_numbers.fetch("Counter"))
+    other = codegen.ivar_indexes.fetch(codegen.class_numbers.fetch("Other"))
+
+    assert_equal({ "@n" => 0, "@max" => 1 }, counter)
+    assert_equal({ "@label" => 0 }, other)
+    refute_includes codegen.ivar_indexes.keys, CLASS_MAIN,
+                    "トップレベルの @top は変数のまま"
+  end
 end
