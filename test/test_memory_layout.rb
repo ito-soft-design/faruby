@@ -395,4 +395,51 @@ class TestMemoryLayout < Minitest::Test
 
     assert_match(/16 ビット/, error.message)
   end
+  # VM 状態のオフセットが重ならないこと
+  #
+  # **実機で 1 日潰しました。** `OFFSET_INIT_METHOD_ID` を 27 に置いたところ、
+  # Z の退避が 21 から **9 ワード** (Z1-Z9) なので 21-29 が埋まっていて、
+  # 毎スキャン Z7 が上書きしていました。`new` が `initialize` を呼ばなくなり、
+  # 実機だけ ERROR=3 で止まりました。
+  #
+  # **幅のあるものを数え落とさないための表です。** 新しいオフセットを足す人は
+  # ここに幅を書くことになり、重なれば落ちます。
+  WIDTHS = {
+    OFFSET_STEP_COUNT: 2,      # 32 ビット
+    OFFSET_TEMP32: 2,
+    OFFSET_TEMP32_B: 2,
+    OFFSET_Z_SAVE: Layout::Z_SAVE_WORDS,
+    OFFSET_TICKS: 2,
+    # **`STR_TEMP` は 1 ワードです。** 「文字列の作業用 4 ワード」は
+    # STR_INDEX / STR_FLAG / STR_TEMP / STR_LIMIT の 4 つを指す言い方で、
+    # 1 つが 4 ワードという意味ではありません (このテストで気づきました)
+    OFFSET_CLOCK_10MS: SLOT_WORDS,
+    OFFSET_CLOCK_100MS: SLOT_WORDS,
+    OFFSET_CLOCK_1S: SLOT_WORDS,
+  }.freeze
+
+  def test_the_vm_state_offsets_do_not_overlap
+    taken = {}
+    Layout.constants.grep(/\AOFFSET_/).sort.each do |name|
+      start = Layout.const_get(name)
+      WIDTHS.fetch(name, 1).times do |i|
+        word = start + i
+        previous = taken[word]
+        refute previous,
+               "VM 状態の +#{word} が #{previous} と #{name} で重なっています " \
+               "(**幅のあるものを数え落としていませんか。** WIDTHS を見てください)"
+        taken[word] = name
+      end
+    end
+  end
+
+  # 全部が VM 状態領域に収まること
+  def test_every_offset_fits_in_the_vm_state_area
+    Layout.constants.grep(/\AOFFSET_/).each do |name|
+      last = Layout.const_get(name) + WIDTHS.fetch(name, 1) - 1
+
+      assert_operator last, :<, Layout::VM_STATE_WORDS,
+                      "#{name} が VM 状態領域 (#{Layout::VM_STATE_WORDS} ワード) を超えています"
+    end
+  end
 end

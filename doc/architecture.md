@@ -432,6 +432,7 @@ Keyence KV-5000 の EM (拡張データメモリ) を既定で使用します。
 | +12 | NLOCALS | .U | ローカル変数数 |
 | +13 | RESET_REQ | .U | リセット要求 (1=要求, vm_init で処理後 0 に戻る) |
 | +14 | NUM_SYMBOLS | .U | シンボル数 |
+| +15 | INIT_METHOD_ID | .U | `initialize` の名前 ID。`new` が引く (ホストが load で書く。0 なら呼ばない) |
 | +16-17 | TEMP32 | .L | 32ビット合成スクラッチ (下位が先) |
 | +18-19 | TEMP32_B | .L | 2つ目の32ビットスクラッチ。除算の切り下げ補正で余りを置く |
 | +20 | LOOP_COUNTER | .U | fetch-decode-execute の FOR カウンタ |

@@ -1181,12 +1181,13 @@ IF EM54:Z9 <= 62 THEN
           FOR Z6 = Z4 TO Z5
             EM0:Z6 = 0
           NEXT
-          EM1.L:Z1 = EM39:Z9   ' スロット番号
+          ' **値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない
+          EM1.L:Z1 = EM39:Z9 + 1   ' スロット番号 + 1
           EM0:Z1 = 10
           EM39:Z9 = EM39:Z9 + 1
           ' initialize があれば呼ぶ。名前の ID はホストが load で書いている
-          IF EM27:Z9 <> 0 THEN
-            Z3 = Z8 * 32 + EM27:Z9 + 552 + Z9
+          IF EM15:Z9 <> 0 THEN
+            Z3 = Z8 * 32 + EM15:Z9 + 552 + Z9
             Z5 = EM0:Z3   ' initialize の irep
             IF Z5 <> 0 THEN
               IF EM31:Z9 >= 16 THEN

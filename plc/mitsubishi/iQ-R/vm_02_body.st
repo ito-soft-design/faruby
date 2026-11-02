@@ -4489,7 +4489,8 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           FOR Z6 := Z4 TO Z5 DO
             D0Z6 := 0;
           END_FOR;
-          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP);   (* スロット番号 *)
+          (* **値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMARRAYSP) + 1;   (* スロット番号 + 1 *)
           VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 10;
           VMARRAYSP := VMARRAYSP + 1;
           (* initialize があれば呼ぶ。名前の ID はホストが load で書いている *)

@@ -2611,36 +2611,37 @@ module FaRuby
 
     # --- 組み込みメソッドの本体 ---
 
-# Class#new。オブジェクトを確保して initialize を呼ぶ
-#
-# **レシーバはクラスです** (`TT_CLASS`)。プールのスロットを 1 つ取り、
-# 見出しにクラス番号を入れ、値スロットをインスタンス変数に使います。
-#
-# **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
-# 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
-def new_object(name, argc_name, heap_code, depth_code)
-  dest = reg_slot(name)
-  note "クラス番号を控える。R[a] はオブジェクトで上書きする"
-  line "Z8 = #{dest.word(0)}"
-  note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-  if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
-  line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
+    # Class#new。オブジェクトを確保して initialize を呼ぶ
+    #
+    # **レシーバはクラスです** (`TT_CLASS`)。プールのスロットを 1 つ取り、
+    # 見出しにクラス番号を入れ、値スロットをインスタンス変数に使います。
+    #
+    # **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
+    # 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
+    def new_object(name, argc_name, heap_code, depth_code)
+      dest = reg_slot(name)
+      note "クラス番号を控える。R[a] はオブジェクトで上書きする"
+      line "Z8 = #{dest.word(0)}"
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
        "#{block_offset(layout.array_pool_base)}"
-  line "#{word_at(3, MemoryLayout::OBJECT_CLASS)} = Z8   ' クラス番号"
-  note "インスタンス変数は未代入 (TT_EMPTY) から始める"
-  line "Z4 = Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
-  line "Z5 = Z4 + #{layout.max_array_len * SLOT_WORDS - 1}"
-  line "FOR Z6 = Z4 TO Z5"
-  indent
-  line "#{word_at(6)} = 0"
-  dedent
-  line "NEXT"
-  line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-  line "#{dest.tag} = #{TT_OBJECT}"
-  line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      line "#{word_at(3, MemoryLayout::OBJECT_CLASS)} = Z8   ' クラス番号"
+      note "インスタンス変数は未代入 (TT_EMPTY) から始める"
+      line "Z4 = Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      line "Z5 = Z4 + #{layout.max_array_len * SLOT_WORDS - 1}"
+      line "FOR Z6 = Z4 TO Z5"
+      indent
+      line "#{word_at(6)} = 0"
+      dedent
+      line "NEXT"
+      note "**値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない"
+      line "#{dest.value} = #{state(layout.array_sp_addr)} + 1   ' スロット番号 + 1"
+      line "#{dest.tag} = #{TT_OBJECT}"
+      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
 
-  note "initialize があれば呼ぶ。名前の ID はホストが load で書いている"
-  if_("#{state(layout.init_method_id_addr)} <> 0") do
+      note "initialize があれば呼ぶ。名前の ID はホストが load で書いている"
+      if_("#{state(layout.init_method_id_addr)} <> 0") do
     line "Z3 = Z8 * #{layout.max_methods} + #{state(layout.init_method_id_addr)} + " \
          "#{layout.offset_of(layout.method_table_base)} + Z#{Z_INSTANCE}"
     line "Z5 = #{word_at(3)}   ' initialize の irep"
