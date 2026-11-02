@@ -512,20 +512,23 @@ module FaRuby
 
     attr_reader :layout
 
-    def initialize(layout, emitter = nil, labels = {}, retain_fixed: false)
+    def initialize(layout, emitter = nil, labels = {}, retained_devices: [])
       @layout = layout
       @emitter = emitter
       @labels = labels
-      @retain_fixed = retain_fixed
+      @retained_devices = retained_devices
       register_arrays
     end
 
-    # 固定領域のラベルを保持クラスにするか
+    # ラベルを保持クラスにするデバイスの頭文字
     #
-    # **iQ-R は ZR がラッチデバイスです。** そこに割り付けたラベルを
-    # `VAR_GLOBAL` にすると変換が通りません。GX Works2 にはこの検査が
-    # ありませんでした。
-    attr_reader :retain_fixed
+    # **ラッチした領域に割り付けたラベルは `VAR_GLOBAL` だと変換が
+    # 通りません** (GX Works3。GX Works2 にはこの検査がありませんでした)。
+    #
+    # iQ-R は可変領域 (D) も固定領域 (ZR) もラッチにしてあります
+    # (PLC パラメータの保存領域設定)。**特殊リレー (SM) は入りません** —
+    # ラッチの範囲ではなく、システムが持つデバイスです。
+    attr_reader :retained_devices
 
     # 配ったラベルの定義。**生成コードと 1 つの出どころから出ます**
     #
@@ -943,7 +946,8 @@ module FaRuby
 
     # ラベルの区分。**ラッチデバイスに割り付けたものは保持クラス**です
     def label_class(label)
-      retain_fixed && label.device.start_with?(fixed_device) ? "VAR_GLOBAL_RETAIN" : "VAR_GLOBAL"
+      retained = retained_devices.any? { |name| label.device.start_with?(name) }
+      retained ? "VAR_GLOBAL_RETAIN" : "VAR_GLOBAL"
     end
 
     # 先頭デバイスを手で設定するラベル。名前 => デバイス

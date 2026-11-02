@@ -306,12 +306,15 @@ module FaRuby
     # 行うので、デバイス層に持たせると 1 ファイルぶんしか集まりません。
     # 方言は 1 回の生成で 1 つなので、ここが全体の受け皿になります。
     def devices_for(layout, emitter)
-      MelsecDevices.new(layout, emitter, labels, retain_fixed: retain_fixed_labels?)
+      MelsecDevices.new(layout, emitter, labels,
+                        retained_devices: retained_devices(layout))
     end
 
-    # **ラッチデバイスに割り付けたラベルは保持クラスにします。** GX Works2 は
-    # 見ませんが、GX Works3 は `VAR_GLOBAL` だと変換を通しません。
-    def retain_fixed_labels? = false
+    # ラベルを保持クラスにするデバイス
+    #
+    # **GX Works2 は見ません。** ラッチした領域のラベルを `VAR_GLOBAL` に
+    # しても変換が通るので、Q では分ける必要がありません。
+    def retained_devices(_layout) = []
 
     def labels = @labels ||= {}
 
@@ -513,8 +516,12 @@ module FaRuby
     def model = "iQ-R"
     def name = "ST (GX Works3)"
 
-    # **ZR はラッチデバイスです** (実機で確認済み)
-    def retain_fixed_labels? = true
+    # **可変領域 (D) も固定領域 (ZR) もラッチです** (実機で確認済み)。
+    #
+    # PLC パラメータの保存領域設定で D をラッチにしたので、そこに割り付けた
+    # ラベルも保持クラスでないと変換が通りません。**特殊リレー (SM) は
+    # 入れません** — ラッチの範囲ではなく、システムが持つデバイスです。
+    def retained_devices(layout) = [layout.device_name, layout.fixed_device_name]
 
     # GX Works3 は列が増え、並びも違います
     def label_columns
