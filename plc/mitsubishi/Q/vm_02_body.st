@@ -684,6 +684,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         Z3 := Z6;
         VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[(Z3 - 4000) / 4].SLNUM;
         VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := VMSLOT[(Z3 - 4000) / 4].SLTAG;
+      ELSIF Z1 = 7 THEN
+        (* インスタンス変数はレシーバの中。self のスロットの Z5 番目 *)
+        Z3 := (VMSLOTW[VMREGSLOT + 0].SLW0 - 1) * 52 + 6008 + 4;
+        Z3 := Z3 + Z5 * 4;
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[(Z3 - 4000) / 4].SLNUM;
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := VMSLOT[(Z3 - 4000) / 4].SLTAG;
       ELSIF Z1 = 1 THEN
         (* デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分) *)
         VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 := Z6;   (* ベースアドレス *)
@@ -782,6 +788,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z1 = 5 THEN
         (* 汎用グローバルは値スロット。型タグごと写す *)
         Z3 := Z6;
+        VMSLOT[(Z3 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+        VMSLOT[(Z3 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG;
+      ELSIF Z1 = 7 THEN
+        (* インスタンス変数はレシーバの中。self のスロットの Z5 番目 *)
+        Z3 := (VMSLOTW[VMREGSLOT + 0].SLW0 - 1) * 52 + 6008 + 4;
+        Z3 := Z3 + Z5 * 4;
         VMSLOT[(Z3 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
         VMSLOT[(Z3 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG;
       ELSIF Z1 = 1 THEN

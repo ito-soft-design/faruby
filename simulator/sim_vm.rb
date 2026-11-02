@@ -294,6 +294,11 @@ module FaRuby
     # 転送前に分かるので、実行時に幅を見る必要は無い。
     def load_global_into_reg(dest, sym_operand, heap_code)
       type, addr, access, kind = device_entry(operand(sym_operand))
+      # **クラスのインスタンス変数はレシーバの中。** 種別で分かるので
+      # self の型を見る必要はありません (ホストが解決済み)
+      # **索引はシンボル表の 1 ワード目** (device_entry の 1 つ目)
+      return copy_slot_into_reg(ivar_addr(type), operand(dest)) if kind == SYMBOL_KIND_IVAR
+
       dev = device_memory(type)
       return vm_error(0x15) unless dev
       return copy_slot_into_reg(addr, operand(dest)) if kind == SYMBOL_KIND_GLOBAL
@@ -649,6 +654,14 @@ module FaRuby
       end
     end
 
+    # インスタンス変数 n 番目の値スロットのアドレス
+    #
+    # **self (R[0]) が持っているスロット番号**から求めます。値は
+    # スロット + 1 です (0 は main)。
+    def ivar_addr(index)
+      layout.array_element_addr(read_reg(0) - 1, index)
+    end
+
     # オブジェクトのクラス。見出しに入れたクラス番号を読む
     #
     # **値は スロット + 1** です (0 は main)。
@@ -997,6 +1010,8 @@ module FaRuby
 
     def store_reg_into_global(sym_operand, src)
       type, addr, access, kind = device_entry(operand(sym_operand))
+      return copy_reg_into_slot(operand(src), ivar_addr(type)) if kind == SYMBOL_KIND_IVAR
+
       dev = device_memory(type)
       return vm_error(0x16) unless dev
       return copy_reg_into_slot(operand(src), addr) if kind == SYMBOL_KIND_GLOBAL

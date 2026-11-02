@@ -476,6 +476,11 @@ module FaRuby
       line "Z3 = Z6"
       copy_slot(from: slot_on(3), to: slot)
       dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_IVAR}")
+      indent
+      ivar_addr_into(3)
+      copy_slot(from: slot_on(3), to: slot)
+      dedent
       chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
       indent
       assign_device_ref(slot)
@@ -569,6 +574,11 @@ module FaRuby
       indent
       note "汎用グローバルは値スロット。型タグごと写す"
       line "Z3 = Z6"
+      copy_slot(from: slot, to: slot_on(3))
+      dedent
+      chain_head(false, "Z1 = #{SYMBOL_KIND_IVAR}")
+      indent
+      ivar_addr_into(3)
       copy_slot(from: slot, to: slot_on(3))
       dedent
       chain_head(false, "Z1 = #{SYMBOL_KIND_FAMILY}")
@@ -1008,7 +1018,20 @@ module FaRuby
       end
     end
 
-    # R[a] = クラス (OP_CLASS / OP_GETCONST)
+    # インスタンス変数 n 番目の値スロットのアドレスを Z<z> に置く
+    #
+    # **置き場所は self (R[0]) が持っているスロット**です。値は スロット + 1
+    # なので 1 引きます (0 は main)。何番目かはシンボル表の 1 ワード目
+    # (Z5) に入っていて、ホストがコンパイル時に解決しています。
+    def ivar_addr_into(z)
+      note "インスタンス変数はレシーバの中。self のスロットの Z5 番目"
+      self_slot = devices.reg_slot([:reg_self, :ivar], "0", z: Z_VALUE)
+      line "Z#{z} = (#{self_slot.word(0)} - 1) * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)} + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+      line "Z#{z} = Z#{z} + Z5 * #{SLOT_WORDS}"
+    end
+
+# R[a] = クラス (OP_CLASS / OP_GETCONST)
     #
     # **実行時にクラスを作りません。** ホストがコンパイル時に番号を振って
     # シンボル表の 1 ワード目に入れてあるので、読んで置くだけです。

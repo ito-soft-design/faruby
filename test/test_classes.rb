@@ -344,4 +344,104 @@ class TestClasses < Minitest::Test
     refute_includes codegen.ivar_indexes.keys, CLASS_MAIN,
                     "トップレベルの @top は変数のまま"
   end
+  # --- オブジェクトごとの `@` (段階 3) ---
+
+  # **これが段階 3 の目的です。** 2 つのインスタンスが別の値を持つ
+  def test_two_objects_keep_separate_instance_variables
+    sim, = run_source(<<~SRC)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+      end
+      a = Counter.new(3)
+      b = Counter.new(8)
+      $DM0 = a.value + b.value * 100
+    SRC
+
+    assert_equal VM_FINISHED, sim.status, "完了しなかった (error=#{error_of(sim)})"
+    assert_equal 803, dm0(sim), "a=3 b=8 にならない (共有されている)"
+  end
+
+  # 書き換えても混ざらない
+  def test_writing_one_object_does_not_touch_the_other
+    sim, = run_source(<<~SRC)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def bump
+          @n = @n + 1
+        end
+        def value
+          @n
+        end
+      end
+      a = Counter.new(1)
+      b = Counter.new(1)
+      a.bump
+      a.bump
+      $DM0 = a.value * 10 + b.value
+    SRC
+
+    assert_equal 31, dm0(sim), "a=3 b=1 にならない"
+  end
+
+  # 1 つのクラスで `@` が 2 つ以上
+  def test_a_class_may_hold_several_instance_variables
+    sim, = run_source(<<~SRC)
+      class Point
+        def initialize(x, y)
+          @x = x
+          @y = y
+        end
+        def sum
+          @x + @y
+        end
+      end
+      $DM0 = Point.new(3, 4).sum
+    SRC
+
+    assert_equal 7, dm0(sim)
+  end
+
+  # **トップレベルの `@` は変数のまま。** self は main 1 つなので今までどおり
+  def test_a_top_level_instance_variable_stays_a_variable
+    sim, codegen = run_source(<<~SRC)
+      class Counter
+        def initialize
+          @n = 1
+        end
+        def value
+          @n
+        end
+      end
+      @top = 5
+      $DM0 = Counter.new.value + @top
+    SRC
+
+    assert_equal 6, dm0(sim)
+    assert_equal 1, codegen.general_global_count, "@top のぶんだけ枠を使う"
+  end
+
+  # クラスのメソッドの `@` は枠を使わない
+  def test_class_instance_variables_take_no_global_slot
+    _sim, codegen = run_source(<<~SRC)
+      class Point
+        def initialize(x, y)
+          @x = x
+          @y = y
+        end
+        def sum
+          @x + @y
+        end
+      end
+      $DM0 = Point.new(1, 2).sum
+    SRC
+
+    assert_equal 0, codegen.general_global_count, "@x @y が枠を取ってしまっている"
+  end
 end

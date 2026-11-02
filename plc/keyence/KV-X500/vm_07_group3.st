@@ -248,6 +248,13 @@ IF EM54:Z9 <= 30 THEN
         Z3 := Z6;
         EM1.L:Z2 := EM1.L:Z3;
         EM0:Z2 := EM0:Z3;
+      ELSIF Z1 = 7 THEN
+        // インスタンス変数はレシーバの中。self のスロットの Z5 番目
+        Z3 := 0 + EM32:Z9 + Z9;
+        Z3 := (EM1:Z3 - 1) * 52 + 2008 + Z9 + 4;
+        Z3 := Z3 + Z5 * 4;
+        EM1.L:Z2 := EM1.L:Z3;
+        EM0:Z2 := EM0:Z3;
       ELSIF Z1 = 1 THEN
         // デバイス族。読み書きせず参照値を作る ($DM[i] の $DM の部分)
         EM1:Z2 := Z6;   // ベースアドレス
@@ -339,6 +346,13 @@ IF EM54:Z9 <= 30 THEN
       IF Z1 = 5 THEN
         // 汎用グローバルは値スロット。型タグごと写す
         Z3 := Z6;
+        EM1.L:Z3 := EM1.L:Z2;
+        EM0:Z3 := EM0:Z2;
+      ELSIF Z1 = 7 THEN
+        // インスタンス変数はレシーバの中。self のスロットの Z5 番目
+        Z3 := 0 + EM32:Z9 + Z9;
+        Z3 := (EM1:Z3 - 1) * 52 + 2008 + Z9 + 4;
+        Z3 := Z3 + Z5 * 4;
         EM1.L:Z3 := EM1.L:Z2;
         EM0:Z3 := EM0:Z2;
       ELSIF Z1 = 1 THEN

@@ -274,6 +274,14 @@ module FaRuby
       end
     end
 
+    # `@n` がそのクラスの何番目か。クラスのメソッドでなければ nil
+    def ivar_index(sym, owner)
+      return nil if owner.nil? || owner == CLASS_MAIN
+      return nil unless sym.start_with?("@") && !sym.start_with?("@@")
+
+      ivar_indexes.dig(owner, sym)
+    end
+
     # インスタンス変数を読み書きする命令
     IVAR_OPCODES = %i[OP_GETIV OP_SETIV].freeze
 
@@ -413,6 +421,13 @@ module FaRuby
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_IVAR
+          image[m[:table_addr]]     = m[:ivar_index]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = 0
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_CLASS
           image[m[:table_addr]]     = m[:class_number]
           image[m[:table_addr] + 1] = 0
@@ -483,10 +498,14 @@ module FaRuby
       @device_mappings ||= begin
         slots = {}
         method_ids = {}
-        irep_entries.flat_map do |entry|
+        irep_entries.each_with_index.flat_map do |entry, irep_index|
+          # **`@n` の行き先は irep の属するクラスで決まります。**
+          # クラスのメソッドならオブジェクトの中、トップレベルなら
+          # 今までどおり汎用グローバルのスロットです
+          owner = class_of_irep[irep_index]
           entry[:irep].symbols.each_with_index.map do |sym, idx|
             symbol_mapping(sym, entry[:symbol_base] + idx * DEVICE_TABLE_STRIDE,
-                           idx, slots, method_ids)
+                           idx, slots, method_ids, owner)
           end
         end
       end
@@ -574,7 +593,7 @@ module FaRuby
     # シンボル 1 つ分の割り当て
     #   slots      汎用グローバルの名前 => アドレス
     #   method_ids ユーザー定義メソッド名 => ID
-    def symbol_mapping(sym, table_addr, idx, slots, method_ids)
+    def symbol_mapping(sym, table_addr, idx, slots, method_ids, owner = CLASS_MAIN)
       parsed = parse_device_symbol(sym) || device_syntax.parse_family(sym)
       if sym == TICKS_SYMBOL
         # 経過時間。**普通のデバイス読みに落とします**
@@ -635,6 +654,14 @@ module FaRuby
         # クラスが無いので、トップレベルもメソッドの中もブロックの中も self は
         # `main` で、Ruby でもトップレベルの `@foo` は `main` のインスタンス
         # 変数です。名前ごとに 1 枠で正しく、近似ではありません。
+        index = ivar_index(sym, owner)
+        if index
+          # クラスのインスタンス変数。**オブジェクトごとに別の場所**
+          next_entry = { symbol: sym, index: idx, table_addr: table_addr,
+                         general: false, kind: SYMBOL_KIND_IVAR, ivar_index: index }
+          return next_entry
+        end
+
         slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))
         { symbol: sym, index: idx, table_addr: table_addr, general: true,
           kind: SYMBOL_KIND_GLOBAL,
@@ -866,6 +893,11 @@ module FaRuby
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_IVAR
+          lines.concat(ivar_table_lines(m))
+          next
+        end
+
         kind = ACCESS_NAMES[m[:access_type] || ACCESS_BIT]
         if m[:general]
           lines << "#{layout.fixed_device(table_addr)} = #{DEVICE_TYPE_EM}    ' #{m[:symbol]} type=EM (auto)"
@@ -882,6 +914,18 @@ module FaRuby
 
       lines.concat(generate_general_global_clear(mappings))
       lines
+    end
+
+    # インスタンス変数のエントリ。1 ワード目が「何番目か」
+    def ivar_table_lines(mapping)
+      addr = mapping[:table_addr]
+      [
+        "#{layout.fixed_device(addr)} = #{mapping[:ivar_index]}    ' #{mapping[:symbol]} 何番目か",
+        "#{layout.fixed_device(addr + 1)} = 0",
+        "#{layout.fixed_device(addr + 2)} = 0",
+        "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_IVAR}    " \
+        "' #{mapping[:symbol]} インスタンス変数",
+      ]
     end
 
     # クラス名のエントリ。1 ワード目がクラス番号 (メソッド表の行)
