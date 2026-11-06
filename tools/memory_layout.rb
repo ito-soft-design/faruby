@@ -19,7 +19,7 @@
 #                         呼び出しスタック      max_frames  × 10
 #                         メソッド表            max_classes × max_methods
 #                         汎用グローバル変数    max_globals × 4
-#                         配列プール            max_arrays  × (2 + max_array_len × 4)
+#                         配列プール            max_arrays  × (4 + max_array_len × 4)
 #
 # 固定ブロックの配置:
 #
@@ -714,7 +714,8 @@ module FaRuby
         ["IREPテーブル", irep_table_base,   bytecode_base - 1],
         ["バイトコード", bytecode_base,     pool_base - 1],
         ["定数プール",   pool_base,         device_table_base - 1],
-        ["シンボル表",   device_table_base, device_table_base + max_symbols * DEVICE_TABLE_STRIDE - 1],
+        ["シンボル表",   device_table_base, string_pool_base - 1],
+        ["文字列定数",   string_pool_base,  string_pool_base + max_string_words - 1],
       ]
       if fixed_padding.positive?
         list << ["予備 (端数調整)", fixed_origin + fixed_content_size,

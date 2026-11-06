@@ -54,6 +54,23 @@ class TestMemoryLayout < Minitest::Test
     assert_equal l.instance_size, l.regions.sum { |_, _, _, words| words }
   end
 
+  # 固定領域の一覧にも同じことを求める
+  #
+  # **一覧は表示だけのものですが、抜けていると領域があることに気づけません。**
+  # 文字列定数の行が長いあいだ落ちていて、`memmap` が 500 ワードを数え落とした
+  # まま通っていました (予備は合計から引いて出すので、行だけが消えます)。
+  def test_fixed_regions_do_not_overlap
+    l = Layout.default
+    l.fixed_regions.each_cons(2) do |(_, _, prev_to, _), (name, from, _, _)|
+      assert_equal prev_to + 1, from, "#{name} が前の領域と連続していない"
+    end
+  end
+
+  def test_fixed_instance_size_is_sum_of_fixed_regions
+    l = Layout.default
+    assert_equal l.fixed_instance_size, l.fixed_regions.sum { |_, _, _, words| words }
+  end
+
   # === 値スロットの整列 ===
   #
   # **三菱は値スロットを `VMSLOT[添字]` の配列で指します。** 添字は
