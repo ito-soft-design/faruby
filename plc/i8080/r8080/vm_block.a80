@@ -18,7 +18,7 @@ do_op_loadself:
   jmp vm_loop
 
 ; ---------------------------------------------------------------
-; OP_BLOCK (BB): R[a] = Proc(irep=first_child+b, outer=frame_sp)
+; OP_BLOCK (BB): R[a] = Proc(irep=child_irep(b), outer=frame_sp)
 ;
 ; ブロックを TT_PROC としてレジスタに格納する。
 ;   値の下位バイト = 子 irep 番号
@@ -28,32 +28,9 @@ do_op_block:
   call fetch_byte       ; A = a
   sta blk_reg_a
   call fetch_byte       ; A = b (子 irep インデックス)
-  sta blk_child_idx
 
-  ; 子 irep 番号 = IREP テーブル[cur_irep].first_child + b
-  ; まず cur_irep のエントリアドレスを求める
-  lda VM_STATE_BASE + OFF_CUR_IREP
-  ; A * 10 (IREP_ENTRY_BYTES)
-  mov c, a
-  add a           ; ×2
-  mov b, a        ; B = ×2
-  mov a, c
-  add a           ; ×2
-  add a           ; ×4
-  add a           ; ×8
-  add b           ; ×10
-  mov e, a
-  mvi d, 0
-  lxi h, IREP_TABLE_BASE
-  dad d           ; HL = エントリアドレス
-  ; +7 = IREP_OFF_FIRST_CHILD
-  lxi d, IREP_OFF_FIRST_CHILD
-  dad d
-  mov a, m        ; A = first_child
-  lda blk_child_idx
-  mov b, a        ; B = child index
-  mov a, m        ; A = first_child (re-read)
-  add b           ; A = first_child + b = 子 irep 番号
+  ; 子 irep 番号を算出 (共通サブルーチン)
+  call calc_child_irep  ; A = child irep 番号
 
   ; R[a] に TT_PROC を書く
   mov c, a        ; C = irep 番号 (val_lo)
@@ -80,7 +57,6 @@ block_set_outer:
   jmp vm_loop
 
 blk_reg_a:    db 0
-blk_child_idx: db 0
 
 ; ---------------------------------------------------------------
 ; OP_ENTER (W): 引数の仕様を読み飛ばす (3 バイト)

@@ -217,15 +217,19 @@ switch_irep:
   sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
   inx h
 
-  ; +4,+5: pool base (スキップ)
+  ; +4,+5: pool base → POOL_BASE
+  mov a, m
+  sta VM_STATE_BASE + OFF_POOL_BASE
   inx h
+  mov a, m
+  sta VM_STATE_BASE + OFF_POOL_BASE + 1
   inx h
 
   ; +6: nregs
   mov a, m
   sta VM_STATE_BASE + OFF_NREGS
 
-  ; +7: first_child (スキップ)
+  ; +7: subtree_size (スキップ)
   inx h
 
   ; +8,+9: sym_table_base → SYM_BASE

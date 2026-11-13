@@ -1,23 +1,23 @@
-; vm_globals.a80 — グローバル変数アクセス (16 ビット整数)
+; vm_globals.a80 — グローバル変数・インスタンス変数アクセス
 ;
-; OP_GETGV, OP_SETGV
+; OP_GETGV, OP_SETGV, OP_GETIV, OP_SETIV
 ;
-; シンボルテーブル (SYM_TABLE_BASE, 0x8300):
-;   エントリ i (2 バイト): グローバルスロットのアドレス (LE)
-;     0x0000 = 未対応のシンボル (メソッド名等)
+; シンボルテーブル (SYM_TABLE_BASE) の 2 バイトエントリ (D,E) で振り分ける:
+;   D >= 0x80      : グローバル変数アドレス (DE = アドレス)
+;   D == 0x03      : インスタンス変数 (E = ivar_index)
+;   D == 0, E == 0 : 未対応シンボル → エラー
 ;
 ; グローバルスロット (GLOBALS_BASE, 0xB000):
 ;   レジスタと同じ 4 バイト形式 (型タグ + 予約 + val_lo + val_hi)
 
 ; ---------------------------------------------------------------
-; OP_GETGV (BB): R[a] = global[symbols[b]]
+; OP_GETGV / OP_GETIV (BB): R[a] = global[symbols[b]]
 ; ---------------------------------------------------------------
 do_op_getgv:
   call fetch_byte       ; A = a (レジスタ番号)
   push psw
   call fetch_byte       ; A = b (シンボルインデックス)
-  ; シンボルテーブルからグローバルスロットのアドレスを取得
-  ; SYM_TABLE_BASE + b * 2
+  ; シンボルテーブルからエントリを取得
   add a                 ; A = b * 2
   mov e, a
   mvi d, 0
@@ -25,7 +25,13 @@ do_op_getgv:
   dad d                 ; HL = &sym_table[b]
   mov e, m
   inx h
-  mov d, m              ; DE = グローバルスロットアドレス
+  mov d, m              ; DE = エントリ値 (D=種別, E=値)
+
+  ; D == SYM_KIND_IVAR → インスタンス変数
+  mov a, d
+  cpi SYM_KIND_IVAR
+  jz getiv_handler
+
   ; アドレスが 0 なら未対応シンボル
   mov a, d
   ora e
@@ -41,8 +47,22 @@ getgv_ok:
   call copy_slot        ; [HL] → [DE]
   jmp vm_loop
 
+; --- IVAR GET ---
+; E = ivar_index, スタックに a が積まれている
+getiv_handler:
+  mov a, e
+  sta gv_ivar_idx
+  call calc_ivar_addr   ; HL = IVAR スロットアドレス
+  pop psw               ; A = a
+  push h                ; IVAR アドレスを退避
+  call get_reg_addr     ; HL = R[a] (コピー先)
+  xchg                  ; DE = R[a]
+  pop h                 ; HL = IVAR スロット (コピー元)
+  call copy_slot        ; [HL] → [DE]
+  jmp vm_loop
+
 ; ---------------------------------------------------------------
-; OP_SETGV (BB): global[symbols[b]] = R[a]
+; OP_SETGV / OP_SETIV (BB): global[symbols[b]] = R[a]
 ; ---------------------------------------------------------------
 do_op_setgv:
   call fetch_byte       ; A = a (レジスタ番号)
@@ -55,7 +75,13 @@ do_op_setgv:
   dad d                 ; HL = &sym_table[b]
   mov e, m
   inx h
-  mov d, m              ; DE = グローバルスロットアドレス
+  mov d, m              ; DE = エントリ値
+
+  ; D == SYM_KIND_IVAR → インスタンス変数
+  mov a, d
+  cpi SYM_KIND_IVAR
+  jz setiv_handler
+
   mov a, d
   ora e
   jnz setgv_ok
@@ -67,3 +93,56 @@ setgv_ok:
   ; copy_slot: [HL] → [DE]
   call copy_slot
   jmp vm_loop
+
+; --- IVAR SET ---
+; E = ivar_index, スタックに a が積まれている
+setiv_handler:
+  mov a, e
+  sta gv_ivar_idx
+  call calc_ivar_addr   ; HL = IVAR スロットアドレス
+  xchg                  ; DE = IVAR スロット (コピー先)
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a] (コピー元)
+  call copy_slot        ; [HL] → [DE]
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; calc_ivar_addr — R[0] (self) から IVAR スロットアドレスを算出
+;
+;   入力: gv_ivar_idx = ivar_index
+;   出力: HL = OBJECT_POOL_BASE + (val_lo-1)*32 + 4 + ivar_index*4
+;   破壊: A, B, DE
+;
+; R[0].val_lo = slot+1 (TT_OBJECT)
+; ---------------------------------------------------------------
+calc_ivar_addr:
+  ; R[0] の val_lo を読む
+  mvi a, 0
+  call get_reg_addr     ; HL = R[0]
+  inx h
+  inx h
+  mov a, m              ; A = val_lo (slot+1)
+  dcr a                 ; A = slot
+  ; slot * 32
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  add a                 ; ×16
+  add a                 ; ×32
+  mov e, a
+  mvi d, 0
+  lxi h, OBJECT_POOL_BASE
+  dad d                 ; HL = スロット先頭
+  ; + OBJECT_HEADER_SIZE (4)
+  lxi d, OBJECT_HEADER_SIZE
+  dad d
+  ; + ivar_index * 4
+  lda gv_ivar_idx
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = IVAR スロットアドレス
+  ret
+
+gv_ivar_idx: db 0

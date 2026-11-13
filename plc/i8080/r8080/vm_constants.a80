@@ -15,6 +15,7 @@ MAX_REGS                 EQU  40h
 STACK_TOP                EQU  0FDFFh
 DISPLAY_BASE             EQU  0FFF8h
 DISPLAY_SIZE             EQU  08h
+INIT_METHOD_ID_STORE     EQU  82FEh  ; initialize の method_id 格納アドレス
 
 ; --- バリュースロット ---
 
@@ -40,15 +41,19 @@ OFF_REG_BASE             EQU  14h  ; 2B  レジスタウィンドウのベース
 OFF_BC_BASE              EQU  16h  ; 2B  現在の IREP のバイトコード先頭
 OFF_FRAME_SP             EQU  18h  ; 1B  フレームスタックポインタ
 OFF_SYM_BASE             EQU  19h  ; 2B  現在の IREP のシンボルテーブルアドレス
+OFF_OBJ_SP               EQU  1Bh  ; 1B  次の空きオブジェクトスロット
+OFF_INIT_METHOD_ID       EQU  1Ch  ; 1B  initialize のメソッド ID
+OFF_POOL_BASE            EQU  1Dh  ; 2B  現在の IREP の定数プール先頭
+OFF_COL_SP               EQU  1Fh  ; 1B  次の空きコレクションスロット
 
 ; --- IREP テーブルエントリ ---
 
-IREP_ENTRY_BYTES         EQU  0Ah  ; 10 バイト/エントリ
+IREP_ENTRY_BYTES         EQU  0Ah
 IREP_OFF_BYTECODE        EQU  00h  ; 2B
 IREP_OFF_BYTECODE_LEN    EQU  02h  ; 2B
 IREP_OFF_POOL            EQU  04h  ; 2B
 IREP_OFF_NREGS           EQU  06h  ; 1B
-IREP_OFF_FIRST_CHILD     EQU  07h  ; 1B  最初の子 IREP 番号 (FFh=子なし)
+IREP_OFF_SUBTREE_SIZE    EQU  07h  ; 1B  DFS 前順サブツリーサイズ
 IREP_OFF_SYM_TABLE       EQU  08h  ; 2B  シンボルテーブル先頭アドレス
 
 ; --- 型タグ ---
@@ -59,8 +64,11 @@ TT_NIL                   EQU  01h
 TT_FALSE                 EQU  02h
 TT_TRUE                  EQU  03h
 TT_INTEGER               EQU  04h
-TT_OBJECT                EQU  0Ah  ; self (main)
-TT_PROC                  EQU  0Ch  ; ブロック (値 = irep 番号)
+TT_STRING                EQU  07h
+TT_ARRAY                 EQU  08h
+TT_OBJECT                EQU  0Ah
+TT_PROC                  EQU  0Ch
+TT_CLASS                 EQU  0Dh
 TT_FALSY_MAX             EQU  02h
 
 ; --- VM 実行状態 ---
@@ -75,6 +83,11 @@ VM_ERROR                 EQU  03h
 SYM_TABLE_BASE           EQU  8300h
 GLOBALS_BASE             EQU  0B000h
 
+; シンボル種別コード (上位バイト)
+SYM_KIND_USER_METHOD     EQU  01h  ; ユーザー定義メソッド
+SYM_KIND_CLASS           EQU  02h  ; クラス名
+SYM_KIND_IVAR            EQU  03h  ; インスタンス変数
+
 ; --- フレームスタック ---
 
 FRAME_STACK_BASE         EQU  0B100h
@@ -84,7 +97,7 @@ MAX_FRAMES               EQU  08h
 ; フレームフィールドのバイトオフセット
 FRAME_OFF_RETURN_PC      EQU  00h  ; 2B
 FRAME_OFF_RETURN_IREP    EQU  02h  ; 1B
-FRAME_OFF_RETURN_REG_BASE EQU 03h  ; 2B
+FRAME_OFF_RETURN_REG_BASE EQU  03h  ; 2B
 FRAME_OFF_KIND           EQU  05h  ; 1B
 FRAME_OFF_INDEX          EQU  06h  ; 2B
 FRAME_OFF_LIMIT          EQU  08h  ; 2B
@@ -94,9 +107,49 @@ FRAME_OFF_OUTER          EQU  0Ah  ; 1B
 FRAME_KIND_CALL          EQU  00h
 FRAME_KIND_ITERATE       EQU  01h  ; times / upto
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
+FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
 
 ; 外側フレームなし (トップレベル)
 FRAME_NONE               EQU  0FFh
+
+; --- メソッド表 ---
+
+METHOD_TABLE_BASE        EQU  0B160h
+MAX_CLASSES              EQU  04h
+MAX_METHODS_PER_CLASS    EQU  20h
+METHOD_TABLE_SIZE        EQU  80h
+CLASS_MAIN               EQU  00h
+METHOD_NEW               EQU  1Ch  ; Class#new
+METHOD_DISPLAY           EQU  1Dh  ; display(value)
+METHOD_GETKEY            EQU  1Eh  ; getkey
+METHOD_PUTS              EQU  1Fh  ; puts(value): ASCII 2 文字表示
+METHOD_SETSEG            EQU  20h  ; setseg(pos, pattern)
+METHOD_RAND              EQU  21h  ; rand(n)
+METHOD_LENGTH            EQU  12h  ; length / size
+METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
+METHOD_PUSH              EQU  16h  ; push (配列追加)
+KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力ルーチン
+
+; --- オブジェクトプール ---
+
+OBJECT_POOL_BASE         EQU  0B1E0h
+MAX_OBJECTS              EQU  08h
+OBJECT_SLOT_SIZE         EQU  20h  ; 32B/スロット
+OBJECT_HEADER_SIZE       EQU  04h
+MAX_IVARS                EQU  07h
+
+; --- コレクションプール (文字列・配列) ---
+
+COLLECTION_POOL_BASE     EQU  0B2E0h
+MAX_COL_SLOTS            EQU  10h
+COL_SLOT_SIZE            EQU  20h  ; 32B/スロット
+COL_HEADER_SIZE          EQU  02h  ; +0: type, +1: count
+COL_DATA_SIZE            EQU  1Eh  ; データ領域 (30B)
+COL_MAX_STRING_LEN       EQU  1Eh
+COL_MAX_ARRAY_ELEMS      EQU  07h
+COL_TYPE_FREE            EQU  00h
+COL_TYPE_STRING          EQU  01h
+COL_TYPE_ARRAY           EQU  02h
 
 ; --- Phase 1 オペコード ---
 

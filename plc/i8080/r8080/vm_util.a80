@@ -219,3 +219,101 @@ cmp16_ret_neg:
 cmp16_ret_pos:
   mvi a, 01h      ; val1 > val2
   ret
+
+; ---------------------------------------------------------------
+; calc_child_irep — 子 irep 番号を算出
+;
+;   入力: A = 子インデックス (オペランド b)
+;   出力: A = irep 番号
+;   破壊: B, C, DE, HL
+;
+; pos = cur_irep + 1 から開始し、b 個のサブツリーを
+; subtree_size で飛ばして目的の子 irep 番号を求める。
+; OP_BLOCK, OP_METHOD, OP_EXEC の共通サブルーチン。
+; レジスタのみ使用 (メモリ変数なし): B=残りカウント, C=pos。
+; ---------------------------------------------------------------
+calc_child_irep:
+  mov b, a                ; B = スキップ回数
+  lda VM_STATE_BASE + OFF_CUR_IREP
+  inr a                   ; A = cur_irep + 1
+  mov c, a                ; C = pos
+  mov a, b
+  ora a
+  jz cci_done             ; b == 0 → C をそのまま返す
+
+cci_loop:
+  ; HL = IREP_TABLE_BASE + IREP_OFF_SUBTREE_SIZE + pos * 10
+  mov a, c        ; A = pos
+  mov d, a        ; D = pos (退避)
+  add a           ; ×2
+  mov e, a        ; E = ×2
+  mov a, d
+  add a           ; ×2
+  add a           ; ×4
+  add a           ; ×8
+  add e           ; ×10
+  mov e, a
+  mvi d, 0
+  lxi h, IREP_TABLE_BASE + IREP_OFF_SUBTREE_SIZE
+  dad d           ; HL = &subtree_size[pos]
+
+  ; pos += subtree_size
+  mov a, c
+  add m           ; A = pos + subtree_size
+  mov c, a        ; C = 新しい pos
+
+  dcr b
+  jnz cci_loop
+
+cci_done:
+  mov a, c        ; A = 最終的な pos
+  ret
+
+; ---------------------------------------------------------------
+; class_of_reg — レジスタスロットからクラス番号を求める
+;
+;   入力: HL = スロットアドレス
+;   出力: A = class_number
+;   破壊: B, DE, HL
+;
+; - TT_CLASS  → val_lo (クラス自身の番号)
+; - TT_OBJECT, val_lo=0 → 0 (main)
+; - TT_OBJECT, val_lo>0 → OBJECT_POOL_BASE + (val-1)*32 のヘッダから読む
+; - その他 → 0 (main)
+; ---------------------------------------------------------------
+class_of_reg:
+  mov a, m        ; A = 型タグ
+  cpi TT_CLASS
+  jz cor_class
+  cpi TT_OBJECT
+  jz cor_object
+  ; その他 → main (class 0)
+  xra a
+  ret
+cor_class:
+  ; val_lo = class_number
+  inx h
+  inx h
+  mov a, m        ; A = val_lo = class_number
+  ret
+cor_object:
+  ; val_lo = slot+1 (0=main)
+  inx h
+  inx h
+  mov a, m        ; A = val_lo
+  ora a
+  rz              ; val_lo==0 → main (A=0)
+  ; slot = val_lo - 1, ヘッダアドレス = OBJECT_POOL_BASE + slot * 32
+  dcr a           ; A = slot
+  ; × 32 = 5 回の add a
+  add a           ; ×2
+  add a           ; ×4
+  add a           ; ×8
+  add a           ; ×16
+  add a           ; ×32
+  mov e, a
+  mvi d, 0
+  lxi h, OBJECT_POOL_BASE
+  dad d           ; HL = スロット先頭
+  mov a, m        ; A = class_number (ヘッダ +0)
+  ret

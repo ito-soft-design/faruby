@@ -6,7 +6,7 @@
 # テストと対話的な検証に使います。
 #
 # 依存: r8080 リポジトリ (外部)
-#   https://github.com/kito/r8080
+#   https://github.com/katsuyoshi/r8080
 
 require_relative "i8080_memory_layout"
 require_relative "vm_constants"
@@ -136,7 +136,57 @@ module FaRuby
       when TT_FALSE   then "false"
       when TT_TRUE    then "true"
       when TT_INTEGER then reg_value(index).to_s
+      when TT_STRING  then reg_string(index).inspect
+      when TT_ARRAY   then reg_array(index).inspect
       else "type=#{type} val=#{reg_value(index)}"
+      end
+    end
+
+    # --- コレクションプールの読み出し ---
+
+    # コレクションスロットのアドレス (0-based)
+    def col_slot_addr(slot)
+      Layout::COLLECTION_POOL_BASE + slot * Layout::COL_SLOT_SIZE
+    end
+
+    # コレクションスロットから文字列を読む
+    def col_string(slot)
+      addr = col_slot_addr(slot)
+      count = @cpu.mem[addr + 1]
+      (0...count).map { |i| @cpu.mem[addr + 2 + i] }.pack("C*")
+    end
+
+    # コレクションスロットから配列を読む (各要素を [type, value] で返す)
+    def col_array_raw(slot)
+      addr = col_slot_addr(slot)
+      count = @cpu.mem[addr + 1]
+      (0...count).map do |i|
+        elem_addr = addr + 2 + i * Layout::SLOT_BYTES
+        type = @cpu.mem[elem_addr]
+        val = @cpu.mem[elem_addr + 2] | (@cpu.mem[elem_addr + 3] << 8)
+        val = val - 0x10000 if type == TT_INTEGER && val >= 0x8000
+        [type, val]
+      end
+    end
+
+    # レジスタが TT_STRING のとき文字列を返す
+    def reg_string(index)
+      slot_num = reg_value(index) - 1  # val_lo = slot+1
+      col_string(slot_num)
+    end
+
+    # レジスタが TT_ARRAY のとき要素の値を配列で返す (整数のみ簡易)
+    def reg_array(index)
+      slot_num = reg_value(index) - 1
+      col_array_raw(slot_num).map do |type, val|
+        case type
+        when TT_INTEGER then val
+        when TT_STRING  then col_string(val - 1)
+        when TT_NIL     then nil
+        when TT_TRUE    then true
+        when TT_FALSE   then false
+        else [type, val]
+        end
       end
     end
 
@@ -155,8 +205,53 @@ module FaRuby
       0x39 => "C", 0x5E => "d", 0x79 => "E", 0x71 => "F",
     }.freeze
 
+    # セグメントパターン → ASCII 文字 (拡張版)
+    #
+    # ascii_seg_table (vm_main.a80) の全エントリの逆引きテーブル。
+    # SEG_TO_HEX は hex 16 文字だけだが、こちらは英字・記号を含む。
+    # 同じパターンに複数の文字が対応する場合は代表的な方を優先する。
+    SEG_TO_ASCII = {
+      0x00 => " ",
+      0x06 => "1",  # 'I', '!' も同じパターンだが '1' を優先
+      0x22 => '"',
+      0x02 => "'",
+      0x6D => "5",  # 'S', '$' も同じパターン
+      0x39 => "C",  # '(', '[' も同じ
+      0x0F => ")",  # ']' も同じ
+      0x04 => ",",
+      0x40 => "-",
+      0x08 => ".",  # '_' も同じ
+      0x5C => "0",  # 'O' も同じ
+      0x5B => "2",  # 'Z' も同じ
+      0x4F => "3",
+      0x66 => "4",
+      0x7D => "6",
+      0x27 => "7",
+      0x7F => "8",
+      0x6F => "9",
+      0x09 => ":",
+      0x48 => "=",
+      0x77 => "A",
+      0x7C => "b",
+      0x5E => "d",
+      0x79 => "E",
+      0x71 => "F",
+      0x3D => "G",
+      0x76 => "H",
+      0x1E => "J",
+      0x38 => "L",
+      0x54 => "n",
+      0x73 => "P",
+      0x67 => "Q",
+      0x50 => "r",
+      0x78 => "t",
+      0x3E => "U",  # 'V' も同じ
+      0x6E => "Y",
+      0x23 => "^",
+    }.freeze
+
     def display_text
-      display_raw.map { |seg| SEG_TO_HEX[seg] || "?" }.join
+      display_raw.map { |seg| SEG_TO_ASCII[seg] || SEG_TO_HEX[seg] || "?" }.join
     end
 
     # 7 セグ表示を ASCII アートで描画する (3 行)

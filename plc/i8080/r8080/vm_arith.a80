@@ -5,11 +5,20 @@
 ; ---------------------------------------------------------------
 ; OP_ADD (B): R[a] = R[a] + R[a+1]
 ;
-; Phase 2 は整数のみ。型タグの検査は省略し、TT_INTEGER として扱う。
+; R[a] の型で分岐:
+;   TT_INTEGER: 16 ビット加算
+;   TT_STRING:  文字列連結 (STRCAT と同じ)
 ; ---------------------------------------------------------------
 do_op_add:
   call fetch_byte       ; A = a
-  push psw              ; a を退避
+  push psw
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz add_string
+  ; --- 整数パス ---
+  pop psw               ; A = a
+  push psw
   ; R[a+1] のスロットアドレスを求める
   call get_reg_addr_next ; HL = R[a+1]
   call slot_to_value    ; HL = R[a+1] の値先頭
@@ -21,6 +30,11 @@ do_op_add:
   ; 16 ビット加算: val[a] += val[a+1]
   call add_value16
   jmp vm_loop
+  ; --- 文字列パス ---
+add_string:
+  pop psw               ; A = a
+  sta scat_reg_a
+  jmp strcat_body       ; do_op_strcat の本体を再利用
 
 ; ---------------------------------------------------------------
 ; OP_SUB (B): R[a] = R[a] - R[a+1]

@@ -45,6 +45,7 @@ module FaRuby
     TT_OBJECT  = 10
     TT_DEVICE  = 11    # デバイス族への参照 ($DM など)
     TT_PROC    = 12    # メソッドの本体への参照。値は irep 番号
+    TT_CLASS   = 13    # クラス参照。値は class_number
 
     # --- デバイス参照 (TT_DEVICE) の表現 ---
     #

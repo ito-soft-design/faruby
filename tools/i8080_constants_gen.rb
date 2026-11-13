@@ -62,6 +62,11 @@ module FaRuby
       lines.concat(section_irep_entry)
       lines.concat(section_type_tags)
       lines.concat(section_vm_status)
+      lines.concat(section_symbols_globals)
+      lines.concat(section_frame_stack)
+      lines.concat(section_method_table)
+      lines.concat(section_object_pool)
+      lines.concat(section_collection_pool)
       lines.concat(section_opcodes)
       lines.concat(section_opcode_formats)
 
@@ -87,6 +92,7 @@ module FaRuby
       lines << equ("STACK_TOP",      layout::STACK_TOP,      width: 4)
       lines << equ("DISPLAY_BASE",   layout::DISPLAY_BASE,   width: 4)
       lines << equ("DISPLAY_SIZE",   layout::DISPLAY_SIZE)
+      lines << equ("INIT_METHOD_ID_STORE", layout::INIT_METHOD_ID_STORE, width: 4, comment: "initialize の method_id 格納アドレス")
       lines << ""
       lines
     end
@@ -124,6 +130,14 @@ module FaRuby
       lines << equ("OFF_NREGS",          layout::OFFSET_NREGS,          comment: "1B")
       lines << equ("OFF_CUR_IREP",       layout::OFFSET_CUR_IREP,       comment: "1B")
       lines << equ("OFF_NUM_IREPS",      layout::OFFSET_NUM_IREPS,      comment: "1B")
+      lines << equ("OFF_REG_BASE",      layout::OFFSET_REG_BASE,       comment: "2B  レジスタウィンドウのベースアドレス")
+      lines << equ("OFF_BC_BASE",       layout::OFFSET_BC_BASE,        comment: "2B  現在の IREP のバイトコード先頭")
+      lines << equ("OFF_FRAME_SP",      layout::OFFSET_FRAME_SP,       comment: "1B  フレームスタックポインタ")
+      lines << equ("OFF_SYM_BASE",      layout::OFFSET_SYM_BASE,       comment: "2B  現在の IREP のシンボルテーブルアドレス")
+      lines << equ("OFF_OBJ_SP",        layout::OFFSET_OBJ_SP,         comment: "1B  次の空きオブジェクトスロット")
+      lines << equ("OFF_INIT_METHOD_ID", layout::OFFSET_INIT_METHOD_ID, comment: "1B  initialize のメソッド ID")
+      lines << equ("OFF_POOL_BASE",    layout::OFFSET_POOL_BASE,      comment: "2B  現在の IREP の定数プール先頭")
+      lines << equ("OFF_COL_SP",      layout::OFFSET_COL_SP,         comment: "1B  次の空きコレクションスロット")
       lines << ""
       lines
     end
@@ -140,6 +154,8 @@ module FaRuby
       lines << equ("IREP_OFF_BYTECODE_LEN", layout::IREP_OFF_BYTECODE_LEN, comment: "2B")
       lines << equ("IREP_OFF_POOL",        layout::IREP_OFF_POOL,         comment: "2B")
       lines << equ("IREP_OFF_NREGS",       layout::IREP_OFF_NREGS,        comment: "1B")
+      lines << equ("IREP_OFF_SUBTREE_SIZE", layout::IREP_OFF_SUBTREE_SIZE,  comment: "1B  DFS 前順サブツリーサイズ")
+      lines << equ("IREP_OFF_SYM_TABLE",  layout::IREP_OFF_SYM_TABLE,    comment: "2B  シンボルテーブル先頭アドレス")
       lines << ""
       lines
     end
@@ -157,6 +173,11 @@ module FaRuby
         "TT_FALSE"   => TT_FALSE,
         "TT_TRUE"    => TT_TRUE,
         "TT_INTEGER" => TT_INTEGER,
+        "TT_STRING"  => TT_STRING,
+        "TT_ARRAY"   => TT_ARRAY,
+        "TT_OBJECT"  => TT_OBJECT,
+        "TT_PROC"    => TT_PROC,
+        "TT_CLASS"   => TT_CLASS,
         "TT_FALSY_MAX" => TT_FALSY_MAX,
       }.each do |name, value|
         lines << equ(name, value)
@@ -175,6 +196,119 @@ module FaRuby
       lines << equ("VM_RUNNING",  VM_RUNNING)
       lines << equ("VM_FINISHED", VM_FINISHED)
       lines << equ("VM_ERROR",    VM_ERROR)
+      lines << ""
+      lines
+    end
+
+    # --- シンボルテーブル / グローバル変数 ---
+
+    def section_symbols_globals
+      layout = I8080MemoryLayout
+      lines = []
+      lines << "; --- シンボルテーブル / グローバル変数 ---"
+      lines << ""
+      lines << equ("SYM_TABLE_BASE",       layout::SYM_TABLE_BASE,       width: 4)
+      lines << equ("GLOBALS_BASE",         layout::GLOBALS_BASE,         width: 4)
+      lines << ""
+      lines << "; シンボル種別コード (上位バイト)"
+      lines << equ("SYM_KIND_USER_METHOD", layout::SYM_KIND_USER_METHOD, comment: "ユーザー定義メソッド")
+      lines << equ("SYM_KIND_CLASS",       layout::SYM_KIND_CLASS,       comment: "クラス名")
+      lines << equ("SYM_KIND_IVAR",        layout::SYM_KIND_IVAR,        comment: "インスタンス変数")
+      lines << ""
+      lines
+    end
+
+    # --- フレームスタック ---
+
+    def section_frame_stack
+      layout = I8080MemoryLayout
+      lines = []
+      lines << "; --- フレームスタック ---"
+      lines << ""
+      lines << equ("FRAME_STACK_BASE",     layout::FRAME_STACK_BASE,     width: 4)
+      lines << equ("FRAME_BYTES",          layout::FRAME_BYTES,          comment: "#{layout::FRAME_BYTES} バイト/フレーム")
+      lines << equ("MAX_FRAMES",           layout::MAX_FRAMES)
+      lines << ""
+      lines << "; フレームフィールドのバイトオフセット"
+      lines << equ("FRAME_OFF_RETURN_PC",      layout::FRAME_OFF_RETURN_PC,      comment: "2B")
+      lines << equ("FRAME_OFF_RETURN_IREP",    layout::FRAME_OFF_RETURN_IREP,    comment: "1B")
+      lines << equ("FRAME_OFF_RETURN_REG_BASE", layout::FRAME_OFF_RETURN_REG_BASE, comment: "2B")
+      lines << equ("FRAME_OFF_KIND",           layout::FRAME_OFF_KIND,           comment: "1B")
+      lines << equ("FRAME_OFF_INDEX",          layout::FRAME_OFF_INDEX,          comment: "2B")
+      lines << equ("FRAME_OFF_LIMIT",          layout::FRAME_OFF_LIMIT,          comment: "2B")
+      lines << equ("FRAME_OFF_OUTER",          layout::FRAME_OFF_OUTER,          comment: "1B")
+      lines << ""
+      lines << "; フレーム種別"
+      lines << equ("FRAME_KIND_CALL",    layout::FRAME_KIND_CALL)
+      lines << equ("FRAME_KIND_ITERATE", layout::FRAME_KIND_ITERATE, comment: "times / upto")
+      lines << equ("FRAME_KIND_LOOP",    layout::FRAME_KIND_LOOP,    comment: "loop (無限)")
+      lines << equ("FRAME_KIND_NEW",     layout::FRAME_KIND_NEW,     comment: "Class#new → initialize")
+      lines << ""
+      lines << "; 外側フレームなし (トップレベル)"
+      lines << equ("FRAME_NONE", layout::FRAME_NONE)
+      lines << ""
+      lines
+    end
+
+    # --- メソッド表 ---
+
+    def section_method_table
+      layout = I8080MemoryLayout
+      lines = []
+      lines << "; --- メソッド表 ---"
+      lines << ""
+      lines << equ("METHOD_TABLE_BASE",     layout::METHOD_TABLE_BASE,     width: 4)
+      lines << equ("MAX_CLASSES",           layout::MAX_CLASSES)
+      lines << equ("MAX_METHODS_PER_CLASS", layout::MAX_METHODS_PER_CLASS)
+      lines << equ("METHOD_TABLE_SIZE",     layout::METHOD_TABLE_SIZE)
+      lines << equ("CLASS_MAIN",            layout::CLASS_MAIN)
+      lines << equ("METHOD_NEW",            layout::METHOD_NEW,            comment: "Class#new")
+      lines << equ("METHOD_DISPLAY",        layout::METHOD_DISPLAY,        comment: "display(value)")
+      lines << equ("METHOD_GETKEY",         layout::METHOD_GETKEY,         comment: "getkey")
+      lines << equ("METHOD_PUTS",           layout::METHOD_PUTS,           comment: "puts(value): ASCII 2 文字表示")
+      lines << equ("METHOD_SETSEG",         layout::METHOD_SETSEG,         comment: "setseg(pos, pattern)")
+      lines << equ("METHOD_RAND",          layout::METHOD_RAND,           comment: "rand(n)")
+      lines << equ("METHOD_LENGTH",        layout::METHOD_LENGTH,         comment: "length / size")
+      lines << equ("METHOD_CONCAT",        layout::METHOD_CONCAT,         comment: "<< (文字列追記/配列追加)")
+      lines << equ("METHOD_PUSH",          layout::METHOD_PUSH,           comment: "push (配列追加)")
+      lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力ルーチン")
+      lines << ""
+      lines
+    end
+
+    # --- オブジェクトプール ---
+
+    def section_object_pool
+      layout = I8080MemoryLayout
+      lines = []
+      lines << "; --- オブジェクトプール ---"
+      lines << ""
+      lines << equ("OBJECT_POOL_BASE",   layout::OBJECT_POOL_BASE,   width: 4)
+      lines << equ("MAX_OBJECTS",        layout::MAX_OBJECTS)
+      lines << equ("OBJECT_SLOT_SIZE",   layout::OBJECT_SLOT_SIZE,   comment: "32B/スロット")
+      lines << equ("OBJECT_HEADER_SIZE", layout::OBJECT_HEADER_SIZE)
+      lines << equ("MAX_IVARS",          layout::MAX_IVARS)
+      lines << ""
+      lines
+    end
+
+    # --- コレクションプール ---
+
+    def section_collection_pool
+      layout = I8080MemoryLayout
+      lines = []
+      lines << "; --- コレクションプール (文字列・配列) ---"
+      lines << ""
+      lines << equ("COLLECTION_POOL_BASE", layout::COLLECTION_POOL_BASE, width: 4)
+      lines << equ("MAX_COL_SLOTS",        layout::MAX_COL_SLOTS)
+      lines << equ("COL_SLOT_SIZE",        layout::COL_SLOT_SIZE,        comment: "32B/スロット")
+      lines << equ("COL_HEADER_SIZE",      layout::COL_HEADER_SIZE,      comment: "+0: type, +1: count")
+      lines << equ("COL_DATA_SIZE",        layout::COL_DATA_SIZE,        comment: "データ領域 (30B)")
+      lines << equ("COL_MAX_STRING_LEN",   layout::COL_MAX_STRING_LEN)
+      lines << equ("COL_MAX_ARRAY_ELEMS",  layout::COL_MAX_ARRAY_ELEMS)
+      lines << equ("COL_TYPE_FREE",        layout::COL_TYPE_FREE)
+      lines << equ("COL_TYPE_STRING",      layout::COL_TYPE_STRING)
+      lines << equ("COL_TYPE_ARRAY",       layout::COL_TYPE_ARRAY)
       lines << ""
       lines
     end

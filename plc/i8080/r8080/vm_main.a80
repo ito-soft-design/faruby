@@ -28,13 +28,16 @@
 .include "vm_frame.a80"
 .include "vm_block.a80"
 .include "vm_upvar.a80"
+.include "vm_class.a80"
 .include "vm_display.a80"
 
 ; ===============================================================
-; OP_RETURN (B): ブロック内なら反復継続、トップレベルなら停止
+; OP_RETURN (B): フレーム種別に応じて復帰
 ;
 ; frame_sp == 0 → トップレベル: 表示して停止
-; frame_sp > 0  → ブロック内: advance_iteration
+; FRAME_KIND_CALL → メソッド復帰: R[a] を R[0] にコピー、pop_frame
+; FRAME_KIND_NEW  → new 復帰: pop_frame のみ (R[a] をコピーしない)
+; FRAME_KIND_ITERATE/LOOP → ブロック内: advance_iteration
 ; ===============================================================
 do_op_return:
   call fetch_byte         ; A = a (戻り値のレジスタ)
@@ -45,8 +48,35 @@ do_op_return:
   ora a
   jz do_op_return_top
 
-  ; ブロック内 → 反復を進める
+  ; フレーム種別を確認
+  call cur_frame_addr     ; HL = 現在のフレーム
+  lxi d, FRAME_OFF_KIND
+  dad d
+  mov a, m                ; A = kind
+  cpi FRAME_KIND_CALL
+  jz return_call
+  cpi FRAME_KIND_NEW
+  jz return_new
+  ; ITERATE / LOOP → advance_iteration
   jmp advance_iteration
+
+return_call:
+  ; R[a] の値を R[0] にコピー
+  lda return_reg_a
+  call get_reg_addr       ; HL = R[a]
+  push h
+  mvi a, 0
+  call get_reg_addr       ; HL = R[0]
+  xchg                    ; DE = R[0] (コピー先)
+  pop h                   ; HL = R[a] (コピー元)
+  call copy_slot          ; R[0] = R[a]
+  call pop_frame
+  jmp vm_loop
+
+return_new:
+  ; FRAME_KIND_NEW: 戻り値をコピーしない (R[a] のオブジェクトを保持)
+  call pop_frame
+  jmp vm_loop
 
 do_op_return_top:
   lda return_reg_a
@@ -172,72 +202,9 @@ vm_halt_inner:
   jmp 00821h        ; N80MON2D REMOTE: リモートモード再入口
 
 ; ===============================================================
-; 初期化
+; 初期化 (vm_start) はディスパッチテーブル後の空き領域に配置
+; (0xA800+ エリア。起動時 1 回だけ呼ばれるためパフォーマンス影響なし)
 ; ===============================================================
-vm_start:
-  ; スタックポインタを設定
-  lxi sp, STACK_TOP + 1
-
-  ; VM 状態領域をゼロクリア (256 バイト)
-  lxi h, VM_STATE_BASE
-  mvi c, 0              ; 256 回 (0 は 256 として扱う)
-vm_clear_state:
-  mvi m, 0
-  inx h
-  dcr c
-  jnz vm_clear_state
-
-  ; レジスタファイルをゼロクリア (256 バイト)
-  lxi h, REG_FILE_BASE
-  mvi c, 0
-vm_clear_regs:
-  mvi m, 0
-  inx h
-  dcr c
-  jnz vm_clear_regs
-
-  ; IREP 0 のバイトコード長を VM 状態に設定
-  ; IREP テーブルの先頭エントリから読む
-  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN
-  sta VM_STATE_BASE + OFF_BYTECODE_LEN
-  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1
-  sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
-
-  ; レジスタベースを初期化 (REG_FILE_BASE)
-  lxi h, REG_FILE_BASE
-  shld VM_STATE_BASE + OFF_REG_BASE
-
-  ; バイトコードベースを IREP 0 から読んで設定
-  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE
-  sta VM_STATE_BASE + OFF_BC_BASE
-  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE + 1
-  sta VM_STATE_BASE + OFF_BC_BASE + 1
-
-  ; シンボルテーブルベースを IREP 0 から読んで設定
-  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE
-  sta VM_STATE_BASE + OFF_SYM_BASE
-  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE + 1
-  sta VM_STATE_BASE + OFF_SYM_BASE + 1
-
-  ; フレーム SP = 0 (ゼロクリア済み)
-  ; PC = 0 (ゼロクリア済み)
-
-  ; R[0] = self (TT_OBJECT, 値 = 0)
-  lxi h, REG_FILE_BASE
-  mvi m, TT_OBJECT      ; +0: 型タグ
-  inx h
-  mvi m, 0               ; +1: 予約
-  inx h
-  mvi m, 0               ; +2: val_lo
-  inx h
-  mvi m, 0               ; +3: val_hi
-
-  ; 実行状態を RUNNING に設定
-  mvi a, VM_RUNNING
-  sta VM_STATE_BASE + OFF_STATUS
-
-  ; メインループへ
-  ; fall through
 
 ; ===============================================================
 ; メインループ (fetch-decode-execute)
@@ -309,7 +276,12 @@ vm_dispatch:
 ;
 ; オペコード番号順に 2 バイトのアドレスを並べる。
 ; 未実装のオペコードは 0000h (vm_error で捕捉)。
+;
+; VM コード (0x8400-0x8FFF) に収まらないため、定数プール後の空き領域
+; (0xA800-0xAFFF) に配置する。ディスパッチは 16 ビットアドレスなので
+; テーブルがどこにあっても動作する。
 ; ===============================================================
+  org 0A800h
 dispatch_table:
   dw do_op_nop        ; 00 OP_NOP
   dw do_op_move       ; 01 OP_MOVE
@@ -340,14 +312,14 @@ dispatch_table:
   dw do_op_setgv      ; 1A OP_SETIV (= OP_SETGV)
   dw 0000h            ; 1B OP_GETCV
   dw 0000h            ; 1C OP_SETCV
-  dw 0000h            ; 1D OP_GETCONST
+  dw do_op_getconst   ; 1D OP_GETCONST
   dw 0000h            ; 1E OP_SETCONST
   dw 0000h            ; 1F OP_GETMCNST
   dw 0000h            ; 20 OP_SETMCNST
   dw do_op_getupvar   ; 21 OP_GETUPVAR
   dw do_op_setupvar   ; 22 OP_SETUPVAR
-  dw 0000h            ; 23 OP_GETIDX
-  dw 0000h            ; 24 OP_SETIDX
+  dw do_op_getidx     ; 23 OP_GETIDX
+  dw do_op_setidx     ; 24 OP_SETIDX
   dw do_op_jmp        ; 25 OP_JMP
   dw do_op_jmpif      ; 26 OP_JMPIF
   dw do_op_jmpnot     ; 27 OP_JMPNOT
@@ -382,35 +354,35 @@ dispatch_table:
   dw do_op_le         ; 44 OP_LE
   dw do_op_gt         ; 45 OP_GT
   dw do_op_ge         ; 46 OP_GE
-  dw 0000h            ; 47 OP_ARRAY
-  dw 0000h            ; 48 OP_ARRAY2
+  dw do_op_array      ; 47 OP_ARRAY
+  dw do_op_array2     ; 48 OP_ARRAY2
   dw 0000h            ; 49 OP_ARYCAT
-  dw 0000h            ; 4A OP_ARYPUSH
+  dw do_op_arypush    ; 4A OP_ARYPUSH
   dw 0000h            ; 4B OP_ARYSPLAT
   dw 0000h            ; 4C OP_AREF
   dw 0000h            ; 4D OP_ASET
   dw 0000h            ; 4E OP_APOST
   dw 0000h            ; 4F OP_INTERN
   dw 0000h            ; 50 OP_SYMBOL
-  dw 0000h            ; 51 OP_STRING
-  dw 0000h            ; 52 OP_STRCAT
+  dw do_op_string     ; 51 OP_STRING
+  dw do_op_strcat     ; 52 OP_STRCAT
   dw 0000h            ; 53 OP_HASH
   dw 0000h            ; 54 OP_HASHADD
   dw 0000h            ; 55 OP_HASHCAT
   dw 0000h            ; 56 OP_LAMBDA
   dw do_op_block      ; 57 OP_BLOCK
-  dw 0000h            ; 58 OP_METHOD
+  dw do_op_method     ; 58 OP_METHOD
   dw 0000h            ; 59 OP_RANGE_INC
   dw 0000h            ; 5A OP_RANGE_EXC
   dw 0000h            ; 5B OP_OCLASS
-  dw 0000h            ; 5C OP_CLASS
+  dw do_op_class      ; 5C OP_CLASS
   dw 0000h            ; 5D OP_MODULE
-  dw 0000h            ; 5E OP_EXEC
-  dw 0000h            ; 5F OP_DEF
+  dw do_op_exec       ; 5E OP_EXEC
+  dw do_op_def        ; 5F OP_DEF
   dw 0000h            ; 60 OP_ALIAS
   dw 0000h            ; 61 OP_UNDEF
   dw 0000h            ; 62 OP_SCLASS
-  dw 0000h            ; 63 OP_TCLASS
+  dw do_op_tclass     ; 63 OP_TCLASS
   dw 0000h            ; 64 OP_DEBUG
   dw 0000h            ; 65 OP_ERR
   dw 0000h            ; 66 OP_EXT1
@@ -418,5 +390,1413 @@ dispatch_table:
   dw 0000h            ; 68 OP_EXT3
   dw do_op_stop       ; 69 OP_STOP
 dispatch_table_end:
+
+; ===============================================================
+; 初期化 (起動時 1 回だけ。ディスパッチテーブル後に配置)
+; ===============================================================
+vm_start:
+  ; スタックポインタを設定
+  lxi sp, STACK_TOP + 1
+
+  ; VM 状態領域をゼロクリア (256 バイト)
+  lxi h, VM_STATE_BASE
+  mvi c, 0              ; 256 回 (0 は 256 として扱う)
+vm_clear_state:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_state
+
+  ; レジスタファイルをゼロクリア (256 バイト)
+  lxi h, REG_FILE_BASE
+  mvi c, 0
+vm_clear_regs:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_regs
+
+  ; メソッド表をゼロクリア (128 バイト)
+  lxi h, METHOD_TABLE_BASE
+  mvi c, METHOD_TABLE_SIZE
+vm_clear_mtable:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_mtable
+
+  ; オブジェクトプールをゼロクリア (256 バイト)
+  lxi h, OBJECT_POOL_BASE
+  mvi c, 0              ; 256 回
+vm_clear_objpool:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_objpool
+
+  ; コレクションプールをゼロクリア (512 バイト = 2 × 256)
+  lxi h, COLLECTION_POOL_BASE
+  mvi c, 0              ; 256 回
+vm_clear_colpool1:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_colpool1
+  mvi c, 0              ; 256 回
+vm_clear_colpool2:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_colpool2
+
+  ; IREP 0 のバイトコード長を VM 状態に設定
+  ; IREP テーブルの先頭エントリから読む
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE_LEN + 1
+  sta VM_STATE_BASE + OFF_BYTECODE_LEN + 1
+
+  ; レジスタベースを初期化 (REG_FILE_BASE)
+  lxi h, REG_FILE_BASE
+  shld VM_STATE_BASE + OFF_REG_BASE
+
+  ; バイトコードベースを IREP 0 から読んで設定
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE
+  sta VM_STATE_BASE + OFF_BC_BASE
+  lda IREP_TABLE_BASE + IREP_OFF_BYTECODE + 1
+  sta VM_STATE_BASE + OFF_BC_BASE + 1
+
+  ; シンボルテーブルベースを IREP 0 から読んで設定
+  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE
+  sta VM_STATE_BASE + OFF_SYM_BASE
+  lda IREP_TABLE_BASE + IREP_OFF_SYM_TABLE + 1
+  sta VM_STATE_BASE + OFF_SYM_BASE + 1
+
+  ; 定数プールベースを IREP 0 から読んで設定
+  lda IREP_TABLE_BASE + IREP_OFF_POOL
+  sta VM_STATE_BASE + OFF_POOL_BASE
+  lda IREP_TABLE_BASE + IREP_OFF_POOL + 1
+  sta VM_STATE_BASE + OFF_POOL_BASE + 1
+
+  ; フレーム SP = 0 (ゼロクリア済み)
+  ; PC = 0 (ゼロクリア済み)
+
+  ; INIT_METHOD_ID を INIT_METHOD_ID_STORE から読み込む
+  ; (VM 状態クリアで消されないよう、IREP テーブルページに配置されている)
+  lda INIT_METHOD_ID_STORE
+  sta VM_STATE_BASE + OFF_INIT_METHOD_ID
+
+  ; R[0] = self (TT_OBJECT, 値 = 0)
+  lxi h, REG_FILE_BASE
+  mvi m, TT_OBJECT      ; +0: 型タグ
+  inx h
+  mvi m, 0               ; +1: 予約
+  inx h
+  mvi m, 0               ; +2: val_lo
+  inx h
+  mvi m, 0               ; +3: val_hi
+
+  ; 実行状態を RUNNING に設定
+  mvi a, VM_RUNNING
+  sta VM_STATE_BASE + OFF_STATUS
+
+  ; メインループへ
+  jmp vm_loop
+
+; ===============================================================
+; OP_STRING (BB): R[a] = 文字列リテラル (コレクションプールにコピー)
+;
+; Pool[b] は TT_STRING + 文字列データアドレスの 4 バイトスロット。
+; 文字列データをコレクションプールにコピーし、R[a] にスロット番号を設定。
+; ===============================================================
+do_op_string:
+  call fetch_byte       ; A = a
+  sta ops_reg_a
+  call fetch_byte       ; A = b (プールインデックス)
+  ; pool_base + b * 4 を計算
+  add a                 ; b * 2
+  add a                 ; b * 4
+  mov e, a
+  mvi d, 0
+  lhld VM_STATE_BASE + OFF_POOL_BASE
+  dad d                 ; HL = &Pool[b]
+  ; Pool[b] の val (文字列データアドレス) を取得
+  inx h                 ; +1: 予約
+  inx h                 ; +2: val_lo
+  mov e, m
+  inx h                 ; +3: val_hi
+  mov d, m              ; DE = 文字列データアドレス
+  ; DE → 長さバイト + ASCII データ
+  ldax d                ; A = 文字列長
+  sta ops_str_len
+  inx d                 ; DE → 最初のバイト
+  push d                ; 文字列データソース退避
+
+  ; コレクションスロットを確保
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta ops_slot_num
+
+  ; スロットヘッダ: type=COL_TYPE_STRING, count=文字列長
+  mvi m, COL_TYPE_STRING ; +0: type
+  inx h
+  lda ops_str_len
+  cpi COL_MAX_STRING_LEN + 1
+  jc ops_len_ok
+  mvi a, COL_MAX_STRING_LEN  ; 最大 30 文字に切り詰め
+ops_len_ok:
+  mov m, a              ; +1: count
+  sta ops_str_len       ; 切り詰め後の長さ
+  inx h                 ; HL → データ領域先頭
+
+  ; 文字列データをコピー
+  pop d                 ; DE = ソースデータ
+  lda ops_str_len
+  ora a
+  jz ops_set_reg        ; 空文字列
+  mov c, a
+ops_str_copy:
+  ldax d
+  mov m, a
+  inx h
+  inx d
+  dcr c
+  jnz ops_str_copy
+
+ops_set_reg:
+  ; R[a] = TT_STRING, val_lo = slot+1
+  lda ops_reg_a
+  call get_reg_addr     ; HL = &R[a]
+  mvi m, TT_STRING      ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  lda ops_slot_num
+  inr a                 ; slot + 1
+  mov m, a              ; +2: val_lo
+  inx h
+  mvi m, 0              ; +3: val_hi
+  jmp vm_loop
+
+ops_reg_a:   db 0
+ops_str_len: db 0
+ops_slot_num: db 0
+
+; ===============================================================
+; send_display — display(value): 7 セグに hex 表示
+;
+; R[a+1] の 16 ビット値を display_hex16 で DISPLAY_BASE に書く。
+; R[a] に nil を返す。
+; ===============================================================
+send_display:
+  lda send_reg_a
+  inr a
+  call get_reg_addr      ; HL = R[a+1]
+  call slot_to_value     ; HL = 値先頭
+  call display_hex16     ; 7 セグに書く
+  ; return nil
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+; ===============================================================
+; send_getkey — getkey: ブロッキングキー入力
+;
+; ROM チェック: KEYIN1_ADDR の先頭バイトが 0 なら ROM なし → -1
+; ROM あり: CALL KEYIN1_ADDR でブロッキング待ち
+; A = 0x00-0x0F → 整数として R[a] に返す
+; A >= 0x10 (ファンクションキー) → -1
+; ===============================================================
+send_getkey:
+  ; --- LFSR シード設定 (初回の getkey 呼び出し時) ---
+  lda lfsr_seeded
+  ora a
+  jnz getkey_skip_seed
+  lhld VM_STATE_BASE + OFF_STEP_COUNT
+  mov a, h
+  ora l
+  jz getkey_skip_seed   ; step_count=0 は LFSR で不可
+  shld lfsr_state
+  mvi a, 1
+  sta lfsr_seeded
+getkey_skip_seed:
+
+  lda KEYIN1_ADDR       ; ROM 先頭バイト
+  ora a
+  jz getkey_no_key      ; ROM なし → -1
+
+  call KEYIN1_ADDR      ; A = キーコード (ブロッキング)
+  cpi 10h
+  jnc getkey_no_key     ; ファンクションキー → -1
+
+  ; hex キー (0-F) を R[a] に返す
+  mov c, a
+  mvi b, 0
+  lda send_reg_a
+  call get_reg_addr
+  call set_slot_int16
+  jmp vm_loop
+
+getkey_no_key:
+  lda send_reg_a
+  call get_reg_addr
+  mvi b, 0FFh
+  mvi c, 0FFh           ; -1
+  call set_slot_int16
+  jmp vm_loop
+
+; ===============================================================
+; send_builtin_ext — 拡張ビルトインメソッドディスパッチ
+;
+; vm_send.a80 のメインディスパッチに入りきらないメソッドをここで振り分ける。
+; E レジスタにメソッド ID が入っている。
+; ===============================================================
+send_builtin_ext:
+  mov a, e
+  cpi METHOD_PUTS
+  jz send_puts
+  cpi METHOD_SETSEG
+  jz send_setseg
+  cpi METHOD_RAND
+  jz send_rand
+  cpi METHOD_LENGTH
+  jz send_length
+  cpi METHOD_CONCAT
+  jz send_concat
+  cpi METHOD_PUSH
+  jz send_push
+  jmp vm_error          ; 未対応メソッド
+
+; ===============================================================
+; send_puts — puts(value): 文字列を 7 セグに表示
+;
+; R[a+1] が TT_STRING の場合:
+;   文字列データのアドレスから長さとバイト列を読み、
+;   各 ASCII コードを 7 セグパターンに変換して表示する。
+;   8 桁全体をクリアしてから左詰めで書く (最大 8 文字)。
+;
+; R[a+1] が TT_INTEGER の場合:
+;   16 ビット値を高位・低位バイトに分け、2 文字として表示。
+;   表示バッファは左に 2 桁スクロールする (従来互換)。
+;
+; 使い方:
+;   puts "HELLO"          # 文字列を表示
+;   puts(0x4849)          # "HI" を表示 (整数パック)
+; ===============================================================
+send_puts:
+  lda send_reg_a
+  inr a
+  call get_reg_addr      ; HL = R[a+1]
+  mov a, m               ; A = 型タグ
+  cpi TT_STRING
+  jz puts_string
+  ; TT_INTEGER: 従来のパック ASCII 処理
+  cpi TT_INTEGER
+  jnz vm_error
+
+  ; --- 整数パス (2 文字スクロール表示) ---
+  lda send_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value     ; HL = 値先頭 (val_lo)
+  mov c, m               ; C = val_lo (右の文字)
+  inx h
+  mov b, m               ; B = val_hi (左の文字)
+  push b
+
+  ; 表示バッファを左に 2 桁スクロール
+  lxi h, DISPLAY_BASE + 2
+  lxi d, DISPLAY_BASE
+  mvi b, 6
+puts_scroll:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr b
+  jnz puts_scroll
+
+  pop b
+  push b
+  mov a, b
+  call ascii_to_seg
+  sta DISPLAY_BASE + 6
+
+  pop b
+  mov a, c
+  call ascii_to_seg
+  sta DISPLAY_BASE + 7
+  jmp puts_ret_nil
+
+  ; --- 文字列パス (全桁クリア + 左詰め表示) ---
+puts_string:
+  lda send_reg_a
+  inr a
+  call get_reg_addr      ; HL = R[a+1]
+  call col_from_reg      ; HL = コレクションスロットアドレス
+
+  ; +1: count (文字列長)
+  inx h
+  mov a, m               ; A = 文字列長
+  ora a
+  jz puts_ret_nil        ; 空文字列 → nil を返すだけ
+  cpi 9
+  jc sp_len_ok
+  mvi a, 8               ; 最大 8 文字
+sp_len_ok:
+  sta sp_count
+  inx h                  ; HL → データ領域先頭
+  shld sp_src            ; 文字列ソースポインタ退避
+
+  ; 表示バッファ全体をクリア
+  lxi h, DISPLAY_BASE
+  mvi c, DISPLAY_SIZE
+puts_str_clear:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz puts_str_clear
+
+  ; 文字列の各バイトを変換して表示
+  lxi h, DISPLAY_BASE
+  shld sp_dst            ; 表示書き込みポインタ
+puts_str_loop:
+  lhld sp_src
+  mov a, m               ; A = ASCII コード
+  inx h
+  shld sp_src
+  call ascii_to_seg      ; A = セグメントパターン (HL, BC 破壊)
+  lhld sp_dst
+  mov m, a
+  inx h
+  shld sp_dst
+  lda sp_count
+  dcr a
+  sta sp_count
+  jnz puts_str_loop
+
+puts_ret_nil:
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+sp_count: db 0
+sp_src:   dw 0
+sp_dst:   dw 0
+
+; ===============================================================
+; send_setseg — setseg(pos, pattern): 7 セグに任意パターンを設定
+;
+; R[a+1] = 桁位置 (0-7), R[a+2] = 生セグメントパターン (0x00-0x7F)
+; ===============================================================
+send_setseg:
+  ; 桁位置を取得
+  lda send_reg_a
+  inr a
+  call get_reg_addr      ; HL = R[a+1]
+  call slot_to_value
+  mov a, m               ; A = 桁位置 (val_lo)
+  cpi DISPLAY_SIZE
+  jnc vm_error           ; 桁位置 >= 8 → エラー
+  sta ss_pos
+
+  ; パターンを取得
+  lda send_reg_a
+  inr a
+  inr a
+  call get_reg_addr      ; HL = R[a+2]
+  call slot_to_value
+  mov b, m               ; B = パターン (val_lo)
+
+  ; DISPLAY_BASE + pos にパターンを書く
+  lda ss_pos
+  mov l, a
+  mvi h, 0
+  lxi d, DISPLAY_BASE
+  dad d                  ; HL = DISPLAY_BASE + pos
+  mov m, b
+
+  ; R[a] に nil を返す
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+ss_pos: db 0
+
+; ===============================================================
+; ascii_to_seg — ASCII コードを 7 セグパターンに変換
+;
+;   入力: A = ASCII コード
+;   出力: A = セグメントパターン
+;   破壊: HL, BC
+;
+; 0x60-0x7F (小文字) は 0x20 を引いて大文字に折り畳む。
+; 0x20-0x5F は 64 エントリのテーブルで変換する。
+; 範囲外はブランク (0x00) を返す。
+; ===============================================================
+ascii_to_seg:
+  cpi 60h
+  jc ats_no_fold
+  sui 20h               ; 小文字 → 大文字 (0x60-0x7F → 0x40-0x5F)
+ats_no_fold:
+  sui 20h               ; 0x20-0x5F → 0x00-0x3F
+  jc ats_blank           ; 元が < 0x20 → ブランク
+  cpi 40h
+  jnc ats_blank          ; >= 64 → ブランク
+  ; テーブル参照
+  mov l, a
+  mvi h, 0
+  lxi b, ascii_seg_table
+  dad b                  ; HL = ascii_seg_table + index
+  mov a, m
+  ret
+ats_blank:
+  xra a                  ; A = 0 (ブランク)
+  ret
+
+; ===============================================================
+; ASCII → 7 セグパターン変換テーブル (64 エントリ)
+;
+; ASCII 0x20 (' ') から 0x5F ('_') まで。
+; 小文字 0x60-0x7F は -0x20 で大文字に折り畳んで参照する。
+;
+; セグメント配置:
+;     aaa        bit 0 = a (上)
+;    f   b       bit 1 = b (右上)
+;     ggg        bit 2 = c (右下)
+;    e   c       bit 3 = d (下)
+;     ddd        bit 4 = e (左下)
+;                bit 5 = f (左上)
+;                bit 6 = g (中)
+;
+; 表現できない文字は 0x00 (消灯)。
+; 数字 0-9 は既存の seg_table (ND8080 ROM パターン) と同一。
+; ===============================================================
+ascii_seg_table:
+  ; 0x20-0x2F: 記号
+  db 00h          ; 0x20 ' ' (スペース)
+  db 06h          ; 0x21 '!' (bc)
+  db 22h          ; 0x22 '"' (bf)
+  db 00h          ; 0x23 '#'
+  db 6Dh          ; 0x24 '$' (= S)
+  db 00h          ; 0x25 '%'
+  db 00h          ; 0x26 '&'
+  db 02h          ; 0x27 "'" (b)
+  db 39h          ; 0x28 '(' (= C)
+  db 0Fh          ; 0x29 ')' (abcd)
+  db 00h          ; 0x2A '*'
+  db 00h          ; 0x2B '+'
+  db 04h          ; 0x2C ',' (c)
+  db 40h          ; 0x2D '-' (g)
+  db 08h          ; 0x2E '.' (d)
+  db 00h          ; 0x2F '/'
+  ; 0x30-0x39: 数字 (ND8080 ROM パターン)
+  db 5Ch          ; 0x30 '0'
+  db 06h          ; 0x31 '1'
+  db 5Bh          ; 0x32 '2'
+  db 4Fh          ; 0x33 '3'
+  db 66h          ; 0x34 '4'
+  db 6Dh          ; 0x35 '5'
+  db 7Dh          ; 0x36 '6'
+  db 27h          ; 0x37 '7'
+  db 7Fh          ; 0x38 '8'
+  db 6Fh          ; 0x39 '9'
+  ; 0x3A-0x40: 記号
+  db 09h          ; 0x3A ':' (ad)
+  db 00h          ; 0x3B ';'
+  db 00h          ; 0x3C '<'
+  db 48h          ; 0x3D '=' (dg)
+  db 00h          ; 0x3E '>'
+  db 00h          ; 0x3F '?'
+  db 00h          ; 0x40 '@'
+  ; 0x41-0x5A: 英字
+  db 77h          ; 0x41 'A' (abcefg)
+  db 7Ch          ; 0x42 'B' (cdefg = b)
+  db 39h          ; 0x43 'C' (adef)
+  db 5Eh          ; 0x44 'D' (bcdeg = d)
+  db 79h          ; 0x45 'E' (adefg)
+  db 71h          ; 0x46 'F' (aefg)
+  db 3Dh          ; 0x47 'G' (acdef)
+  db 76h          ; 0x48 'H' (bcefg)
+  db 06h          ; 0x49 'I' (bc)
+  db 1Eh          ; 0x4A 'J' (bcde)
+  db 00h          ; 0x4B 'K'
+  db 38h          ; 0x4C 'L' (def)
+  db 00h          ; 0x4D 'M'
+  db 54h          ; 0x4E 'N' (ceg = n)
+  db 5Ch          ; 0x4F 'O' (= 0)
+  db 73h          ; 0x50 'P' (abefg)
+  db 67h          ; 0x51 'Q' (abcfg)
+  db 50h          ; 0x52 'R' (eg = r)
+  db 6Dh          ; 0x53 'S' (= 5)
+  db 78h          ; 0x54 'T' (defg = t)
+  db 3Eh          ; 0x55 'U' (bcdef)
+  db 3Eh          ; 0x56 'V' (= U)
+  db 00h          ; 0x57 'W'
+  db 00h          ; 0x58 'X'
+  db 6Eh          ; 0x59 'Y' (bcdfg)
+  db 5Bh          ; 0x5A 'Z' (= 2)
+  ; 0x5B-0x5F: 記号
+  db 39h          ; 0x5B '[' (= C)
+  db 00h          ; 0x5C '\'
+  db 0Fh          ; 0x5D ']' (= ))
+  db 23h          ; 0x5E '^' (abf)
+  db 08h          ; 0x5F '_' (d)
+
+; ===============================================================
+; lfsr_next — 16-bit Galois LFSR 擬似乱数生成
+;
+;   入力: なし
+;   出力: HL = 新しい乱数値
+;   破壊: A, HL
+;
+; 多項式: x^16 + x^14 + x^13 + x^11 + 1 (タップ = 0xB400)
+; 周期: 65535
+; ===============================================================
+lfsr_next:
+  lhld lfsr_state
+  mov a, l
+  ani 1               ; LSB チェック
+  jz lfsr_no_tap
+  ; LSB=1: 右シフト + XOR タップ
+  mov a, h
+  ora a               ; CY=0 クリア
+  rar
+  mov h, a
+  mov a, l
+  rar
+  mov l, a
+  mov a, h
+  xri 0B4h
+  mov h, a
+  shld lfsr_state
+  ret
+lfsr_no_tap:
+  ; LSB=0: 右シフトのみ
+  mov a, h
+  ora a
+  rar
+  mov h, a
+  mov a, l
+  rar
+  mov l, a
+  shld lfsr_state
+  ret
+
+lfsr_state:  dw 0ACE1h  ; 初期シード (0 以外)
+lfsr_seeded: db 0        ; 1 = getkey からシード設定済み
+
+; ===============================================================
+; send_rand — rand(n): 0〜n-1 の擬似乱数を返す
+;
+; R[a+1] = n (上限)。n == 0 なら 0 を返す。
+; lfsr_next で 16-bit 乱数を取得し、udiv16 で n の剰余を求める。
+; ===============================================================
+send_rand:
+  ; R[a+1] から n を取得
+  lda send_reg_a
+  inr a
+  call get_reg_addr    ; HL = R[a+1]
+  call slot_to_value   ; HL = 値先頭
+  mov e, m
+  inx h
+  mov d, m             ; DE = n
+
+  ; n == 0 チェック
+  mov a, d
+  ora e
+  jz rand_zero
+
+  push d               ; n を退避
+  call lfsr_next       ; HL = 乱数
+  mov b, h
+  mov c, l             ; BC = 乱数 (被除数)
+  pop d                ; DE = n (除数)
+  call udiv16          ; BC=商, HL=剰余
+
+  ; HL (剰余) → BC → R[a]
+  mov b, h
+  mov c, l
+  lda send_reg_a
+  call get_reg_addr
+  call set_slot_int16
+  jmp vm_loop
+
+rand_zero:
+  mvi b, 0
+  mvi c, 0
+  lda send_reg_a
+  call get_reg_addr
+  call set_slot_int16
+  jmp vm_loop
+
+; ===============================================================
+; コレクションプール基盤ルーチン
+; ===============================================================
+
+; ---------------------------------------------------------------
+; col_slot_addr — スロット番号からアドレスを計算
+;
+;   入力: A = スロット番号 (0-based)
+;   出力: HL = COLLECTION_POOL_BASE + slot * 32
+;   破壊: A, DE
+; ---------------------------------------------------------------
+col_slot_addr:
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  add a                 ; ×16
+  add a                 ; ×32
+  mov l, a
+  mvi h, 0
+  lxi d, COLLECTION_POOL_BASE
+  dad d
+  ret
+
+; ---------------------------------------------------------------
+; col_alloc — コレクションスロットを確保
+;
+;   入力: なし
+;   出力: A = スロット番号 (0-based), HL = スロットアドレス
+;   破壊: DE
+;   エラー: プール満杯 → vm_error
+; ---------------------------------------------------------------
+col_alloc:
+  lda VM_STATE_BASE + OFF_COL_SP
+  cpi MAX_COL_SLOTS
+  jnc vm_error          ; プール満杯
+  push psw              ; スロット番号を退避
+  call col_slot_addr    ; HL = スロットアドレス
+  ; COL_SP++
+  lda VM_STATE_BASE + OFF_COL_SP
+  inr a
+  sta VM_STATE_BASE + OFF_COL_SP
+  pop psw               ; A = スロット番号
+  ret
+
+; ---------------------------------------------------------------
+; col_from_reg — レジスタの val_lo からコレクションスロットアドレスを取得
+;
+;   入力: HL = R[x] のスロットアドレス (get_reg_addr の結果)
+;   出力: HL = コレクションスロットアドレス
+;   破壊: A, DE
+; ---------------------------------------------------------------
+col_from_reg:
+  call slot_to_value    ; HL = val アドレス
+  mov a, m              ; A = val_lo = slot+1
+  dcr a                 ; A = slot_number (0-based)
+  jmp col_slot_addr
+
+; ===============================================================
+; do_op_getidx — OP_GETIDX (B): R[a] = R[a][R[a+1]]
+;
+; R[a] の型で分岐:
+;   TT_STRING: 1 文字を新しい文字列スロットとして返す
+;   TT_ARRAY:  要素スロット (4B) を R[a] にコピー
+; ===============================================================
+do_op_getidx:
+  call fetch_byte       ; A = a
+  sta gidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz gidx_string
+  cpi TT_ARRAY
+  jz gidx_array
+  jmp vm_error
+
+gidx_string:
+  ; R[a] のコレクションスロットを取得
+  lda gidx_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov b, m              ; B = 文字列長
+  inx h                 ; HL → データ領域先頭
+  shld gidx_data_addr
+
+  ; R[a+1] からインデックスを取得
+  lda gidx_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = index (val_lo)
+  ; 範囲チェック: index < 文字列長
+  cmp b
+  jnc vm_error          ; index >= 長さ → エラー
+  ; データ先頭 + index で 1 文字を取得
+  mov e, a
+  mvi d, 0
+  lhld gidx_data_addr
+  dad d                 ; HL = &data[index]
+  mov c, m              ; C = 文字コード
+
+  ; 新しいコレクションスロットを確保して 1 文字の文字列を作る
+  push b                ; C = 文字コード退避
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta gidx_new_slot
+  mvi m, COL_TYPE_STRING ; +0: type
+  inx h
+  mvi m, 1              ; +1: count = 1
+  inx h
+  pop b
+  mov m, c              ; +2: data[0] = 文字コード
+
+  ; R[a] = TT_STRING, val_lo = new_slot+1
+  lda gidx_reg_a
+  call get_reg_addr
+  mvi m, TT_STRING
+  inx h
+  mvi m, 0
+  inx h
+  lda gidx_new_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+gidx_array:
+  ; R[a] のコレクションスロットを取得
+  lda gidx_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov b, m              ; B = 要素数
+  inx h                 ; HL → データ領域先頭
+  shld gidx_data_addr
+
+  ; R[a+1] からインデックスを取得
+  lda gidx_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = index (val_lo)
+  ; 範囲チェック: index < 要素数
+  cmp b
+  jnc vm_error
+  ; data + index * 4 で要素スロットの先頭を求める
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  lhld gidx_data_addr
+  dad d                 ; HL = &data[index * 4] (コピー元)
+  xchg                  ; DE = &data[index * 4]
+
+  ; R[a] にコピー (4 バイト)
+  lda gidx_reg_a
+  call get_reg_addr     ; HL = R[a] (コピー先)
+  mvi c, SLOT_BYTES
+gidx_ary_copy:
+  ldax d
+  mov m, a
+  inx h
+  inx d
+  dcr c
+  jnz gidx_ary_copy
+  jmp vm_loop
+
+gidx_reg_a:    db 0
+gidx_data_addr: dw 0
+gidx_new_slot: db 0
+
+; ===============================================================
+; do_op_setidx — OP_SETIDX (B): R[a][R[a+1]] = R[a+2]
+;
+; R[a] の型で分岐:
+;   TT_STRING: インデックス位置に 1 文字を書き込む
+;   TT_ARRAY:  インデックス位置にスロットをコピー
+; ===============================================================
+do_op_setidx:
+  call fetch_byte       ; A = a
+  sta sidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz sidx_string
+  cpi TT_ARRAY
+  jz sidx_array
+  jmp vm_error
+
+sidx_string:
+  ; R[a] のコレクションスロットを取得
+  lda sidx_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov b, m              ; B = 文字列長
+  inx h                 ; HL → データ領域先頭
+  shld sidx_data_addr
+
+  ; R[a+1] からインデックスを取得
+  lda sidx_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = index
+  cmp b
+  jnc vm_error          ; index >= 長さ
+
+  ; data[index] に R[a+2] の文字を書き込む
+  mov e, a
+  mvi d, 0
+  lhld sidx_data_addr
+  dad d                 ; HL = &data[index]
+
+  ; R[a+2] から文字コードを取得
+  lda sidx_reg_a
+  inr a
+  inr a
+  call get_reg_addr
+  ; R[a+2] が TT_STRING なら先頭文字、TT_INTEGER なら val_lo
+  mov a, m              ; 型タグ
+  cpi TT_STRING
+  jz sidx_str_char
+  ; TT_INTEGER: val_lo を文字コードとして使う
+  call slot_to_value
+  mov a, m
+  jmp sidx_write_char
+sidx_str_char:
+  ; TT_STRING: コレクションスロットの先頭文字
+  call col_from_reg
+  inx h                 ; +1: count
+  inx h                 ; +2: data[0]
+  mov a, m
+sidx_write_char:
+  lhld sidx_data_addr
+  mov e, a              ; E = 文字コード
+  lda sidx_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = index
+  mov c, a
+  mvi b, 0
+  lhld sidx_data_addr
+  dad b                 ; HL = &data[index]
+  mov m, e              ; 書き込み
+  jmp vm_loop
+
+sidx_array:
+  ; R[a] のコレクションスロットを取得
+  lda sidx_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov b, m              ; B = 要素数
+  inx h                 ; HL → データ領域先頭
+  shld sidx_data_addr
+
+  ; R[a+1] からインデックスを取得
+  lda sidx_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = index
+  cmp b
+  jnc vm_error
+
+  ; data[index * 4] に R[a+2] をコピー
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  lhld sidx_data_addr
+  dad d                 ; HL = &data[index * 4] (コピー先)
+  xchg                  ; DE = コピー先
+
+  ; R[a+2] を取得 (コピー元)
+  lda sidx_reg_a
+  inr a
+  inr a
+  call get_reg_addr     ; HL = R[a+2]
+  mvi c, SLOT_BYTES
+sidx_ary_copy:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz sidx_ary_copy
+  jmp vm_loop
+
+sidx_reg_a:    db 0
+sidx_data_addr: dw 0
+
+; ===============================================================
+; do_op_array — OP_ARRAY (BB): R[a] = [R[a], R[a+1], ..., R[a+b-1]]
+;
+; b 個のレジスタからコレクションプールに配列を構築する。
+; ===============================================================
+do_op_array:
+  call fetch_byte       ; A = a
+  sta oary_reg_a
+  sta oary_src_reg      ; BB 形式: ソース = a
+  call fetch_byte       ; A = b (要素数)
+oa2_join:               ; OP_ARRAY2 からの合流点
+  sta oary_count
+  ora a
+  jz oary_empty         ; 空配列
+
+  ; 要素数チェック
+  cpi COL_MAX_ARRAY_ELEMS + 1
+  jnc vm_error          ; 要素数 > 7
+
+  ; コレクションスロットを確保
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta oary_slot_num
+  mvi m, COL_TYPE_ARRAY ; +0: type
+  inx h
+  lda oary_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域先頭
+  xchg                  ; DE = データ領域先頭 (コピー先)
+
+  ; ソースレジスタから b 個のスロットをコピー
+  lda oary_src_reg
+  mov b, a              ; B = 現在のレジスタ番号
+  lda oary_count
+  mov c, a              ; C = 残り要素数
+oary_copy_loop:
+  mvi a, SLOT_BYTES
+  sta oary_elem_cnt     ; 毎回初期化 (2 回目以降のため)
+  push b
+  push d
+  mov a, b
+  call get_reg_addr     ; HL = R[reg] (コピー元)
+  pop d
+oary_copy_elem:
+  mov b, m              ; SLOT_BYTES 分のコピー (HL → DE)
+  inx h
+  mov a, b
+  stax d
+  inx d
+  push h
+  lxi h, oary_elem_cnt
+  dcr m
+  pop h
+  jnz oary_copy_elem
+  pop b
+  inr b                 ; 次のレジスタ
+  dcr c
+  jz oary_done
+  jmp oary_copy_loop
+
+oary_done:
+  ; R[a] = TT_ARRAY, val_lo = slot+1
+  lda oary_reg_a
+  call get_reg_addr
+  mvi m, TT_ARRAY
+  inx h
+  mvi m, 0
+  inx h
+  lda oary_slot_num
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+oary_empty:
+  ; 空配列: スロット確保して count=0
+  call col_alloc
+  sta oary_slot_num
+  mvi m, COL_TYPE_ARRAY
+  inx h
+  mvi m, 0              ; count = 0
+  jmp oary_done
+
+oary_reg_a:    db 0
+oary_src_reg:  db 0
+oary_count:    db 0
+oary_slot_num: db 0
+oary_elem_cnt: db SLOT_BYTES
+
+; ===============================================================
+; do_op_arypush — OP_ARYPUSH (BB): R[a].push(R[a+1], ..., R[a+b-1])
+;
+; R[a] の配列の末尾に要素を追加する。
+; ===============================================================
+do_op_arypush:
+  call fetch_byte       ; A = a
+  sta apush_reg_a
+  call fetch_byte       ; A = b (追加する要素数)
+  sta apush_add_count
+
+  ; R[a] のコレクションスロットを取得
+  lda apush_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov a, m              ; A = 現在の要素数
+  sta apush_cur_count
+  ; 容量チェック: count + add_count <= MAX
+  lda apush_add_count
+  mov b, a
+  lda apush_cur_count
+  add b
+  cpi COL_MAX_ARRAY_ELEMS + 1
+  jnc vm_error          ; オーバーフロー
+
+  ; 書き込み先: data + count * 4
+  lda apush_cur_count
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  inx h                 ; HL → データ領域先頭
+  dad d                 ; HL = 書き込み位置
+  xchg                  ; DE = 書き込み位置
+
+  ; R[a+1] から b 個のスロットをコピー
+  lda apush_reg_a
+  inr a
+  mov b, a              ; B = 現在のレジスタ番号
+  lda apush_add_count
+  mov c, a              ; C = 残り要素数
+apush_loop:
+  mvi a, SLOT_BYTES
+  sta apush_byte_cnt    ; 毎回初期化
+  push b
+  push d
+  mov a, b
+  call get_reg_addr     ; HL = R[reg]
+  pop d
+apush_copy:
+  mov b, m
+  mov a, b
+  stax d
+  inx h
+  inx d
+  push h
+  lxi h, apush_byte_cnt
+  dcr m
+  pop h
+  jnz apush_copy
+  pop b
+  inr b
+  dcr c
+  jz apush_done
+  jmp apush_loop
+
+apush_done:
+  ; count を更新
+  lda apush_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  lda apush_cur_count
+  mov b, a
+  lda apush_add_count
+  add b
+  mov m, a              ; count = old + added
+  jmp vm_loop
+
+apush_reg_a:     db 0
+apush_add_count: db 0
+apush_cur_count: db 0
+apush_byte_cnt:  db SLOT_BYTES
+
+; ===============================================================
+; do_op_strcat — OP_STRCAT (B): R[a] = R[a] + R[a+1] (文字列連結)
+;
+; R[a] の文字列の末尾に R[a+1] の文字列を追記する。
+; ===============================================================
+do_op_strcat:
+  call fetch_byte       ; A = a
+  sta scat_reg_a
+strcat_body:            ; OP_ADD 文字列パスからも使う (A = a)
+
+  ; R[a+1] のコレクションスロット (ソース)
+  inr a
+  call get_reg_addr
+  call col_from_reg     ; HL = ソーススロット
+  inx h                 ; +1: count
+  mov a, m              ; A = ソース文字列長
+  sta scat_src_len
+  inx h                 ; HL → データ先頭
+  shld scat_src_data
+
+  ; R[a] のコレクションスロット (デスト)
+  lda scat_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = デストスロット
+  inx h                 ; +1: count
+  mov a, m              ; A = デスト文字列長
+  sta scat_dst_len
+
+  ; 合計長チェック
+  lda scat_src_len
+  mov b, a
+  lda scat_dst_len
+  add b
+  cpi COL_MAX_STRING_LEN + 1
+  jc scat_len_ok
+  ; 切り詰め: 追記できる分だけ
+  mvi a, COL_MAX_STRING_LEN
+  mov b, a
+  lda scat_dst_len
+  sub b                 ; この結果は負 (使わない)
+  mvi a, COL_MAX_STRING_LEN
+  mov b, a
+  lda scat_dst_len
+  mov c, a
+  mov a, b
+  sub c                 ; A = MAX - dst_len = コピー可能バイト数
+  sta scat_src_len
+  ; 合計を MAX に
+  mvi a, COL_MAX_STRING_LEN
+scat_len_ok:
+  sta scat_total_len
+
+  ; デスト count を更新
+  lda scat_reg_a
+  call get_reg_addr
+  call col_from_reg
+  inx h
+  lda scat_total_len
+  mov m, a              ; count = 合計長
+  inx h                 ; HL → データ先頭
+
+  ; デストデータ末尾 = data + dst_len
+  lda scat_dst_len
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = 書き込み位置
+
+  ; ソースデータをコピー
+  xchg                  ; DE = 書き込み位置
+  lhld scat_src_data    ; HL = ソースデータ
+  lda scat_src_len
+  ora a
+  jz scat_done
+  mov c, a
+scat_copy:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz scat_copy
+
+scat_done:
+  jmp vm_loop
+
+scat_reg_a:     db 0
+scat_src_len:   db 0
+scat_dst_len:   db 0
+scat_total_len: db 0
+scat_src_data:  dw 0
+
+; ===============================================================
+; send_length — length / size: 文字列長・配列長を返す
+;
+; R[a] のコレクションスロットの count を TT_INTEGER として返す。
+; ===============================================================
+send_length:
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov c, m              ; C = count
+  mvi b, 0              ; BC = count (16-bit)
+  lda send_reg_a
+  call get_reg_addr
+  call set_slot_int16   ; R[a] = count
+  jmp vm_loop
+
+; ===============================================================
+; send_concat — << (文字列追記 / 配列追加)
+;
+; R[a] の型で分岐:
+;   TT_STRING: R[a+1] の文字列を R[a] に追記
+;   TT_ARRAY:  R[a+1] のスロットを R[a] の配列末尾に追加
+; ===============================================================
+send_concat:
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz concat_string
+  cpi TT_ARRAY
+  jz concat_array
+  jmp vm_error
+
+concat_string:
+  ; R[a+1] の型を確認
+  lda send_reg_a
+  inr a
+  call get_reg_addr
+  mov a, m              ; A = R[a+1] の型タグ
+  cpi TT_STRING
+  jz concat_str_str
+  cpi TT_INTEGER
+  jz concat_str_int
+  jmp vm_error
+
+concat_str_str:
+  ; R[a+1] のコレクションスロット (ソース)
+  lda send_reg_a
+  inr a
+  call get_reg_addr
+  call col_from_reg     ; HL = ソーススロット
+  inx h                 ; +1: count
+  mov a, m              ; A = ソース文字列長
+  sta cc_src_len
+  inx h                 ; HL → データ先頭
+  shld cc_src_data
+
+  ; R[a] のコレクションスロット (デスト)
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = デストスロット
+  inx h                 ; +1: count
+  mov a, m
+  sta cc_dst_len
+
+  ; コピー可能バイト数を計算
+  lda cc_src_len
+  mov b, a
+  lda cc_dst_len
+  add b
+  cpi COL_MAX_STRING_LEN + 1
+  jc cc_str_len_ok
+  ; 切り詰め
+  mvi a, COL_MAX_STRING_LEN
+  mov b, a
+  lda cc_dst_len
+  mov c, a
+  mov a, b
+  sub c
+  sta cc_src_len
+  lda cc_dst_len
+  add a                 ; ここでは使わない — 合計は MAX
+  mvi a, COL_MAX_STRING_LEN
+cc_str_len_ok:
+  sta cc_total_len
+
+  ; count を更新
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg
+  inx h
+  lda cc_total_len
+  mov m, a
+  inx h                 ; HL → データ先頭
+
+  ; 書き込み位置 = data + dst_len
+  lda cc_dst_len
+  mov e, a
+  mvi d, 0
+  dad d
+
+  ; コピー
+  xchg
+  lhld cc_src_data
+  lda cc_src_len
+  ora a
+  jz cc_str_done
+  mov c, a
+cc_str_copy:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz cc_str_copy
+cc_str_done:
+  ; R[a] をそのまま返す (破壊的操作)
+  jmp vm_loop
+
+concat_str_int:
+  ; R[a+1] の val_lo を 1 バイトとして追記
+  lda send_reg_a
+  inr a
+  call get_reg_addr
+  call slot_to_value
+  mov c, m              ; C = 文字コード (val_lo)
+
+  ; R[a] のコレクションスロット
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = デストスロット
+  inx h                 ; +1: count
+  mov a, m
+  cpi COL_MAX_STRING_LEN
+  jnc vm_loop           ; 満杯なら何もしない
+  inr m                 ; count++
+  mov e, a              ; E = 旧 count (= 書き込みオフセット)
+  inx h                 ; HL → データ先頭
+  mvi d, 0
+  dad d                 ; HL = &data[old_count]
+  mov m, c              ; 書き込み
+  jmp vm_loop
+
+concat_array:
+  ; R[a] のコレクションスロット
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov a, m
+  cpi COL_MAX_ARRAY_ELEMS
+  jnc vm_error          ; 満杯
+  sta cc_ary_count
+  inr m                 ; count++
+
+  ; 書き込み位置: data + count * 4
+  inx h                 ; HL → データ先頭
+  lda cc_ary_count
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = 書き込み位置
+  xchg                  ; DE = 書き込み位置
+
+  ; R[a+1] をコピー
+  lda send_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  mvi c, SLOT_BYTES
+cc_ary_copy:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz cc_ary_copy
+  jmp vm_loop
+
+cc_src_len:    db 0
+cc_dst_len:    db 0
+cc_total_len:  db 0
+cc_src_data:   dw 0
+cc_ary_count:  db 0
+
+; ===============================================================
+; send_push — push: 配列に要素を追加 (send_concat の配列パスと同じ)
+; ===============================================================
+send_push:
+  jmp concat_array
+
+; ===============================================================
+; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
+;
+; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
+; ===============================================================
+do_op_array2:
+  call fetch_byte       ; A = a (書き込み先)
+  sta oary_reg_a
+  call fetch_byte       ; A = b (ソースレジスタ先頭)
+  sta oary_src_reg
+  call fetch_byte       ; A = c (要素数)
+  jmp oa2_join
 
   end

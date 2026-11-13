@@ -553,6 +553,416 @@ class TestI8080Vm < Minitest::Test
     end
   end
 
+  # === ユーザー定義メソッド ===
+
+  def test_def_basic
+    # def double(n); n + n; end; a = double(3)
+    board = run_ruby(<<~RUBY)
+      def double(n)
+        n + n
+      end
+      a = double(3)
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 6, board[:board].reg_value(1)
+  end
+
+  def test_def_two_methods
+    board = run_ruby(<<~RUBY)
+      def add1(n)
+        n + 1
+      end
+      def add2(n)
+        n + 2
+      end
+      a = add1(10) + add2(20)
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 33, board[:board].reg_value(1)
+  end
+
+  # === クラス定義 ===
+
+  def test_class_def_and_method
+    board = run_ruby(<<~RUBY)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+      end
+      a = Counter.new(3).value
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(1)
+  end
+
+  def test_class_two_objects
+    board = run_ruby(<<~RUBY)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+      end
+      a = Counter.new(3)
+      b = Counter.new(8)
+      c = a.value + b.value
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 11, board[:board].reg_value(3)
+  end
+
+  def test_class_bump
+    board = run_ruby(<<~RUBY)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+        def bump
+          @n = @n + 1
+          @n
+        end
+      end
+      a = Counter.new(5)
+      a.bump
+      a.bump
+      c = a.value
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 7, board[:board].reg_value(3)
+  end
+
+  def test_class_isolation
+    # トップレベルの def value と クラスの def value が混在しない
+    board = run_ruby(<<~RUBY)
+      class Foo
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+      end
+      def value
+        99
+      end
+      a = value
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(1)
+  end
+
+  def test_class_method_call
+    # メソッド内から自分のメソッド呼び出し
+    board = run_ruby(<<~RUBY)
+      class Counter
+        def initialize(n)
+          @n = n
+        end
+        def value
+          @n
+        end
+        def twice
+          value + value
+        end
+      end
+      a = Counter.new(6).twice
+    RUBY
+    assert_equal :finished, board[:result]
+    assert_equal 12, board[:board].reg_value(1)
+  end
+
+  # === display / getkey ビルトイン ===
+
+  def test_display_builtin
+    # display(a) で 7 セグに hex 002A を表示
+    # 末尾に a を置いて OP_RETURN R[1] でも同じ値を表示させる
+    board = run_ruby("a = 42\ndisplay(a)\na\n")
+    assert_equal :finished, board[:result]
+    assert_equal 42, board[:board].reg_value(1)
+    assert_equal "    002A", board[:board].display_text
+  end
+
+  def test_display_builtin_zero
+    # display(0) → 0000, OP_RETURN R[1]=nil の値=0 でも 0000
+    board = run_ruby("display(0)\n")
+    assert_equal :finished, board[:result]
+    assert_equal "    0000", board[:board].display_text
+  end
+
+  def test_display_builtin_variable
+    # 変数を介して display を呼ぶ
+    board = run_ruby("a = 255\ndisplay(a)\na\n")
+    assert_equal :finished, board[:result]
+    assert_equal "    00FF", board[:board].display_text
+  end
+
+  def test_getkey_simulator
+    # シミュレータでは ROM なし → -1 が返る
+    board = run_ruby("a = getkey\n")
+    assert_equal :finished, board[:result]
+    assert_equal(-1, board[:board].reg_value(1))
+  end
+
+  # === puts (ASCII → 7 セグ表示) ===
+
+  def test_puts_basic
+    # puts がクラッシュせず nil を返すことを確認
+    board = run_ruby("puts(0x4131)\n")
+    assert_equal :finished, board[:result]
+  end
+
+  def test_puts_display
+    # puts(0x4131) → 'A'(0x77) と '1'(0x06) を右端 2 桁に表示 (整数パス)
+    # loop で表示を保持 (OP_RETURN による上書きを防ぐ)
+    board = run_ruby("puts(0x4131)\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x77, raw[6], "digit 6 should be 'A' pattern"
+    assert_equal 0x06, raw[7], "digit 7 should be '1' pattern"
+    # 左 6 桁は初期値 (0x00) のままスクロール
+    (0..5).each { |i| assert_equal 0x00, raw[i], "digit #{i} should be blank" }
+  end
+
+  def test_puts_scroll
+    # 2 回の puts でスクロールを確認 (整数パス)
+    # puts(0x4142) → "AB", puts(0x4344) → "CD"
+    # スクロール後: 左 4 桁ブランク, [4]=A(0x77), [5]=B(0x7C), [6]=C(0x39), [7]=D(0x5E)
+    board = run_ruby("puts(0x4142)\nputs(0x4344)\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x00, raw[0]
+    assert_equal 0x00, raw[1]
+    assert_equal 0x00, raw[2]
+    assert_equal 0x00, raw[3]
+    assert_equal 0x77, raw[4], "digit 4 should be 'A' pattern"
+    assert_equal 0x7C, raw[5], "digit 5 should be 'B' pattern"
+    assert_equal 0x39, raw[6], "digit 6 should be 'C' pattern"
+    assert_equal 0x5E, raw[7], "digit 7 should be 'D' pattern"
+  end
+
+  def test_puts_lowercase_fold
+    # 小文字は大文字に折り畳まれる (整数パス)
+    # puts(0x6131) = 'a'→'A', '1'→'1'
+    board = run_ruby("puts(0x6131)\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x77, raw[6], "lowercase 'a' should fold to 'A' pattern"
+    assert_equal 0x06, raw[7], "'1' pattern"
+  end
+
+  # === puts 文字列リテラル (OP_STRING → TT_STRING パス) ===
+
+  def test_puts_string_hi
+    # puts "HI" → 左詰め: H(0x76), I(0x06), 残りブランク
+    board = run_ruby("puts \"HI\"\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x76, raw[0], "digit 0 should be 'H' pattern"
+    assert_equal 0x06, raw[1], "digit 1 should be 'I' pattern"
+    (2..7).each { |i| assert_equal 0x00, raw[i], "digit #{i} should be blank" }
+  end
+
+  def test_puts_string_hello
+    # puts "HELLO" → H(0x76), E(0x79), L(0x38), L(0x38), O(0x5C), blank×3
+    board = run_ruby("puts \"HELLO\"\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x76, raw[0], "H"
+    assert_equal 0x79, raw[1], "E"
+    assert_equal 0x38, raw[2], "L"
+    assert_equal 0x38, raw[3], "L"
+    assert_equal 0x5C, raw[4], "O"
+    (5..7).each { |i| assert_equal 0x00, raw[i], "digit #{i} should be blank" }
+  end
+
+  def test_puts_string_lowercase_fold
+    # puts "hello" → 小文字は大文字に折り畳まれる
+    board = run_ruby("puts \"hello\"\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x76, raw[0], "h → H"
+    assert_equal 0x79, raw[1], "e → E"
+    assert_equal 0x38, raw[2], "l → L"
+    assert_equal 0x38, raw[3], "l → L"
+    assert_equal 0x5C, raw[4], "o → O"
+  end
+
+  def test_puts_string_digits
+    # puts "1234" → 数字のセグメントパターン
+    board = run_ruby("puts \"1234\"\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x06, raw[0], "'1'"
+    assert_equal 0x5B, raw[1], "'2'"
+    assert_equal 0x4F, raw[2], "'3'"
+    assert_equal 0x66, raw[3], "'4'"
+  end
+
+  def test_puts_string_inside_loop
+    # 回帰テスト: 文字列リテラルがループ本体 (子 irep) のプールにある場合
+    # (programs/test_builtin.rb の実機テストパターン)
+    board = run_ruby("loop do\nputs \"HELLO\"\nbreak\nend\n")
+    assert_equal :finished, board[:result]
+    # break 後に OP_RETURN で上書きされるが、クラッシュしないことが重要
+  end
+
+  # === setseg (任意パターン設定) ===
+
+  def test_setseg_basic
+    # setseg(7, 0x77) → DISPLAY_BASE+7 に 0x77 を書く
+    board = run_ruby("setseg(7, 119)\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x77, raw[7], "digit 7 should have pattern 0x77"
+  end
+
+  def test_setseg_position_0
+    # setseg(0, 63) → DISPLAY_BASE+0 に 0x3F を書く
+    board = run_ruby("setseg(0, 63)\nloop do\nend\n", max_steps: 100_000)
+    assert_equal :timeout, board[:result]
+    raw = board[:board].display_raw
+    assert_equal 0x3F, raw[0], "digit 0 should have pattern 0x3F"
+  end
+
+  # === rand (擬似乱数) ===
+
+  def test_rand_returns_integer
+    board = run_ruby("a = rand(10)\n")
+    assert_equal :finished, board[:result]
+    val = board[:board].reg_value(1)
+    assert_operator val, :>=, 0
+    assert_operator val, :<, 10
+  end
+
+  def test_rand_one
+    # rand(1) は常に 0 を返す
+    board = run_ruby("a = rand(1)\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(1)
+  end
+
+  def test_rand_zero
+    # rand(0) はエッジケース → 0 を返す
+    board = run_ruby("a = rand(0)\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(1)
+  end
+
+  def test_rand_within_range
+    # 複数回呼んで全て範囲内
+    board = run_ruby("a = rand(6)\nb = rand(6)\nc = rand(6)\n")
+    assert_equal :finished, board[:result]
+    [1, 2, 3].each do |r|
+      val = board[:board].reg_value(r)
+      assert_operator val, :>=, 0, "R[#{r}] = #{val} should be >= 0"
+      assert_operator val, :<, 6, "R[#{r}] = #{val} should be < 6"
+    end
+  end
+
+  # === 文字列操作テスト ===
+
+  def test_string_length
+    board = run_ruby("a = \"hello\"\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_INTEGER, board[:board].reg_type(2)
+    assert_equal 5, board[:board].reg_value(2)
+  end
+
+  def test_string_size
+    board = run_ruby("a = \"abc\"\nb = a.size\n")
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(2)
+  end
+
+  def test_string_getidx
+    board = run_ruby("a = \"abc\"\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(2)
+    assert_equal "b", board[:board].reg_string(2)
+  end
+
+  def test_string_concat_str
+    board = run_ruby("a = \"ab\"\na << \"cd\"\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(1)
+    assert_equal "abcd", board[:board].reg_string(1)
+  end
+
+  def test_string_strcat
+    board = run_ruby("a = \"ab\" + \"cd\"\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(1)
+    assert_equal "abcd", board[:board].reg_string(1)
+  end
+
+  def test_string_puts
+    # puts with string literal should still work (compatibility)
+    # Note: OP_STOP overwrites display with return value, so we only check :finished
+    board = run_ruby("puts \"HELLO\"\n")
+    assert_equal :finished, board[:result]
+  end
+
+  def test_string_empty
+    board = run_ruby("a = \"\"\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
+  # === 配列操作テスト ===
+
+  def test_array_literal
+    board = run_ruby("a = [1, 2, 3]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_ARRAY, board[:board].reg_type(1)
+    assert_equal [1, 2, 3], board[:board].reg_array(1)
+  end
+
+  def test_array_getidx
+    board = run_ruby("a = [10, 20, 30]\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_INTEGER, board[:board].reg_type(2)
+    assert_equal 20, board[:board].reg_value(2)
+  end
+
+  def test_array_setidx
+    board = run_ruby("a = [1, 2, 3]\na[1] = 99\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(2)
+  end
+
+  def test_array_push
+    board = run_ruby("a = [1]\na.push(2)\n")
+    assert_equal :finished, board[:result]
+    assert_equal [1, 2], board[:board].reg_array(1)
+  end
+
+  def test_array_concat
+    board = run_ruby("a = [1]\na << 2\n")
+    assert_equal :finished, board[:result]
+    assert_equal [1, 2], board[:board].reg_array(1)
+  end
+
+  def test_array_length
+    board = run_ruby("a = [1, 2, 3]\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(2)
+  end
+
+  def test_array_empty
+    board = run_ruby("a = []\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
   private
 
   def find_mrbc
@@ -569,7 +979,7 @@ class TestI8080Vm < Minitest::Test
   end
 
   # Ruby ソースをコンパイルして i8080 VM で実行する
-  def run_ruby(source)
+  def run_ruby(source, max_steps: 2_000_000)
     rb_file = Tempfile.new(["i8080_test", ".rb"])
     rb_file.write(source)
     rb_file.close
@@ -588,7 +998,7 @@ class TestI8080Vm < Minitest::Test
 
       board = FaRuby::I8080Board.new
       board.load_hex(combined.path)
-      result = board.run
+      result = board.run(max_steps: max_steps)
 
       { result: result, board: board }
     ensure
