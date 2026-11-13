@@ -963,6 +963,52 @@ class TestI8080Vm < Minitest::Test
     assert_equal 0, board[:board].reg_value(2)
   end
 
+  # === Hash テスト ===
+
+  def test_hash_literal
+    board = run_ruby("a = {1 => 2}\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_HASH, board[:board].reg_type(1)
+    assert_equal({1 => 2}, board[:board].reg_hash(1))
+  end
+
+  def test_hash_getidx
+    board = run_ruby("a = {1 => 10}\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_INTEGER, board[:board].reg_type(2)
+    assert_equal 10, board[:board].reg_value(2)
+  end
+
+  def test_hash_getidx_not_found
+    board = run_ruby("a = {1 => 10}\nb = a[2]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_NIL, board[:board].reg_type(2)
+  end
+
+  def test_hash_setidx
+    board = run_ruby("a = {1 => 10}\na[1] = 99\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(2)
+  end
+
+  def test_hash_setidx_append
+    board = run_ruby("a = {1 => 10}\na[2] = 20\nb = a[2]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 20, board[:board].reg_value(2)
+  end
+
+  def test_hash_length
+    board = run_ruby("a = {1 => 10, 2 => 20}\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 2, board[:board].reg_value(2)
+  end
+
+  def test_hash_empty
+    board = run_ruby("a = {}\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
   private
 
   def find_mrbc

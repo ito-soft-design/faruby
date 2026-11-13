@@ -66,6 +66,7 @@ TT_TRUE                  EQU  03h
 TT_INTEGER               EQU  04h
 TT_STRING                EQU  07h
 TT_ARRAY                 EQU  08h
+TT_HASH                  EQU  09h
 TT_OBJECT                EQU  0Ah
 TT_PROC                  EQU  0Ch
 TT_CLASS                 EQU  0Dh
@@ -150,6 +151,9 @@ COL_MAX_ARRAY_ELEMS      EQU  07h
 COL_TYPE_FREE            EQU  00h
 COL_TYPE_STRING          EQU  01h
 COL_TYPE_ARRAY           EQU  02h
+COL_TYPE_HASH            EQU  03h
+HASH_PAIR_BYTES          EQU  08h  ; 8B/ペア (key+value)
+COL_MAX_HASH_PAIRS       EQU  03h  ; 最大3ペア
 
 ; --- Phase 1 オペコード ---
 

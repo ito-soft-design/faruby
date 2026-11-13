@@ -62,6 +62,7 @@
 0000                TT_INTEGER:   EQU   04h   
 0000                TT_STRING:   EQU   07h   
 0000                TT_ARRAY:   EQU   08h   
+0000                TT_HASH:   EQU   09h   
 0000                TT_OBJECT:   EQU   0Ah   
 0000                TT_PROC:   EQU   0Ch   
 0000                TT_CLASS:   EQU   0Dh   
@@ -130,6 +131,9 @@
 0000                COL_TYPE_FREE:   EQU   00h   
 0000                COL_TYPE_STRING:   EQU   01h   
 0000                COL_TYPE_ARRAY:   EQU   02h   
+0000                COL_TYPE_HASH:   EQU   03h   
+0000                HASH_PAIR_BYTES:   EQU   08h   ; 8B/ペア (key+value)
+0000                COL_MAX_HASH_PAIRS:   EQU   03h   ; 最大3ペア
 0000                             ; --- Phase 1 オペコード ---
 0000                OP_NOP:   EQU   00h   
 0000                OP_MOVE:   EQU   01h   
@@ -718,8 +722,8 @@
 85CF                             ; --- 文字列パス ---
 85CF                ADD_STRING:      
 85CF   F1                     POP   psw   ; A = a
-85D0   32 D0 AE               STA   scat_reg_a   
-85D3   C3 60 AE               JMP   strcat_body   ; do_op_strcat の本体を再利用
+85D0   32 DA AE               STA   scat_reg_a   
+85D3   C3 6A AE               JMP   strcat_body   ; do_op_strcat の本体を再利用
 85D6                             ; ---------------------------------------------------------------
 85D6                             ; OP_SUB (B): R[a] = R[a] - R[a+1]
 85D6                             ; ---------------------------------------------------------------
@@ -2780,7 +2784,7 @@ A840   00 00                  DW   0000h   ; 20 OP_SETMCNST
 A842   F9 8C                  DW   do_op_getupvar   ; 21 OP_GETUPVAR
 A844   25 8D                  DW   do_op_setupvar   ; 22 OP_SETUPVAR
 A846   13 AC                  DW   do_op_getidx   ; 23 OP_GETIDX
-A848   B5 AC                  DW   do_op_setidx   ; 24 OP_SETIDX
+A848   BA AC                  DW   do_op_setidx   ; 24 OP_SETIDX
 A84A   86 87                  DW   do_op_jmp   ; 25 OP_JMP
 A84C   8F 87                  DW   do_op_jmpif   ; 26 OP_JMPIF
 A84E   AE 87                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
@@ -2815,10 +2819,10 @@ A886   4F 87                  DW   do_op_lt   ; 43 OP_LT
 A888   59 87                  DW   do_op_le   ; 44 OP_LE
 A88A   66 87                  DW   do_op_gt   ; 45 OP_GT
 A88C   73 87                  DW   do_op_ge   ; 46 OP_GE
-A88E   66 AD                  DW   do_op_array   ; 47 OP_ARRAY
-A890   E9 AF                  DW   do_op_array2   ; 48 OP_ARRAY2
+A88E   70 AD                  DW   do_op_array   ; 47 OP_ARRAY
+A890   00 B5                  DW   do_op_array2   ; 48 OP_ARRAY2
 A892   00 00                  DW   0000h   ; 49 OP_ARYCAT
-A894   E2 AD                  DW   do_op_arypush   ; 4A OP_ARYPUSH
+A894   EC AD                  DW   do_op_arypush   ; 4A OP_ARYPUSH
 A896   00 00                  DW   0000h   ; 4B OP_ARYSPLAT
 A898   00 00                  DW   0000h   ; 4C OP_AREF
 A89A   00 00                  DW   0000h   ; 4D OP_ASET
@@ -2826,8 +2830,8 @@ A89C   00 00                  DW   0000h   ; 4E OP_APOST
 A89E   00 00                  DW   0000h   ; 4F OP_INTERN
 A8A0   00 00                  DW   0000h   ; 50 OP_SYMBOL
 A8A2   6E A9                  DW   do_op_string   ; 51 OP_STRING
-A8A4   5A AE                  DW   do_op_strcat   ; 52 OP_STRCAT
-A8A6   00 00                  DW   0000h   ; 53 OP_HASH
+A8A4   64 AE                  DW   do_op_strcat   ; 52 OP_STRCAT
+A8A6   12 B5                  DW   do_op_hash   ; 53 OP_HASH
 A8A8   00 00                  DW   0000h   ; 54 OP_HASHADD
 A8AA   00 00                  DW   0000h   ; 55 OP_HASHCAT
 A8AC   00 00                  DW   0000h   ; 56 OP_LAMBDA
@@ -3093,11 +3097,11 @@ AA36   CA F4 AA               JZ   send_setseg
 AA39   FE 21                  CPI   METHOD_RAND   
 AA3B   CA AF AB               JZ   send_rand   
 AA3E   FE 12                  CPI   METHOD_LENGTH   
-AA40   CA D6 AE               JZ   send_length   
+AA40   CA E0 AE               JZ   send_length   
 AA43   FE 14                  CPI   METHOD_CONCAT   
-AA45   CA EF AE               JZ   send_concat   
+AA45   CA F9 AE               JZ   send_concat   
 AA48   FE 16                  CPI   METHOD_PUSH   
-AA4A   CA E6 AF               JZ   send_push   
+AA4A   CA F0 AF               JZ   send_push   
 AA4D   C3 03 00               JMP   vm_error   ; 未対応メソッド
 AA50                             ; ===============================================================
 AA50                             ; send_puts — puts(value): 文字列を 7 セグに表示
@@ -3503,647 +3507,909 @@ AC13                             ;   TT_ARRAY:  要素スロット (4B) を R[a]
 AC13                             ; ===============================================================
 AC13                DO_OP_GETIDX:      
 AC13   CD C3 84               CALL   fetch_byte   ; A = a
-AC16   32 B1 AC               STA   gidx_reg_a   
+AC16   32 B6 AC               STA   gidx_reg_a   
 AC19   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
 AC1C   7E                     MOV   a,m   ; A = 型タグ
 AC1D   FE 07                  CPI   TT_STRING   
-AC1F   CA 2A AC               JZ   gidx_string   
+AC1F   CA 2F AC               JZ   gidx_string   
 AC22   FE 08                  CPI   TT_ARRAY   
-AC24   CA 76 AC               JZ   gidx_array   
-AC27   C3 03 00               JMP   vm_error   
-AC2A                GIDX_STRING:      
-AC2A                             ; R[a] のコレクションスロットを取得
-AC2A   3A B1 AC               LDA   gidx_reg_a   
-AC2D   CD 03 84               CALL   get_reg_addr   
-AC30   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AC33   23                     INX   h   ; +1: count
-AC34   46                     MOV   b,m   ; B = 文字列長
-AC35   23                     INX   h   ; HL → データ領域先頭
-AC36   22 B2 AC               SHLD   gidx_data_addr   
-AC39                             ; R[a+1] からインデックスを取得
-AC39   3A B1 AC               LDA   gidx_reg_a   
-AC3C   3C                     INR   a   
-AC3D   CD 03 84               CALL   get_reg_addr   
-AC40   CD 35 84               CALL   slot_to_value   
-AC43   7E                     MOV   a,m   ; A = index (val_lo)
-AC44                             ; 範囲チェック: index < 文字列長
-AC44   B8                     CMP   b   
-AC45   D2 03 00               JNC   vm_error   ; index >= 長さ → エラー
-AC48                             ; データ先頭 + index で 1 文字を取得
-AC48   5F                     MOV   e,a   
-AC49   16 00                  MVI   d,0   
-AC4B   2A B2 AC               LHLD   gidx_data_addr   
-AC4E   19                     DAD   d   ; HL = &data[index]
-AC4F   4E                     MOV   c,m   ; C = 文字コード
-AC50                             ; 新しいコレクションスロットを確保して 1 文字の文字列を作る
-AC50   C5                     PUSH   b   ; C = 文字コード退避
-AC51   CD F6 AB               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
-AC54   32 B4 AC               STA   gidx_new_slot   
-AC57   36 01                  MVI   m,COL_TYPE_STRING   ; +0: type
-AC59   23                     INX   h   
-AC5A   36 01                  MVI   m,1   ; +1: count = 1
-AC5C   23                     INX   h   
-AC5D   C1                     POP   b   
-AC5E   71                     MOV   m,c   ; +2: data[0] = 文字コード
-AC5F                             ; R[a] = TT_STRING, val_lo = new_slot+1
-AC5F   3A B1 AC               LDA   gidx_reg_a   
-AC62   CD 03 84               CALL   get_reg_addr   
-AC65   36 07                  MVI   m,TT_STRING   
-AC67   23                     INX   h   
-AC68   36 00                  MVI   m,0   
-AC6A   23                     INX   h   
-AC6B   3A B4 AC               LDA   gidx_new_slot   
-AC6E   3C                     INR   a   
-AC6F   77                     MOV   m,a   
-AC70   23                     INX   h   
-AC71   36 00                  MVI   m,0   
-AC73   C3 4F 8F               JMP   vm_loop   
-AC76                GIDX_ARRAY:      
-AC76                             ; R[a] のコレクションスロットを取得
-AC76   3A B1 AC               LDA   gidx_reg_a   
-AC79   CD 03 84               CALL   get_reg_addr   
-AC7C   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AC7F   23                     INX   h   ; +1: count
-AC80   46                     MOV   b,m   ; B = 要素数
-AC81   23                     INX   h   ; HL → データ領域先頭
-AC82   22 B2 AC               SHLD   gidx_data_addr   
-AC85                             ; R[a+1] からインデックスを取得
-AC85   3A B1 AC               LDA   gidx_reg_a   
-AC88   3C                     INR   a   
-AC89   CD 03 84               CALL   get_reg_addr   
-AC8C   CD 35 84               CALL   slot_to_value   
-AC8F   7E                     MOV   a,m   ; A = index (val_lo)
-AC90                             ; 範囲チェック: index < 要素数
-AC90   B8                     CMP   b   
-AC91   D2 03 00               JNC   vm_error   
-AC94                             ; data + index * 4 で要素スロットの先頭を求める
-AC94   87                     ADD   a   ; ×2
-AC95   87                     ADD   a   ; ×4
-AC96   5F                     MOV   e,a   
-AC97   16 00                  MVI   d,0   
-AC99   2A B2 AC               LHLD   gidx_data_addr   
-AC9C   19                     DAD   d   ; HL = &data[index * 4] (コピー元)
-AC9D   EB                     XCHG      ; DE = &data[index * 4]
-AC9E                             ; R[a] にコピー (4 バイト)
-AC9E   3A B1 AC               LDA   gidx_reg_a   
-ACA1   CD 03 84               CALL   get_reg_addr   ; HL = R[a] (コピー先)
-ACA4   0E 04                  MVI   c,SLOT_BYTES   
-ACA6                GIDX_ARY_COPY:      
-ACA6   1A                     LDAX   d   
-ACA7   77                     MOV   m,a   
-ACA8   23                     INX   h   
-ACA9   13                     INX   d   
-ACAA   0D                     DCR   c   
-ACAB   C2 A6 AC               JNZ   gidx_ary_copy   
-ACAE   C3 4F 8F               JMP   vm_loop   
-ACB1   00           GIDX_REG_A:   DB   0   
-ACB2   00 00        GIDX_DATA_ADDR:   DW   0   
-ACB4   00           GIDX_NEW_SLOT:   DB   0   
-ACB5                             ; ===============================================================
-ACB5                             ; do_op_setidx — OP_SETIDX (B): R[a][R[a+1]] = R[a+2]
-ACB5                             ; 
-ACB5                             ; R[a] の型で分岐:
-ACB5                             ;   TT_STRING: インデックス位置に 1 文字を書き込む
-ACB5                             ;   TT_ARRAY:  インデックス位置にスロットをコピー
-ACB5                             ; ===============================================================
-ACB5                DO_OP_SETIDX:      
-ACB5   CD C3 84               CALL   fetch_byte   ; A = a
-ACB8   32 63 AD               STA   sidx_reg_a   
-ACBB   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-ACBE   7E                     MOV   a,m   ; A = 型タグ
-ACBF   FE 07                  CPI   TT_STRING   
-ACC1   CA CC AC               JZ   sidx_string   
-ACC4   FE 08                  CPI   TT_ARRAY   
-ACC6   CA 26 AD               JZ   sidx_array   
-ACC9   C3 03 00               JMP   vm_error   
-ACCC                SIDX_STRING:      
-ACCC                             ; R[a] のコレクションスロットを取得
-ACCC   3A 63 AD               LDA   sidx_reg_a   
-ACCF   CD 03 84               CALL   get_reg_addr   
-ACD2   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-ACD5   23                     INX   h   ; +1: count
-ACD6   46                     MOV   b,m   ; B = 文字列長
-ACD7   23                     INX   h   ; HL → データ領域先頭
-ACD8   22 64 AD               SHLD   sidx_data_addr   
-ACDB                             ; R[a+1] からインデックスを取得
-ACDB   3A 63 AD               LDA   sidx_reg_a   
-ACDE   3C                     INR   a   
-ACDF   CD 03 84               CALL   get_reg_addr   
-ACE2   CD 35 84               CALL   slot_to_value   
-ACE5   7E                     MOV   a,m   ; A = index
-ACE6   B8                     CMP   b   
-ACE7   D2 03 00               JNC   vm_error   ; index >= 長さ
-ACEA                             ; data[index] に R[a+2] の文字を書き込む
-ACEA   5F                     MOV   e,a   
-ACEB   16 00                  MVI   d,0   
-ACED   2A 64 AD               LHLD   sidx_data_addr   
-ACF0   19                     DAD   d   ; HL = &data[index]
-ACF1                             ; R[a+2] から文字コードを取得
-ACF1   3A 63 AD               LDA   sidx_reg_a   
-ACF4   3C                     INR   a   
-ACF5   3C                     INR   a   
-ACF6   CD 03 84               CALL   get_reg_addr   
-ACF9                             ; R[a+2] が TT_STRING なら先頭文字、TT_INTEGER なら val_lo
-ACF9   7E                     MOV   a,m   ; 型タグ
-ACFA   FE 07                  CPI   TT_STRING   
-ACFC   CA 06 AD               JZ   sidx_str_char   
-ACFF                             ; TT_INTEGER: val_lo を文字コードとして使う
-ACFF   CD 35 84               CALL   slot_to_value   
-AD02   7E                     MOV   a,m   
-AD03   C3 0C AD               JMP   sidx_write_char   
-AD06                SIDX_STR_CHAR:      
-AD06                             ; TT_STRING: コレクションスロットの先頭文字
-AD06   CD 0B AC               CALL   col_from_reg   
-AD09   23                     INX   h   ; +1: count
-AD0A   23                     INX   h   ; +2: data[0]
-AD0B   7E                     MOV   a,m   
-AD0C                SIDX_WRITE_CHAR:      
-AD0C   2A 64 AD               LHLD   sidx_data_addr   
-AD0F   5F                     MOV   e,a   ; E = 文字コード
-AD10   3A 63 AD               LDA   sidx_reg_a   
-AD13   3C                     INR   a   
-AD14   CD 03 84               CALL   get_reg_addr   
-AD17   CD 35 84               CALL   slot_to_value   
-AD1A   7E                     MOV   a,m   ; A = index
-AD1B   4F                     MOV   c,a   
-AD1C   06 00                  MVI   b,0   
-AD1E   2A 64 AD               LHLD   sidx_data_addr   
-AD21   09                     DAD   b   ; HL = &data[index]
-AD22   73                     MOV   m,e   ; 書き込み
-AD23   C3 4F 8F               JMP   vm_loop   
-AD26                SIDX_ARRAY:      
-AD26                             ; R[a] のコレクションスロットを取得
-AD26   3A 63 AD               LDA   sidx_reg_a   
-AD29   CD 03 84               CALL   get_reg_addr   
-AD2C   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AD2F   23                     INX   h   ; +1: count
-AD30   46                     MOV   b,m   ; B = 要素数
-AD31   23                     INX   h   ; HL → データ領域先頭
-AD32   22 64 AD               SHLD   sidx_data_addr   
-AD35                             ; R[a+1] からインデックスを取得
-AD35   3A 63 AD               LDA   sidx_reg_a   
-AD38   3C                     INR   a   
-AD39   CD 03 84               CALL   get_reg_addr   
-AD3C   CD 35 84               CALL   slot_to_value   
-AD3F   7E                     MOV   a,m   ; A = index
-AD40   B8                     CMP   b   
-AD41   D2 03 00               JNC   vm_error   
-AD44                             ; data[index * 4] に R[a+2] をコピー
-AD44   87                     ADD   a   ; ×2
-AD45   87                     ADD   a   ; ×4
-AD46   5F                     MOV   e,a   
-AD47   16 00                  MVI   d,0   
-AD49   2A 64 AD               LHLD   sidx_data_addr   
-AD4C   19                     DAD   d   ; HL = &data[index * 4] (コピー先)
-AD4D   EB                     XCHG      ; DE = コピー先
-AD4E                             ; R[a+2] を取得 (コピー元)
-AD4E   3A 63 AD               LDA   sidx_reg_a   
-AD51   3C                     INR   a   
-AD52   3C                     INR   a   
-AD53   CD 03 84               CALL   get_reg_addr   ; HL = R[a+2]
-AD56   0E 04                  MVI   c,SLOT_BYTES   
-AD58                SIDX_ARY_COPY:      
-AD58   7E                     MOV   a,m   
-AD59   12                     STAX   d   
-AD5A   23                     INX   h   
-AD5B   13                     INX   d   
-AD5C   0D                     DCR   c   
-AD5D   C2 58 AD               JNZ   sidx_ary_copy   
-AD60   C3 4F 8F               JMP   vm_loop   
-AD63   00           SIDX_REG_A:   DB   0   
-AD64   00 00        SIDX_DATA_ADDR:   DW   0   
-AD66                             ; ===============================================================
-AD66                             ; do_op_array — OP_ARRAY (BB): R[a] = [R[a], R[a+1], ..., R[a+b-1]]
-AD66                             ; 
-AD66                             ; b 個のレジスタからコレクションプールに配列を構築する。
-AD66                             ; ===============================================================
-AD66                DO_OP_ARRAY:      
-AD66   CD C3 84               CALL   fetch_byte   ; A = a
-AD69   32 DD AD               STA   oary_reg_a   
-AD6C   32 DE AD               STA   oary_src_reg   ; BB 形式: ソース = a
-AD6F   CD C3 84               CALL   fetch_byte   ; A = b (要素数)
-AD72                OA2_JOIN:      ; OP_ARRAY2 からの合流点
-AD72   32 DF AD               STA   oary_count   
-AD75   B7                     ORA   a   
-AD76   CA CF AD               JZ   oary_empty   ; 空配列
-AD79                             ; 要素数チェック
-AD79   FE 08                  CPI   COL_MAX_ARRAY_ELEMS + 1   
-AD7B   D2 03 00               JNC   vm_error   ; 要素数 > 7
-AD7E                             ; コレクションスロットを確保
-AD7E   CD F6 AB               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
-AD81   32 E0 AD               STA   oary_slot_num   
-AD84   36 02                  MVI   m,COL_TYPE_ARRAY   ; +0: type
-AD86   23                     INX   h   
-AD87   3A DF AD               LDA   oary_count   
-AD8A   77                     MOV   m,a   ; +1: count
-AD8B   23                     INX   h   ; HL → データ領域先頭
-AD8C   EB                     XCHG      ; DE = データ領域先頭 (コピー先)
-AD8D                             ; ソースレジスタから b 個のスロットをコピー
-AD8D   3A DE AD               LDA   oary_src_reg   
-AD90   47                     MOV   b,a   ; B = 現在のレジスタ番号
-AD91   3A DF AD               LDA   oary_count   
-AD94   4F                     MOV   c,a   ; C = 残り要素数
-AD95                OARY_COPY_LOOP:      
-AD95   3E 04                  MVI   a,SLOT_BYTES   
-AD97   32 E1 AD               STA   oary_elem_cnt   ; 毎回初期化 (2 回目以降のため)
-AD9A   C5                     PUSH   b   
-AD9B   D5                     PUSH   d   
-AD9C   78                     MOV   a,b   
-AD9D   CD 03 84               CALL   get_reg_addr   ; HL = R[reg] (コピー元)
-ADA0   D1                     POP   d   
-ADA1                OARY_COPY_ELEM:      
-ADA1   46                     MOV   b,m   ; SLOT_BYTES 分のコピー (HL → DE)
-ADA2   23                     INX   h   
-ADA3   78                     MOV   a,b   
-ADA4   12                     STAX   d   
-ADA5   13                     INX   d   
-ADA6   E5                     PUSH   h   
-ADA7   21 E1 AD               LXI   h,oary_elem_cnt   
-ADAA   35                     DCR   m   
-ADAB   E1                     POP   h   
-ADAC   C2 A1 AD               JNZ   oary_copy_elem   
-ADAF   C1                     POP   b   
-ADB0   04                     INR   b   ; 次のレジスタ
-ADB1   0D                     DCR   c   
-ADB2   CA B8 AD               JZ   oary_done   
-ADB5   C3 95 AD               JMP   oary_copy_loop   
-ADB8                OARY_DONE:      
-ADB8                             ; R[a] = TT_ARRAY, val_lo = slot+1
-ADB8   3A DD AD               LDA   oary_reg_a   
-ADBB   CD 03 84               CALL   get_reg_addr   
-ADBE   36 08                  MVI   m,TT_ARRAY   
-ADC0   23                     INX   h   
-ADC1   36 00                  MVI   m,0   
-ADC3   23                     INX   h   
-ADC4   3A E0 AD               LDA   oary_slot_num   
-ADC7   3C                     INR   a   
-ADC8   77                     MOV   m,a   
-ADC9   23                     INX   h   
-ADCA   36 00                  MVI   m,0   
-ADCC   C3 4F 8F               JMP   vm_loop   
-ADCF                OARY_EMPTY:      
-ADCF                             ; 空配列: スロット確保して count=0
-ADCF   CD F6 AB               CALL   col_alloc   
-ADD2   32 E0 AD               STA   oary_slot_num   
-ADD5   36 02                  MVI   m,COL_TYPE_ARRAY   
-ADD7   23                     INX   h   
-ADD8   36 00                  MVI   m,0   ; count = 0
-ADDA   C3 B8 AD               JMP   oary_done   
-ADDD   00           OARY_REG_A:   DB   0   
-ADDE   00           OARY_SRC_REG:   DB   0   
-ADDF   00           OARY_COUNT:   DB   0   
-ADE0   00           OARY_SLOT_NUM:   DB   0   
-ADE1   04           OARY_ELEM_CNT:   DB   SLOT_BYTES   
-ADE2                             ; ===============================================================
-ADE2                             ; do_op_arypush — OP_ARYPUSH (BB): R[a].push(R[a+1], ..., R[a+b-1])
-ADE2                             ; 
-ADE2                             ; R[a] の配列の末尾に要素を追加する。
-ADE2                             ; ===============================================================
-ADE2                DO_OP_ARYPUSH:      
-ADE2   CD C3 84               CALL   fetch_byte   ; A = a
-ADE5   32 56 AE               STA   apush_reg_a   
-ADE8   CD C3 84               CALL   fetch_byte   ; A = b (追加する要素数)
-ADEB   32 57 AE               STA   apush_add_count   
-ADEE                             ; R[a] のコレクションスロットを取得
-ADEE   3A 56 AE               LDA   apush_reg_a   
-ADF1   CD 03 84               CALL   get_reg_addr   
-ADF4   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-ADF7   23                     INX   h   ; +1: count
-ADF8   7E                     MOV   a,m   ; A = 現在の要素数
-ADF9   32 58 AE               STA   apush_cur_count   
-ADFC                             ; 容量チェック: count + add_count <= MAX
-ADFC   3A 57 AE               LDA   apush_add_count   
-ADFF   47                     MOV   b,a   
-AE00   3A 58 AE               LDA   apush_cur_count   
-AE03   80                     ADD   b   
-AE04   FE 08                  CPI   COL_MAX_ARRAY_ELEMS + 1   
-AE06   D2 03 00               JNC   vm_error   ; オーバーフロー
-AE09                             ; 書き込み先: data + count * 4
-AE09   3A 58 AE               LDA   apush_cur_count   
-AE0C   87                     ADD   a   ; ×2
-AE0D   87                     ADD   a   ; ×4
-AE0E   5F                     MOV   e,a   
-AE0F   16 00                  MVI   d,0   
-AE11   23                     INX   h   ; HL → データ領域先頭
-AE12   19                     DAD   d   ; HL = 書き込み位置
-AE13   EB                     XCHG      ; DE = 書き込み位置
-AE14                             ; R[a+1] から b 個のスロットをコピー
-AE14   3A 56 AE               LDA   apush_reg_a   
-AE17   3C                     INR   a   
-AE18   47                     MOV   b,a   ; B = 現在のレジスタ番号
-AE19   3A 57 AE               LDA   apush_add_count   
-AE1C   4F                     MOV   c,a   ; C = 残り要素数
-AE1D                APUSH_LOOP:      
-AE1D   3E 04                  MVI   a,SLOT_BYTES   
-AE1F   32 59 AE               STA   apush_byte_cnt   ; 毎回初期化
-AE22   C5                     PUSH   b   
-AE23   D5                     PUSH   d   
-AE24   78                     MOV   a,b   
-AE25   CD 03 84               CALL   get_reg_addr   ; HL = R[reg]
-AE28   D1                     POP   d   
-AE29                APUSH_COPY:      
-AE29   46                     MOV   b,m   
-AE2A   78                     MOV   a,b   
-AE2B   12                     STAX   d   
-AE2C   23                     INX   h   
-AE2D   13                     INX   d   
-AE2E   E5                     PUSH   h   
-AE2F   21 59 AE               LXI   h,apush_byte_cnt   
-AE32   35                     DCR   m   
-AE33   E1                     POP   h   
-AE34   C2 29 AE               JNZ   apush_copy   
-AE37   C1                     POP   b   
-AE38   04                     INR   b   
-AE39   0D                     DCR   c   
-AE3A   CA 40 AE               JZ   apush_done   
-AE3D   C3 1D AE               JMP   apush_loop   
-AE40                APUSH_DONE:      
-AE40                             ; count を更新
-AE40   3A 56 AE               LDA   apush_reg_a   
-AE43   CD 03 84               CALL   get_reg_addr   
-AE46   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AE49   23                     INX   h   ; +1: count
-AE4A   3A 58 AE               LDA   apush_cur_count   
-AE4D   47                     MOV   b,a   
-AE4E   3A 57 AE               LDA   apush_add_count   
-AE51   80                     ADD   b   
-AE52   77                     MOV   m,a   ; count = old + added
-AE53   C3 4F 8F               JMP   vm_loop   
-AE56   00           APUSH_REG_A:   DB   0   
-AE57   00           APUSH_ADD_COUNT:   DB   0   
-AE58   00           APUSH_CUR_COUNT:   DB   0   
-AE59   04           APUSH_BYTE_CNT:   DB   SLOT_BYTES   
-AE5A                             ; ===============================================================
-AE5A                             ; do_op_strcat — OP_STRCAT (B): R[a] = R[a] + R[a+1] (文字列連結)
-AE5A                             ; 
-AE5A                             ; R[a] の文字列の末尾に R[a+1] の文字列を追記する。
-AE5A                             ; ===============================================================
-AE5A                DO_OP_STRCAT:      
-AE5A   CD C3 84               CALL   fetch_byte   ; A = a
-AE5D   32 D0 AE               STA   scat_reg_a   
-AE60                STRCAT_BODY:      ; OP_ADD 文字列パスからも使う (A = a)
-AE60                             ; R[a+1] のコレクションスロット (ソース)
-AE60   3C                     INR   a   
-AE61   CD 03 84               CALL   get_reg_addr   
-AE64   CD 0B AC               CALL   col_from_reg   ; HL = ソーススロット
-AE67   23                     INX   h   ; +1: count
-AE68   7E                     MOV   a,m   ; A = ソース文字列長
-AE69   32 D1 AE               STA   scat_src_len   
-AE6C   23                     INX   h   ; HL → データ先頭
-AE6D   22 D4 AE               SHLD   scat_src_data   
-AE70                             ; R[a] のコレクションスロット (デスト)
-AE70   3A D0 AE               LDA   scat_reg_a   
-AE73   CD 03 84               CALL   get_reg_addr   
-AE76   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
-AE79   23                     INX   h   ; +1: count
-AE7A   7E                     MOV   a,m   ; A = デスト文字列長
-AE7B   32 D2 AE               STA   scat_dst_len   
-AE7E                             ; 合計長チェック
-AE7E   3A D1 AE               LDA   scat_src_len   
-AE81   47                     MOV   b,a   
-AE82   3A D2 AE               LDA   scat_dst_len   
-AE85   80                     ADD   b   
-AE86   FE 1F                  CPI   COL_MAX_STRING_LEN + 1   
-AE88   DA A0 AE               JC   scat_len_ok   
-AE8B                             ; 切り詰め: 追記できる分だけ
-AE8B   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
-AE8D   47                     MOV   b,a   
-AE8E   3A D2 AE               LDA   scat_dst_len   
-AE91   90                     SUB   b   ; この結果は負 (使わない)
-AE92   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
-AE94   47                     MOV   b,a   
-AE95   3A D2 AE               LDA   scat_dst_len   
-AE98   4F                     MOV   c,a   
-AE99   78                     MOV   a,b   
-AE9A   91                     SUB   c   ; A = MAX - dst_len = コピー可能バイト数
-AE9B   32 D1 AE               STA   scat_src_len   
-AE9E                             ; 合計を MAX に
-AE9E   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
-AEA0                SCAT_LEN_OK:      
-AEA0   32 D3 AE               STA   scat_total_len   
-AEA3                             ; デスト count を更新
-AEA3   3A D0 AE               LDA   scat_reg_a   
-AEA6   CD 03 84               CALL   get_reg_addr   
-AEA9   CD 0B AC               CALL   col_from_reg   
-AEAC   23                     INX   h   
-AEAD   3A D3 AE               LDA   scat_total_len   
-AEB0   77                     MOV   m,a   ; count = 合計長
-AEB1   23                     INX   h   ; HL → データ先頭
-AEB2                             ; デストデータ末尾 = data + dst_len
-AEB2   3A D2 AE               LDA   scat_dst_len   
-AEB5   5F                     MOV   e,a   
-AEB6   16 00                  MVI   d,0   
-AEB8   19                     DAD   d   ; HL = 書き込み位置
-AEB9                             ; ソースデータをコピー
-AEB9   EB                     XCHG      ; DE = 書き込み位置
-AEBA   2A D4 AE               LHLD   scat_src_data   ; HL = ソースデータ
-AEBD   3A D1 AE               LDA   scat_src_len   
-AEC0   B7                     ORA   a   
-AEC1   CA CD AE               JZ   scat_done   
-AEC4   4F                     MOV   c,a   
-AEC5                SCAT_COPY:      
-AEC5   7E                     MOV   a,m   
-AEC6   12                     STAX   d   
-AEC7   23                     INX   h   
-AEC8   13                     INX   d   
-AEC9   0D                     DCR   c   
-AECA   C2 C5 AE               JNZ   scat_copy   
-AECD                SCAT_DONE:      
-AECD   C3 4F 8F               JMP   vm_loop   
-AED0   00           SCAT_REG_A:   DB   0   
-AED1   00           SCAT_SRC_LEN:   DB   0   
-AED2   00           SCAT_DST_LEN:   DB   0   
-AED3   00           SCAT_TOTAL_LEN:   DB   0   
-AED4   00 00        SCAT_SRC_DATA:   DW   0   
-AED6                             ; ===============================================================
-AED6                             ; send_length — length / size: 文字列長・配列長を返す
-AED6                             ; 
-AED6                             ; R[a] のコレクションスロットの count を TT_INTEGER として返す。
-AED6                             ; ===============================================================
-AED6                SEND_LENGTH:      
-AED6   3A 58 8A               LDA   send_reg_a   
-AED9   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-AEDC   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AEDF   23                     INX   h   ; +1: count
-AEE0   4E                     MOV   c,m   ; C = count
-AEE1   06 00                  MVI   b,0   ; BC = count (16-bit)
-AEE3   3A 58 8A               LDA   send_reg_a   
-AEE6   CD 03 84               CALL   get_reg_addr   
-AEE9   CD 13 84               CALL   set_slot_int16   ; R[a] = count
-AEEC   C3 4F 8F               JMP   vm_loop   
-AEEF                             ; ===============================================================
-AEEF                             ; send_concat — << (文字列追記 / 配列追加)
-AEEF                             ; 
-AEEF                             ; R[a] の型で分岐:
-AEEF                             ;   TT_STRING: R[a+1] の文字列を R[a] に追記
-AEEF                             ;   TT_ARRAY:  R[a+1] のスロットを R[a] の配列末尾に追加
-AEEF                             ; ===============================================================
-AEEF                SEND_CONCAT:      
-AEEF   3A 58 8A               LDA   send_reg_a   
-AEF2   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
-AEF5   7E                     MOV   a,m   ; A = 型タグ
-AEF6   FE 07                  CPI   TT_STRING   
-AEF8   CA 03 AF               JZ   concat_string   
-AEFB   FE 08                  CPI   TT_ARRAY   
-AEFD   CA AD AF               JZ   concat_array   
-AF00   C3 03 00               JMP   vm_error   
-AF03                CONCAT_STRING:      
-AF03                             ; R[a+1] の型を確認
-AF03   3A 58 8A               LDA   send_reg_a   
-AF06   3C                     INR   a   
-AF07   CD 03 84               CALL   get_reg_addr   
-AF0A   7E                     MOV   a,m   ; A = R[a+1] の型タグ
-AF0B   FE 07                  CPI   TT_STRING   
-AF0D   CA 18 AF               JZ   concat_str_str   
-AF10   FE 04                  CPI   TT_INTEGER   
-AF12   CA 88 AF               JZ   concat_str_int   
-AF15   C3 03 00               JMP   vm_error   
-AF18                CONCAT_STR_STR:      
-AF18                             ; R[a+1] のコレクションスロット (ソース)
-AF18   3A 58 8A               LDA   send_reg_a   
-AF1B   3C                     INR   a   
-AF1C   CD 03 84               CALL   get_reg_addr   
-AF1F   CD 0B AC               CALL   col_from_reg   ; HL = ソーススロット
-AF22   23                     INX   h   ; +1: count
-AF23   7E                     MOV   a,m   ; A = ソース文字列長
-AF24   32 E0 AF               STA   cc_src_len   
-AF27   23                     INX   h   ; HL → データ先頭
-AF28   22 E3 AF               SHLD   cc_src_data   
-AF2B                             ; R[a] のコレクションスロット (デスト)
-AF2B   3A 58 8A               LDA   send_reg_a   
-AF2E   CD 03 84               CALL   get_reg_addr   
-AF31   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
-AF34   23                     INX   h   ; +1: count
-AF35   7E                     MOV   a,m   
-AF36   32 E1 AF               STA   cc_dst_len   
-AF39                             ; コピー可能バイト数を計算
-AF39   3A E0 AF               LDA   cc_src_len   
-AF3C   47                     MOV   b,a   
-AF3D   3A E1 AF               LDA   cc_dst_len   
-AF40   80                     ADD   b   
-AF41   FE 1F                  CPI   COL_MAX_STRING_LEN + 1   
-AF43   DA 58 AF               JC   cc_str_len_ok   
-AF46                             ; 切り詰め
-AF46   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
-AF48   47                     MOV   b,a   
-AF49   3A E1 AF               LDA   cc_dst_len   
-AF4C   4F                     MOV   c,a   
-AF4D   78                     MOV   a,b   
-AF4E   91                     SUB   c   
-AF4F   32 E0 AF               STA   cc_src_len   
-AF52   3A E1 AF               LDA   cc_dst_len   
-AF55   87                     ADD   a   ; ここでは使わない — 合計は MAX
-AF56   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
-AF58                CC_STR_LEN_OK:      
-AF58   32 E2 AF               STA   cc_total_len   
-AF5B                             ; count を更新
-AF5B   3A 58 8A               LDA   send_reg_a   
-AF5E   CD 03 84               CALL   get_reg_addr   
-AF61   CD 0B AC               CALL   col_from_reg   
-AF64   23                     INX   h   
-AF65   3A E2 AF               LDA   cc_total_len   
-AF68   77                     MOV   m,a   
-AF69   23                     INX   h   ; HL → データ先頭
-AF6A                             ; 書き込み位置 = data + dst_len
-AF6A   3A E1 AF               LDA   cc_dst_len   
-AF6D   5F                     MOV   e,a   
-AF6E   16 00                  MVI   d,0   
-AF70   19                     DAD   d   
-AF71                             ; コピー
-AF71   EB                     XCHG      
-AF72   2A E3 AF               LHLD   cc_src_data   
-AF75   3A E0 AF               LDA   cc_src_len   
-AF78   B7                     ORA   a   
-AF79   CA 85 AF               JZ   cc_str_done   
-AF7C   4F                     MOV   c,a   
-AF7D                CC_STR_COPY:      
-AF7D   7E                     MOV   a,m   
-AF7E   12                     STAX   d   
-AF7F   23                     INX   h   
-AF80   13                     INX   d   
-AF81   0D                     DCR   c   
-AF82   C2 7D AF               JNZ   cc_str_copy   
-AF85                CC_STR_DONE:      
-AF85                             ; R[a] をそのまま返す (破壊的操作)
-AF85   C3 4F 8F               JMP   vm_loop   
-AF88                CONCAT_STR_INT:      
-AF88                             ; R[a+1] の val_lo を 1 バイトとして追記
-AF88   3A 58 8A               LDA   send_reg_a   
-AF8B   3C                     INR   a   
-AF8C   CD 03 84               CALL   get_reg_addr   
-AF8F   CD 35 84               CALL   slot_to_value   
-AF92   4E                     MOV   c,m   ; C = 文字コード (val_lo)
-AF93                             ; R[a] のコレクションスロット
-AF93   3A 58 8A               LDA   send_reg_a   
+AC24   CA 7B AC               JZ   gidx_array   
+AC27   FE 09                  CPI   TT_HASH   
+AC29   CA 7E B5               JZ   gidx_hash   
+AC2C   C3 03 00               JMP   vm_error   
+AC2F                GIDX_STRING:      
+AC2F                             ; R[a] のコレクションスロットを取得
+AC2F   3A B6 AC               LDA   gidx_reg_a   
+AC32   CD 03 84               CALL   get_reg_addr   
+AC35   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AC38   23                     INX   h   ; +1: count
+AC39   46                     MOV   b,m   ; B = 文字列長
+AC3A   23                     INX   h   ; HL → データ領域先頭
+AC3B   22 B7 AC               SHLD   gidx_data_addr   
+AC3E                             ; R[a+1] からインデックスを取得
+AC3E   3A B6 AC               LDA   gidx_reg_a   
+AC41   3C                     INR   a   
+AC42   CD 03 84               CALL   get_reg_addr   
+AC45   CD 35 84               CALL   slot_to_value   
+AC48   7E                     MOV   a,m   ; A = index (val_lo)
+AC49                             ; 範囲チェック: index < 文字列長
+AC49   B8                     CMP   b   
+AC4A   D2 03 00               JNC   vm_error   ; index >= 長さ → エラー
+AC4D                             ; データ先頭 + index で 1 文字を取得
+AC4D   5F                     MOV   e,a   
+AC4E   16 00                  MVI   d,0   
+AC50   2A B7 AC               LHLD   gidx_data_addr   
+AC53   19                     DAD   d   ; HL = &data[index]
+AC54   4E                     MOV   c,m   ; C = 文字コード
+AC55                             ; 新しいコレクションスロットを確保して 1 文字の文字列を作る
+AC55   C5                     PUSH   b   ; C = 文字コード退避
+AC56   CD F6 AB               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
+AC59   32 B9 AC               STA   gidx_new_slot   
+AC5C   36 01                  MVI   m,COL_TYPE_STRING   ; +0: type
+AC5E   23                     INX   h   
+AC5F   36 01                  MVI   m,1   ; +1: count = 1
+AC61   23                     INX   h   
+AC62   C1                     POP   b   
+AC63   71                     MOV   m,c   ; +2: data[0] = 文字コード
+AC64                             ; R[a] = TT_STRING, val_lo = new_slot+1
+AC64   3A B6 AC               LDA   gidx_reg_a   
+AC67   CD 03 84               CALL   get_reg_addr   
+AC6A   36 07                  MVI   m,TT_STRING   
+AC6C   23                     INX   h   
+AC6D   36 00                  MVI   m,0   
+AC6F   23                     INX   h   
+AC70   3A B9 AC               LDA   gidx_new_slot   
+AC73   3C                     INR   a   
+AC74   77                     MOV   m,a   
+AC75   23                     INX   h   
+AC76   36 00                  MVI   m,0   
+AC78   C3 4F 8F               JMP   vm_loop   
+AC7B                GIDX_ARRAY:      
+AC7B                             ; R[a] のコレクションスロットを取得
+AC7B   3A B6 AC               LDA   gidx_reg_a   
+AC7E   CD 03 84               CALL   get_reg_addr   
+AC81   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AC84   23                     INX   h   ; +1: count
+AC85   46                     MOV   b,m   ; B = 要素数
+AC86   23                     INX   h   ; HL → データ領域先頭
+AC87   22 B7 AC               SHLD   gidx_data_addr   
+AC8A                             ; R[a+1] からインデックスを取得
+AC8A   3A B6 AC               LDA   gidx_reg_a   
+AC8D   3C                     INR   a   
+AC8E   CD 03 84               CALL   get_reg_addr   
+AC91   CD 35 84               CALL   slot_to_value   
+AC94   7E                     MOV   a,m   ; A = index (val_lo)
+AC95                             ; 範囲チェック: index < 要素数
+AC95   B8                     CMP   b   
+AC96   D2 03 00               JNC   vm_error   
+AC99                             ; data + index * 4 で要素スロットの先頭を求める
+AC99   87                     ADD   a   ; ×2
+AC9A   87                     ADD   a   ; ×4
+AC9B   5F                     MOV   e,a   
+AC9C   16 00                  MVI   d,0   
+AC9E   2A B7 AC               LHLD   gidx_data_addr   
+ACA1   19                     DAD   d   ; HL = &data[index * 4] (コピー元)
+ACA2   EB                     XCHG      ; DE = &data[index * 4]
+ACA3                             ; R[a] にコピー (4 バイト)
+ACA3   3A B6 AC               LDA   gidx_reg_a   
+ACA6   CD 03 84               CALL   get_reg_addr   ; HL = R[a] (コピー先)
+ACA9   0E 04                  MVI   c,SLOT_BYTES   
+ACAB                GIDX_ARY_COPY:      
+ACAB   1A                     LDAX   d   
+ACAC   77                     MOV   m,a   
+ACAD   23                     INX   h   
+ACAE   13                     INX   d   
+ACAF   0D                     DCR   c   
+ACB0   C2 AB AC               JNZ   gidx_ary_copy   
+ACB3   C3 4F 8F               JMP   vm_loop   
+ACB6   00           GIDX_REG_A:   DB   0   
+ACB7   00 00        GIDX_DATA_ADDR:   DW   0   
+ACB9   00           GIDX_NEW_SLOT:   DB   0   
+ACBA                             ; ===============================================================
+ACBA                             ; do_op_setidx — OP_SETIDX (B): R[a][R[a+1]] = R[a+2]
+ACBA                             ; 
+ACBA                             ; R[a] の型で分岐:
+ACBA                             ;   TT_STRING: インデックス位置に 1 文字を書き込む
+ACBA                             ;   TT_ARRAY:  インデックス位置にスロットをコピー
+ACBA                             ; ===============================================================
+ACBA                DO_OP_SETIDX:      
+ACBA   CD C3 84               CALL   fetch_byte   ; A = a
+ACBD   32 6D AD               STA   sidx_reg_a   
+ACC0   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+ACC3   7E                     MOV   a,m   ; A = 型タグ
+ACC4   FE 07                  CPI   TT_STRING   
+ACC6   CA D6 AC               JZ   sidx_string   
+ACC9   FE 08                  CPI   TT_ARRAY   
+ACCB   CA 30 AD               JZ   sidx_array   
+ACCE   FE 09                  CPI   TT_HASH   
+ACD0   CA E6 B5               JZ   sidx_hash   
+ACD3   C3 03 00               JMP   vm_error   
+ACD6                SIDX_STRING:      
+ACD6                             ; R[a] のコレクションスロットを取得
+ACD6   3A 6D AD               LDA   sidx_reg_a   
+ACD9   CD 03 84               CALL   get_reg_addr   
+ACDC   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+ACDF   23                     INX   h   ; +1: count
+ACE0   46                     MOV   b,m   ; B = 文字列長
+ACE1   23                     INX   h   ; HL → データ領域先頭
+ACE2   22 6E AD               SHLD   sidx_data_addr   
+ACE5                             ; R[a+1] からインデックスを取得
+ACE5   3A 6D AD               LDA   sidx_reg_a   
+ACE8   3C                     INR   a   
+ACE9   CD 03 84               CALL   get_reg_addr   
+ACEC   CD 35 84               CALL   slot_to_value   
+ACEF   7E                     MOV   a,m   ; A = index
+ACF0   B8                     CMP   b   
+ACF1   D2 03 00               JNC   vm_error   ; index >= 長さ
+ACF4                             ; data[index] に R[a+2] の文字を書き込む
+ACF4   5F                     MOV   e,a   
+ACF5   16 00                  MVI   d,0   
+ACF7   2A 6E AD               LHLD   sidx_data_addr   
+ACFA   19                     DAD   d   ; HL = &data[index]
+ACFB                             ; R[a+2] から文字コードを取得
+ACFB   3A 6D AD               LDA   sidx_reg_a   
+ACFE   3C                     INR   a   
+ACFF   3C                     INR   a   
+AD00   CD 03 84               CALL   get_reg_addr   
+AD03                             ; R[a+2] が TT_STRING なら先頭文字、TT_INTEGER なら val_lo
+AD03   7E                     MOV   a,m   ; 型タグ
+AD04   FE 07                  CPI   TT_STRING   
+AD06   CA 10 AD               JZ   sidx_str_char   
+AD09                             ; TT_INTEGER: val_lo を文字コードとして使う
+AD09   CD 35 84               CALL   slot_to_value   
+AD0C   7E                     MOV   a,m   
+AD0D   C3 16 AD               JMP   sidx_write_char   
+AD10                SIDX_STR_CHAR:      
+AD10                             ; TT_STRING: コレクションスロットの先頭文字
+AD10   CD 0B AC               CALL   col_from_reg   
+AD13   23                     INX   h   ; +1: count
+AD14   23                     INX   h   ; +2: data[0]
+AD15   7E                     MOV   a,m   
+AD16                SIDX_WRITE_CHAR:      
+AD16   2A 6E AD               LHLD   sidx_data_addr   
+AD19   5F                     MOV   e,a   ; E = 文字コード
+AD1A   3A 6D AD               LDA   sidx_reg_a   
+AD1D   3C                     INR   a   
+AD1E   CD 03 84               CALL   get_reg_addr   
+AD21   CD 35 84               CALL   slot_to_value   
+AD24   7E                     MOV   a,m   ; A = index
+AD25   4F                     MOV   c,a   
+AD26   06 00                  MVI   b,0   
+AD28   2A 6E AD               LHLD   sidx_data_addr   
+AD2B   09                     DAD   b   ; HL = &data[index]
+AD2C   73                     MOV   m,e   ; 書き込み
+AD2D   C3 4F 8F               JMP   vm_loop   
+AD30                SIDX_ARRAY:      
+AD30                             ; R[a] のコレクションスロットを取得
+AD30   3A 6D AD               LDA   sidx_reg_a   
+AD33   CD 03 84               CALL   get_reg_addr   
+AD36   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AD39   23                     INX   h   ; +1: count
+AD3A   46                     MOV   b,m   ; B = 要素数
+AD3B   23                     INX   h   ; HL → データ領域先頭
+AD3C   22 6E AD               SHLD   sidx_data_addr   
+AD3F                             ; R[a+1] からインデックスを取得
+AD3F   3A 6D AD               LDA   sidx_reg_a   
+AD42   3C                     INR   a   
+AD43   CD 03 84               CALL   get_reg_addr   
+AD46   CD 35 84               CALL   slot_to_value   
+AD49   7E                     MOV   a,m   ; A = index
+AD4A   B8                     CMP   b   
+AD4B   D2 03 00               JNC   vm_error   
+AD4E                             ; data[index * 4] に R[a+2] をコピー
+AD4E   87                     ADD   a   ; ×2
+AD4F   87                     ADD   a   ; ×4
+AD50   5F                     MOV   e,a   
+AD51   16 00                  MVI   d,0   
+AD53   2A 6E AD               LHLD   sidx_data_addr   
+AD56   19                     DAD   d   ; HL = &data[index * 4] (コピー先)
+AD57   EB                     XCHG      ; DE = コピー先
+AD58                             ; R[a+2] を取得 (コピー元)
+AD58   3A 6D AD               LDA   sidx_reg_a   
+AD5B   3C                     INR   a   
+AD5C   3C                     INR   a   
+AD5D   CD 03 84               CALL   get_reg_addr   ; HL = R[a+2]
+AD60   0E 04                  MVI   c,SLOT_BYTES   
+AD62                SIDX_ARY_COPY:      
+AD62   7E                     MOV   a,m   
+AD63   12                     STAX   d   
+AD64   23                     INX   h   
+AD65   13                     INX   d   
+AD66   0D                     DCR   c   
+AD67   C2 62 AD               JNZ   sidx_ary_copy   
+AD6A   C3 4F 8F               JMP   vm_loop   
+AD6D   00           SIDX_REG_A:   DB   0   
+AD6E   00 00        SIDX_DATA_ADDR:   DW   0   
+AD70                             ; ===============================================================
+AD70                             ; do_op_array — OP_ARRAY (BB): R[a] = [R[a], R[a+1], ..., R[a+b-1]]
+AD70                             ; 
+AD70                             ; b 個のレジスタからコレクションプールに配列を構築する。
+AD70                             ; ===============================================================
+AD70                DO_OP_ARRAY:      
+AD70   CD C3 84               CALL   fetch_byte   ; A = a
+AD73   32 E7 AD               STA   oary_reg_a   
+AD76   32 E8 AD               STA   oary_src_reg   ; BB 形式: ソース = a
+AD79   CD C3 84               CALL   fetch_byte   ; A = b (要素数)
+AD7C                OA2_JOIN:      ; OP_ARRAY2 からの合流点
+AD7C   32 E9 AD               STA   oary_count   
+AD7F   B7                     ORA   a   
+AD80   CA D9 AD               JZ   oary_empty   ; 空配列
+AD83                             ; 要素数チェック
+AD83   FE 08                  CPI   COL_MAX_ARRAY_ELEMS + 1   
+AD85   D2 03 00               JNC   vm_error   ; 要素数 > 7
+AD88                             ; コレクションスロットを確保
+AD88   CD F6 AB               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
+AD8B   32 EA AD               STA   oary_slot_num   
+AD8E   36 02                  MVI   m,COL_TYPE_ARRAY   ; +0: type
+AD90   23                     INX   h   
+AD91   3A E9 AD               LDA   oary_count   
+AD94   77                     MOV   m,a   ; +1: count
+AD95   23                     INX   h   ; HL → データ領域先頭
+AD96   EB                     XCHG      ; DE = データ領域先頭 (コピー先)
+AD97                             ; ソースレジスタから b 個のスロットをコピー
+AD97   3A E8 AD               LDA   oary_src_reg   
+AD9A   47                     MOV   b,a   ; B = 現在のレジスタ番号
+AD9B   3A E9 AD               LDA   oary_count   
+AD9E   4F                     MOV   c,a   ; C = 残り要素数
+AD9F                OARY_COPY_LOOP:      
+AD9F   3E 04                  MVI   a,SLOT_BYTES   
+ADA1   32 EB AD               STA   oary_elem_cnt   ; 毎回初期化 (2 回目以降のため)
+ADA4   C5                     PUSH   b   
+ADA5   D5                     PUSH   d   
+ADA6   78                     MOV   a,b   
+ADA7   CD 03 84               CALL   get_reg_addr   ; HL = R[reg] (コピー元)
+ADAA   D1                     POP   d   
+ADAB                OARY_COPY_ELEM:      
+ADAB   46                     MOV   b,m   ; SLOT_BYTES 分のコピー (HL → DE)
+ADAC   23                     INX   h   
+ADAD   78                     MOV   a,b   
+ADAE   12                     STAX   d   
+ADAF   13                     INX   d   
+ADB0   E5                     PUSH   h   
+ADB1   21 EB AD               LXI   h,oary_elem_cnt   
+ADB4   35                     DCR   m   
+ADB5   E1                     POP   h   
+ADB6   C2 AB AD               JNZ   oary_copy_elem   
+ADB9   C1                     POP   b   
+ADBA   04                     INR   b   ; 次のレジスタ
+ADBB   0D                     DCR   c   
+ADBC   CA C2 AD               JZ   oary_done   
+ADBF   C3 9F AD               JMP   oary_copy_loop   
+ADC2                OARY_DONE:      
+ADC2                             ; R[a] = TT_ARRAY, val_lo = slot+1
+ADC2   3A E7 AD               LDA   oary_reg_a   
+ADC5   CD 03 84               CALL   get_reg_addr   
+ADC8   36 08                  MVI   m,TT_ARRAY   
+ADCA   23                     INX   h   
+ADCB   36 00                  MVI   m,0   
+ADCD   23                     INX   h   
+ADCE   3A EA AD               LDA   oary_slot_num   
+ADD1   3C                     INR   a   
+ADD2   77                     MOV   m,a   
+ADD3   23                     INX   h   
+ADD4   36 00                  MVI   m,0   
+ADD6   C3 4F 8F               JMP   vm_loop   
+ADD9                OARY_EMPTY:      
+ADD9                             ; 空配列: スロット確保して count=0
+ADD9   CD F6 AB               CALL   col_alloc   
+ADDC   32 EA AD               STA   oary_slot_num   
+ADDF   36 02                  MVI   m,COL_TYPE_ARRAY   
+ADE1   23                     INX   h   
+ADE2   36 00                  MVI   m,0   ; count = 0
+ADE4   C3 C2 AD               JMP   oary_done   
+ADE7   00           OARY_REG_A:   DB   0   
+ADE8   00           OARY_SRC_REG:   DB   0   
+ADE9   00           OARY_COUNT:   DB   0   
+ADEA   00           OARY_SLOT_NUM:   DB   0   
+ADEB   04           OARY_ELEM_CNT:   DB   SLOT_BYTES   
+ADEC                             ; ===============================================================
+ADEC                             ; do_op_arypush — OP_ARYPUSH (BB): R[a].push(R[a+1], ..., R[a+b-1])
+ADEC                             ; 
+ADEC                             ; R[a] の配列の末尾に要素を追加する。
+ADEC                             ; ===============================================================
+ADEC                DO_OP_ARYPUSH:      
+ADEC   CD C3 84               CALL   fetch_byte   ; A = a
+ADEF   32 60 AE               STA   apush_reg_a   
+ADF2   CD C3 84               CALL   fetch_byte   ; A = b (追加する要素数)
+ADF5   32 61 AE               STA   apush_add_count   
+ADF8                             ; R[a] のコレクションスロットを取得
+ADF8   3A 60 AE               LDA   apush_reg_a   
+ADFB   CD 03 84               CALL   get_reg_addr   
+ADFE   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AE01   23                     INX   h   ; +1: count
+AE02   7E                     MOV   a,m   ; A = 現在の要素数
+AE03   32 62 AE               STA   apush_cur_count   
+AE06                             ; 容量チェック: count + add_count <= MAX
+AE06   3A 61 AE               LDA   apush_add_count   
+AE09   47                     MOV   b,a   
+AE0A   3A 62 AE               LDA   apush_cur_count   
+AE0D   80                     ADD   b   
+AE0E   FE 08                  CPI   COL_MAX_ARRAY_ELEMS + 1   
+AE10   D2 03 00               JNC   vm_error   ; オーバーフロー
+AE13                             ; 書き込み先: data + count * 4
+AE13   3A 62 AE               LDA   apush_cur_count   
+AE16   87                     ADD   a   ; ×2
+AE17   87                     ADD   a   ; ×4
+AE18   5F                     MOV   e,a   
+AE19   16 00                  MVI   d,0   
+AE1B   23                     INX   h   ; HL → データ領域先頭
+AE1C   19                     DAD   d   ; HL = 書き込み位置
+AE1D   EB                     XCHG      ; DE = 書き込み位置
+AE1E                             ; R[a+1] から b 個のスロットをコピー
+AE1E   3A 60 AE               LDA   apush_reg_a   
+AE21   3C                     INR   a   
+AE22   47                     MOV   b,a   ; B = 現在のレジスタ番号
+AE23   3A 61 AE               LDA   apush_add_count   
+AE26   4F                     MOV   c,a   ; C = 残り要素数
+AE27                APUSH_LOOP:      
+AE27   3E 04                  MVI   a,SLOT_BYTES   
+AE29   32 63 AE               STA   apush_byte_cnt   ; 毎回初期化
+AE2C   C5                     PUSH   b   
+AE2D   D5                     PUSH   d   
+AE2E   78                     MOV   a,b   
+AE2F   CD 03 84               CALL   get_reg_addr   ; HL = R[reg]
+AE32   D1                     POP   d   
+AE33                APUSH_COPY:      
+AE33   46                     MOV   b,m   
+AE34   78                     MOV   a,b   
+AE35   12                     STAX   d   
+AE36   23                     INX   h   
+AE37   13                     INX   d   
+AE38   E5                     PUSH   h   
+AE39   21 63 AE               LXI   h,apush_byte_cnt   
+AE3C   35                     DCR   m   
+AE3D   E1                     POP   h   
+AE3E   C2 33 AE               JNZ   apush_copy   
+AE41   C1                     POP   b   
+AE42   04                     INR   b   
+AE43   0D                     DCR   c   
+AE44   CA 4A AE               JZ   apush_done   
+AE47   C3 27 AE               JMP   apush_loop   
+AE4A                APUSH_DONE:      
+AE4A                             ; count を更新
+AE4A   3A 60 AE               LDA   apush_reg_a   
+AE4D   CD 03 84               CALL   get_reg_addr   
+AE50   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AE53   23                     INX   h   ; +1: count
+AE54   3A 62 AE               LDA   apush_cur_count   
+AE57   47                     MOV   b,a   
+AE58   3A 61 AE               LDA   apush_add_count   
+AE5B   80                     ADD   b   
+AE5C   77                     MOV   m,a   ; count = old + added
+AE5D   C3 4F 8F               JMP   vm_loop   
+AE60   00           APUSH_REG_A:   DB   0   
+AE61   00           APUSH_ADD_COUNT:   DB   0   
+AE62   00           APUSH_CUR_COUNT:   DB   0   
+AE63   04           APUSH_BYTE_CNT:   DB   SLOT_BYTES   
+AE64                             ; ===============================================================
+AE64                             ; do_op_strcat — OP_STRCAT (B): R[a] = R[a] + R[a+1] (文字列連結)
+AE64                             ; 
+AE64                             ; R[a] の文字列の末尾に R[a+1] の文字列を追記する。
+AE64                             ; ===============================================================
+AE64                DO_OP_STRCAT:      
+AE64   CD C3 84               CALL   fetch_byte   ; A = a
+AE67   32 DA AE               STA   scat_reg_a   
+AE6A                STRCAT_BODY:      ; OP_ADD 文字列パスからも使う (A = a)
+AE6A                             ; R[a+1] のコレクションスロット (ソース)
+AE6A   3C                     INR   a   
+AE6B   CD 03 84               CALL   get_reg_addr   
+AE6E   CD 0B AC               CALL   col_from_reg   ; HL = ソーススロット
+AE71   23                     INX   h   ; +1: count
+AE72   7E                     MOV   a,m   ; A = ソース文字列長
+AE73   32 DB AE               STA   scat_src_len   
+AE76   23                     INX   h   ; HL → データ先頭
+AE77   22 DE AE               SHLD   scat_src_data   
+AE7A                             ; R[a] のコレクションスロット (デスト)
+AE7A   3A DA AE               LDA   scat_reg_a   
+AE7D   CD 03 84               CALL   get_reg_addr   
+AE80   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
+AE83   23                     INX   h   ; +1: count
+AE84   7E                     MOV   a,m   ; A = デスト文字列長
+AE85   32 DC AE               STA   scat_dst_len   
+AE88                             ; 合計長チェック
+AE88   3A DB AE               LDA   scat_src_len   
+AE8B   47                     MOV   b,a   
+AE8C   3A DC AE               LDA   scat_dst_len   
+AE8F   80                     ADD   b   
+AE90   FE 1F                  CPI   COL_MAX_STRING_LEN + 1   
+AE92   DA AA AE               JC   scat_len_ok   
+AE95                             ; 切り詰め: 追記できる分だけ
+AE95   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
+AE97   47                     MOV   b,a   
+AE98   3A DC AE               LDA   scat_dst_len   
+AE9B   90                     SUB   b   ; この結果は負 (使わない)
+AE9C   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
+AE9E   47                     MOV   b,a   
+AE9F   3A DC AE               LDA   scat_dst_len   
+AEA2   4F                     MOV   c,a   
+AEA3   78                     MOV   a,b   
+AEA4   91                     SUB   c   ; A = MAX - dst_len = コピー可能バイト数
+AEA5   32 DB AE               STA   scat_src_len   
+AEA8                             ; 合計を MAX に
+AEA8   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
+AEAA                SCAT_LEN_OK:      
+AEAA   32 DD AE               STA   scat_total_len   
+AEAD                             ; デスト count を更新
+AEAD   3A DA AE               LDA   scat_reg_a   
+AEB0   CD 03 84               CALL   get_reg_addr   
+AEB3   CD 0B AC               CALL   col_from_reg   
+AEB6   23                     INX   h   
+AEB7   3A DD AE               LDA   scat_total_len   
+AEBA   77                     MOV   m,a   ; count = 合計長
+AEBB   23                     INX   h   ; HL → データ先頭
+AEBC                             ; デストデータ末尾 = data + dst_len
+AEBC   3A DC AE               LDA   scat_dst_len   
+AEBF   5F                     MOV   e,a   
+AEC0   16 00                  MVI   d,0   
+AEC2   19                     DAD   d   ; HL = 書き込み位置
+AEC3                             ; ソースデータをコピー
+AEC3   EB                     XCHG      ; DE = 書き込み位置
+AEC4   2A DE AE               LHLD   scat_src_data   ; HL = ソースデータ
+AEC7   3A DB AE               LDA   scat_src_len   
+AECA   B7                     ORA   a   
+AECB   CA D7 AE               JZ   scat_done   
+AECE   4F                     MOV   c,a   
+AECF                SCAT_COPY:      
+AECF   7E                     MOV   a,m   
+AED0   12                     STAX   d   
+AED1   23                     INX   h   
+AED2   13                     INX   d   
+AED3   0D                     DCR   c   
+AED4   C2 CF AE               JNZ   scat_copy   
+AED7                SCAT_DONE:      
+AED7   C3 4F 8F               JMP   vm_loop   
+AEDA   00           SCAT_REG_A:   DB   0   
+AEDB   00           SCAT_SRC_LEN:   DB   0   
+AEDC   00           SCAT_DST_LEN:   DB   0   
+AEDD   00           SCAT_TOTAL_LEN:   DB   0   
+AEDE   00 00        SCAT_SRC_DATA:   DW   0   
+AEE0                             ; ===============================================================
+AEE0                             ; send_length — length / size: 文字列長・配列長を返す
+AEE0                             ; 
+AEE0                             ; R[a] のコレクションスロットの count を TT_INTEGER として返す。
+AEE0                             ; ===============================================================
+AEE0                SEND_LENGTH:      
+AEE0   3A 58 8A               LDA   send_reg_a   
+AEE3   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+AEE6   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AEE9   23                     INX   h   ; +1: count
+AEEA   4E                     MOV   c,m   ; C = count
+AEEB   06 00                  MVI   b,0   ; BC = count (16-bit)
+AEED   3A 58 8A               LDA   send_reg_a   
+AEF0   CD 03 84               CALL   get_reg_addr   
+AEF3   CD 13 84               CALL   set_slot_int16   ; R[a] = count
+AEF6   C3 4F 8F               JMP   vm_loop   
+AEF9                             ; ===============================================================
+AEF9                             ; send_concat — << (文字列追記 / 配列追加)
+AEF9                             ; 
+AEF9                             ; R[a] の型で分岐:
+AEF9                             ;   TT_STRING: R[a+1] の文字列を R[a] に追記
+AEF9                             ;   TT_ARRAY:  R[a+1] のスロットを R[a] の配列末尾に追加
+AEF9                             ; ===============================================================
+AEF9                SEND_CONCAT:      
+AEF9   3A 58 8A               LDA   send_reg_a   
+AEFC   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+AEFF   7E                     MOV   a,m   ; A = 型タグ
+AF00   FE 07                  CPI   TT_STRING   
+AF02   CA 0D AF               JZ   concat_string   
+AF05   FE 08                  CPI   TT_ARRAY   
+AF07   CA B7 AF               JZ   concat_array   
+AF0A   C3 03 00               JMP   vm_error   
+AF0D                CONCAT_STRING:      
+AF0D                             ; R[a+1] の型を確認
+AF0D   3A 58 8A               LDA   send_reg_a   
+AF10   3C                     INR   a   
+AF11   CD 03 84               CALL   get_reg_addr   
+AF14   7E                     MOV   a,m   ; A = R[a+1] の型タグ
+AF15   FE 07                  CPI   TT_STRING   
+AF17   CA 22 AF               JZ   concat_str_str   
+AF1A   FE 04                  CPI   TT_INTEGER   
+AF1C   CA 92 AF               JZ   concat_str_int   
+AF1F   C3 03 00               JMP   vm_error   
+AF22                CONCAT_STR_STR:      
+AF22                             ; R[a+1] のコレクションスロット (ソース)
+AF22   3A 58 8A               LDA   send_reg_a   
+AF25   3C                     INR   a   
+AF26   CD 03 84               CALL   get_reg_addr   
+AF29   CD 0B AC               CALL   col_from_reg   ; HL = ソーススロット
+AF2C   23                     INX   h   ; +1: count
+AF2D   7E                     MOV   a,m   ; A = ソース文字列長
+AF2E   32 EA AF               STA   cc_src_len   
+AF31   23                     INX   h   ; HL → データ先頭
+AF32   22 ED AF               SHLD   cc_src_data   
+AF35                             ; R[a] のコレクションスロット (デスト)
+AF35   3A 58 8A               LDA   send_reg_a   
+AF38   CD 03 84               CALL   get_reg_addr   
+AF3B   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
+AF3E   23                     INX   h   ; +1: count
+AF3F   7E                     MOV   a,m   
+AF40   32 EB AF               STA   cc_dst_len   
+AF43                             ; コピー可能バイト数を計算
+AF43   3A EA AF               LDA   cc_src_len   
+AF46   47                     MOV   b,a   
+AF47   3A EB AF               LDA   cc_dst_len   
+AF4A   80                     ADD   b   
+AF4B   FE 1F                  CPI   COL_MAX_STRING_LEN + 1   
+AF4D   DA 62 AF               JC   cc_str_len_ok   
+AF50                             ; 切り詰め
+AF50   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
+AF52   47                     MOV   b,a   
+AF53   3A EB AF               LDA   cc_dst_len   
+AF56   4F                     MOV   c,a   
+AF57   78                     MOV   a,b   
+AF58   91                     SUB   c   
+AF59   32 EA AF               STA   cc_src_len   
+AF5C   3A EB AF               LDA   cc_dst_len   
+AF5F   87                     ADD   a   ; ここでは使わない — 合計は MAX
+AF60   3E 1E                  MVI   a,COL_MAX_STRING_LEN   
+AF62                CC_STR_LEN_OK:      
+AF62   32 EC AF               STA   cc_total_len   
+AF65                             ; count を更新
+AF65   3A 58 8A               LDA   send_reg_a   
+AF68   CD 03 84               CALL   get_reg_addr   
+AF6B   CD 0B AC               CALL   col_from_reg   
+AF6E   23                     INX   h   
+AF6F   3A EC AF               LDA   cc_total_len   
+AF72   77                     MOV   m,a   
+AF73   23                     INX   h   ; HL → データ先頭
+AF74                             ; 書き込み位置 = data + dst_len
+AF74   3A EB AF               LDA   cc_dst_len   
+AF77   5F                     MOV   e,a   
+AF78   16 00                  MVI   d,0   
+AF7A   19                     DAD   d   
+AF7B                             ; コピー
+AF7B   EB                     XCHG      
+AF7C   2A ED AF               LHLD   cc_src_data   
+AF7F   3A EA AF               LDA   cc_src_len   
+AF82   B7                     ORA   a   
+AF83   CA 8F AF               JZ   cc_str_done   
+AF86   4F                     MOV   c,a   
+AF87                CC_STR_COPY:      
+AF87   7E                     MOV   a,m   
+AF88   12                     STAX   d   
+AF89   23                     INX   h   
+AF8A   13                     INX   d   
+AF8B   0D                     DCR   c   
+AF8C   C2 87 AF               JNZ   cc_str_copy   
+AF8F                CC_STR_DONE:      
+AF8F                             ; R[a] をそのまま返す (破壊的操作)
+AF8F   C3 4F 8F               JMP   vm_loop   
+AF92                CONCAT_STR_INT:      
+AF92                             ; R[a+1] の val_lo を 1 バイトとして追記
+AF92   3A 58 8A               LDA   send_reg_a   
+AF95   3C                     INR   a   
 AF96   CD 03 84               CALL   get_reg_addr   
-AF99   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
-AF9C   23                     INX   h   ; +1: count
-AF9D   7E                     MOV   a,m   
-AF9E   FE 1E                  CPI   COL_MAX_STRING_LEN   
-AFA0   D2 4F 8F               JNC   vm_loop   ; 満杯なら何もしない
-AFA3   34                     INR   m   ; count++
-AFA4   5F                     MOV   e,a   ; E = 旧 count (= 書き込みオフセット)
-AFA5   23                     INX   h   ; HL → データ先頭
-AFA6   16 00                  MVI   d,0   
-AFA8   19                     DAD   d   ; HL = &data[old_count]
-AFA9   71                     MOV   m,c   ; 書き込み
-AFAA   C3 4F 8F               JMP   vm_loop   
-AFAD                CONCAT_ARRAY:      
-AFAD                             ; R[a] のコレクションスロット
-AFAD   3A 58 8A               LDA   send_reg_a   
-AFB0   CD 03 84               CALL   get_reg_addr   
-AFB3   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
-AFB6   23                     INX   h   ; +1: count
-AFB7   7E                     MOV   a,m   
-AFB8   FE 07                  CPI   COL_MAX_ARRAY_ELEMS   
-AFBA   D2 03 00               JNC   vm_error   ; 満杯
-AFBD   32 E5 AF               STA   cc_ary_count   
-AFC0   34                     INR   m   ; count++
-AFC1                             ; 書き込み位置: data + count * 4
-AFC1   23                     INX   h   ; HL → データ先頭
-AFC2   3A E5 AF               LDA   cc_ary_count   
-AFC5   87                     ADD   a   ; ×2
-AFC6   87                     ADD   a   ; ×4
-AFC7   5F                     MOV   e,a   
-AFC8   16 00                  MVI   d,0   
-AFCA   19                     DAD   d   ; HL = 書き込み位置
-AFCB   EB                     XCHG      ; DE = 書き込み位置
-AFCC                             ; R[a+1] をコピー
-AFCC   3A 58 8A               LDA   send_reg_a   
-AFCF   3C                     INR   a   
-AFD0   CD 03 84               CALL   get_reg_addr   ; HL = R[a+1]
-AFD3   0E 04                  MVI   c,SLOT_BYTES   
-AFD5                CC_ARY_COPY:      
-AFD5   7E                     MOV   a,m   
-AFD6   12                     STAX   d   
-AFD7   23                     INX   h   
-AFD8   13                     INX   d   
-AFD9   0D                     DCR   c   
-AFDA   C2 D5 AF               JNZ   cc_ary_copy   
-AFDD   C3 4F 8F               JMP   vm_loop   
-AFE0   00           CC_SRC_LEN:   DB   0   
-AFE1   00           CC_DST_LEN:   DB   0   
-AFE2   00           CC_TOTAL_LEN:   DB   0   
-AFE3   00 00        CC_SRC_DATA:   DW   0   
-AFE5   00           CC_ARY_COUNT:   DB   0   
-AFE6                             ; ===============================================================
-AFE6                             ; send_push — push: 配列に要素を追加 (send_concat の配列パスと同じ)
-AFE6                             ; ===============================================================
-AFE6                SEND_PUSH:      
-AFE6   C3 AD AF               JMP   concat_array   
-AFE9                             ; ===============================================================
-AFE9                             ; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
-AFE9                             ; 
-AFE9                             ; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
-AFE9                             ; ===============================================================
-AFE9                DO_OP_ARRAY2:      
-AFE9   CD C3 84               CALL   fetch_byte   ; A = a (書き込み先)
-AFEC   32 DD AD               STA   oary_reg_a   
-AFEF   CD C3 84               CALL   fetch_byte   ; A = b (ソースレジスタ先頭)
-AFF2   32 DE AD               STA   oary_src_reg   
-AFF5   CD C3 84               CALL   fetch_byte   ; A = c (要素数)
-AFF8   C3 72 AD               JMP   oa2_join   
-AFFB                          END      
+AF99   CD 35 84               CALL   slot_to_value   
+AF9C   4E                     MOV   c,m   ; C = 文字コード (val_lo)
+AF9D                             ; R[a] のコレクションスロット
+AF9D   3A 58 8A               LDA   send_reg_a   
+AFA0   CD 03 84               CALL   get_reg_addr   
+AFA3   CD 0B AC               CALL   col_from_reg   ; HL = デストスロット
+AFA6   23                     INX   h   ; +1: count
+AFA7   7E                     MOV   a,m   
+AFA8   FE 1E                  CPI   COL_MAX_STRING_LEN   
+AFAA   D2 4F 8F               JNC   vm_loop   ; 満杯なら何もしない
+AFAD   34                     INR   m   ; count++
+AFAE   5F                     MOV   e,a   ; E = 旧 count (= 書き込みオフセット)
+AFAF   23                     INX   h   ; HL → データ先頭
+AFB0   16 00                  MVI   d,0   
+AFB2   19                     DAD   d   ; HL = &data[old_count]
+AFB3   71                     MOV   m,c   ; 書き込み
+AFB4   C3 4F 8F               JMP   vm_loop   
+AFB7                CONCAT_ARRAY:      
+AFB7                             ; R[a] のコレクションスロット
+AFB7   3A 58 8A               LDA   send_reg_a   
+AFBA   CD 03 84               CALL   get_reg_addr   
+AFBD   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+AFC0   23                     INX   h   ; +1: count
+AFC1   7E                     MOV   a,m   
+AFC2   FE 07                  CPI   COL_MAX_ARRAY_ELEMS   
+AFC4   D2 03 00               JNC   vm_error   ; 満杯
+AFC7   32 EF AF               STA   cc_ary_count   
+AFCA   34                     INR   m   ; count++
+AFCB                             ; 書き込み位置: data + count * 4
+AFCB   23                     INX   h   ; HL → データ先頭
+AFCC   3A EF AF               LDA   cc_ary_count   
+AFCF   87                     ADD   a   ; ×2
+AFD0   87                     ADD   a   ; ×4
+AFD1   5F                     MOV   e,a   
+AFD2   16 00                  MVI   d,0   
+AFD4   19                     DAD   d   ; HL = 書き込み位置
+AFD5   EB                     XCHG      ; DE = 書き込み位置
+AFD6                             ; R[a+1] をコピー
+AFD6   3A 58 8A               LDA   send_reg_a   
+AFD9   3C                     INR   a   
+AFDA   CD 03 84               CALL   get_reg_addr   ; HL = R[a+1]
+AFDD   0E 04                  MVI   c,SLOT_BYTES   
+AFDF                CC_ARY_COPY:      
+AFDF   7E                     MOV   a,m   
+AFE0   12                     STAX   d   
+AFE1   23                     INX   h   
+AFE2   13                     INX   d   
+AFE3   0D                     DCR   c   
+AFE4   C2 DF AF               JNZ   cc_ary_copy   
+AFE7   C3 4F 8F               JMP   vm_loop   
+AFEA   00           CC_SRC_LEN:   DB   0   
+AFEB   00           CC_DST_LEN:   DB   0   
+AFEC   00           CC_TOTAL_LEN:   DB   0   
+AFED   00 00        CC_SRC_DATA:   DW   0   
+AFEF   00           CC_ARY_COUNT:   DB   0   
+AFF0                             ; ===============================================================
+AFF0                             ; send_push — push: 配列に要素を追加 (send_concat の配列パスと同じ)
+AFF0                             ; ===============================================================
+AFF0                SEND_PUSH:      
+AFF0   C3 B7 AF               JMP   concat_array   
+AFF3                             ; vm_hash.a80 — Hash (連想配列) ハンドラ
+AFF3                             ; 
+AFF3                             ; メインコード領域 (0x8400-0xAFFF) に空きがないため、
+AFF3                             ; コレクションプール末尾の後 (0xB500) にオーバーフロー配置する。
+AFF3                             ; 
+AFF3                             ; Hash スロット形式 (コレクションプール 32B スロット内):
+AFF3                             ;   +0: type  (1B)  COL_TYPE_HASH = 3
+AFF3                             ;   +1: count (1B)  ペア数 (最大 3)
+AFF3                             ;   +2: data  (30B) key(4B)+value(4B) × 3 = 24B 使用
+AFF3                             ; 
+AFF3                             ; キー検索は線形 4 バイト比較。
+AFF3                             ; 
+AFF3                             ; do_op_array2 もメインコード領域から溢れたためここに配置。
+B500                          .ORG   0B500h   
+B500                             ; ===============================================================
+B500                             ; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
+B500                             ; 
+B500                             ; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
+B500                             ; ===============================================================
+B500                DO_OP_ARRAY2:      
+B500   CD C3 84               CALL   fetch_byte   ; A = a (書き込み先)
+B503   32 E7 AD               STA   oary_reg_a   
+B506   CD C3 84               CALL   fetch_byte   ; A = b (ソースレジスタ先頭)
+B509   32 E8 AD               STA   oary_src_reg   
+B50C   CD C3 84               CALL   fetch_byte   ; A = c (要素数)
+B50F   C3 7C AD               JMP   oa2_join   
+B512                             ; ===============================================================
+B512                             ; do_op_hash — OP_HASH (BB): R[a] = 00bbUlthKzFdPT5SW2ErMl0sIC4uLg==
+B512                             ; 
+B512                             ;   a = 書き込み先レジスタ
+B512                             ;   b = ペア数 (0 = 空 Hash)
+B512                             ;   ソース: R[a+1]=key1, R[a+2]=val1, R[a+3]=key2, ...
+B512                             ; ===============================================================
+B512                DO_OP_HASH:      
+B512   CD C3 84               CALL   fetch_byte   ; A = a (書き込み先)
+B515   32 7A B5               STA   hash_reg_a   
+B518   CD C3 84               CALL   fetch_byte   ; A = b (ペア数)
+B51B   32 7B B5               STA   hash_count   
+B51E                             ; コレクションスロット確保
+B51E   CD F6 AB               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
+B521   32 7C B5               STA   hash_slot_num   
+B524                             ; ヘッダ書き込み
+B524   36 03                  MVI   m,COL_TYPE_HASH   ; +0: type
+B526   23                     INX   h   
+B527   3A 7B B5               LDA   hash_count   
+B52A   77                     MOV   m,a   ; +1: count
+B52B   23                     INX   h   ; HL → データ領域先頭
+B52C                             ; ペアがなければ結果書き込みへ
+B52C   3A 7B B5               LDA   hash_count   
+B52F   B7                     ORA   a   
+B530   CA 63 B5               JZ   hash_write_result   
+B533                             ; ソースレジスタ = a (mruby3 は R[a] からペアを読む)
+B533   3A 7A B5               LDA   hash_reg_a   
+B536   32 7D B5               STA   hash_src_reg   
+B539                HASH_COPY_PAIR:      
+B539                             ; HL = コレクションプール内の書き込み位置
+B539                             ; key (4B) をコピー: R[src] → [HL]
+B539   E5                     PUSH   h   ; 書き込み先を退避
+B53A   3A 7D B5               LDA   hash_src_reg   
+B53D   CD 03 84               CALL   get_reg_addr   ; HL = R[src]
+B540   D1                     POP   d   ; DE = 書き込み先
+B541   CD 28 84               CALL   copy_slot   ; 4B コピー (HL, DE 共に +4)
+B544                             ; DE = value 書き込み位置
+B544                             ; value (4B) をコピー: R[src+1] → [DE]
+B544   D5                     PUSH   d   ; value 書き込み先を退避
+B545   3A 7D B5               LDA   hash_src_reg   
+B548   3C                     INR   a   
+B549   CD 03 84               CALL   get_reg_addr   ; HL = R[src+1]
+B54C   D1                     POP   d   ; DE = value 書き込み先
+B54D   CD 28 84               CALL   copy_slot   ; 4B コピー
+B550                             ; DE = 次ペアの先頭
+B550                             ; ソースレジスタを +2
+B550   3A 7D B5               LDA   hash_src_reg   
+B553   C6 02                  ADI   2   
+B555   32 7D B5               STA   hash_src_reg   
+B558                             ; HL = 次の書き込み位置 (DE から)
+B558   EB                     XCHG      
+B559                             ; ペアカウンタ
+B559   3A 7B B5               LDA   hash_count   
+B55C   3D                     DCR   a   
+B55D   32 7B B5               STA   hash_count   
+B560   C2 39 B5               JNZ   hash_copy_pair   
+B563                HASH_WRITE_RESULT:      
+B563                             ; R[hash_reg_a] = TT_HASH, val_lo = slot+1
+B563   3A 7A B5               LDA   hash_reg_a   
+B566   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+B569   36 09                  MVI   m,TT_HASH   ; +0: type
+B56B   23                     INX   h   
+B56C   36 00                  MVI   m,0   ; +1: reserved
+B56E   23                     INX   h   
+B56F   3A 7C B5               LDA   hash_slot_num   
+B572   3C                     INR   a   ; slot + 1
+B573   77                     MOV   m,a   ; +2: val_lo
+B574   23                     INX   h   
+B575   36 00                  MVI   m,0   ; +3: val_hi
+B577   C3 4F 8F               JMP   vm_loop   
+B57A                             ; --- do_op_hash データ ---
+B57A   00           HASH_REG_A:   DB   0   
+B57B   00           HASH_COUNT:   DB   0   
+B57C   00           HASH_SLOT_NUM:   DB   0   
+B57D   00           HASH_SRC_REG:   DB   0   
+B57E                             ; ===============================================================
+B57E                             ; gidx_hash — GETIDX の Hash パス: R[a] = R[a][R[a+1]]
+B57E                             ; 
+B57E                             ;   入口: gidx_reg_a 設定済み、HL = R[a] スロットアドレス
+B57E                             ;   キーが見つからなければ R[a] = nil
+B57E                             ; ===============================================================
+B57E                GIDX_HASH:      
+B57E                             ; コレクションスロットを取得
+B57E   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+B581   23                     INX   h   ; +1: count
+B582   7E                     MOV   a,m   ; A = ペア数
+B583   23                     INX   h   ; HL → データ領域
+B584   B7                     ORA   a   
+B585   CA D1 B5               JZ   ghash_not_found   ; 空 Hash
+B588   32 E5 B5               STA   ghash_loop_cnt   
+B58B   22 DF B5               SHLD   ghash_data_ptr   
+B58E                             ; 検索キー R[a+1] のアドレスを取得
+B58E   3A B6 AC               LDA   gidx_reg_a   
+B591   3C                     INR   a   
+B592   CD 03 84               CALL   get_reg_addr   ; HL = R[a+1]
+B595   22 E1 B5               SHLD   ghash_key_ptr   
+B598                             ; 検索ループ
+B598   2A DF B5               LHLD   ghash_data_ptr   
+B59B                GHASH_SEARCH:      
+B59B   22 E3 B5               SHLD   ghash_cur_ptr   ; 現在のペア先頭を保存
+B59E                             ; 4 バイト比較: [HL] (hash key) vs [ghash_key_ptr] (search key)
+B59E   E5                     PUSH   h   
+B59F   2A E1 B5               LHLD   ghash_key_ptr   
+B5A2   EB                     XCHG      ; DE = 検索キー
+B5A3   E1                     POP   h   ; HL = hash ペアのキー
+B5A4   0E 04                  MVI   c,SLOT_BYTES   
+B5A6                GHASH_CMP:      
+B5A6   1A                     LDAX   d   
+B5A7   BE                     CMP   m   
+B5A8   C2 C0 B5               JNZ   ghash_next   
+B5AB   23                     INX   h   
+B5AC   13                     INX   d   
+B5AD   0D                     DCR   c   
+B5AE   C2 A6 B5               JNZ   ghash_cmp   
+B5B1                             ; 一致! HL = value 位置 (キー直後)
+B5B1                             ; value (4B) を R[a] にコピー
+B5B1   E5                     PUSH   h   ; value ソース
+B5B2   3A B6 AC               LDA   gidx_reg_a   
+B5B5   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+B5B8   EB                     XCHG      ; DE = R[a] (コピー先)
+B5B9   E1                     POP   h   ; HL = value (コピー元)
+B5BA   CD 28 84               CALL   copy_slot   
+B5BD   C3 4F 8F               JMP   vm_loop   
+B5C0                GHASH_NEXT:      
+B5C0                             ; 次のペアへ (現在ペア + HASH_PAIR_BYTES)
+B5C0   2A E3 B5               LHLD   ghash_cur_ptr   
+B5C3   11 08 00               LXI   d,HASH_PAIR_BYTES   
+B5C6   19                     DAD   d   
+B5C7   3A E5 B5               LDA   ghash_loop_cnt   
+B5CA   3D                     DCR   a   
+B5CB   32 E5 B5               STA   ghash_loop_cnt   
+B5CE   C2 9B B5               JNZ   ghash_search   
+B5D1                GHASH_NOT_FOUND:      
+B5D1                             ; R[a] = nil
+B5D1   3A B6 AC               LDA   gidx_reg_a   
+B5D4   CD 03 84               CALL   get_reg_addr   ; HL = R[a]
+B5D7   3E 01                  MVI   a,TT_NIL   
+B5D9   CD 1D 84               CALL   set_slot_special   
+B5DC   C3 4F 8F               JMP   vm_loop   
+B5DF                             ; --- gidx_hash データ ---
+B5DF   00 00        GHASH_DATA_PTR:   DW   0   
+B5E1   00 00        GHASH_KEY_PTR:   DW   0   
+B5E3   00 00        GHASH_CUR_PTR:   DW   0   
+B5E5   00           GHASH_LOOP_CNT:   DB   0   
+B5E6                             ; ===============================================================
+B5E6                             ; sidx_hash — SETIDX の Hash パス: R[a][R[a+1]] = R[a+2]
+B5E6                             ; 
+B5E6                             ;   入口: sidx_reg_a 設定済み、HL = R[a] スロットアドレス
+B5E6                             ;   既存キー → 値を上書き
+B5E6                             ;   新規キー → count < MAX なら末尾に追加
+B5E6                             ; ===============================================================
+B5E6                SIDX_HASH:      
+B5E6                             ; コレクションスロットを取得
+B5E6   CD 0B AC               CALL   col_from_reg   ; HL = コレクションスロット
+B5E9   22 75 B6               SHLD   shash_col_ptr   ; スロット先頭を保存 (count 更新用)
+B5EC   23                     INX   h   ; +1: count
+B5ED   7E                     MOV   a,m   
+B5EE   32 7F B6               STA   shash_pair_cnt   ; 元のペア数
+B5F1   23                     INX   h   ; HL → データ領域
+B5F2   22 77 B6               SHLD   shash_data_ptr   
+B5F5                             ; R[a+1] キーのアドレス
+B5F5   3A 6D AD               LDA   sidx_reg_a   
+B5F8   3C                     INR   a   
+B5F9   CD 03 84               CALL   get_reg_addr   ; HL = R[a+1]
+B5FC   22 79 B6               SHLD   shash_key_ptr   
+B5FF                             ; R[a+2] 値のアドレス
+B5FF   3A 6D AD               LDA   sidx_reg_a   
+B602   C6 02                  ADI   2   
+B604   CD 03 84               CALL   get_reg_addr   ; HL = R[a+2]
+B607   22 7B B6               SHLD   shash_val_ptr   
+B60A                             ; 既存キーを検索
+B60A   3A 7F B6               LDA   shash_pair_cnt   
+B60D   B7                     ORA   a   
+B60E   CA 48 B6               JZ   shash_append   ; 空 Hash → 追加
+B611   32 80 B6               STA   shash_loop_cnt   
+B614   2A 77 B6               LHLD   shash_data_ptr   
+B617                SHASH_SEARCH:      
+B617   22 7D B6               SHLD   shash_cur_ptr   
+B61A   E5                     PUSH   h   
+B61B   2A 79 B6               LHLD   shash_key_ptr   
+B61E   EB                     XCHG      ; DE = 検索キー
+B61F   E1                     POP   h   ; HL = hash ペアのキー
+B620   0E 04                  MVI   c,SLOT_BYTES   
+B622                SHASH_CMP:      
+B622   1A                     LDAX   d   
+B623   BE                     CMP   m   
+B624   C2 37 B6               JNZ   shash_snext   
+B627   23                     INX   h   
+B628   13                     INX   d   
+B629   0D                     DCR   c   
+B62A   C2 22 B6               JNZ   shash_cmp   
+B62D                             ; 一致! HL = value 位置
+B62D                             ; R[a+2] を value にコピー
+B62D   EB                     XCHG      ; DE = hash value 位置
+B62E   2A 7B B6               LHLD   shash_val_ptr   ; HL = R[a+2]
+B631   CD 28 84               CALL   copy_slot   
+B634   C3 4F 8F               JMP   vm_loop   
+B637                SHASH_SNEXT:      
+B637   2A 7D B6               LHLD   shash_cur_ptr   
+B63A   11 08 00               LXI   d,HASH_PAIR_BYTES   
+B63D   19                     DAD   d   
+B63E   3A 80 B6               LDA   shash_loop_cnt   
+B641   3D                     DCR   a   
+B642   32 80 B6               STA   shash_loop_cnt   
+B645   C2 17 B6               JNZ   shash_search   
+B648                             ; 見つからなかった → 末尾に追加
+B648                SHASH_APPEND:      
+B648                             ; 容量チェック
+B648   3A 7F B6               LDA   shash_pair_cnt   
+B64B   FE 03                  CPI   COL_MAX_HASH_PAIRS   
+B64D   D2 03 00               JNC   vm_error   ; Hash 満杯
+B650                             ; count++ を書き込み
+B650   3C                     INR   a   
+B651   F5                     PUSH   psw   
+B652   2A 75 B6               LHLD   shash_col_ptr   
+B655   23                     INX   h   ; +1: count フィールド
+B656   77                     MOV   m,a   
+B657   F1                     POP   psw   
+B658                             ; 追加位置 = data + old_count * 8
+B658   3A 7F B6               LDA   shash_pair_cnt   ; old count
+B65B   87                     ADD   a   ; ×2
+B65C   87                     ADD   a   ; ×4
+B65D   87                     ADD   a   ; ×8
+B65E   5F                     MOV   e,a   
+B65F   16 00                  MVI   d,0   
+B661   2A 77 B6               LHLD   shash_data_ptr   
+B664   19                     DAD   d   ; HL = 追加位置
+B665                             ; key をコピー (R[a+1] → [HL])
+B665   EB                     XCHG      ; DE = 追加位置
+B666   2A 79 B6               LHLD   shash_key_ptr   ; HL = R[a+1]
+B669   CD 28 84               CALL   copy_slot   ; key 4B、DE は value 位置に進む
+B66C                             ; value をコピー (R[a+2] → [DE])
+B66C   2A 7B B6               LHLD   shash_val_ptr   ; HL = R[a+2]
+B66F                             ; DE は既に value 位置
+B66F   CD 28 84               CALL   copy_slot   
+B672   C3 4F 8F               JMP   vm_loop   
+B675                             ; --- sidx_hash データ ---
+B675   00 00        SHASH_COL_PTR:   DW   0   
+B677   00 00        SHASH_DATA_PTR:   DW   0   
+B679   00 00        SHASH_KEY_PTR:   DW   0   
+B67B   00 00        SHASH_VAL_PTR:   DW   0   
+B67D   00 00        SHASH_CUR_PTR:   DW   0   
+B67F   00           SHASH_PAIR_CNT:   DB   0   
+B680   00           SHASH_LOOP_CNT:   DB   0   
+B681                          END      
 
 
 VM_CODE_ORG:        8400 DEFINED AT LINE 6 IN vm_constants.a80
@@ -4279,13 +4545,15 @@ INIT_METHOD_ID_STORE: 82FE DEFINED AT LINE 18 IN vm_constants.a80
 SLOT_BYTES:         0004 DEFINED AT LINE 22 IN vm_constants.a80
                     > USED AT LINE 91 IN vm_util.a80
                     > USED AT LINE 252 IN vm_send.a80
-                    > USED AT LINE 1195
-                    > USED AT LINE 1319
-                    > USED AT LINE 1367
-                    > USED AT LINE 1419
-                    > USED AT LINE 1464
-                    > USED AT LINE 1504
-                    > USED AT LINE 1767
+                    > USED AT LINE 1197
+                    > USED AT LINE 1323
+                    > USED AT LINE 1371
+                    > USED AT LINE 1423
+                    > USED AT LINE 1468
+                    > USED AT LINE 1508
+                    > USED AT LINE 1771
+                    > USED AT LINE 152 IN vm_hash.a80
+                    > USED AT LINE 241 IN vm_hash.a80
 SLOT_TYPE_OFFSET:   0000 DEFINED AT LINE 23 IN vm_constants.a80
 SLOT_VALUE_OFFSET:  0002 DEFINED AT LINE 24 IN vm_constants.a80
 OFF_PC:             0000 DEFINED AT LINE 28 IN vm_constants.a80
@@ -4420,6 +4688,7 @@ TT_NIL:             0001 DEFINED AT LINE 63 IN vm_constants.a80
                     > USED AT LINE 599
                     > USED AT LINE 782
                     > USED AT LINE 825
+                    > USED AT LINE 186 IN vm_hash.a80
 TT_FALSE:           0002 DEFINED AT LINE 64 IN vm_constants.a80
                     > USED AT LINE 158 IN vm_load.a80
                     > USED AT LINE 50 IN vm_compare.a80
@@ -4434,42 +4703,46 @@ TT_INTEGER:         0004 DEFINED AT LINE 66 IN vm_constants.a80
                     > USED AT LINE 55 IN vm_util.a80
                     > USED AT LINE 123 IN vm_load.a80
                     > USED AT LINE 695
-                    > USED AT LINE 1639
+                    > USED AT LINE 1643
 TT_STRING:          0007 DEFINED AT LINE 67 IN vm_constants.a80
                     > USED AT LINE 17 IN vm_arith.a80
                     > USED AT LINE 569
                     > USED AT LINE 692
                     > USED AT LINE 1107
-                    > USED AT LINE 1153
-                    > USED AT LINE 1221
-                    > USED AT LINE 1259
-                    > USED AT LINE 1625
-                    > USED AT LINE 1637
+                    > USED AT LINE 1155
+                    > USED AT LINE 1223
+                    > USED AT LINE 1263
+                    > USED AT LINE 1629
+                    > USED AT LINE 1641
 TT_ARRAY:           0008 DEFINED AT LINE 68 IN vm_constants.a80
                     > USED AT LINE 1109
-                    > USED AT LINE 1223
-                    > USED AT LINE 1395
-                    > USED AT LINE 1627
-TT_OBJECT:          000A DEFINED AT LINE 69 IN vm_constants.a80
+                    > USED AT LINE 1225
+                    > USED AT LINE 1399
+                    > USED AT LINE 1631
+TT_HASH:            0009 DEFINED AT LINE 69 IN vm_constants.a80
+                    > USED AT LINE 1111
+                    > USED AT LINE 1227
+                    > USED AT LINE 100 IN vm_hash.a80
+TT_OBJECT:          000A DEFINED AT LINE 70 IN vm_constants.a80
                     > USED AT LINE 288 IN vm_util.a80
                     > USED AT LINE 178 IN vm_send.a80
                     > USED AT LINE 11 IN vm_block.a80
                     > USED AT LINE 491
-TT_PROC:            000C DEFINED AT LINE 70 IN vm_constants.a80
+TT_PROC:            000C DEFINED AT LINE 71 IN vm_constants.a80
                     > USED AT LINE 39 IN vm_block.a80
                     > USED AT LINE 35 IN vm_class.a80
-TT_CLASS:           000D DEFINED AT LINE 71 IN vm_constants.a80
+TT_CLASS:           000D DEFINED AT LINE 72 IN vm_constants.a80
                     > USED AT LINE 286 IN vm_util.a80
                     > USED AT LINE 151 IN vm_class.a80
-TT_FALSY_MAX:       0002 DEFINED AT LINE 72 IN vm_constants.a80
+TT_FALSY_MAX:       0002 DEFINED AT LINE 73 IN vm_constants.a80
                     > USED AT LINE 44 IN vm_jump.a80
                     > USED AT LINE 65 IN vm_jump.a80
                     > USED AT LINE 283 IN vm_send.a80
-VM_STOPPED:         0000 DEFINED AT LINE 76 IN vm_constants.a80
-VM_RUNNING:         0001 DEFINED AT LINE 77 IN vm_constants.a80
+VM_STOPPED:         0000 DEFINED AT LINE 77 IN vm_constants.a80
+VM_RUNNING:         0001 DEFINED AT LINE 78 IN vm_constants.a80
                     > USED AT LINE 215
                     > USED AT LINE 500
-VM_FINISHED:        0002 DEFINED AT LINE 78 IN vm_constants.a80
+VM_FINISHED:        0002 DEFINED AT LINE 79 IN vm_constants.a80
                     > USED AT LINE 86
                     > USED AT LINE 156
 VM_ERROR:           8F2F DEFINED AT LINE 171
@@ -4491,170 +4764,178 @@ VM_ERROR:           8F2F DEFINED AT LINE 171
                     > USED AT LINE 696
                     > USED AT LINE 803
                     > USED AT LINE 1072
-                    > USED AT LINE 1111
-                    > USED AT LINE 1131
-                    > USED AT LINE 1182
-                    > USED AT LINE 1225
-                    > USED AT LINE 1244
-                    > USED AT LINE 1303
-                    > USED AT LINE 1349
-                    > USED AT LINE 1445
-                    > USED AT LINE 1629
-                    > USED AT LINE 1641
-                    > USED AT LINE 1749
-SYM_TABLE_BASE:     8300 DEFINED AT LINE 83 IN vm_constants.a80
-GLOBALS_BASE:       B000 DEFINED AT LINE 84 IN vm_constants.a80
-SYM_KIND_USER_METHOD: 0001 DEFINED AT LINE 87 IN vm_constants.a80
+                    > USED AT LINE 1113
+                    > USED AT LINE 1133
+                    > USED AT LINE 1184
+                    > USED AT LINE 1229
+                    > USED AT LINE 1248
+                    > USED AT LINE 1307
+                    > USED AT LINE 1353
+                    > USED AT LINE 1449
+                    > USED AT LINE 1633
+                    > USED AT LINE 1645
+                    > USED AT LINE 1753
+                    > USED AT LINE 273 IN vm_hash.a80
+SYM_TABLE_BASE:     8300 DEFINED AT LINE 84 IN vm_constants.a80
+GLOBALS_BASE:       B000 DEFINED AT LINE 85 IN vm_constants.a80
+SYM_KIND_USER_METHOD: 0001 DEFINED AT LINE 88 IN vm_constants.a80
                     > USED AT LINE 59 IN vm_send.a80
-SYM_KIND_CLASS:     0002 DEFINED AT LINE 88 IN vm_constants.a80
-SYM_KIND_IVAR:      0003 DEFINED AT LINE 89 IN vm_constants.a80
+SYM_KIND_CLASS:     0002 DEFINED AT LINE 89 IN vm_constants.a80
+SYM_KIND_IVAR:      0003 DEFINED AT LINE 90 IN vm_constants.a80
                     > USED AT LINE 32 IN vm_globals.a80
                     > USED AT LINE 82 IN vm_globals.a80
-FRAME_STACK_BASE:   B100 DEFINED AT LINE 93 IN vm_constants.a80
+FRAME_STACK_BASE:   B100 DEFINED AT LINE 94 IN vm_constants.a80
                     > USED AT LINE 27 IN vm_frame.a80
-FRAME_BYTES:        000C DEFINED AT LINE 94 IN vm_constants.a80
-MAX_FRAMES:         0008 DEFINED AT LINE 95 IN vm_constants.a80
-FRAME_OFF_RETURN_PC: 0000 DEFINED AT LINE 98 IN vm_constants.a80
-FRAME_OFF_RETURN_IREP: 0002 DEFINED AT LINE 99 IN vm_constants.a80
-FRAME_OFF_RETURN_REG_BASE: 0003 DEFINED AT LINE 100 IN vm_constants.a80
+FRAME_BYTES:        000C DEFINED AT LINE 95 IN vm_constants.a80
+MAX_FRAMES:         0008 DEFINED AT LINE 96 IN vm_constants.a80
+FRAME_OFF_RETURN_PC: 0000 DEFINED AT LINE 99 IN vm_constants.a80
+FRAME_OFF_RETURN_IREP: 0002 DEFINED AT LINE 100 IN vm_constants.a80
+FRAME_OFF_RETURN_REG_BASE: 0003 DEFINED AT LINE 101 IN vm_constants.a80
                     > USED AT LINE 44 IN vm_upvar.a80
-FRAME_OFF_KIND:     0005 DEFINED AT LINE 101 IN vm_constants.a80
+FRAME_OFF_KIND:     0005 DEFINED AT LINE 102 IN vm_constants.a80
                     > USED AT LINE 53
                     > USED AT LINE 101
-FRAME_OFF_INDEX:    0006 DEFINED AT LINE 102 IN vm_constants.a80
+FRAME_OFF_INDEX:    0006 DEFINED AT LINE 103 IN vm_constants.a80
                     > USED AT LINE 110
-FRAME_OFF_LIMIT:    0008 DEFINED AT LINE 103 IN vm_constants.a80
+FRAME_OFF_LIMIT:    0008 DEFINED AT LINE 104 IN vm_constants.a80
                     > USED AT LINE 180 IN vm_block.a80
-FRAME_OFF_OUTER:    000A DEFINED AT LINE 104 IN vm_constants.a80
+FRAME_OFF_OUTER:    000A DEFINED AT LINE 105 IN vm_constants.a80
                     > USED AT LINE 29 IN vm_upvar.a80
-FRAME_KIND_CALL:    0000 DEFINED AT LINE 107 IN vm_constants.a80
+FRAME_KIND_CALL:    0000 DEFINED AT LINE 108 IN vm_constants.a80
                     > USED AT LINE 123 IN vm_send.a80
                     > USED AT LINE 180 IN vm_class.a80
                     > USED AT LINE 56
-FRAME_KIND_ITERATE: 0001 DEFINED AT LINE 108 IN vm_constants.a80
+FRAME_KIND_ITERATE: 0001 DEFINED AT LINE 109 IN vm_constants.a80
                     > USED AT LINE 171 IN vm_block.a80
-FRAME_KIND_LOOP:    0004 DEFINED AT LINE 109 IN vm_constants.a80
+FRAME_KIND_LOOP:    0004 DEFINED AT LINE 110 IN vm_constants.a80
                     > USED AT LINE 222 IN vm_block.a80
                     > USED AT LINE 104
-FRAME_KIND_NEW:     0005 DEFINED AT LINE 110 IN vm_constants.a80
+FRAME_KIND_NEW:     0005 DEFINED AT LINE 111 IN vm_constants.a80
                     > USED AT LINE 221 IN vm_send.a80
                     > USED AT LINE 58
-FRAME_NONE:         00FF DEFINED AT LINE 113 IN vm_constants.a80
+FRAME_NONE:         00FF DEFINED AT LINE 114 IN vm_constants.a80
                     > USED AT LINE 124 IN vm_send.a80
                     > USED AT LINE 222 IN vm_send.a80
                     > USED AT LINE 51 IN vm_block.a80
                     > USED AT LINE 33 IN vm_upvar.a80
                     > USED AT LINE 41 IN vm_class.a80
                     > USED AT LINE 181 IN vm_class.a80
-METHOD_TABLE_BASE:  B160 DEFINED AT LINE 117 IN vm_constants.a80
+METHOD_TABLE_BASE:  B160 DEFINED AT LINE 118 IN vm_constants.a80
                     > USED AT LINE 110 IN vm_send.a80
                     > USED AT LINE 208 IN vm_send.a80
                     > USED AT LINE 89 IN vm_class.a80
                     > USED AT LINE 114 IN vm_class.a80
                     > USED AT LINE 420
-MAX_CLASSES:        0004 DEFINED AT LINE 118 IN vm_constants.a80
-MAX_METHODS_PER_CLASS: 0020 DEFINED AT LINE 119 IN vm_constants.a80
-METHOD_TABLE_SIZE:  0080 DEFINED AT LINE 120 IN vm_constants.a80
+MAX_CLASSES:        0004 DEFINED AT LINE 119 IN vm_constants.a80
+MAX_METHODS_PER_CLASS: 0020 DEFINED AT LINE 120 IN vm_constants.a80
+METHOD_TABLE_SIZE:  0080 DEFINED AT LINE 121 IN vm_constants.a80
                     > USED AT LINE 421
-CLASS_MAIN:         0000 DEFINED AT LINE 121 IN vm_constants.a80
-METHOD_NEW:         001C DEFINED AT LINE 122 IN vm_constants.a80
+CLASS_MAIN:         0000 DEFINED AT LINE 122 IN vm_constants.a80
+METHOD_NEW:         001C DEFINED AT LINE 123 IN vm_constants.a80
                     > USED AT LINE 78 IN vm_send.a80
-METHOD_DISPLAY:     001D DEFINED AT LINE 123 IN vm_constants.a80
+METHOD_DISPLAY:     001D DEFINED AT LINE 124 IN vm_constants.a80
                     > USED AT LINE 80 IN vm_send.a80
-METHOD_GETKEY:      001E DEFINED AT LINE 124 IN vm_constants.a80
+METHOD_GETKEY:      001E DEFINED AT LINE 125 IN vm_constants.a80
                     > USED AT LINE 82 IN vm_send.a80
-METHOD_PUTS:        001F DEFINED AT LINE 125 IN vm_constants.a80
+METHOD_PUTS:        001F DEFINED AT LINE 126 IN vm_constants.a80
                     > USED AT LINE 657
-METHOD_SETSEG:      0020 DEFINED AT LINE 126 IN vm_constants.a80
+METHOD_SETSEG:      0020 DEFINED AT LINE 127 IN vm_constants.a80
                     > USED AT LINE 659
-METHOD_RAND:        0021 DEFINED AT LINE 127 IN vm_constants.a80
+METHOD_RAND:        0021 DEFINED AT LINE 128 IN vm_constants.a80
                     > USED AT LINE 661
-METHOD_LENGTH:      0012 DEFINED AT LINE 128 IN vm_constants.a80
+METHOD_LENGTH:      0012 DEFINED AT LINE 129 IN vm_constants.a80
                     > USED AT LINE 663
-METHOD_CONCAT:      0014 DEFINED AT LINE 129 IN vm_constants.a80
+METHOD_CONCAT:      0014 DEFINED AT LINE 130 IN vm_constants.a80
                     > USED AT LINE 665
-METHOD_PUSH:        0016 DEFINED AT LINE 130 IN vm_constants.a80
+METHOD_PUSH:        0016 DEFINED AT LINE 131 IN vm_constants.a80
                     > USED AT LINE 667
-KEYIN1_ADDR:        0616 DEFINED AT LINE 131 IN vm_constants.a80
+KEYIN1_ADDR:        0616 DEFINED AT LINE 132 IN vm_constants.a80
                     > USED AT LINE 625
                     > USED AT LINE 629
-OBJECT_POOL_BASE:   B1E0 DEFINED AT LINE 135 IN vm_constants.a80
+OBJECT_POOL_BASE:   B1E0 DEFINED AT LINE 136 IN vm_constants.a80
                     > USED AT LINE 316 IN vm_util.a80
                     > USED AT LINE 134 IN vm_globals.a80
                     > USED AT LINE 170 IN vm_send.a80
                     > USED AT LINE 429
-MAX_OBJECTS:        0008 DEFINED AT LINE 136 IN vm_constants.a80
+MAX_OBJECTS:        0008 DEFINED AT LINE 137 IN vm_constants.a80
                     > USED AT LINE 149 IN vm_send.a80
-OBJECT_SLOT_SIZE:   0020 DEFINED AT LINE 137 IN vm_constants.a80
-OBJECT_HEADER_SIZE: 0004 DEFINED AT LINE 138 IN vm_constants.a80
+OBJECT_SLOT_SIZE:   0020 DEFINED AT LINE 138 IN vm_constants.a80
+OBJECT_HEADER_SIZE: 0004 DEFINED AT LINE 139 IN vm_constants.a80
                     > USED AT LINE 137 IN vm_globals.a80
-MAX_IVARS:          0007 DEFINED AT LINE 139 IN vm_constants.a80
-COLLECTION_POOL_BASE: B2E0 DEFINED AT LINE 143 IN vm_constants.a80
+MAX_IVARS:          0007 DEFINED AT LINE 140 IN vm_constants.a80
+COLLECTION_POOL_BASE: B2E0 DEFINED AT LINE 144 IN vm_constants.a80
                     > USED AT LINE 438
                     > USED AT LINE 1057
-MAX_COL_SLOTS:      0010 DEFINED AT LINE 144 IN vm_constants.a80
+MAX_COL_SLOTS:      0010 DEFINED AT LINE 145 IN vm_constants.a80
                     > USED AT LINE 1071
-COL_SLOT_SIZE:      0020 DEFINED AT LINE 145 IN vm_constants.a80
-COL_HEADER_SIZE:    0002 DEFINED AT LINE 146 IN vm_constants.a80
-COL_DATA_SIZE:      001E DEFINED AT LINE 147 IN vm_constants.a80
-COL_MAX_STRING_LEN: 001E DEFINED AT LINE 148 IN vm_constants.a80
+COL_SLOT_SIZE:      0020 DEFINED AT LINE 146 IN vm_constants.a80
+COL_HEADER_SIZE:    0002 DEFINED AT LINE 147 IN vm_constants.a80
+COL_DATA_SIZE:      001E DEFINED AT LINE 148 IN vm_constants.a80
+COL_MAX_STRING_LEN: 001E DEFINED AT LINE 149 IN vm_constants.a80
                     > USED AT LINE 543
                     > USED AT LINE 545
-                    > USED AT LINE 1539
-                    > USED AT LINE 1542
+                    > USED AT LINE 1543
                     > USED AT LINE 1546
-                    > USED AT LINE 1554
-                    > USED AT LINE 1668
-                    > USED AT LINE 1671
-                    > USED AT LINE 1680
-                    > USED AT LINE 1731
-COL_MAX_ARRAY_ELEMS: 0007 DEFINED AT LINE 149 IN vm_constants.a80
-                    > USED AT LINE 1348
-                    > USED AT LINE 1444
-                    > USED AT LINE 1748
-COL_TYPE_FREE:      0000 DEFINED AT LINE 150 IN vm_constants.a80
-COL_TYPE_STRING:    0001 DEFINED AT LINE 151 IN vm_constants.a80
+                    > USED AT LINE 1550
+                    > USED AT LINE 1558
+                    > USED AT LINE 1672
+                    > USED AT LINE 1675
+                    > USED AT LINE 1684
+                    > USED AT LINE 1735
+COL_MAX_ARRAY_ELEMS: 0007 DEFINED AT LINE 150 IN vm_constants.a80
+                    > USED AT LINE 1352
+                    > USED AT LINE 1448
+                    > USED AT LINE 1752
+COL_TYPE_FREE:      0000 DEFINED AT LINE 151 IN vm_constants.a80
+COL_TYPE_STRING:    0001 DEFINED AT LINE 152 IN vm_constants.a80
                     > USED AT LINE 540
-                    > USED AT LINE 1143
-COL_TYPE_ARRAY:     0002 DEFINED AT LINE 152 IN vm_constants.a80
-                    > USED AT LINE 1354
-                    > USED AT LINE 1410
-OP_NOP:             0000 DEFINED AT LINE 156 IN vm_constants.a80
-OP_MOVE:            0001 DEFINED AT LINE 157 IN vm_constants.a80
-OP_LOADI:           0003 DEFINED AT LINE 158 IN vm_constants.a80
-OP_LOADINEG:        0004 DEFINED AT LINE 159 IN vm_constants.a80
-OP_LOADI__1:        0005 DEFINED AT LINE 160 IN vm_constants.a80
-OP_LOADI_0:         0006 DEFINED AT LINE 161 IN vm_constants.a80
-OP_LOADI_1:         0007 DEFINED AT LINE 162 IN vm_constants.a80
-OP_LOADI_2:         0008 DEFINED AT LINE 163 IN vm_constants.a80
-OP_LOADI_3:         0009 DEFINED AT LINE 164 IN vm_constants.a80
-OP_LOADI_4:         000A DEFINED AT LINE 165 IN vm_constants.a80
-OP_LOADI_5:         000B DEFINED AT LINE 166 IN vm_constants.a80
-OP_LOADI_6:         000C DEFINED AT LINE 167 IN vm_constants.a80
-OP_LOADI_7:         000D DEFINED AT LINE 168 IN vm_constants.a80
-OP_LOADI16:         000E DEFINED AT LINE 169 IN vm_constants.a80
-OP_LOADNIL:         0011 DEFINED AT LINE 170 IN vm_constants.a80
-OP_LOADT:           0013 DEFINED AT LINE 171 IN vm_constants.a80
-OP_LOADF:           0014 DEFINED AT LINE 172 IN vm_constants.a80
-OP_ADD:             003C DEFINED AT LINE 173 IN vm_constants.a80
-OP_SUB:             003E DEFINED AT LINE 174 IN vm_constants.a80
-OP_EQ:              0042 DEFINED AT LINE 175 IN vm_constants.a80
-OP_LT:              0043 DEFINED AT LINE 176 IN vm_constants.a80
-OP_LE:              0044 DEFINED AT LINE 177 IN vm_constants.a80
-OP_GT:              0045 DEFINED AT LINE 178 IN vm_constants.a80
-OP_GE:              0046 DEFINED AT LINE 179 IN vm_constants.a80
-OP_JMP:             0025 DEFINED AT LINE 180 IN vm_constants.a80
-OP_JMPIF:           0026 DEFINED AT LINE 181 IN vm_constants.a80
-OP_JMPNOT:          0027 DEFINED AT LINE 182 IN vm_constants.a80
-OP_STOP:            0069 DEFINED AT LINE 183 IN vm_constants.a80
-FMT_Z:              0000 DEFINED AT LINE 188 IN vm_constants.a80
-FMT_B:              0001 DEFINED AT LINE 189 IN vm_constants.a80
-FMT_BB:             0002 DEFINED AT LINE 190 IN vm_constants.a80
-FMT_BBB:            0003 DEFINED AT LINE 191 IN vm_constants.a80
-FMT_S:              0002 DEFINED AT LINE 192 IN vm_constants.a80
-FMT_BS:             0003 DEFINED AT LINE 193 IN vm_constants.a80
-FMT_BSS:            0005 DEFINED AT LINE 194 IN vm_constants.a80
-FMT_W:              0003 DEFINED AT LINE 195 IN vm_constants.a80
+                    > USED AT LINE 1145
+COL_TYPE_ARRAY:     0002 DEFINED AT LINE 153 IN vm_constants.a80
+                    > USED AT LINE 1358
+                    > USED AT LINE 1414
+COL_TYPE_HASH:      0003 DEFINED AT LINE 154 IN vm_constants.a80
+                    > USED AT LINE 48 IN vm_hash.a80
+HASH_PAIR_BYTES:    0008 DEFINED AT LINE 155 IN vm_constants.a80
+                    > USED AT LINE 175 IN vm_hash.a80
+                    > USED AT LINE 260 IN vm_hash.a80
+COL_MAX_HASH_PAIRS: 0003 DEFINED AT LINE 156 IN vm_constants.a80
+                    > USED AT LINE 272 IN vm_hash.a80
+OP_NOP:             0000 DEFINED AT LINE 160 IN vm_constants.a80
+OP_MOVE:            0001 DEFINED AT LINE 161 IN vm_constants.a80
+OP_LOADI:           0003 DEFINED AT LINE 162 IN vm_constants.a80
+OP_LOADINEG:        0004 DEFINED AT LINE 163 IN vm_constants.a80
+OP_LOADI__1:        0005 DEFINED AT LINE 164 IN vm_constants.a80
+OP_LOADI_0:         0006 DEFINED AT LINE 165 IN vm_constants.a80
+OP_LOADI_1:         0007 DEFINED AT LINE 166 IN vm_constants.a80
+OP_LOADI_2:         0008 DEFINED AT LINE 167 IN vm_constants.a80
+OP_LOADI_3:         0009 DEFINED AT LINE 168 IN vm_constants.a80
+OP_LOADI_4:         000A DEFINED AT LINE 169 IN vm_constants.a80
+OP_LOADI_5:         000B DEFINED AT LINE 170 IN vm_constants.a80
+OP_LOADI_6:         000C DEFINED AT LINE 171 IN vm_constants.a80
+OP_LOADI_7:         000D DEFINED AT LINE 172 IN vm_constants.a80
+OP_LOADI16:         000E DEFINED AT LINE 173 IN vm_constants.a80
+OP_LOADNIL:         0011 DEFINED AT LINE 174 IN vm_constants.a80
+OP_LOADT:           0013 DEFINED AT LINE 175 IN vm_constants.a80
+OP_LOADF:           0014 DEFINED AT LINE 176 IN vm_constants.a80
+OP_ADD:             003C DEFINED AT LINE 177 IN vm_constants.a80
+OP_SUB:             003E DEFINED AT LINE 178 IN vm_constants.a80
+OP_EQ:              0042 DEFINED AT LINE 179 IN vm_constants.a80
+OP_LT:              0043 DEFINED AT LINE 180 IN vm_constants.a80
+OP_LE:              0044 DEFINED AT LINE 181 IN vm_constants.a80
+OP_GT:              0045 DEFINED AT LINE 182 IN vm_constants.a80
+OP_GE:              0046 DEFINED AT LINE 183 IN vm_constants.a80
+OP_JMP:             0025 DEFINED AT LINE 184 IN vm_constants.a80
+OP_JMPIF:           0026 DEFINED AT LINE 185 IN vm_constants.a80
+OP_JMPNOT:          0027 DEFINED AT LINE 186 IN vm_constants.a80
+OP_STOP:            0069 DEFINED AT LINE 187 IN vm_constants.a80
+FMT_Z:              0000 DEFINED AT LINE 192 IN vm_constants.a80
+FMT_B:              0001 DEFINED AT LINE 193 IN vm_constants.a80
+FMT_BB:             0002 DEFINED AT LINE 194 IN vm_constants.a80
+FMT_BBB:            0003 DEFINED AT LINE 195 IN vm_constants.a80
+FMT_S:              0002 DEFINED AT LINE 196 IN vm_constants.a80
+FMT_BS:             0003 DEFINED AT LINE 197 IN vm_constants.a80
+FMT_BSS:            0005 DEFINED AT LINE 198 IN vm_constants.a80
+FMT_W:              0003 DEFINED AT LINE 199 IN vm_constants.a80
 GET_REG_ADDR:       8403 DEFINED AT LINE 23 IN vm_util.a80
                     > USED AT LINE 43 IN vm_util.a80
                     > USED AT LINE 21 IN vm_load.a80
@@ -4737,39 +5018,47 @@ GET_REG_ADDR:       8403 DEFINED AT LINE 23 IN vm_util.a80
                     > USED AT LINE 1026
                     > USED AT LINE 1034
                     > USED AT LINE 1105
-                    > USED AT LINE 1116
-                    > USED AT LINE 1126
-                    > USED AT LINE 1152
-                    > USED AT LINE 1167
-                    > USED AT LINE 1177
-                    > USED AT LINE 1194
-                    > USED AT LINE 1219
-                    > USED AT LINE 1230
-                    > USED AT LINE 1240
-                    > USED AT LINE 1256
-                    > USED AT LINE 1276
-                    > USED AT LINE 1289
-                    > USED AT LINE 1299
-                    > USED AT LINE 1318
-                    > USED AT LINE 1372
-                    > USED AT LINE 1394
-                    > USED AT LINE 1434
-                    > USED AT LINE 1469
-                    > USED AT LINE 1491
-                    > USED AT LINE 1518
-                    > USED AT LINE 1528
-                    > USED AT LINE 1560
-                    > USED AT LINE 1604
-                    > USED AT LINE 1610
-                    > USED AT LINE 1623
-                    > USED AT LINE 1635
-                    > USED AT LINE 1647
-                    > USED AT LINE 1657
-                    > USED AT LINE 1686
-                    > USED AT LINE 1721
-                    > USED AT LINE 1727
-                    > USED AT LINE 1744
-                    > USED AT LINE 1766
+                    > USED AT LINE 1118
+                    > USED AT LINE 1128
+                    > USED AT LINE 1154
+                    > USED AT LINE 1169
+                    > USED AT LINE 1179
+                    > USED AT LINE 1196
+                    > USED AT LINE 1221
+                    > USED AT LINE 1234
+                    > USED AT LINE 1244
+                    > USED AT LINE 1260
+                    > USED AT LINE 1280
+                    > USED AT LINE 1293
+                    > USED AT LINE 1303
+                    > USED AT LINE 1322
+                    > USED AT LINE 1376
+                    > USED AT LINE 1398
+                    > USED AT LINE 1438
+                    > USED AT LINE 1473
+                    > USED AT LINE 1495
+                    > USED AT LINE 1522
+                    > USED AT LINE 1532
+                    > USED AT LINE 1564
+                    > USED AT LINE 1608
+                    > USED AT LINE 1614
+                    > USED AT LINE 1627
+                    > USED AT LINE 1639
+                    > USED AT LINE 1651
+                    > USED AT LINE 1661
+                    > USED AT LINE 1690
+                    > USED AT LINE 1725
+                    > USED AT LINE 1731
+                    > USED AT LINE 1748
+                    > USED AT LINE 1770
+                    > USED AT LINE 68 IN vm_hash.a80
+                    > USED AT LINE 77 IN vm_hash.a80
+                    > USED AT LINE 99 IN vm_hash.a80
+                    > USED AT LINE 138 IN vm_hash.a80
+                    > USED AT LINE 166 IN vm_hash.a80
+                    > USED AT LINE 185 IN vm_hash.a80
+                    > USED AT LINE 216 IN vm_hash.a80
+                    > USED AT LINE 222 IN vm_hash.a80
 GET_REG_ADDR_NEXT:  840F DEFINED AT LINE 41 IN vm_util.a80
                     > USED AT LINE 23 IN vm_arith.a80
                     > USED AT LINE 45 IN vm_arith.a80
@@ -4791,7 +5080,7 @@ SET_SLOT_INT16:     8413 DEFINED AT LINE 54 IN vm_util.a80
                     > USED AT LINE 646
                     > USED AT LINE 1027
                     > USED AT LINE 1035
-                    > USED AT LINE 1611
+                    > USED AT LINE 1615
 SET_SLOT_SPECIAL:   841D DEFINED AT LINE 72 IN vm_util.a80
                     > USED AT LINE 139 IN vm_load.a80
                     > USED AT LINE 149 IN vm_load.a80
@@ -4805,6 +5094,7 @@ SET_SLOT_SPECIAL:   841D DEFINED AT LINE 72 IN vm_util.a80
                     > USED AT LINE 600
                     > USED AT LINE 783
                     > USED AT LINE 826
+                    > USED AT LINE 187 IN vm_hash.a80
 COPY_SLOT:          8428 DEFINED AT LINE 90 IN vm_util.a80
                     > USED AT LINE 26 IN vm_load.a80
                     > USED AT LINE 47 IN vm_globals.a80
@@ -4818,6 +5108,12 @@ COPY_SLOT:          8428 DEFINED AT LINE 90 IN vm_util.a80
                     > USED AT LINE 125 IN vm_upvar.a80
                     > USED AT LINE 17 IN vm_class.a80
                     > USED AT LINE 72
+                    > USED AT LINE 70 IN vm_hash.a80
+                    > USED AT LINE 79 IN vm_hash.a80
+                    > USED AT LINE 169 IN vm_hash.a80
+                    > USED AT LINE 255 IN vm_hash.a80
+                    > USED AT LINE 296 IN vm_hash.a80
+                    > USED AT LINE 301 IN vm_hash.a80
 COPY_SLOT_LOOP:     842A DEFINED AT LINE 92 IN vm_util.a80
                     > USED AT LINE 98 IN vm_util.a80
 GET_SLOT_TYPE:      8433 DEFINED AT LINE 108 IN vm_util.a80
@@ -4852,13 +5148,13 @@ SLOT_TO_VALUE:      8435 DEFINED AT LINE 119 IN vm_util.a80
                     > USED AT LINE 811
                     > USED AT LINE 1005
                     > USED AT LINE 1090
-                    > USED AT LINE 1127
-                    > USED AT LINE 1178
-                    > USED AT LINE 1241
-                    > USED AT LINE 1262
-                    > USED AT LINE 1277
-                    > USED AT LINE 1300
-                    > USED AT LINE 1722
+                    > USED AT LINE 1129
+                    > USED AT LINE 1180
+                    > USED AT LINE 1245
+                    > USED AT LINE 1266
+                    > USED AT LINE 1281
+                    > USED AT LINE 1304
+                    > USED AT LINE 1726
 ADD_VALUE16:        8438 DEFINED AT LINE 134 IN vm_util.a80
                     > USED AT LINE 31 IN vm_arith.a80
 SUB_VALUE16:        8441 DEFINED AT LINE 155 IN vm_util.a80
@@ -4961,15 +5257,17 @@ FETCH_BYTE:         84C3 DEFINED AT LINE 17 IN vm_fetch.a80
                     > USED AT LINE 513
                     > USED AT LINE 515
                     > USED AT LINE 1103
-                    > USED AT LINE 1217
-                    > USED AT LINE 1338
-                    > USED AT LINE 1341
-                    > USED AT LINE 1427
-                    > USED AT LINE 1429
-                    > USED AT LINE 1512
-                    > USED AT LINE 1795
-                    > USED AT LINE 1797
-                    > USED AT LINE 1799
+                    > USED AT LINE 1219
+                    > USED AT LINE 1342
+                    > USED AT LINE 1345
+                    > USED AT LINE 1431
+                    > USED AT LINE 1433
+                    > USED AT LINE 1516
+                    > USED AT LINE 23 IN vm_hash.a80
+                    > USED AT LINE 25 IN vm_hash.a80
+                    > USED AT LINE 27 IN vm_hash.a80
+                    > USED AT LINE 38 IN vm_hash.a80
+                    > USED AT LINE 40 IN vm_hash.a80
 FETCH_U16BE:        84D4 DEFINED AT LINE 39 IN vm_fetch.a80
                     > USED AT LINE 57 IN vm_fetch.a80
 FETCH_S16BE:        84DE DEFINED AT LINE 56 IN vm_fetch.a80
@@ -5218,17 +5516,17 @@ SEND_REG_A:         8A58 DEFINED AT LINE 352 IN vm_send.a80
                     > USED AT LINE 1002
                     > USED AT LINE 1025
                     > USED AT LINE 1033
-                    > USED AT LINE 1603
-                    > USED AT LINE 1609
-                    > USED AT LINE 1622
-                    > USED AT LINE 1633
-                    > USED AT LINE 1645
-                    > USED AT LINE 1656
-                    > USED AT LINE 1685
-                    > USED AT LINE 1719
-                    > USED AT LINE 1726
-                    > USED AT LINE 1743
-                    > USED AT LINE 1764
+                    > USED AT LINE 1607
+                    > USED AT LINE 1613
+                    > USED AT LINE 1626
+                    > USED AT LINE 1637
+                    > USED AT LINE 1649
+                    > USED AT LINE 1660
+                    > USED AT LINE 1689
+                    > USED AT LINE 1723
+                    > USED AT LINE 1730
+                    > USED AT LINE 1747
+                    > USED AT LINE 1768
 SEND_ARGC:          8A59 DEFINED AT LINE 354 IN vm_send.a80
                     > USED AT LINE 28 IN vm_send.a80
                     > USED AT LINE 41 IN vm_send.a80
@@ -5513,18 +5811,23 @@ VM_LOOP:            8F4F DEFINED AT LINE 212
                     > USED AT LINE 827
                     > USED AT LINE 1028
                     > USED AT LINE 1036
-                    > USED AT LINE 1162
-                    > USED AT LINE 1203
-                    > USED AT LINE 1284
-                    > USED AT LINE 1327
-                    > USED AT LINE 1404
-                    > USED AT LINE 1499
-                    > USED AT LINE 1589
-                    > USED AT LINE 1612
-                    > USED AT LINE 1715
-                    > USED AT LINE 1732
-                    > USED AT LINE 1739
-                    > USED AT LINE 1775
+                    > USED AT LINE 1164
+                    > USED AT LINE 1205
+                    > USED AT LINE 1288
+                    > USED AT LINE 1331
+                    > USED AT LINE 1408
+                    > USED AT LINE 1503
+                    > USED AT LINE 1593
+                    > USED AT LINE 1616
+                    > USED AT LINE 1719
+                    > USED AT LINE 1736
+                    > USED AT LINE 1743
+                    > USED AT LINE 1779
+                    > USED AT LINE 109 IN vm_hash.a80
+                    > USED AT LINE 170 IN vm_hash.a80
+                    > USED AT LINE 188 IN vm_hash.a80
+                    > USED AT LINE 256 IN vm_hash.a80
+                    > USED AT LINE 302 IN vm_hash.a80
 VM_DISPATCH:        8F7E DEFINED AT LINE 247
                     > USED AT LINE 241
 DISPATCH_TABLE:     A800 DEFINED AT LINE 285
@@ -5640,211 +5943,304 @@ COL_SLOT_ADDR:      ABE9 DEFINED AT LINE 1049
                     > USED AT LINE 1093
 COL_ALLOC:          ABF6 DEFINED AT LINE 1069
                     > USED AT LINE 536
-                    > USED AT LINE 1141
-                    > USED AT LINE 1352
-                    > USED AT LINE 1408
+                    > USED AT LINE 1143
+                    > USED AT LINE 1356
+                    > USED AT LINE 1412
+                    > USED AT LINE 44 IN vm_hash.a80
 COL_FROM_REG:       AC0B DEFINED AT LINE 1089
                     > USED AT LINE 737
-                    > USED AT LINE 1117
-                    > USED AT LINE 1168
-                    > USED AT LINE 1231
-                    > USED AT LINE 1267
-                    > USED AT LINE 1290
-                    > USED AT LINE 1435
-                    > USED AT LINE 1492
-                    > USED AT LINE 1519
-                    > USED AT LINE 1529
-                    > USED AT LINE 1561
-                    > USED AT LINE 1605
-                    > USED AT LINE 1648
-                    > USED AT LINE 1658
-                    > USED AT LINE 1687
-                    > USED AT LINE 1728
-                    > USED AT LINE 1745
+                    > USED AT LINE 1119
+                    > USED AT LINE 1170
+                    > USED AT LINE 1235
+                    > USED AT LINE 1271
+                    > USED AT LINE 1294
+                    > USED AT LINE 1439
+                    > USED AT LINE 1496
+                    > USED AT LINE 1523
+                    > USED AT LINE 1533
+                    > USED AT LINE 1565
+                    > USED AT LINE 1609
+                    > USED AT LINE 1652
+                    > USED AT LINE 1662
+                    > USED AT LINE 1691
+                    > USED AT LINE 1732
+                    > USED AT LINE 1749
+                    > USED AT LINE 125 IN vm_hash.a80
+                    > USED AT LINE 205 IN vm_hash.a80
 DO_OP_GETIDX:       AC13 DEFINED AT LINE 1102
                     > USED AT LINE 321
-GIDX_STRING:        AC2A DEFINED AT LINE 1113
+GIDX_STRING:        AC2F DEFINED AT LINE 1115
                     > USED AT LINE 1108
-GIDX_ARRAY:         AC76 DEFINED AT LINE 1164
+GIDX_ARRAY:         AC7B DEFINED AT LINE 1166
                     > USED AT LINE 1110
-GIDX_ARY_COPY:      ACA6 DEFINED AT LINE 1196
-                    > USED AT LINE 1202
-GIDX_REG_A:         ACB1 DEFINED AT LINE 1205
+GIDX_ARY_COPY:      ACAB DEFINED AT LINE 1198
+                    > USED AT LINE 1204
+GIDX_REG_A:         ACB6 DEFINED AT LINE 1207
                     > USED AT LINE 1104
-                    > USED AT LINE 1115
-                    > USED AT LINE 1124
-                    > USED AT LINE 1151
-                    > USED AT LINE 1166
-                    > USED AT LINE 1175
-                    > USED AT LINE 1193
-GIDX_DATA_ADDR:     ACB2 DEFINED AT LINE 1206
-                    > USED AT LINE 1121
-                    > USED AT LINE 1135
-                    > USED AT LINE 1172
-                    > USED AT LINE 1188
-GIDX_NEW_SLOT:      ACB4 DEFINED AT LINE 1207
-                    > USED AT LINE 1142
-                    > USED AT LINE 1157
-DO_OP_SETIDX:       ACB5 DEFINED AT LINE 1216
+                    > USED AT LINE 1117
+                    > USED AT LINE 1126
+                    > USED AT LINE 1153
+                    > USED AT LINE 1168
+                    > USED AT LINE 1177
+                    > USED AT LINE 1195
+                    > USED AT LINE 136 IN vm_hash.a80
+                    > USED AT LINE 165 IN vm_hash.a80
+                    > USED AT LINE 184 IN vm_hash.a80
+GIDX_DATA_ADDR:     ACB7 DEFINED AT LINE 1208
+                    > USED AT LINE 1123
+                    > USED AT LINE 1137
+                    > USED AT LINE 1174
+                    > USED AT LINE 1190
+GIDX_NEW_SLOT:      ACB9 DEFINED AT LINE 1209
+                    > USED AT LINE 1144
+                    > USED AT LINE 1159
+DO_OP_SETIDX:       ACBA DEFINED AT LINE 1218
                     > USED AT LINE 322
-SIDX_STRING:        ACCC DEFINED AT LINE 1227
-                    > USED AT LINE 1222
-SIDX_STR_CHAR:      AD06 DEFINED AT LINE 1265
-                    > USED AT LINE 1260
-SIDX_WRITE_CHAR:    AD0C DEFINED AT LINE 1271
-                    > USED AT LINE 1264
-SIDX_ARRAY:         AD26 DEFINED AT LINE 1286
+SIDX_STRING:        ACD6 DEFINED AT LINE 1231
                     > USED AT LINE 1224
-SIDX_ARY_COPY:      AD58 DEFINED AT LINE 1320
-                    > USED AT LINE 1326
-SIDX_REG_A:         AD63 DEFINED AT LINE 1329
-                    > USED AT LINE 1218
-                    > USED AT LINE 1229
-                    > USED AT LINE 1238
+SIDX_STR_CHAR:      AD10 DEFINED AT LINE 1269
+                    > USED AT LINE 1264
+SIDX_WRITE_CHAR:    AD16 DEFINED AT LINE 1275
+                    > USED AT LINE 1268
+SIDX_ARRAY:         AD30 DEFINED AT LINE 1290
+                    > USED AT LINE 1226
+SIDX_ARY_COPY:      AD62 DEFINED AT LINE 1324
+                    > USED AT LINE 1330
+SIDX_REG_A:         AD6D DEFINED AT LINE 1333
+                    > USED AT LINE 1220
+                    > USED AT LINE 1233
+                    > USED AT LINE 1242
+                    > USED AT LINE 1257
+                    > USED AT LINE 1278
+                    > USED AT LINE 1292
+                    > USED AT LINE 1301
+                    > USED AT LINE 1319
+                    > USED AT LINE 214 IN vm_hash.a80
+                    > USED AT LINE 220 IN vm_hash.a80
+SIDX_DATA_ADDR:     AD6E DEFINED AT LINE 1334
+                    > USED AT LINE 1239
                     > USED AT LINE 1253
-                    > USED AT LINE 1274
-                    > USED AT LINE 1288
-                    > USED AT LINE 1297
-                    > USED AT LINE 1315
-SIDX_DATA_ADDR:     AD64 DEFINED AT LINE 1330
-                    > USED AT LINE 1235
-                    > USED AT LINE 1249
-                    > USED AT LINE 1272
-                    > USED AT LINE 1281
-                    > USED AT LINE 1294
-                    > USED AT LINE 1310
-DO_OP_ARRAY:        AD66 DEFINED AT LINE 1337
+                    > USED AT LINE 1276
+                    > USED AT LINE 1285
+                    > USED AT LINE 1298
+                    > USED AT LINE 1314
+DO_OP_ARRAY:        AD70 DEFINED AT LINE 1341
                     > USED AT LINE 357
-OA2_JOIN:           AD72 DEFINED AT LINE 1342
-                    > USED AT LINE 1800
-OARY_COPY_LOOP:     AD95 DEFINED AT LINE 1366
-                    > USED AT LINE 1389
-OARY_COPY_ELEM:     ADA1 DEFINED AT LINE 1374
-                    > USED AT LINE 1384
-OARY_DONE:          ADB8 DEFINED AT LINE 1391
-                    > USED AT LINE 1388
-                    > USED AT LINE 1413
-OARY_EMPTY:         ADCF DEFINED AT LINE 1406
-                    > USED AT LINE 1345
-OARY_REG_A:         ADDD DEFINED AT LINE 1415
-                    > USED AT LINE 1339
+OA2_JOIN:           AD7C DEFINED AT LINE 1346
+                    > USED AT LINE 28 IN vm_hash.a80
+OARY_COPY_LOOP:     AD9F DEFINED AT LINE 1370
                     > USED AT LINE 1393
-                    > USED AT LINE 1796
-OARY_SRC_REG:       ADDE DEFINED AT LINE 1416
-                    > USED AT LINE 1340
-                    > USED AT LINE 1362
-                    > USED AT LINE 1798
-OARY_COUNT:         ADDF DEFINED AT LINE 1417
+OARY_COPY_ELEM:     ADAB DEFINED AT LINE 1378
+                    > USED AT LINE 1388
+OARY_DONE:          ADC2 DEFINED AT LINE 1395
+                    > USED AT LINE 1392
+                    > USED AT LINE 1417
+OARY_EMPTY:         ADD9 DEFINED AT LINE 1410
+                    > USED AT LINE 1349
+OARY_REG_A:         ADE7 DEFINED AT LINE 1419
                     > USED AT LINE 1343
-                    > USED AT LINE 1356
-                    > USED AT LINE 1364
-OARY_SLOT_NUM:      ADE0 DEFINED AT LINE 1418
-                    > USED AT LINE 1353
-                    > USED AT LINE 1399
-                    > USED AT LINE 1409
-OARY_ELEM_CNT:      ADE1 DEFINED AT LINE 1419
+                    > USED AT LINE 1397
+                    > USED AT LINE 24 IN vm_hash.a80
+OARY_SRC_REG:       ADE8 DEFINED AT LINE 1420
+                    > USED AT LINE 1344
+                    > USED AT LINE 1366
+                    > USED AT LINE 26 IN vm_hash.a80
+OARY_COUNT:         ADE9 DEFINED AT LINE 1421
+                    > USED AT LINE 1347
+                    > USED AT LINE 1360
                     > USED AT LINE 1368
-                    > USED AT LINE 1381
-DO_OP_ARYPUSH:      ADE2 DEFINED AT LINE 1426
+OARY_SLOT_NUM:      ADEA DEFINED AT LINE 1422
+                    > USED AT LINE 1357
+                    > USED AT LINE 1403
+                    > USED AT LINE 1413
+OARY_ELEM_CNT:      ADEB DEFINED AT LINE 1423
+                    > USED AT LINE 1372
+                    > USED AT LINE 1385
+DO_OP_ARYPUSH:      ADEC DEFINED AT LINE 1430
                     > USED AT LINE 360
-APUSH_LOOP:         AE1D DEFINED AT LINE 1463
-                    > USED AT LINE 1486
-APUSH_COPY:         AE29 DEFINED AT LINE 1471
-                    > USED AT LINE 1481
-APUSH_DONE:         AE40 DEFINED AT LINE 1488
-                    > USED AT LINE 1485
-APUSH_REG_A:        AE56 DEFINED AT LINE 1501
-                    > USED AT LINE 1428
-                    > USED AT LINE 1433
-                    > USED AT LINE 1458
+APUSH_LOOP:         AE27 DEFINED AT LINE 1467
                     > USED AT LINE 1490
-APUSH_ADD_COUNT:    AE57 DEFINED AT LINE 1502
-                    > USED AT LINE 1430
-                    > USED AT LINE 1440
-                    > USED AT LINE 1461
-                    > USED AT LINE 1496
-APUSH_CUR_COUNT:    AE58 DEFINED AT LINE 1503
-                    > USED AT LINE 1438
-                    > USED AT LINE 1442
-                    > USED AT LINE 1448
+APUSH_COPY:         AE33 DEFINED AT LINE 1475
+                    > USED AT LINE 1485
+APUSH_DONE:         AE4A DEFINED AT LINE 1492
+                    > USED AT LINE 1489
+APUSH_REG_A:        AE60 DEFINED AT LINE 1505
+                    > USED AT LINE 1432
+                    > USED AT LINE 1437
+                    > USED AT LINE 1462
                     > USED AT LINE 1494
-APUSH_BYTE_CNT:     AE59 DEFINED AT LINE 1504
+APUSH_ADD_COUNT:    AE61 DEFINED AT LINE 1506
+                    > USED AT LINE 1434
+                    > USED AT LINE 1444
                     > USED AT LINE 1465
-                    > USED AT LINE 1478
-DO_OP_STRCAT:       AE5A DEFINED AT LINE 1511
+                    > USED AT LINE 1500
+APUSH_CUR_COUNT:    AE62 DEFINED AT LINE 1507
+                    > USED AT LINE 1442
+                    > USED AT LINE 1446
+                    > USED AT LINE 1452
+                    > USED AT LINE 1498
+APUSH_BYTE_CNT:     AE63 DEFINED AT LINE 1508
+                    > USED AT LINE 1469
+                    > USED AT LINE 1482
+DO_OP_STRCAT:       AE64 DEFINED AT LINE 1515
                     > USED AT LINE 368
-STRCAT_BODY:        AE60 DEFINED AT LINE 1514
+STRCAT_BODY:        AE6A DEFINED AT LINE 1518
                     > USED AT LINE 37 IN vm_arith.a80
-SCAT_LEN_OK:        AEA0 DEFINED AT LINE 1555
-                    > USED AT LINE 1540
-SCAT_COPY:          AEC5 DEFINED AT LINE 1580
-                    > USED AT LINE 1586
-SCAT_DONE:          AECD DEFINED AT LINE 1588
-                    > USED AT LINE 1578
-SCAT_REG_A:         AED0 DEFINED AT LINE 1591
-                    > USED AT LINE 36 IN vm_arith.a80
-                    > USED AT LINE 1513
-                    > USED AT LINE 1527
-                    > USED AT LINE 1559
-SCAT_SRC_LEN:       AED1 DEFINED AT LINE 1592
-                    > USED AT LINE 1522
-                    > USED AT LINE 1535
-                    > USED AT LINE 1552
-                    > USED AT LINE 1576
-SCAT_DST_LEN:       AED2 DEFINED AT LINE 1593
-                    > USED AT LINE 1532
-                    > USED AT LINE 1537
+SCAT_LEN_OK:        AEAA DEFINED AT LINE 1559
                     > USED AT LINE 1544
-                    > USED AT LINE 1548
-                    > USED AT LINE 1568
-SCAT_TOTAL_LEN:     AED3 DEFINED AT LINE 1594
-                    > USED AT LINE 1556
+SCAT_COPY:          AECF DEFINED AT LINE 1584
+                    > USED AT LINE 1590
+SCAT_DONE:          AED7 DEFINED AT LINE 1592
+                    > USED AT LINE 1582
+SCAT_REG_A:         AEDA DEFINED AT LINE 1595
+                    > USED AT LINE 36 IN vm_arith.a80
+                    > USED AT LINE 1517
+                    > USED AT LINE 1531
                     > USED AT LINE 1563
-SCAT_SRC_DATA:      AED4 DEFINED AT LINE 1595
-                    > USED AT LINE 1524
-                    > USED AT LINE 1575
-SEND_LENGTH:        AED6 DEFINED AT LINE 1602
+SCAT_SRC_LEN:       AEDB DEFINED AT LINE 1596
+                    > USED AT LINE 1526
+                    > USED AT LINE 1539
+                    > USED AT LINE 1556
+                    > USED AT LINE 1580
+SCAT_DST_LEN:       AEDC DEFINED AT LINE 1597
+                    > USED AT LINE 1536
+                    > USED AT LINE 1541
+                    > USED AT LINE 1548
+                    > USED AT LINE 1552
+                    > USED AT LINE 1572
+SCAT_TOTAL_LEN:     AEDD DEFINED AT LINE 1598
+                    > USED AT LINE 1560
+                    > USED AT LINE 1567
+SCAT_SRC_DATA:      AEDE DEFINED AT LINE 1599
+                    > USED AT LINE 1528
+                    > USED AT LINE 1579
+SEND_LENGTH:        AEE0 DEFINED AT LINE 1606
                     > USED AT LINE 664
-SEND_CONCAT:        AEEF DEFINED AT LINE 1621
+SEND_CONCAT:        AEF9 DEFINED AT LINE 1625
                     > USED AT LINE 666
-CONCAT_STRING:      AF03 DEFINED AT LINE 1631
-                    > USED AT LINE 1626
-CONCAT_STR_STR:     AF18 DEFINED AT LINE 1643
-                    > USED AT LINE 1638
-CC_STR_LEN_OK:      AF58 DEFINED AT LINE 1681
-                    > USED AT LINE 1669
-CC_STR_COPY:        AF7D DEFINED AT LINE 1706
-                    > USED AT LINE 1712
-CC_STR_DONE:        AF85 DEFINED AT LINE 1713
-                    > USED AT LINE 1704
-CONCAT_STR_INT:     AF88 DEFINED AT LINE 1717
-                    > USED AT LINE 1640
-CONCAT_ARRAY:       AFAD DEFINED AT LINE 1741
-                    > USED AT LINE 1628
-                    > USED AT LINE 1787
-CC_ARY_COPY:        AFD5 DEFINED AT LINE 1768
-                    > USED AT LINE 1774
-CC_SRC_LEN:         AFE0 DEFINED AT LINE 1777
-                    > USED AT LINE 1651
-                    > USED AT LINE 1664
-                    > USED AT LINE 1677
-                    > USED AT LINE 1702
-CC_DST_LEN:         AFE1 DEFINED AT LINE 1778
-                    > USED AT LINE 1661
-                    > USED AT LINE 1666
+CONCAT_STRING:      AF0D DEFINED AT LINE 1635
+                    > USED AT LINE 1630
+CONCAT_STR_STR:     AF22 DEFINED AT LINE 1647
+                    > USED AT LINE 1642
+CC_STR_LEN_OK:      AF62 DEFINED AT LINE 1685
                     > USED AT LINE 1673
-                    > USED AT LINE 1678
-                    > USED AT LINE 1694
-CC_TOTAL_LEN:       AFE2 DEFINED AT LINE 1779
+CC_STR_COPY:        AF87 DEFINED AT LINE 1710
+                    > USED AT LINE 1716
+CC_STR_DONE:        AF8F DEFINED AT LINE 1717
+                    > USED AT LINE 1708
+CONCAT_STR_INT:     AF92 DEFINED AT LINE 1721
+                    > USED AT LINE 1644
+CONCAT_ARRAY:       AFB7 DEFINED AT LINE 1745
+                    > USED AT LINE 1632
+                    > USED AT LINE 1791
+CC_ARY_COPY:        AFDF DEFINED AT LINE 1772
+                    > USED AT LINE 1778
+CC_SRC_LEN:         AFEA DEFINED AT LINE 1781
+                    > USED AT LINE 1655
+                    > USED AT LINE 1668
+                    > USED AT LINE 1681
+                    > USED AT LINE 1706
+CC_DST_LEN:         AFEB DEFINED AT LINE 1782
+                    > USED AT LINE 1665
+                    > USED AT LINE 1670
+                    > USED AT LINE 1677
                     > USED AT LINE 1682
-                    > USED AT LINE 1689
-CC_SRC_DATA:        AFE3 DEFINED AT LINE 1780
-                    > USED AT LINE 1653
-                    > USED AT LINE 1701
-CC_ARY_COUNT:       AFE5 DEFINED AT LINE 1781
-                    > USED AT LINE 1750
-                    > USED AT LINE 1755
-SEND_PUSH:          AFE6 DEFINED AT LINE 1786
+                    > USED AT LINE 1698
+CC_TOTAL_LEN:       AFEC DEFINED AT LINE 1783
+                    > USED AT LINE 1686
+                    > USED AT LINE 1693
+CC_SRC_DATA:        AFED DEFINED AT LINE 1784
+                    > USED AT LINE 1657
+                    > USED AT LINE 1705
+CC_ARY_COUNT:       AFEF DEFINED AT LINE 1785
+                    > USED AT LINE 1754
+                    > USED AT LINE 1759
+SEND_PUSH:          AFF0 DEFINED AT LINE 1790
                     > USED AT LINE 668
-DO_OP_ARRAY2:       AFE9 DEFINED AT LINE 1794
+DO_OP_ARRAY2:       B500 DEFINED AT LINE 22 IN vm_hash.a80
                     > USED AT LINE 358
+DO_OP_HASH:         B512 DEFINED AT LINE 37 IN vm_hash.a80
+                    > USED AT LINE 369
+HASH_COPY_PAIR:     B539 DEFINED AT LINE 63 IN vm_hash.a80
+                    > USED AT LINE 94 IN vm_hash.a80
+HASH_WRITE_RESULT:  B563 DEFINED AT LINE 96 IN vm_hash.a80
+                    > USED AT LINE 57 IN vm_hash.a80
+HASH_REG_A:         B57A DEFINED AT LINE 112 IN vm_hash.a80
+                    > USED AT LINE 39 IN vm_hash.a80
+                    > USED AT LINE 60 IN vm_hash.a80
+                    > USED AT LINE 98 IN vm_hash.a80
+HASH_COUNT:         B57B DEFINED AT LINE 113 IN vm_hash.a80
+                    > USED AT LINE 41 IN vm_hash.a80
+                    > USED AT LINE 50 IN vm_hash.a80
+                    > USED AT LINE 55 IN vm_hash.a80
+                    > USED AT LINE 91 IN vm_hash.a80
+                    > USED AT LINE 93 IN vm_hash.a80
+HASH_SLOT_NUM:      B57C DEFINED AT LINE 114 IN vm_hash.a80
+                    > USED AT LINE 45 IN vm_hash.a80
+                    > USED AT LINE 104 IN vm_hash.a80
+HASH_SRC_REG:       B57D DEFINED AT LINE 115 IN vm_hash.a80
+                    > USED AT LINE 61 IN vm_hash.a80
+                    > USED AT LINE 67 IN vm_hash.a80
+                    > USED AT LINE 75 IN vm_hash.a80
+                    > USED AT LINE 83 IN vm_hash.a80
+                    > USED AT LINE 85 IN vm_hash.a80
+GIDX_HASH:          B57E DEFINED AT LINE 123 IN vm_hash.a80
+                    > USED AT LINE 1112
+GHASH_SEARCH:       B59B DEFINED AT LINE 143 IN vm_hash.a80
+                    > USED AT LINE 180 IN vm_hash.a80
+GHASH_CMP:          B5A6 DEFINED AT LINE 153 IN vm_hash.a80
+                    > USED AT LINE 160 IN vm_hash.a80
+GHASH_NEXT:         B5C0 DEFINED AT LINE 172 IN vm_hash.a80
+                    > USED AT LINE 156 IN vm_hash.a80
+GHASH_NOT_FOUND:    B5D1 DEFINED AT LINE 182 IN vm_hash.a80
+                    > USED AT LINE 130 IN vm_hash.a80
+GHASH_DATA_PTR:     B5DF DEFINED AT LINE 191 IN vm_hash.a80
+                    > USED AT LINE 133 IN vm_hash.a80
+                    > USED AT LINE 142 IN vm_hash.a80
+GHASH_KEY_PTR:      B5E1 DEFINED AT LINE 192 IN vm_hash.a80
+                    > USED AT LINE 139 IN vm_hash.a80
+                    > USED AT LINE 148 IN vm_hash.a80
+GHASH_CUR_PTR:      B5E3 DEFINED AT LINE 193 IN vm_hash.a80
+                    > USED AT LINE 144 IN vm_hash.a80
+                    > USED AT LINE 174 IN vm_hash.a80
+GHASH_LOOP_CNT:     B5E5 DEFINED AT LINE 194 IN vm_hash.a80
+                    > USED AT LINE 132 IN vm_hash.a80
+                    > USED AT LINE 177 IN vm_hash.a80
+                    > USED AT LINE 179 IN vm_hash.a80
+SIDX_HASH:          B5E6 DEFINED AT LINE 203 IN vm_hash.a80
+                    > USED AT LINE 1228
+SHASH_SEARCH:       B617 DEFINED AT LINE 233 IN vm_hash.a80
+                    > USED AT LINE 265 IN vm_hash.a80
+SHASH_CMP:          B622 DEFINED AT LINE 242 IN vm_hash.a80
+                    > USED AT LINE 249 IN vm_hash.a80
+SHASH_SNEXT:        B637 DEFINED AT LINE 258 IN vm_hash.a80
+                    > USED AT LINE 245 IN vm_hash.a80
+SHASH_APPEND:       B648 DEFINED AT LINE 269 IN vm_hash.a80
+                    > USED AT LINE 228 IN vm_hash.a80
+SHASH_COL_PTR:      B675 DEFINED AT LINE 305 IN vm_hash.a80
+                    > USED AT LINE 206 IN vm_hash.a80
+                    > USED AT LINE 278 IN vm_hash.a80
+SHASH_DATA_PTR:     B677 DEFINED AT LINE 306 IN vm_hash.a80
+                    > USED AT LINE 211 IN vm_hash.a80
+                    > USED AT LINE 231 IN vm_hash.a80
+                    > USED AT LINE 290 IN vm_hash.a80
+SHASH_KEY_PTR:      B679 DEFINED AT LINE 307 IN vm_hash.a80
+                    > USED AT LINE 217 IN vm_hash.a80
+                    > USED AT LINE 237 IN vm_hash.a80
+                    > USED AT LINE 295 IN vm_hash.a80
+SHASH_VAL_PTR:      B67B DEFINED AT LINE 308 IN vm_hash.a80
+                    > USED AT LINE 223 IN vm_hash.a80
+                    > USED AT LINE 254 IN vm_hash.a80
+                    > USED AT LINE 299 IN vm_hash.a80
+SHASH_CUR_PTR:      B67D DEFINED AT LINE 309 IN vm_hash.a80
+                    > USED AT LINE 234 IN vm_hash.a80
+                    > USED AT LINE 259 IN vm_hash.a80
+SHASH_PAIR_CNT:     B67F DEFINED AT LINE 310 IN vm_hash.a80
+                    > USED AT LINE 209 IN vm_hash.a80
+                    > USED AT LINE 226 IN vm_hash.a80
+                    > USED AT LINE 271 IN vm_hash.a80
+                    > USED AT LINE 284 IN vm_hash.a80
+SHASH_LOOP_CNT:     B680 DEFINED AT LINE 311 IN vm_hash.a80
+                    > USED AT LINE 230 IN vm_hash.a80
+                    > USED AT LINE 262 IN vm_hash.a80
+                    > USED AT LINE 264 IN vm_hash.a80

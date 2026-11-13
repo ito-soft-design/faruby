@@ -1,0 +1,311 @@
+; vm_hash.a80 — Hash (連想配列) ハンドラ
+;
+; メインコード領域 (0x8400-0xAFFF) に空きがないため、
+; コレクションプール末尾の後 (0xB500) にオーバーフロー配置する。
+;
+; Hash スロット形式 (コレクションプール 32B スロット内):
+;   +0: type  (1B)  COL_TYPE_HASH = 3
+;   +1: count (1B)  ペア数 (最大 3)
+;   +2: data  (30B) key(4B)+value(4B) × 3 = 24B 使用
+;
+; キー検索は線形 4 バイト比較。
+;
+; do_op_array2 もメインコード領域から溢れたためここに配置。
+
+  org 0B500h
+
+; ===============================================================
+; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
+;
+; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
+; ===============================================================
+do_op_array2:
+  call fetch_byte       ; A = a (書き込み先)
+  sta oary_reg_a
+  call fetch_byte       ; A = b (ソースレジスタ先頭)
+  sta oary_src_reg
+  call fetch_byte       ; A = c (要素数)
+  jmp oa2_join
+
+; ===============================================================
+; do_op_hash — OP_HASH (BB): R[a] = {R[a+1]=>R[a+2], ...}
+;
+;   a = 書き込み先レジスタ
+;   b = ペア数 (0 = 空 Hash)
+;   ソース: R[a+1]=key1, R[a+2]=val1, R[a+3]=key2, ...
+; ===============================================================
+do_op_hash:
+  call fetch_byte       ; A = a (書き込み先)
+  sta hash_reg_a
+  call fetch_byte       ; A = b (ペア数)
+  sta hash_count
+
+  ; コレクションスロット確保
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta hash_slot_num
+
+  ; ヘッダ書き込み
+  mvi m, COL_TYPE_HASH  ; +0: type
+  inx h
+  lda hash_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域先頭
+
+  ; ペアがなければ結果書き込みへ
+  lda hash_count
+  ora a
+  jz hash_write_result
+
+  ; ソースレジスタ = a (mruby3 は R[a] からペアを読む)
+  lda hash_reg_a
+  sta hash_src_reg
+
+hash_copy_pair:
+  ; HL = コレクションプール内の書き込み位置
+  ; key (4B) をコピー: R[src] → [HL]
+  push h                ; 書き込み先を退避
+  lda hash_src_reg
+  call get_reg_addr     ; HL = R[src]
+  pop d                 ; DE = 書き込み先
+  call copy_slot        ; 4B コピー (HL, DE 共に +4)
+  ; DE = value 書き込み位置
+
+  ; value (4B) をコピー: R[src+1] → [DE]
+  push d                ; value 書き込み先を退避
+  lda hash_src_reg
+  inr a
+  call get_reg_addr     ; HL = R[src+1]
+  pop d                 ; DE = value 書き込み先
+  call copy_slot        ; 4B コピー
+  ; DE = 次ペアの先頭
+
+  ; ソースレジスタを +2
+  lda hash_src_reg
+  adi 2
+  sta hash_src_reg
+
+  ; HL = 次の書き込み位置 (DE から)
+  xchg
+
+  ; ペアカウンタ
+  lda hash_count
+  dcr a
+  sta hash_count
+  jnz hash_copy_pair
+
+hash_write_result:
+  ; R[hash_reg_a] = TT_HASH, val_lo = slot+1
+  lda hash_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_HASH        ; +0: type
+  inx h
+  mvi m, 0              ; +1: reserved
+  inx h
+  lda hash_slot_num
+  inr a                 ; slot + 1
+  mov m, a              ; +2: val_lo
+  inx h
+  mvi m, 0              ; +3: val_hi
+  jmp vm_loop
+
+; --- do_op_hash データ ---
+hash_reg_a:    db 0
+hash_count:    db 0
+hash_slot_num: db 0
+hash_src_reg:  db 0
+
+; ===============================================================
+; gidx_hash — GETIDX の Hash パス: R[a] = R[a][R[a+1]]
+;
+;   入口: gidx_reg_a 設定済み、HL = R[a] スロットアドレス
+;   キーが見つからなければ R[a] = nil
+; ===============================================================
+gidx_hash:
+  ; コレクションスロットを取得
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov a, m              ; A = ペア数
+  inx h                 ; HL → データ領域
+  ora a
+  jz ghash_not_found    ; 空 Hash
+
+  sta ghash_loop_cnt
+  shld ghash_data_ptr
+
+  ; 検索キー R[a+1] のアドレスを取得
+  lda gidx_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  shld ghash_key_ptr
+
+  ; 検索ループ
+  lhld ghash_data_ptr
+ghash_search:
+  shld ghash_cur_ptr    ; 現在のペア先頭を保存
+
+  ; 4 バイト比較: [HL] (hash key) vs [ghash_key_ptr] (search key)
+  push h
+  lhld ghash_key_ptr
+  xchg                  ; DE = 検索キー
+  pop h                 ; HL = hash ペアのキー
+
+  mvi c, SLOT_BYTES
+ghash_cmp:
+  ldax d
+  cmp m
+  jnz ghash_next
+  inx h
+  inx d
+  dcr c
+  jnz ghash_cmp
+
+  ; 一致! HL = value 位置 (キー直後)
+  ; value (4B) を R[a] にコピー
+  push h                ; value ソース
+  lda gidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  xchg                  ; DE = R[a] (コピー先)
+  pop h                 ; HL = value (コピー元)
+  call copy_slot
+  jmp vm_loop
+
+ghash_next:
+  ; 次のペアへ (現在ペア + HASH_PAIR_BYTES)
+  lhld ghash_cur_ptr
+  lxi d, HASH_PAIR_BYTES
+  dad d
+  lda ghash_loop_cnt
+  dcr a
+  sta ghash_loop_cnt
+  jnz ghash_search
+
+ghash_not_found:
+  ; R[a] = nil
+  lda gidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+; --- gidx_hash データ ---
+ghash_data_ptr: dw 0
+ghash_key_ptr:  dw 0
+ghash_cur_ptr:  dw 0
+ghash_loop_cnt: db 0
+
+; ===============================================================
+; sidx_hash — SETIDX の Hash パス: R[a][R[a+1]] = R[a+2]
+;
+;   入口: sidx_reg_a 設定済み、HL = R[a] スロットアドレス
+;   既存キー → 値を上書き
+;   新規キー → count < MAX なら末尾に追加
+; ===============================================================
+sidx_hash:
+  ; コレクションスロットを取得
+  call col_from_reg     ; HL = コレクションスロット
+  shld shash_col_ptr    ; スロット先頭を保存 (count 更新用)
+  inx h                 ; +1: count
+  mov a, m
+  sta shash_pair_cnt    ; 元のペア数
+  inx h                 ; HL → データ領域
+  shld shash_data_ptr
+
+  ; R[a+1] キーのアドレス
+  lda sidx_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  shld shash_key_ptr
+
+  ; R[a+2] 値のアドレス
+  lda sidx_reg_a
+  adi 2
+  call get_reg_addr     ; HL = R[a+2]
+  shld shash_val_ptr
+
+  ; 既存キーを検索
+  lda shash_pair_cnt
+  ora a
+  jz shash_append       ; 空 Hash → 追加
+
+  sta shash_loop_cnt
+  lhld shash_data_ptr
+
+shash_search:
+  shld shash_cur_ptr
+
+  push h
+  lhld shash_key_ptr
+  xchg                  ; DE = 検索キー
+  pop h                 ; HL = hash ペアのキー
+
+  mvi c, SLOT_BYTES
+shash_cmp:
+  ldax d
+  cmp m
+  jnz shash_snext
+  inx h
+  inx d
+  dcr c
+  jnz shash_cmp
+
+  ; 一致! HL = value 位置
+  ; R[a+2] を value にコピー
+  xchg                  ; DE = hash value 位置
+  lhld shash_val_ptr    ; HL = R[a+2]
+  call copy_slot
+  jmp vm_loop
+
+shash_snext:
+  lhld shash_cur_ptr
+  lxi d, HASH_PAIR_BYTES
+  dad d
+  lda shash_loop_cnt
+  dcr a
+  sta shash_loop_cnt
+  jnz shash_search
+
+  ; 見つからなかった → 末尾に追加
+
+shash_append:
+  ; 容量チェック
+  lda shash_pair_cnt
+  cpi COL_MAX_HASH_PAIRS
+  jnc vm_error          ; Hash 満杯
+
+  ; count++ を書き込み
+  inr a
+  push psw
+  lhld shash_col_ptr
+  inx h                 ; +1: count フィールド
+  mov m, a
+  pop psw
+
+  ; 追加位置 = data + old_count * 8
+  lda shash_pair_cnt    ; old count
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  mov e, a
+  mvi d, 0
+  lhld shash_data_ptr
+  dad d                 ; HL = 追加位置
+
+  ; key をコピー (R[a+1] → [HL])
+  xchg                  ; DE = 追加位置
+  lhld shash_key_ptr    ; HL = R[a+1]
+  call copy_slot        ; key 4B、DE は value 位置に進む
+
+  ; value をコピー (R[a+2] → [DE])
+  lhld shash_val_ptr    ; HL = R[a+2]
+  ; DE は既に value 位置
+  call copy_slot
+  jmp vm_loop
+
+; --- sidx_hash データ ---
+shash_col_ptr:  dw 0
+shash_data_ptr: dw 0
+shash_key_ptr:  dw 0
+shash_val_ptr:  dw 0
+shash_cur_ptr:  dw 0
+shash_pair_cnt: db 0
+shash_loop_cnt: db 0

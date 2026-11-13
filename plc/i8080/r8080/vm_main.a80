@@ -366,7 +366,7 @@ dispatch_table:
   dw 0000h            ; 50 OP_SYMBOL
   dw do_op_string     ; 51 OP_STRING
   dw do_op_strcat     ; 52 OP_STRCAT
-  dw 0000h            ; 53 OP_HASH
+  dw do_op_hash       ; 53 OP_HASH
   dw 0000h            ; 54 OP_HASHADD
   dw 0000h            ; 55 OP_HASHCAT
   dw 0000h            ; 56 OP_LAMBDA
@@ -1108,6 +1108,8 @@ do_op_getidx:
   jz gidx_string
   cpi TT_ARRAY
   jz gidx_array
+  cpi TT_HASH
+  jz gidx_hash
   jmp vm_error
 
 gidx_string:
@@ -1222,6 +1224,8 @@ do_op_setidx:
   jz sidx_string
   cpi TT_ARRAY
   jz sidx_array
+  cpi TT_HASH
+  jz sidx_hash
   jmp vm_error
 
 sidx_string:
@@ -1786,17 +1790,6 @@ cc_ary_count:  db 0
 send_push:
   jmp concat_array
 
-; ===============================================================
-; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
-;
-; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
-; ===============================================================
-do_op_array2:
-  call fetch_byte       ; A = a (書き込み先)
-  sta oary_reg_a
-  call fetch_byte       ; A = b (ソースレジスタ先頭)
-  sta oary_src_reg
-  call fetch_byte       ; A = c (要素数)
-  jmp oa2_join
+.include "vm_hash.a80"
 
   end

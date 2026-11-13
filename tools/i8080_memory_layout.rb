@@ -179,6 +179,11 @@ module FaRuby
     COL_TYPE_FREE   = 0
     COL_TYPE_STRING = 1
     COL_TYPE_ARRAY  = 2
+    COL_TYPE_HASH   = 3
+
+    # Hash ペアのバイトサイズ (key 4B + value 4B)
+    HASH_PAIR_BYTES     = 2 * SLOT_BYTES                      # 8
+    COL_MAX_HASH_PAIRS  = COL_DATA_SIZE / HASH_PAIR_BYTES     # 3
 
     # --- シンボルテーブルの種別コード ---
     #

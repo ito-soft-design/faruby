@@ -138,6 +138,7 @@ module FaRuby
       when TT_INTEGER then reg_value(index).to_s
       when TT_STRING  then reg_string(index).inspect
       when TT_ARRAY   then reg_array(index).inspect
+      when TT_HASH    then reg_hash(index).inspect
       else "type=#{type} val=#{reg_value(index)}"
       end
     end
@@ -169,6 +170,22 @@ module FaRuby
       end
     end
 
+    # コレクションスロットから Hash を読む (各ペアを {key: [type, val], value: [type, val]} で返す)
+    def col_hash_raw(slot)
+      addr = col_slot_addr(slot)
+      count = @cpu.mem[addr + 1]
+      (0...count).map do |i|
+        pair_addr = addr + 2 + i * Layout::HASH_PAIR_BYTES
+        key_type = @cpu.mem[pair_addr]
+        key_val = @cpu.mem[pair_addr + 2] | (@cpu.mem[pair_addr + 3] << 8)
+        key_val = key_val - 0x10000 if key_type == TT_INTEGER && key_val >= 0x8000
+        val_type = @cpu.mem[pair_addr + 4]
+        val_val = @cpu.mem[pair_addr + 6] | (@cpu.mem[pair_addr + 7] << 8)
+        val_val = val_val - 0x10000 if val_type == TT_INTEGER && val_val >= 0x8000
+        { key: [key_type, key_val], value: [val_type, val_val] }
+      end
+    end
+
     # レジスタが TT_STRING のとき文字列を返す
     def reg_string(index)
       slot_num = reg_value(index) - 1  # val_lo = slot+1
@@ -188,6 +205,18 @@ module FaRuby
         else [type, val]
         end
       end
+    end
+
+    # レジスタが TT_HASH のとき Ruby Hash として返す
+    def reg_hash(index)
+      slot_num = reg_value(index) - 1
+      result = {}
+      col_hash_raw(slot_num).each do |pair|
+        key = slot_to_ruby(pair[:key][0], pair[:key][1])
+        value = slot_to_ruby(pair[:value][0], pair[:value][1])
+        result[key] = value
+      end
+      result
     end
 
     # --- 7 セグ表示の読み出し ---
@@ -293,6 +322,18 @@ module FaRuby
     end
 
     private
+
+    # [type, val] ペアを Ruby オブジェクトに変換
+    def slot_to_ruby(type, val)
+      case type
+      when TT_INTEGER then val
+      when TT_STRING  then col_string(val - 1)
+      when TT_NIL     then nil
+      when TT_TRUE    then true
+      when TT_FALSE   then false
+      else [type, val]
+      end
+    end
 
     def load_r8080
       $LOAD_PATH.unshift(R8080_LIB) unless $LOAD_PATH.include?(R8080_LIB)

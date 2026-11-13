@@ -175,6 +175,7 @@ module FaRuby
         "TT_INTEGER" => TT_INTEGER,
         "TT_STRING"  => TT_STRING,
         "TT_ARRAY"   => TT_ARRAY,
+        "TT_HASH"    => TT_HASH,
         "TT_OBJECT"  => TT_OBJECT,
         "TT_PROC"    => TT_PROC,
         "TT_CLASS"   => TT_CLASS,
@@ -309,6 +310,9 @@ module FaRuby
       lines << equ("COL_TYPE_FREE",        layout::COL_TYPE_FREE)
       lines << equ("COL_TYPE_STRING",      layout::COL_TYPE_STRING)
       lines << equ("COL_TYPE_ARRAY",       layout::COL_TYPE_ARRAY)
+      lines << equ("COL_TYPE_HASH",        layout::COL_TYPE_HASH)
+      lines << equ("HASH_PAIR_BYTES",      layout::HASH_PAIR_BYTES,       comment: "8B/ペア (key+value)")
+      lines << equ("COL_MAX_HASH_PAIRS",   layout::COL_MAX_HASH_PAIRS,    comment: "最大3ペア")
       lines << ""
       lines
     end
