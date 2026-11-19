@@ -1,0 +1,194 @@
+; vm_class.a80 — クラス・メソッド定義オペコード
+;
+; OP_TCLASS, OP_METHOD, OP_DEF, OP_CLASS, OP_GETCONST, OP_EXEC
+
+; ---------------------------------------------------------------
+; OP_TCLASS (B): R[a] = R[0] (self をコピー)
+;
+; 定義先クラスを返す。トップレベルでは main (TT_OBJECT, 値=0)、
+; クラス本体内ではそのクラス (TT_CLASS)。
+; ---------------------------------------------------------------
+do_op_tclass:
+  call fetch_byte       ; A = a
+  call get_reg_addr     ; HL = R[a]
+  xchg                  ; DE = R[a] (コピー先)
+  mvi a, 0
+  call get_reg_addr     ; HL = R[0] (コピー元)
+  call copy_slot        ; R[a] = R[0]
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; OP_METHOD (BB): R[a] = Proc(irep=child_irep(b), outer=FRAME_NONE)
+;
+; OP_BLOCK と同様だが、outer は常に FRAME_NONE (メソッドはクロージャ
+; ではないため、外側フレームへの参照を持たない)。
+; ---------------------------------------------------------------
+do_op_method:
+  call fetch_byte       ; A = a
+  sta meth_reg_a
+  call fetch_byte       ; A = b (子 irep インデックス)
+  call calc_child_irep  ; A = irep 番号
+  mov c, a              ; C = irep 番号 (val_lo)
+
+  lda meth_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_PROC        ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  mov m, c              ; +2: val_lo = irep 番号
+  inx h
+  mvi m, FRAME_NONE     ; +3: val_hi = FRAME_NONE (メソッド)
+  jmp vm_loop
+
+meth_reg_a: db 0
+
+; ---------------------------------------------------------------
+; OP_DEF (BB): メソッド表に登録
+;
+; R[a] = 定義先 (TT_CLASS or TT_OBJECT)
+; R[a+1] = Proc (TT_PROC, val_lo = irep 番号)
+; シンボル b の種別: SYM_KIND_USER_METHOD (D=0x01), E=method_id
+;
+; method_table[class_number * 32 + method_id] = irep 番号
+; ---------------------------------------------------------------
+do_op_def:
+  call fetch_byte       ; A = a
+  sta def_reg_a
+  call fetch_byte       ; A = b (シンボルインデックス)
+
+  ; シンボルテーブルから method_id を取得
+  add a                 ; ×2
+  mov e, a
+  mvi d, 0
+  lhld VM_STATE_BASE + OFF_SYM_BASE
+  dad d                 ; HL = &sym_table[b]
+  mov e, m              ; E = method_id (下位)
+  inx h
+  mov d, m              ; D = 種別 (上位、SYM_KIND_USER_METHOD のはず)
+  ; 種別チェックは省略 (バイトコードツールが保証)
+
+  ; method_id を退避
+  mov a, e
+  sta def_method_id
+
+  ; R[a] から class_number を取得
+  lda def_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call class_of_reg     ; A = class_number
+
+  ; メソッド表アドレス: METHOD_TABLE_BASE + class * 32 + method_id
+  ; A * 32
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  add a                 ; ×16
+  add a                 ; ×32
+  mov e, a
+  mvi d, 0
+  lxi h, METHOD_TABLE_BASE
+  dad d                 ; HL = METHOD_TABLE_BASE + class * 32
+  lda def_method_id
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = METHOD_TABLE_BASE + class * 32 + method_id
+
+  ; R[a+1].val_lo = irep 番号
+  lda def_reg_a
+  call get_reg_addr_next ; HL = R[a+1]
+  call slot_to_value     ; HL = 値先頭
+  mov a, m               ; A = val_lo = irep 番号
+
+  ; メソッド表に書く (HL は R[a+1] の値を指しているので、再計算)
+  sta def_irep_num
+  lda def_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call class_of_reg     ; A = class_number
+  add a
+  add a
+  add a
+  add a
+  add a                 ; A = class * 32
+  mov e, a
+  mvi d, 0
+  lxi h, METHOD_TABLE_BASE
+  dad d
+  lda def_method_id
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = メソッド表エントリ
+  lda def_irep_num
+  mov m, a              ; method_table[...] = irep 番号
+  jmp vm_loop
+
+def_reg_a:     db 0
+def_method_id: db 0
+def_irep_num:  db 0
+
+; ---------------------------------------------------------------
+; OP_CLASS (BB) / OP_GETCONST (BB): R[a] = TT_CLASS(class_number)
+;
+; シンボル b の種別: SYM_KIND_CLASS (D=0x02), E=class_number
+; ---------------------------------------------------------------
+do_op_class:
+do_op_getconst:
+  call fetch_byte       ; A = a
+  sta cls_reg_a
+  call fetch_byte       ; A = b (シンボルインデックス)
+
+  ; シンボルテーブルから class_number を取得
+  add a                 ; ×2
+  mov e, a
+  mvi d, 0
+  lhld VM_STATE_BASE + OFF_SYM_BASE
+  dad d                 ; HL = &sym_table[b]
+  mov a, m              ; A = class_number (下位)
+  sta cls_class_num
+
+  ; R[a] に TT_CLASS を書く
+  lda cls_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_CLASS       ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  lda cls_class_num
+  mov m, a              ; +2: val_lo = class_number
+  inx h
+  mvi m, 0              ; +3: val_hi = 0
+  jmp vm_loop
+
+cls_reg_a:    db 0
+cls_class_num: db 0
+
+; ---------------------------------------------------------------
+; OP_EXEC (BB): クラス本体を実行
+;
+; push_frame して子 irep に切り替える。
+; reg_base が a*4 ずれるので、新フレームの R[0] = 旧フレームの R[a]。
+; これにより、クラス本体内の R[0] (self) がクラスオブジェクトになる。
+; ---------------------------------------------------------------
+do_op_exec:
+  call fetch_byte       ; A = a
+  sta exec_reg_a
+  call fetch_byte       ; A = b (子 irep インデックス)
+  call calc_child_irep  ; A = irep 番号
+  sta exec_irep
+
+  ; push_frame(a, FRAME_KIND_CALL, FRAME_NONE)
+  lda exec_reg_a
+  mvi b, FRAME_KIND_CALL
+  mvi c, FRAME_NONE
+  call push_frame
+
+  ; 子 irep に切り替え
+  lda exec_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+exec_reg_a: db 0
+exec_irep:  db 0

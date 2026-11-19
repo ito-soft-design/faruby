@@ -1,0 +1,410 @@
+; vm_send.a80 — メソッド呼び出し
+;
+; OP_SEND, OP_SSEND
+;
+; シンボルテーブルの 2 バイトエントリで振り分ける:
+;   D=0x00, E=1-31 : 組み込みメソッド
+;   D=0x01, E=id   : ユーザー定義メソッド
+;   D>=0x80         : グローバルアドレス (メソッドではない → エラー)
+
+; ---------------------------------------------------------------
+; OP_SSEND (BBB): self をレシーバに置いて SEND
+;
+; R[a] = R[0] (self) を設定してから OP_SEND と同じ処理を行う。
+; ---------------------------------------------------------------
+do_op_ssend:
+  call fetch_byte       ; A = a
+  push psw
+  call get_reg_addr     ; HL = R[a] (コピー先)
+  xchg                  ; DE = R[a]
+  xra a                 ; A = 0
+  call get_reg_addr     ; HL = R[0] (self)
+  call copy_slot        ; R[a] = R[0]
+  pop psw               ; A = a
+  sta send_reg_a
+  call fetch_byte       ; A = b (シンボル)
+  push psw
+  call fetch_byte       ; A = c (argc)
+  sta send_argc
+  pop psw               ; A = b
+  jmp send_dispatch
+
+; ---------------------------------------------------------------
+; OP_SEND (BBB): R[a] = R[a].method(R[a+1], ...)
+; ---------------------------------------------------------------
+do_op_send:
+  call fetch_byte       ; A = a
+  sta send_reg_a
+  call fetch_byte       ; A = b (シンボル)
+  push psw
+  call fetch_byte       ; A = c (argc)
+  sta send_argc
+  pop psw               ; A = b
+
+send_dispatch:
+  ; シンボルテーブルからメソッド ID を取得
+  add a                 ; b * 2
+  mov e, a
+  mvi d, 0
+  lhld VM_STATE_BASE + OFF_SYM_BASE
+  dad d
+  mov e, m
+  inx h
+  mov d, m              ; DE = エントリ値 (D=種別, E=id)
+
+  ; D で振り分け
+  mov a, d
+  ora a
+  jz send_builtin       ; D=0x00 → 組み込みメソッド
+  cpi SYM_KIND_USER_METHOD
+  jz send_user_method   ; D=0x01 → ユーザー定義メソッド
+  ; D >= 0x80 or other → エラー
+  jmp vm_error
+
+send_builtin:
+  ; E = メソッド ID (0 = 未対応)
+  mov a, e
+  ora a
+  jz vm_error
+  ; 組み込みメソッドディスパッチ
+  cpi 1
+  jz send_ne            ; != (不等号)
+  cpi 2
+  jz send_not           ; !  (論理否定)
+  cpi 3
+  jz send_mod           ; %  (剰余)
+  cpi 4
+  jz send_abs           ; abs (絶対値)
+  cpi METHOD_NEW
+  jz send_new           ; Class#new
+  cpi METHOD_DISPLAY
+  jz send_display       ; display(value)
+  cpi METHOD_GETKEY
+  jz send_getkey        ; getkey
+  jmp send_builtin_ext  ; 拡張ビルトイン (0xA800+ 領域)
+
+; ---------------------------------------------------------------
+; send_user_method — ユーザー定義メソッド呼び出し
+;
+; E = method_id。メソッド表から irep 番号を引き、
+; push_frame + switch_irep で呼び出す。
+; ---------------------------------------------------------------
+send_user_method:
+  ; method_id を退避
+  mov a, e
+  sta sum_method_id
+
+  ; R[a] から class_number を取得
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call class_of_reg     ; A = class_number
+
+  ; メソッド表アドレス: METHOD_TABLE_BASE + class * 32 + method_id
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  add a                 ; ×16
+  add a                 ; ×32
+  mov e, a
+  mvi d, 0
+  lxi h, METHOD_TABLE_BASE
+  dad d
+  lda sum_method_id
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = メソッド表エントリ
+  mov a, m              ; A = irep 番号
+  ora a
+  jz vm_error           ; 0 = 未定義
+  sta sum_irep
+
+  ; push_frame(a, FRAME_KIND_CALL, FRAME_NONE)
+  lda send_reg_a
+  mvi b, FRAME_KIND_CALL
+  mvi c, FRAME_NONE
+  call push_frame
+
+  ; 子 irep に切り替え
+  lda sum_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+sum_method_id: db 0
+sum_irep:      db 0
+
+; ---------------------------------------------------------------
+; send_new — Class#new (オブジェクト生成)
+;
+; 1. オブジェクトプールにスロットを確保
+; 2. R[a] を TT_OBJECT に設定 (val_lo = slot+1)
+; 3. initialize メソッドがあれば呼び出す
+; ---------------------------------------------------------------
+send_new:
+  ; OBJ_SP < MAX_OBJECTS を確認
+  lda VM_STATE_BASE + OFF_OBJ_SP
+  cpi MAX_OBJECTS
+  jnc vm_error          ; オブジェクトプール満杯
+
+  ; R[a] (TT_CLASS) から class_number を取得
+  sta sn_slot           ; OBJ_SP = slot 番号
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call slot_to_value
+  mov a, m              ; A = class_number
+  sta sn_class_num
+
+  ; オブジェクトプールにヘッダを書く
+  ; OBJECT_POOL_BASE + slot * 32
+  lda sn_slot
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  add a                 ; ×16
+  add a                 ; ×32
+  mov e, a
+  mvi d, 0
+  lxi h, OBJECT_POOL_BASE
+  dad d                 ; HL = スロット先頭
+  lda sn_class_num
+  mov m, a              ; +0: class_number
+
+  ; R[a] = TT_OBJECT, val_lo = slot+1
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_OBJECT      ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  lda sn_slot
+  inr a                 ; slot + 1
+  mov m, a              ; +2: val_lo
+  inx h
+  mvi m, 0              ; +3: val_hi = 0
+
+  ; OBJ_SP++
+  lda VM_STATE_BASE + OFF_OBJ_SP
+  inr a
+  sta VM_STATE_BASE + OFF_OBJ_SP
+
+  ; initialize メソッドがあれば呼び出す
+  lda VM_STATE_BASE + OFF_INIT_METHOD_ID
+  ora a
+  jz vm_loop            ; INIT_METHOD_ID=0 → initialize なし
+
+  ; method_table[class * 32 + init_id] を引く
+  sta sn_init_id
+  lda sn_class_num
+  add a
+  add a
+  add a
+  add a
+  add a                 ; class * 32
+  mov e, a
+  mvi d, 0
+  lxi h, METHOD_TABLE_BASE
+  dad d
+  lda sn_init_id
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = メソッド表エントリ
+  mov a, m              ; A = irep 番号
+  ora a
+  jz vm_loop            ; 未定義 → 呼ばない
+  sta sn_init_irep
+
+  ; push_frame(a, FRAME_KIND_NEW, FRAME_NONE)
+  lda send_reg_a
+  mvi b, FRAME_KIND_NEW
+  mvi c, FRAME_NONE
+  call push_frame
+
+  ; 子 irep に切り替え
+  lda sn_init_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+sn_slot:       db 0
+sn_class_num:  db 0
+sn_init_id:    db 0
+sn_init_irep:  db 0
+
+; ---------------------------------------------------------------
+; != (不等号): R[a] = (R[a] != R[a+1]) ? true : false
+;
+; スロット全体 (4 バイト) をバイト比較する。
+; 型タグも含めて比較するので異なる型は常に true。
+; ---------------------------------------------------------------
+send_ne:
+  lda send_reg_a
+  push psw
+  call get_reg_addr_next ; HL = R[a+1]
+  xchg                  ; DE = R[a+1]
+  pop psw
+  call get_reg_addr     ; HL = R[a]
+  mvi c, SLOT_BYTES
+send_ne_cmp:
+  ldax d
+  cmp m
+  jnz send_ne_diff
+  inx h
+  inx d
+  dcr c
+  jnz send_ne_cmp
+  ; 全バイト一致 → 等しい → false
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop
+send_ne_diff:
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; ! (論理否定): R[a] = falsy(R[a]) ? true : false
+;
+; TT_FALSY_MAX (02h) 以下が偽 (TT_EMPTY, TT_NIL, TT_FALSE)。
+; ---------------------------------------------------------------
+send_not:
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_FALSY_MAX + 1  ; A < 3 なら偽
+  jc send_not_falsy
+  ; 真だった → false
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_FALSE
+  call set_slot_special
+  jmp vm_loop
+send_not_falsy:
+  ; 偽だった → true
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_TRUE
+  call set_slot_special
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; % (剰余, Ruby floor modulo): R[a] = R[a] % R[a+1]
+; ---------------------------------------------------------------
+send_mod:
+  lda send_reg_a
+  push psw
+  call get_reg_addr_next
+  call slot_to_value
+  mov e, m
+  inx h
+  mov d, m              ; DE = 除数
+  mov a, d
+  ora e
+  jnz send_mod_ok
+  pop psw
+  jmp vm_error          ; ゼロ除算
+send_mod_ok:
+  pop psw
+  call get_reg_addr
+  call slot_to_value
+  push h                ; 書き戻し先
+  mov c, m
+  inx h
+  mov b, m              ; BC = 被除数
+  call smod16           ; BC = 剰余 (除数と同符号)
+  pop h
+  mov m, c
+  inx h
+  mov m, b
+  jmp vm_loop
+
+; ---------------------------------------------------------------
+; abs (絶対値): R[a] = |R[a]|
+; ---------------------------------------------------------------
+send_abs:
+  lda send_reg_a
+  call get_reg_addr
+  call slot_to_value    ; HL = 値の先頭
+  inx h                 ; HL → val_hi
+  mov a, m
+  ani 80h
+  jz vm_loop            ; 正ならそのまま
+  dcx h                 ; HL → val_lo
+  mov c, m
+  inx h
+  mov b, m              ; BC = 値
+  call neg_bc
+  mov m, b              ; val_hi
+  dcx h
+  mov m, c              ; val_lo
+  jmp vm_loop
+
+; --- 一時変数 ---
+send_reg_a:
+  db 0
+send_argc:
+  db 0
+
+; ---------------------------------------------------------------
+; smod16 — 16 ビット符号付き剰余 (Ruby floor modulo)
+;
+;   入力: BC = 被除数, DE = 除数 (≠ 0)
+;   出力: BC = 剰余 (除数と同符号)
+;   破壊: A, DE, HL
+;
+; |被除数| mod |除数| を求めたあと、符号と floor 調整を行う。
+; ---------------------------------------------------------------
+smod16:
+  ; 除数の符号を保存
+  mov a, d
+  push psw
+  ; 符号の差を保存 (bit7: 異符号なら 1)
+  mov a, b
+  xra d
+  push psw
+  ; 被除数を正にする
+  mov a, b
+  ani 80h
+  jz smod_chk_div
+  call neg_bc
+smod_chk_div:
+  mov a, d
+  ani 80h
+  jz smod_do
+  call neg_de
+smod_do:
+  push d               ; |除数| を退避
+  call udiv16          ; BC = 商, HL = 剰余
+  mov b, h
+  mov c, l             ; BC = |剰余|
+  mov a, b
+  ora c
+  pop d                ; DE = |除数|
+  pop psw              ; 符号差 (bit7)
+  jz smod_zero         ; 剰余 = 0
+  ani 80h
+  jz smod_sign         ; 同符号 → 大きさはそのまま
+  ; 異符号: 大きさ = |除数| - |剰余|
+  mov a, e
+  sub c
+  mov c, a
+  mov a, d
+  sbb b
+  mov b, a
+smod_sign:
+  pop psw              ; 除数の符号 (bit7)
+  ani 80h
+  rz                   ; 除数が正 → 正の剰余
+  jmp neg_bc           ; 除数が負 → 負にする
+smod_zero:
+  pop psw              ; 除数の符号を捨てる
+  ret

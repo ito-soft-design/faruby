@@ -1,0 +1,665 @@
+; vm_hash.a80 — Hash (連想配列) ハンドラ
+;
+; メインコード領域 (0x8400-0xAFFF) に空きがないため、
+; コレクションプール末尾の後 (0xB500) にオーバーフロー配置する。
+;
+; Hash スロット形式 (コレクションプール 32B スロット内):
+;   +0: type  (1B)  COL_TYPE_HASH = 3
+;   +1: count (1B)  ペア数 (最大 3)
+;   +2: data  (30B) key(4B)+value(4B) × 3 = 24B 使用
+;
+; キー検索は線形 4 バイト比較。
+;
+; do_op_array2 もメインコード領域から溢れたためここに配置。
+
+  org 0B500h
+
+; ===============================================================
+; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
+;
+; OP_ARRAY (BB) とソースレジスタが異なるだけ。共通コードに合流。
+; ===============================================================
+do_op_array2:
+  call fetch_byte       ; A = a (書き込み先)
+  sta oary_reg_a
+  call fetch_byte       ; A = b (ソースレジスタ先頭)
+  sta oary_src_reg
+  call fetch_byte       ; A = c (要素数)
+  jmp oa2_join
+
+; ===============================================================
+; do_op_hash — OP_HASH (BB): R[a] = {R[a+1]=>R[a+2], ...}
+;
+;   a = 書き込み先レジスタ
+;   b = ペア数 (0 = 空 Hash)
+;   ソース: R[a+1]=key1, R[a+2]=val1, R[a+3]=key2, ...
+; ===============================================================
+do_op_hash:
+  call fetch_byte       ; A = a (書き込み先)
+  sta hash_reg_a
+  call fetch_byte       ; A = b (ペア数)
+  sta hash_count
+
+  ; コレクションスロット確保
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta hash_slot_num
+
+  ; ヘッダ書き込み
+  mvi m, COL_TYPE_HASH  ; +0: type
+  inx h
+  lda hash_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域先頭
+
+  ; ペアがなければ結果書き込みへ
+  lda hash_count
+  ora a
+  jz hash_write_result
+
+  ; ソースレジスタ = a (mruby3 は R[a] からペアを読む)
+  lda hash_reg_a
+  sta hash_src_reg
+
+hash_copy_pair:
+  ; HL = コレクションプール内の書き込み位置
+  ; key (4B) をコピー: R[src] → [HL]
+  push h                ; 書き込み先を退避
+  lda hash_src_reg
+  call get_reg_addr     ; HL = R[src]
+  pop d                 ; DE = 書き込み先
+  call copy_slot        ; 4B コピー (HL, DE 共に +4)
+  ; DE = value 書き込み位置
+
+  ; value (4B) をコピー: R[src+1] → [DE]
+  push d                ; value 書き込み先を退避
+  lda hash_src_reg
+  inr a
+  call get_reg_addr     ; HL = R[src+1]
+  pop d                 ; DE = value 書き込み先
+  call copy_slot        ; 4B コピー
+  ; DE = 次ペアの先頭
+
+  ; ソースレジスタを +2
+  lda hash_src_reg
+  adi 2
+  sta hash_src_reg
+
+  ; HL = 次の書き込み位置 (DE から)
+  xchg
+
+  ; ペアカウンタ
+  lda hash_count
+  dcr a
+  sta hash_count
+  jnz hash_copy_pair
+
+hash_write_result:
+  ; R[hash_reg_a] = TT_HASH, val_lo = slot+1
+  lda hash_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_HASH        ; +0: type
+  inx h
+  mvi m, 0              ; +1: reserved
+  inx h
+  lda hash_slot_num
+  inr a                 ; slot + 1
+  mov m, a              ; +2: val_lo
+  inx h
+  mvi m, 0              ; +3: val_hi
+  jmp vm_loop
+
+; --- do_op_hash データ ---
+hash_reg_a:    db 0
+hash_count:    db 0
+hash_slot_num: db 0
+hash_src_reg:  db 0
+
+; ===============================================================
+; gidx_hash — GETIDX の Hash パス: R[a] = R[a][R[a+1]]
+;
+;   入口: gidx_reg_a 設定済み、HL = R[a] スロットアドレス
+;   キーが見つからなければ R[a] = nil
+; ===============================================================
+gidx_hash:
+  ; コレクションスロットを取得
+  call col_from_reg     ; HL = コレクションスロット
+  inx h                 ; +1: count
+  mov a, m              ; A = ペア数
+  inx h                 ; HL → データ領域
+  ora a
+  jz ghash_not_found    ; 空 Hash
+
+  sta ghash_loop_cnt
+  shld ghash_data_ptr
+
+  ; 検索キー R[a+1] のアドレスを取得
+  lda gidx_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  shld ghash_key_ptr
+
+  ; 検索ループ
+  lhld ghash_data_ptr
+ghash_search:
+  shld ghash_cur_ptr    ; 現在のペア先頭を保存
+
+  ; 4 バイト比較: [HL] (hash key) vs [ghash_key_ptr] (search key)
+  push h
+  lhld ghash_key_ptr
+  xchg                  ; DE = 検索キー
+  pop h                 ; HL = hash ペアのキー
+
+  mvi c, SLOT_BYTES
+ghash_cmp:
+  ldax d
+  cmp m
+  jnz ghash_next
+  inx h
+  inx d
+  dcr c
+  jnz ghash_cmp
+
+  ; 一致! HL = value 位置 (キー直後)
+  ; value (4B) を R[a] にコピー
+  push h                ; value ソース
+  lda gidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  xchg                  ; DE = R[a] (コピー先)
+  pop h                 ; HL = value (コピー元)
+  call copy_slot
+  jmp vm_loop
+
+ghash_next:
+  ; 次のペアへ (現在ペア + HASH_PAIR_BYTES)
+  lhld ghash_cur_ptr
+  lxi d, HASH_PAIR_BYTES
+  dad d
+  lda ghash_loop_cnt
+  dcr a
+  sta ghash_loop_cnt
+  jnz ghash_search
+
+ghash_not_found:
+  ; R[a] = nil
+  lda gidx_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+; --- gidx_hash データ ---
+ghash_data_ptr: dw 0
+ghash_key_ptr:  dw 0
+ghash_cur_ptr:  dw 0
+ghash_loop_cnt: db 0
+
+; ===============================================================
+; sidx_hash — SETIDX の Hash パス: R[a][R[a+1]] = R[a+2]
+;
+;   入口: sidx_reg_a 設定済み、HL = R[a] スロットアドレス
+;   既存キー → 値を上書き
+;   新規キー → count < MAX なら末尾に追加
+; ===============================================================
+sidx_hash:
+  ; コレクションスロットを取得
+  call col_from_reg     ; HL = コレクションスロット
+  shld shash_col_ptr    ; スロット先頭を保存 (count 更新用)
+  inx h                 ; +1: count
+  mov a, m
+  sta shash_pair_cnt    ; 元のペア数
+  inx h                 ; HL → データ領域
+  shld shash_data_ptr
+
+  ; R[a+1] キーのアドレス
+  lda sidx_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  shld shash_key_ptr
+
+  ; R[a+2] 値のアドレス
+  lda sidx_reg_a
+  adi 2
+  call get_reg_addr     ; HL = R[a+2]
+  shld shash_val_ptr
+
+  ; 既存キーを検索
+  lda shash_pair_cnt
+  ora a
+  jz shash_append       ; 空 Hash → 追加
+
+  sta shash_loop_cnt
+  lhld shash_data_ptr
+
+shash_search:
+  shld shash_cur_ptr
+
+  push h
+  lhld shash_key_ptr
+  xchg                  ; DE = 検索キー
+  pop h                 ; HL = hash ペアのキー
+
+  mvi c, SLOT_BYTES
+shash_cmp:
+  ldax d
+  cmp m
+  jnz shash_snext
+  inx h
+  inx d
+  dcr c
+  jnz shash_cmp
+
+  ; 一致! HL = value 位置
+  ; R[a+2] を value にコピー
+  xchg                  ; DE = hash value 位置
+  lhld shash_val_ptr    ; HL = R[a+2]
+  call copy_slot
+  jmp vm_loop
+
+shash_snext:
+  lhld shash_cur_ptr
+  lxi d, HASH_PAIR_BYTES
+  dad d
+  lda shash_loop_cnt
+  dcr a
+  sta shash_loop_cnt
+  jnz shash_search
+
+  ; 見つからなかった → 末尾に追加
+
+shash_append:
+  ; 容量チェック
+  lda shash_pair_cnt
+  cpi COL_MAX_HASH_PAIRS
+  jnc vm_error          ; Hash 満杯
+
+  ; count++ を書き込み
+  inr a
+  push psw
+  lhld shash_col_ptr
+  inx h                 ; +1: count フィールド
+  mov m, a
+  pop psw
+
+  ; 追加位置 = data + old_count * 8
+  lda shash_pair_cnt    ; old count
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  mov e, a
+  mvi d, 0
+  lhld shash_data_ptr
+  dad d                 ; HL = 追加位置
+
+  ; key をコピー (R[a+1] → [HL])
+  xchg                  ; DE = 追加位置
+  lhld shash_key_ptr    ; HL = R[a+1]
+  call copy_slot        ; key 4B、DE は value 位置に進む
+
+  ; value をコピー (R[a+2] → [DE])
+  lhld shash_val_ptr    ; HL = R[a+2]
+  ; DE は既に value 位置
+  call copy_slot
+  jmp vm_loop
+
+; --- sidx_hash データ ---
+shash_col_ptr:  dw 0
+shash_data_ptr: dw 0
+shash_key_ptr:  dw 0
+shash_val_ptr:  dw 0
+shash_cur_ptr:  dw 0
+shash_pair_cnt: db 0
+shash_loop_cnt: db 0
+
+; ===============================================================
+; send_getkey_timeout — getkey(n): ノンブロッキングタイムアウト付きキー入力
+;
+; KEY (0x0647) を最大 n 回呼び出し、キーが押されたらキーコードを返す。
+; n 回スキャンしてもキーが見つからなければ nil を返す。
+; ROM がなければ即 nil。
+;
+; 入力: send_reg_a = a, R[a+1] = タイムアウト回数 (整数)
+; 出力: R[a] = キーコード (0x00-0x17) or nil
+; ===============================================================
+send_getkey_timeout:
+  ; R[a+1] からタイムアウト回数を読む
+  lda send_reg_a
+  adi 1
+  call get_reg_addr     ; HL = R[a+1]
+  inx h
+  inx h                 ; +2: val_lo
+  mov c, m
+  inx h                 ; +3: val_hi
+  mov b, m              ; BC = タイムアウト回数
+
+  ; ROM チェック
+  lda KEY_ADDR
+  ora a
+  jz getkey_timeout_nil ; ROM なし → nil
+
+getkey_poll_loop:
+  mov a, b
+  ora c
+  jz getkey_timeout_nil ; カウンタ = 0 → タイムアウト
+
+  push b                ; カウンタ退避
+  call KEY_ADDR         ; A = キーコード or 0xFF
+  pop b                 ; カウンタ復帰
+  cpi 0FFh
+  jnz getkey_timeout_got ; キー押下!
+
+  dcx b                 ; カウンタ--
+  jmp getkey_poll_loop
+
+getkey_timeout_got:
+  ; A = キーコード (0x00-0x17)
+  mov c, a
+  mvi b, 0
+  lda send_reg_a
+  call get_reg_addr
+  call set_slot_int16
+  jmp vm_loop
+
+getkey_timeout_nil:
+  lda send_reg_a
+  call get_reg_addr
+  mvi a, TT_NIL
+  call set_slot_special
+  jmp vm_loop
+
+; ===============================================================
+; send_slice — [](offset, length): 文字列スライス
+;
+; OP_SEND R[a], "[]", 2 で呼ばれる (argc=2 は OP_GETIDX にならない)。
+;
+;   入力: send_reg_a = a, send_argc = 2
+;         R[a] = TT_STRING (対象文字列)
+;         R[a+1] = offset (TT_INTEGER, 0-based)
+;         R[a+2] = length (TT_INTEGER)
+;   出力: R[a] = 新しい部分文字列 (TT_STRING)
+;         offset >= 文字列長 → 空文字列
+;         length は利用可能バイト数にクランプ
+; ===============================================================
+send_slice:
+  ; R[a] が TT_STRING か確認
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jnz vm_error
+
+  ; ソース文字列のコレクションスロットを取得
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = collection slot
+  inx h                 ; +1: count
+  mov a, m
+  sta slice_src_count
+  inx h                 ; HL → data
+  shld slice_src_data
+
+  ; R[a+1] から offset を取得
+  lda send_reg_a
+  adi 1
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = offset (val_lo)
+  sta slice_offset
+
+  ; R[a+2] から length を取得
+  lda send_reg_a
+  adi 2
+  call get_reg_addr
+  call slot_to_value
+  mov a, m              ; A = length (val_lo)
+  sta slice_length
+
+  ; offset >= src_count → 空文字列
+  lda slice_offset
+  mov b, a              ; B = offset
+  lda slice_src_count   ; A = src_count
+  cmp b
+  jc slice_empty        ; src_count < offset
+  jz slice_empty        ; src_count == offset
+
+  ; available = src_count - offset
+  sub b                 ; A = available
+  mov b, a              ; B = available
+  lda slice_length
+  cmp b
+  jc slice_len_ok       ; length < available → そのまま
+  mov a, b              ; clamp: length = available
+slice_len_ok:
+  sta slice_length      ; 実際のコピー長
+
+  ; 新しいコレクションスロットを確保
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta slice_new_slot
+  mvi m, COL_TYPE_STRING ; +0: type
+  inx h
+  lda slice_length
+  mov m, a              ; +1: count = コピー長
+  inx h                 ; HL → new data area
+
+  ; ソースデータ先頭 + offset
+  push h                ; dest を退避
+  lhld slice_src_data
+  lda slice_offset
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = src_data + offset
+  xchg                  ; DE = src + offset
+  pop h                 ; HL = dest
+
+  ; バイトコピー
+  lda slice_length
+  ora a
+  jz slice_done
+  mov c, a
+slice_copy:
+  ldax d
+  mov m, a
+  inx h
+  inx d
+  dcr c
+  jnz slice_copy
+
+slice_done:
+  ; R[a] = TT_STRING, val_lo = new_slot + 1
+  lda send_reg_a
+  call get_reg_addr
+  mvi m, TT_STRING      ; +0: type
+  inx h
+  mvi m, 0              ; +1: reserved
+  inx h
+  lda slice_new_slot
+  inr a                 ; slot + 1
+  mov m, a              ; +2: val_lo
+  inx h
+  mvi m, 0              ; +3: val_hi
+  jmp vm_loop
+
+slice_empty:
+  ; 空文字列を返す
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta slice_new_slot
+  mvi m, COL_TYPE_STRING ; +0: type
+  inx h
+  mvi m, 0              ; +1: count = 0
+  jmp slice_done
+
+; --- send_slice データ ---
+slice_src_count: db 0
+slice_src_data:  dw 0
+slice_offset:    db 0
+slice_length:    db 0
+slice_new_slot:  db 0
+
+; ===============================================================
+; col_gc_alloc — 簡易 GC 付きコレクションスロット確保
+;
+; col_alloc がプール満杯 (col_sp >= MAX_COL_SLOTS) のとき呼ばれる。
+; レジスタファイル全体とグローバル変数をスキャンして参照ビットマップを構築し、
+; 未参照のスロットを見つけて再利用する。
+;
+; スキャン対象:
+;   - レジスタファイル (64 スロット): TT_STRING / TT_ARRAY / TT_HASH
+;   - グローバル変数 (64 スロット): 同上
+;
+; 注意: 配列要素・Hash 値からの間接参照はスキャンしない (保守的)。
+;       配列/Hash 自体が参照されていればそのスロットは保持される。
+;
+;   出力: A = スロット番号, HL = スロットアドレス
+;   エラー: 全スロット使用中 → vm_error
+; ===============================================================
+col_gc_alloc:
+  ; 1. ビットマップクリア (16 スロット = 2 バイト)
+  xra a
+  sta gc_bitmap
+  sta gc_bitmap + 1
+
+  ; 2. レジスタファイル全体をスキャン (64 スロット × 4B)
+  lxi h, REG_FILE_BASE
+  mvi b, MAX_REGS
+gc_scan_regs:
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz gc_mark_reg
+  cpi TT_ARRAY
+  jz gc_mark_reg
+  cpi TT_HASH
+  jz gc_mark_reg
+gc_next_reg:
+  inx h
+  inx h
+  inx h
+  inx h                 ; HL += SLOT_BYTES
+  dcr b
+  jnz gc_scan_regs
+
+  ; 3. グローバル変数をスキャン (64 スロット × 4B)
+  lxi h, GLOBALS_BASE
+  mvi b, MAX_REGS       ; MAX_GLOBALS = MAX_REGS = 64
+gc_scan_globals:
+  mov a, m
+  cpi TT_STRING
+  jz gc_mark_global
+  cpi TT_ARRAY
+  jz gc_mark_global
+  cpi TT_HASH
+  jz gc_mark_global
+gc_next_global:
+  inx h
+  inx h
+  inx h
+  inx h
+  dcr b
+  jnz gc_scan_globals
+
+  ; 4. 空きスロットを探す (B をカウンタに使う。gc_check_bit は B を破壊しない)
+  mvi b, 0
+gc_find_free:
+  mov a, b              ; A = 検査対象スロット番号
+  call gc_check_bit     ; Z=1: 空き (A は破壊される)
+  jz gc_found_free
+  inr b
+  mov a, b
+  cpi MAX_COL_SLOTS
+  jc gc_find_free
+  jmp vm_error          ; 全スロット使用中
+
+gc_found_free:
+  mov a, b              ; A = 空きスロット番号 (B から復帰)
+  push psw              ; スロット番号を退避 (col_slot_addr が A を破壊する)
+  call col_slot_addr    ; HL = スロットアドレス
+  pop psw               ; A = スロット番号を復帰
+  ret
+
+; --- gc_mark_reg: レジスタの val_lo からスロットを参照マーク ---
+gc_mark_reg:
+  push h
+  push b
+  inx h
+  inx h                 ; +2: val_lo
+  mov a, m              ; A = slot + 1
+  ora a
+  jz gc_mark_reg_done   ; val_lo = 0 → 無効
+  dcr a                 ; A = slot number
+  cpi MAX_COL_SLOTS
+  jnc gc_mark_reg_done  ; 範囲外
+  call gc_set_bit
+gc_mark_reg_done:
+  pop b
+  pop h
+  jmp gc_next_reg
+
+; --- gc_mark_global: グローバルの val_lo からスロットを参照マーク ---
+gc_mark_global:
+  push h
+  push b
+  inx h
+  inx h
+  mov a, m
+  ora a
+  jz gc_mark_gl_done
+  dcr a
+  cpi MAX_COL_SLOTS
+  jnc gc_mark_gl_done
+  call gc_set_bit
+gc_mark_gl_done:
+  pop b
+  pop h
+  jmp gc_next_global
+
+; --- gc_set_bit: A = slot (0-15) のビットを gc_bitmap に立てる ---
+gc_set_bit:
+  push h
+  push d
+  mov c, a              ; C = slot
+  ani 08h               ; slot >= 8?
+  lxi h, gc_bitmap
+  jz gsb_lo
+  inx h                 ; gc_bitmap + 1
+gsb_lo:
+  mov a, c
+  ani 07h               ; bit position (0-7)
+  mov e, a
+  mvi d, 0
+  push h                ; ビットマップバイトアドレス退避
+  lxi h, gc_bit_table
+  dad d
+  mov a, m              ; A = ビットマスク
+  pop h                 ; HL = ビットマップバイト
+  ora m                 ; ビットを立てる
+  mov m, a
+  pop d
+  pop h
+  ret
+
+; --- gc_check_bit: A = slot (0-15) のビットを検査 ---
+; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
+gc_check_bit:
+  push h
+  push d
+  mov c, a
+  ani 08h
+  lxi h, gc_bitmap
+  jz gcb_lo
+  inx h
+gcb_lo:
+  mov a, c
+  ani 07h
+  mov e, a
+  mvi d, 0
+  push h
+  lxi h, gc_bit_table
+  dad d
+  mov a, m              ; A = ビットマスク
+  pop h
+  ana m                 ; テスト (Z=1 ならビットクリア)
+  pop d
+  pop h
+  ret
+
+; --- GC データ ---
+gc_bitmap:  db 0, 0
+gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h

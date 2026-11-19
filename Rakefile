@@ -181,4 +181,165 @@ task :transfer do
   end
 end
 
+# =========================================================================
+# i8080 バックエンド
+# =========================================================================
+#
+# PLC 向けの rake vm_core とは独立した名前空間。
+# asm80 と r8080 エミュレータが必要です。
+#
+#   rake i8080:constants   定数ヘッダ (vm_constants.a80) を再生成
+#   rake i8080:asm         VM をアセンブル (vm_main.hex)
+#   rake i8080:build       constants + asm をまとめて実行
+#   rake i8080:run         Ruby ソースをコンパイル → r8080 で実行
+#
+#   例: rake i8080:run SRC=test/ruby_programs/addition.rb
+#        rake i8080:run SRC=/tmp/test.rb
+
+namespace :i8080 do
+  asm_dir  = "plc/i8080/r8080"
+  vm_hex   = "#{asm_dir}/vm_main.hex"
+  vm_main  = "#{asm_dir}/vm_main.a80"
+
+  desc "Regenerate vm_constants.a80 from Ruby definitions"
+  task :constants do
+    require_relative "tools/i8080_constants_gen"
+    path = File.join(asm_dir, "vm_constants.a80")
+    content = FaRuby::I8080ConstantsGen.generate
+    if File.exist?(path) && File.read(path) == content
+      puts "vm_constants.a80: 変更なし"
+    else
+      File.write(path, content)
+      puts "vm_constants.a80: 生成しました"
+    end
+  end
+
+  desc "Assemble the i8080 VM (vm_main.a80 → vm_main.hex)"
+  task :asm do
+    sh "asm80 -m I8080 #{vm_main}"
+    puts "アセンブル完了: #{vm_hex}"
+  end
+
+  desc "Build the i8080 VM (constants + assemble)"
+  task build: %i[constants asm]
+
+  desc "Compile Ruby source and run on r8080 emulator"
+  task :run do
+    src = ENV["SRC"]
+    unless src
+      warn "SRC を指定してください: rake i8080:run SRC=path/to/program.rb"
+      exit 1
+    end
+
+    require "tempfile"
+    require_relative "tools/i8080_bytecode_hex"
+
+    # mrbc でコンパイル
+    mrb = Tempfile.new(["faruby", ".mrb"])
+    mrb.close
+    sh "mrbc -o #{mrb.path} #{src}"
+
+    # 結合 HEX を生成
+    mrb_data = File.binread(mrb.path)
+    hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+    combined = Tempfile.new(["combined", ".hex"])
+    combined.write(hex_gen.generate_hex(vm_hex_path: vm_hex))
+    combined.close
+
+    # r8080 で実行
+    require_relative "tools/i8080_board"
+    board = FaRuby::I8080Board.new
+    board.load_hex(combined.path)
+    result = board.run
+    puts "Result: #{result}"
+    puts board.dump_state
+  ensure
+    mrb&.unlink
+    combined&.unlink
+  end
+
+  nd8080_rb = File.expand_path("tools/nd8080.rb", __dir__)
+
+  desc "Generate combined HEX for ND8080"
+  task :hex do
+    src = ENV["SRC"]
+    unless src
+      warn "SRC を指定してください: rake i8080:hex SRC=path/to/program.rb"
+      exit 1
+    end
+
+    require "tempfile"
+    require_relative "tools/i8080_bytecode_hex"
+
+    mrb = Tempfile.new(["faruby", ".mrb"])
+    mrb.close
+    sh "mrbc -o #{mrb.path} #{src}"
+
+    mrb_data = File.binread(mrb.path)
+    hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+    hex_text = hex_gen.generate_hex(vm_hex_path: vm_hex)
+
+    out = ENV["OUT"] || "combined.hex"
+    File.write(out, hex_text)
+    puts "生成: #{out}"
+  ensure
+    mrb&.unlink
+  end
+
+  desc "Upload combined HEX to ND8080 via USB"
+  task :upload do
+    src = ENV["SRC"]
+    unless src
+      warn "SRC を指定してください: rake i8080:upload SRC=path/to/program.rb"
+      exit 1
+    end
+    require "tempfile"
+    require_relative "tools/i8080_bytecode_hex"
+    require_relative "tools/intel_hex"
+
+    # mrbc でコンパイル
+    mrb = Tempfile.new(["faruby", ".mrb"])
+    mrb.close
+    sh "mrbc -o #{mrb.path} #{src}"
+
+    # 結合 HEX を生成
+    mrb_data = File.binread(mrb.path)
+    hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+    hex_text = hex_gen.generate_hex(vm_hex_path: vm_hex)
+
+    # Intel HEX → メモリイメージ → BTK ファイル群
+    mem = FaRuby::IntelHex.parse(hex_text)
+    btks = FaRuby::IntelHex.to_nd8080_btks(mem)
+
+    btk_files = []
+    btks.each_with_index do |(s, e, btk_data), i|
+      f = Tempfile.new(["nd8080_#{i}", ".btk"])
+      f.binmode
+      f.write(btk_data)
+      f.close
+      btk_files << f
+      puts format("領域 %d: %04X-%04X (%d バイト)", i, s, e, e - s + 1)
+    end
+
+    # nd8080.rb で書き込み
+    btk_files.each_with_index do |f, i|
+      puts "書き込み中 (領域 #{i})..."
+      sh "ruby #{nd8080_rb} load #{f.path} --verify"
+    end
+
+    puts ""
+    puts "書き込み完了。実行するには:"
+    puts "  ruby #{nd8080_rb} run 8400"
+  ensure
+    mrb&.unlink
+    btk_files&.each(&:unlink)
+  end
+
+  desc "Run program on ND8080 hardware"
+  task :nd8080_run do
+    addr = ENV["ADDR"] || "8400"
+    sh "ruby #{nd8080_rb} run #{addr}"
+  end
+end
+
 task default: :test
