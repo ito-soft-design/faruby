@@ -269,10 +269,12 @@ module FaRuby
       lines << equ("METHOD_PUTS",           layout::METHOD_PUTS,           comment: "puts(value): ASCII 2 文字表示")
       lines << equ("METHOD_SETSEG",         layout::METHOD_SETSEG,         comment: "setseg(pos, pattern)")
       lines << equ("METHOD_RAND",          layout::METHOD_RAND,           comment: "rand(n)")
+      lines << equ("METHOD_SLICE",         layout::METHOD_SLICE,          comment: "[](offset, length) 文字列スライス")
       lines << equ("METHOD_LENGTH",        layout::METHOD_LENGTH,         comment: "length / size")
       lines << equ("METHOD_CONCAT",        layout::METHOD_CONCAT,         comment: "<< (文字列追記/配列追加)")
       lines << equ("METHOD_PUSH",          layout::METHOD_PUSH,           comment: "push (配列追加)")
-      lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力ルーチン")
+      lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力 (ブロッキング)")
+      lines << equ("KEY_ADDR",              layout::KEY_ADDR,              width: 4, comment: "ND80Z キー 1 回スキャン (ノンブロッキング)")
       lines << ""
       lines
     end

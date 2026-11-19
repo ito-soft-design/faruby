@@ -601,12 +601,21 @@ send_display:
   jmp vm_loop
 
 ; ===============================================================
-; send_getkey — getkey: ブロッキングキー入力
+; send_getkey — getkey / getkey(timeout)
 ;
-; ROM チェック: KEYIN1_ADDR の先頭バイトが 0 なら ROM なし → -1
-; ROM あり: CALL KEYIN1_ADDR でブロッキング待ち
-; A = 0x00-0x0F → 整数として R[a] に返す
-; A >= 0x10 (ファンクションキー) → -1
+; getkey (引数なし): KEYIN1 でブロッキング入力
+;   ROM なし → -1
+;   キー押下 → キーコード (0x00-0x17)
+;
+; getkey(n) (引数あり): KEY でノンブロッキングポーリング
+;   最大 n 回スキャン、キー押下 → キーコード
+;   タイムアウト / ROM なし → nil
+;
+; キーコード割り当て (KEYIN1/KEY 共通):
+;   0x00-0x09: 0-9          0x10: RUN      0x14: RD INC
+;   0x0A-0x0F: A-F          0x11: RET      0x15: WR INC
+;   0x12: ADRS SET          0x13: RD DEC   0x16: STORE
+;                                           0x17: LOAD
 ; ===============================================================
 send_getkey:
   ; --- LFSR シード設定 (初回の getkey 呼び出し時) ---
@@ -622,15 +631,19 @@ send_getkey:
   sta lfsr_seeded
 getkey_skip_seed:
 
+  ; 引数ありならタイムアウト版へ (オーバーフロー領域)
+  lda send_argc
+  ora a
+  jnz send_getkey_timeout
+
+  ; --- ブロッキング版 (引数なし) ---
   lda KEYIN1_ADDR       ; ROM 先頭バイト
   ora a
   jz getkey_no_key      ; ROM なし → -1
 
-  call KEYIN1_ADDR      ; A = キーコード (ブロッキング)
-  cpi 10h
-  jnc getkey_no_key     ; ファンクションキー → -1
+  call KEYIN1_ADDR      ; A = キーコード (ブロッキング, 0x00-0x17)
 
-  ; hex キー (0-F) を R[a] に返す
+  ; キーコードを R[a] に返す
   mov c, a
   mvi b, 0
   lda send_reg_a
@@ -666,6 +679,8 @@ send_builtin_ext:
   jz send_concat
   cpi METHOD_PUSH
   jz send_push
+  cpi METHOD_SLICE
+  jz send_slice
   jmp vm_error          ; 未対応メソッド
 
 ; ===============================================================
@@ -882,7 +897,7 @@ ascii_seg_table:
   db 00h          ; 0x20 ' ' (スペース)
   db 06h          ; 0x21 '!' (bc)
   db 22h          ; 0x22 '"' (bf)
-  db 00h          ; 0x23 '#'
+  db 63h          ; 0x23 '#' (abfg = 上の丸 °)
   db 6Dh          ; 0x24 '$' (= S)
   db 00h          ; 0x25 '%'
   db 00h          ; 0x26 '&'
@@ -913,7 +928,7 @@ ascii_seg_table:
   db 48h          ; 0x3D '=' (dg)
   db 00h          ; 0x3E '>'
   db 00h          ; 0x3F '?'
-  db 00h          ; 0x40 '@'
+  db 5Ch          ; 0x40 '@' (cdeg = 下の丸)
   ; 0x41-0x5A: 英字
   db 77h          ; 0x41 'A' (abcefg)
   db 7Ch          ; 0x42 'B' (cdefg = b)
@@ -925,9 +940,9 @@ ascii_seg_table:
   db 76h          ; 0x48 'H' (bcefg)
   db 06h          ; 0x49 'I' (bc)
   db 1Eh          ; 0x4A 'J' (bcde)
-  db 00h          ; 0x4B 'K'
+  db 74h          ; 0x4B 'K' (cefg = h)
   db 38h          ; 0x4C 'L' (def)
-  db 00h          ; 0x4D 'M'
+  db 55h          ; 0x4D 'M' (aceg = n + ~)
   db 54h          ; 0x4E 'N' (ceg = n)
   db 5Ch          ; 0x4F 'O' (= 0)
   db 73h          ; 0x50 'P' (abefg)
@@ -937,8 +952,8 @@ ascii_seg_table:
   db 78h          ; 0x54 'T' (defg = t)
   db 3Eh          ; 0x55 'U' (bcdef)
   db 3Eh          ; 0x56 'V' (= U)
-  db 00h          ; 0x57 'W'
-  db 00h          ; 0x58 'X'
+  db 3Eh          ; 0x57 'W' (bcdef = U)
+  db 76h          ; 0x58 'X' (bcefg = H)
   db 6Eh          ; 0x59 'Y' (bcdfg)
   db 5Bh          ; 0x5A 'Z' (= 2)
   ; 0x5B-0x5F: 記号
@@ -1047,13 +1062,15 @@ rand_zero:
 ;   破壊: A, DE
 ; ---------------------------------------------------------------
 col_slot_addr:
-  add a                 ; ×2
-  add a                 ; ×4
-  add a                 ; ×8
-  add a                 ; ×16
-  add a                 ; ×32
+  ; slot_number * 32 は最大 15*32=480 で 8 ビットに収まらないため
+  ; 16 ビット (HL) で乗算する
   mov l, a
-  mvi h, 0
+  mvi h, 0              ; HL = slot_number
+  dad h                 ; HL = slot_number × 2
+  dad h                 ; HL = slot_number × 4
+  dad h                 ; HL = slot_number × 8
+  dad h                 ; HL = slot_number × 16
+  dad h                 ; HL = slot_number × 32
   lxi d, COLLECTION_POOL_BASE
   dad d
   ret
@@ -1064,12 +1081,12 @@ col_slot_addr:
 ;   入力: なし
 ;   出力: A = スロット番号 (0-based), HL = スロットアドレス
 ;   破壊: DE
-;   エラー: プール満杯 → vm_error
+;   エラー: プール満杯かつ GC で回収不可 → vm_error
 ; ---------------------------------------------------------------
 col_alloc:
   lda VM_STATE_BASE + OFF_COL_SP
   cpi MAX_COL_SLOTS
-  jnc vm_error          ; プール満杯
+  jnc col_gc_alloc      ; プール満杯 → GC 試行
   push psw              ; スロット番号を退避
   call col_slot_addr    ; HL = スロットアドレス
   ; COL_SP++

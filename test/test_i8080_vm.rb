@@ -712,6 +712,13 @@ class TestI8080Vm < Minitest::Test
     assert_equal(-1, board[:board].reg_value(1))
   end
 
+  def test_getkey_timeout_simulator
+    # シミュレータでは ROM なし → nil が返る
+    board = run_ruby("a = getkey(100)\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_NIL, board[:board].reg_type(1)
+  end
+
   # === puts (ASCII → 7 セグ表示) ===
 
   def test_puts_basic
@@ -1007,6 +1014,58 @@ class TestI8080Vm < Minitest::Test
     board = run_ruby("a = {}\nb = a.length\n")
     assert_equal :finished, board[:result]
     assert_equal 0, board[:board].reg_value(2)
+  end
+
+  # --- 文字列スライス (2 引数 []) ---
+
+  def test_string_slice_basic
+    board = run_ruby("a = \"abcdef\"\nb = a[1, 3]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(2)
+    assert_equal "bcd", board[:board].reg_string(2)
+  end
+
+  def test_string_slice_clamp
+    # length が残りバイト数を超える場合はクランプ
+    board = run_ruby("a = \"abc\"\nb = a[1, 8]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(2)
+    assert_equal "bc", board[:board].reg_string(2)
+  end
+
+  def test_string_slice_scroll
+    # test_builtin.rb パターン: 9 文字から [1,8] で先頭を削る
+    board = run_ruby("a = \"abcdefgh\"\na << \"i\"\na = a[1, 8]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(1)
+    assert_equal "bcdefghi", board[:board].reg_string(1)
+  end
+
+  def test_string_slice_empty
+    # offset == 文字列長 → 空文字列
+    board = run_ruby("a = \"abc\"\nb = a[3, 2]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(2)
+    assert_equal "", board[:board].reg_string(2)
+  end
+
+  # --- GC (コレクションプール回収) ---
+
+  def test_gc_string_loop
+    # 10 回ループで毎回 slice + string literal → GC なしなら 20+ スロット必要
+    # GC が不要スロットを回収するので MAX_COL_SLOTS=16 でも動く
+    src = <<~RUBY
+      a = "abcdefgh"
+      10.times do
+        a << "z"
+        a = a[1, 8]
+      end
+      b = a
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal TT_STRING, board[:board].reg_type(2)
+    assert_equal "ghzzzzzzzz"[2, 8], board[:board].reg_string(2)
   end
 
   private

@@ -217,9 +217,11 @@ module FaRuby
     METHOD_PUTS    = 31   # puts(value): ASCII 2 文字を 7 セグに表示 (スクロール)
     METHOD_SETSEG  = 32   # setseg(pos, pattern): 7 セグに任意パターンを設定
     METHOD_RAND    = 33   # rand(n): 0〜n-1 の擬似乱数を返す
+    METHOD_SLICE   = 34   # [](offset, length): 文字列スライス
 
     # ND80Z モニタ ROM ルーチン
     KEYIN1_ADDR = 0x0616  # キー入力待ち (ブロッキング)
+    KEY_ADDR    = 0x0647  # キー 1 回スキャン (ノンブロッキング, A=FF:なし)
 
     # --- VM 状態領域のバイトオフセット ---
     #

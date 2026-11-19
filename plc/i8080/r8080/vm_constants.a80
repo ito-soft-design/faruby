@@ -126,10 +126,12 @@ METHOD_GETKEY            EQU  1Eh  ; getkey
 METHOD_PUTS              EQU  1Fh  ; puts(value): ASCII 2 文字表示
 METHOD_SETSEG            EQU  20h  ; setseg(pos, pattern)
 METHOD_RAND              EQU  21h  ; rand(n)
+METHOD_SLICE             EQU  22h  ; [](offset, length) 文字列スライス
 METHOD_LENGTH            EQU  12h  ; length / size
 METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
 METHOD_PUSH              EQU  16h  ; push (配列追加)
-KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力ルーチン
+KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
+KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
 
 ; --- オブジェクトプール ---
 

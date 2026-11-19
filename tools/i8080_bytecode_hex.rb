@@ -49,6 +49,7 @@ module FaRuby
       "size"    => Layout::METHOD_LENGTH,
       "<<"      => Layout::METHOD_CONCAT,
       "push"    => Layout::METHOD_PUSH,
+      "[]"      => Layout::METHOD_SLICE,
     }.freeze
 
     def initialize(mrb_data)
