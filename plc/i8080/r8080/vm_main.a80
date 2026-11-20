@@ -899,17 +899,17 @@ ascii_seg_table:
   db 22h          ; 0x22 '"' (bf)
   db 63h          ; 0x23 '#' (abfg = 上の丸 °)
   db 6Dh          ; 0x24 '$' (= S)
-  db 00h          ; 0x25 '%'
-  db 00h          ; 0x26 '&'
+  db 58h          ; 0x25 '%' (deg = 小文字 c)
+  db 4Ch          ; 0x26 '&' (cdg = 反転 c)
   db 02h          ; 0x27 "'" (b)
   db 39h          ; 0x28 '(' (= C)
   db 0Fh          ; 0x29 ')' (abcd)
-  db 00h          ; 0x2A '*'
-  db 00h          ; 0x2B '+'
+  db 49h          ; 0x2A '*' (adg = 三)
+  db 41h          ; 0x2B '+' (ag = 三の下なし)
   db 04h          ; 0x2C ',' (c)
   db 40h          ; 0x2D '-' (g)
   db 08h          ; 0x2E '.' (d)
-  db 00h          ; 0x2F '/'
+  db 61h          ; 0x2F '/' (afg = 上の c)
   ; 0x30-0x39: 数字 (ND8080 ROM パターン)
   db 5Ch          ; 0x30 '0'
   db 06h          ; 0x31 '1'
@@ -927,7 +927,7 @@ ascii_seg_table:
   db 00h          ; 0x3C '<'
   db 48h          ; 0x3D '=' (dg)
   db 00h          ; 0x3E '>'
-  db 00h          ; 0x3F '?'
+  db 23h          ; 0x3F '?' (abf = 上コの字)
   db 5Ch          ; 0x40 '@' (cdeg = 下の丸)
   ; 0x41-0x5A: 英字
   db 77h          ; 0x41 'A' (abcefg)
@@ -950,9 +950,9 @@ ascii_seg_table:
   db 50h          ; 0x52 'R' (eg = r)
   db 6Dh          ; 0x53 'S' (= 5)
   db 78h          ; 0x54 'T' (defg = t)
-  db 3Eh          ; 0x55 'U' (bcdef)
+  db 1Ch          ; 0x55 'U' (cde = 小文字 u)
   db 3Eh          ; 0x56 'V' (= U)
-  db 3Eh          ; 0x57 'W' (bcdef = U)
+  db 7Eh          ; 0x57 'W' (bcdefg = 逆 A)
   db 76h          ; 0x58 'X' (bcefg = H)
   db 6Eh          ; 0x59 'Y' (bcdfg)
   db 5Bh          ; 0x5A 'Z' (= 2)
@@ -960,7 +960,7 @@ ascii_seg_table:
   db 39h          ; 0x5B '[' (= C)
   db 00h          ; 0x5C '\'
   db 0Fh          ; 0x5D ']' (= ))
-  db 23h          ; 0x5E '^' (abf)
+  db 01h          ; 0x5E '^' (a = 上一本, ~ もここに折畳)
   db 08h          ; 0x5F '_' (d)
 
 ; ===============================================================

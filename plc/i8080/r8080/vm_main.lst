@@ -3318,17 +3318,17 @@ AB51   06                     DB   06h   ; 0x21 "!" (bc)
 AB52   22                     DB   22h   ; 0x22 """ (bf)
 AB53   63                     DB   63h   ; 0x23 "#" (abfg = 上の丸 °)
 AB54   6D                     DB   6Dh   ; 0x24 "$" (= S)
-AB55   00                     DB   00h   ; 0x25 "%"
-AB56   00                     DB   00h   ; 0x26 "&"
+AB55   58                     DB   58h   ; 0x25 "%" (deg = 小文字 c)
+AB56   4C                     DB   4Ch   ; 0x26 "&" (cdg = 反転 c)
 AB57   02                     DB   02h   ; 0x27 "'" (b)
 AB58   39                     DB   39h   ; 0x28 "(" (= C)
 AB59   0F                     DB   0Fh   ; 0x29 ")" (abcd)
-AB5A   00                     DB   00h   ; 0x2A "*"
-AB5B   00                     DB   00h   ; 0x2B "+"
+AB5A   49                     DB   49h   ; 0x2A "*" (adg = 三)
+AB5B   41                     DB   41h   ; 0x2B "+" (ag = 三の下なし)
 AB5C   04                     DB   04h   ; 0x2C "," (c)
 AB5D   40                     DB   40h   ; 0x2D "-" (g)
 AB5E   08                     DB   08h   ; 0x2E "." (d)
-AB5F   00                     DB   00h   ; 0x2F "/"
+AB5F   61                     DB   61h   ; 0x2F "/" (afg = 上の c)
 AB60                             ; 0x30-0x39: 数字 (ND8080 ROM パターン)
 AB60   5C                     DB   5Ch   ; 0x30 "0"
 AB61   06                     DB   06h   ; 0x31 "1"
@@ -3346,7 +3346,7 @@ AB6B   00                     DB   00h   ; 0x3B ";"
 AB6C   00                     DB   00h   ; 0x3C "<"
 AB6D   48                     DB   48h   ; 0x3D "=" (dg)
 AB6E   00                     DB   00h   ; 0x3E ">"
-AB6F   00                     DB   00h   ; 0x3F "?"
+AB6F   23                     DB   23h   ; 0x3F "?" (abf = 上コの字)
 AB70   5C                     DB   5Ch   ; 0x40 "@" (cdeg = 下の丸)
 AB71                             ; 0x41-0x5A: 英字
 AB71   77                     DB   77h   ; 0x41 "A" (abcefg)
@@ -3369,9 +3369,9 @@ AB81   67                     DB   67h   ; 0x51 "Q" (abcfg)
 AB82   50                     DB   50h   ; 0x52 "R" (eg = r)
 AB83   6D                     DB   6Dh   ; 0x53 "S" (= 5)
 AB84   78                     DB   78h   ; 0x54 "T" (defg = t)
-AB85   3E                     DB   3Eh   ; 0x55 "U" (bcdef)
+AB85   1C                     DB   1Ch   ; 0x55 "U" (cde = 小文字 u)
 AB86   3E                     DB   3Eh   ; 0x56 "V" (= U)
-AB87   3E                     DB   3Eh   ; 0x57 "W" (bcdef = U)
+AB87   7E                     DB   7Eh   ; 0x57 "W" (bcdefg = 逆 A)
 AB88   76                     DB   76h   ; 0x58 "X" (bcefg = H)
 AB89   6E                     DB   6Eh   ; 0x59 "Y" (bcdfg)
 AB8A   5B                     DB   5Bh   ; 0x5A "Z" (= 2)
@@ -3379,7 +3379,7 @@ AB8B                             ; 0x5B-0x5F: 記号
 AB8B   39                     DB   39h   ; 0x5B "[" (= C)
 AB8C   00                     DB   00h   ; 0x5C "\"
 AB8D   0F                     DB   0Fh   ; 0x5D "]" (= ))
-AB8E   23                     DB   23h   ; 0x5E "^" (abf)
+AB8E   01                     DB   01h   ; 0x5E "^" (a = 上一本, ~ もここに折畳)
 AB8F   08                     DB   08h   ; 0x5F "_" (d)
 AB90                             ; ===============================================================
 AB90                             ; lfsr_next — 16-bit Galois LFSR 擬似乱数生成
