@@ -22,6 +22,12 @@ upvar_base:
   dcr a                 ; 現在のフレーム = frame_sp - 1
   sta upvar_frame
 
+  ; level == 0 なら outer chain を辿らずに
+  ; 現在のフレームの return_reg_base をそのまま返す
+  mov a, b
+  ora a
+  jz upvar_found
+
 upvar_loop:
   ; outer フレーム番号を読む
   lda upvar_frame
@@ -39,6 +45,7 @@ upvar_loop:
   jnz upvar_loop        ; まだ辿る段がある
 
   ; level 回辿り終わった — upvar_frame の reg_base を返す
+upvar_found:
   lda upvar_frame
   call get_frame_addr   ; HL = フレームアドレス
   lxi d, FRAME_OFF_RETURN_REG_BASE

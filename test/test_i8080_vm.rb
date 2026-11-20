@@ -1049,6 +1049,60 @@ class TestI8080Vm < Minitest::Test
     assert_equal "", board[:board].reg_string(2)
   end
 
+  # --- each ---
+
+  def test_each_basic
+    # 配列の要素を合計する
+    src = <<~RUBY
+      a = [10, 20, 30]
+      sum = 0
+      a.each do |x|
+        sum = sum + x
+      end
+      b = sum
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 60, board[:board].reg_value(3)
+  end
+
+  def test_each_empty
+    # 空配列の each はブロックを実行しない
+    src = <<~RUBY
+      a = []
+      sum = 99
+      a.each do |x|
+        sum = 0
+      end
+      b = sum
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(3)
+  end
+
+  def test_each_boolean
+    # flip_flop.rb パターン: 配列内の true/false を検査
+    src = <<~RUBY
+      a = [false, false, true, false]
+      found = false
+      a.each do |f|
+        found = true if f
+      end
+      b = found
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(3)
+  end
+
+  def test_each_single
+    # 要素 1 つの配列
+    board = run_ruby("a = [42]\nb = 0\na.each do |x|\n  b = x\nend\nc = b\n")
+    assert_equal :finished, board[:result]
+    assert_equal 42, board[:board].reg_value(3)
+  end
+
   # --- GC (コレクションプール回収) ---
 
   def test_gc_string_loop

@@ -48,6 +48,7 @@ module FaRuby
       "length"  => Layout::METHOD_LENGTH,
       "size"    => Layout::METHOD_LENGTH,
       "<<"      => Layout::METHOD_CONCAT,
+      "each"    => Layout::METHOD_EACH,
       "push"    => Layout::METHOD_PUSH,
       "[]"      => Layout::METHOD_SLICE,
     }.freeze

@@ -125,6 +125,8 @@ sendb_dispatch:
   lda sendb_method_id
   cpi 11          ; METHOD_TIMES
   jz sendb_times
+  cpi METHOD_EACH
+  jz sendb_each
   cpi 27          ; METHOD_LOOP
   jz sendb_loop
   ; 未対応のブロックメソッド

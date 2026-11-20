@@ -25,8 +25,8 @@
 #   0xB100 - 0xB15F : フレームスタック    (96B, 8 フレーム × 12B)
 #   0xB160 - 0xB1DF : メソッド表         (128B, 4 クラス × 32 メソッド)
 #   0xB1E0 - 0xB2DF : オブジェクトプール  (256B, 8 オブジェクト × 32B)
-#   0xB2E0 - 0xB4DF : コレクションプール  (512B, 16 スロット × 32B)
-#   0xB4E0 - 0xEFFF : (free)            (~15KB)
+#   0xB2E0 - 0xB51F : コレクションプール  (576B, 16 スロット × 36B)
+#   0xB520 - 0xEFFF : (free)            (~15KB)
 #   0xF000 - 0xFDFF : CPU スタック (SP)  (3.5KB)
 #   0xFFB8 - 0xFFF7 : ND80Z モニタワーク (RST ベクタ, レジスタ退避等)
 #   0xFFF8 - 0xFFFF : 7 セグ表示 (DIG)  (8B)
@@ -130,6 +130,7 @@ module FaRuby
     # フレーム種別
     FRAME_KIND_CALL    = 0   # メソッド呼び出し / クラス本体 (OP_EXEC)
     FRAME_KIND_ITERATE = 1   # times / upto
+    FRAME_KIND_EACH    = 2   # each (配列要素反復, +11 に col_slot 格納)
     FRAME_KIND_LOOP    = 4   # loop (無限ループ)
     FRAME_KIND_NEW     = 5   # Class#new → initialize 呼び出し
                               # 戻り値を R[0] に写さない (オブジェクトを保持)
@@ -162,18 +163,18 @@ module FaRuby
     # --- コレクションプール (文字列・配列) ---
     #
     # 文字列・配列の可変長データを格納する共有プール。
-    # 各スロット 32 バイト: type(1B) + count(1B) + data(30B)。
-    #   文字列: data = ASCII バイト列 (最大 30 文字)
-    #   配列:   data = 要素スロット × 7 (4B × 7 = 28B)
+    # 各スロット 36 バイト: type(1B) + count(1B) + data(34B)。
+    #   文字列: data = ASCII バイト列 (最大 34 文字)
+    #   配列:   data = 要素スロット × 8 (4B × 8 = 32B)
     # TT_STRING / TT_ARRAY の val_lo = slot+1 (0 は「なし」)。
     COLLECTION_POOL_BASE = OBJECT_POOL_BASE + OBJECT_POOL_SIZE  # 0xB2E0
     MAX_COL_SLOTS        = 16
-    COL_SLOT_SIZE        = 32    # 2^5 (add a × 5 で乗算)
+    COL_SLOT_SIZE        = 36    # ×36 = ×32 + ×4 で乗算
     COL_HEADER_SIZE      = 2     # +0: type, +1: count
-    COL_DATA_SIZE        = COL_SLOT_SIZE - COL_HEADER_SIZE  # 30B
-    COL_MAX_STRING_LEN   = COL_DATA_SIZE                    # 30
-    COL_MAX_ARRAY_ELEMS  = COL_DATA_SIZE / SLOT_BYTES       # 7
-    COLLECTION_POOL_SIZE = MAX_COL_SLOTS * COL_SLOT_SIZE    # 512B
+    COL_DATA_SIZE        = COL_SLOT_SIZE - COL_HEADER_SIZE  # 34B
+    COL_MAX_STRING_LEN   = COL_DATA_SIZE                    # 34
+    COL_MAX_ARRAY_ELEMS  = COL_DATA_SIZE / SLOT_BYTES       # 8
+    COLLECTION_POOL_SIZE = MAX_COL_SLOTS * COL_SLOT_SIZE    # 576B
 
     # コレクションプールのスロット型
     COL_TYPE_FREE   = 0
@@ -209,6 +210,7 @@ module FaRuby
     # 文字列・配列共通の組み込みメソッド (vm_constants.rb の番号と一致)
     METHOD_LENGTH  = 18   # length / size: 文字列長・配列長
     METHOD_CONCAT  = 20   # <<: 文字列に追記 / 配列に追加
+    METHOD_EACH    = 21   # each: 配列要素を反復 (ブロック必須)
     METHOD_PUSH    = 22   # push: 配列に追加
 
     # i8080 固有のビルトインメソッド

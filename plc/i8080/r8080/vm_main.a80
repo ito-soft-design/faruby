@@ -103,9 +103,9 @@ advance_iteration:
   mov a, m                ; A = kind
   cpi FRAME_KIND_LOOP
   jz adv_reenter          ; loop → 常に再実行
+  sta adv_kind            ; kind を退避 (ITERATE or EACH)
 
-  ; --- ITERATE (times) ---
-  ; index をインクリメント
+  ; --- ITERATE / EACH 共通: index インクリメント + limit チェック ---
   call cur_frame_addr
   lxi d, FRAME_OFF_INDEX
   dad d
@@ -133,10 +133,43 @@ advance_iteration:
   sbb b
   jc adv_done             ; index > limit → 反復終了
 
-  ; まだ反復が残っている: R[1] = index, PC = 0
+  ; kind で R[1] の設定を分岐
+  lda adv_kind
+  cpi FRAME_KIND_EACH
+  jz adv_each_load
+
+  ; --- ITERATE (times): R[1] = index ---
   mvi a, 1
   call get_reg_addr       ; HL = R[1] (BC は保存される)
   call set_slot_int16     ; R[1] = index (ブロック引数 |i|)
+  jmp adv_reenter
+
+  ; --- EACH: R[1] = array[index] ---
+adv_each_load:
+  ; BC = index を退避 (cur_frame_addr が BC を破壊するため)
+  push b
+  ; フレーム +11 からコレクションスロット番号を読む
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  mov a, m                ; A = col_slot
+  call col_slot_addr      ; HL = スロットアドレス
+  inx h                   ; skip type
+  inx h                   ; skip count → data
+  pop b                   ; BC = index (復帰)
+  ; data + index * 4 (C = index_lo, 配列は最大 8 要素)
+  mov a, c
+  add a                   ; ×2
+  add a                   ; ×4
+  mov e, a
+  mvi d, 0
+  dad d                   ; HL = &data[index*4] (source)
+  push h
+  mvi a, 1
+  call get_reg_addr       ; HL = R[1] (dest)
+  xchg                    ; DE = R[1]
+  pop h                   ; HL = source
+  call copy_slot          ; R[1] = array[index]
 
 adv_reenter:
   ; PC = 0 で再実行
@@ -148,6 +181,8 @@ adv_done:
   ; 反復完了 → フレームを破棄して親に戻る
   call pop_frame
   jmp vm_loop
+
+adv_kind: db 0
 
 ; ===============================================================
 ; OP_STOP (Z): VM 停止
@@ -434,7 +469,7 @@ vm_clear_objpool:
   dcr c
   jnz vm_clear_objpool
 
-  ; コレクションプールをゼロクリア (512 バイト = 2 × 256)
+  ; コレクションプールをゼロクリア (576 バイト = 2 × 256 + 64)
   lxi h, COLLECTION_POOL_BASE
   mvi c, 0              ; 256 回
 vm_clear_colpool1:
@@ -448,6 +483,12 @@ vm_clear_colpool2:
   inx h
   dcr c
   jnz vm_clear_colpool2
+  mvi c, 64             ; 残り 64 バイト
+vm_clear_colpool3:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz vm_clear_colpool3
 
   ; IREP 0 のバイトコード長を VM 状態に設定
   ; IREP テーブルの先頭エントリから読む
@@ -618,19 +659,6 @@ send_display:
 ;                                           0x17: LOAD
 ; ===============================================================
 send_getkey:
-  ; --- LFSR シード設定 (初回の getkey 呼び出し時) ---
-  lda lfsr_seeded
-  ora a
-  jnz getkey_skip_seed
-  lhld VM_STATE_BASE + OFF_STEP_COUNT
-  mov a, h
-  ora l
-  jz getkey_skip_seed   ; step_count=0 は LFSR で不可
-  shld lfsr_state
-  mvi a, 1
-  sta lfsr_seeded
-getkey_skip_seed:
-
   ; 引数ありならタイムアウト版へ (オーバーフロー領域)
   lda send_argc
   ora a
@@ -641,8 +669,17 @@ getkey_skip_seed:
   ora a
   jz getkey_no_key      ; ROM なし → -1
 
-  call KEYIN1_ADDR      ; A = キーコード (ブロッキング, 0x00-0x17)
+  ; キー入力をポーリングしながら LFSR を回す。
+  ; ユーザーがキーを押すタイミングで LFSR 状態が変わるため、
+  ; 乱数の種が毎回異なる。
+getkey_poll:
+  call KEY_ADDR         ; A = キーコード (0xFF = なし)
+  cpi 0FFh
+  jnz getkey_got_key
+  call lfsr_next        ; 待機中に LFSR を進める
+  jmp getkey_poll
 
+getkey_got_key:
   ; キーコードを R[a] に返す
   mov c, a
   mvi b, 0
@@ -678,7 +715,7 @@ send_builtin_ext:
   cpi METHOD_CONCAT
   jz send_concat
   cpi METHOD_PUSH
-  jz send_push
+  jz concat_array       ; push は concat_array と同じ
   cpi METHOD_SLICE
   jz send_slice
   jmp vm_error          ; 未対応メソッド
@@ -1004,7 +1041,6 @@ lfsr_no_tap:
   ret
 
 lfsr_state:  dw 0ACE1h  ; 初期シード (0 以外)
-lfsr_seeded: db 0        ; 1 = getkey からシード設定済み
 
 ; ===============================================================
 ; send_rand — rand(n): 0〜n-1 の擬似乱数を返す
@@ -1058,19 +1094,22 @@ rand_zero:
 ; col_slot_addr — スロット番号からアドレスを計算
 ;
 ;   入力: A = スロット番号 (0-based)
-;   出力: HL = COLLECTION_POOL_BASE + slot * 32
+;   出力: HL = COLLECTION_POOL_BASE + slot * 36
 ;   破壊: A, DE
 ; ---------------------------------------------------------------
 col_slot_addr:
-  ; slot_number * 32 は最大 15*32=480 で 8 ビットに収まらないため
-  ; 16 ビット (HL) で乗算する
+  ; slot_number * 36 = slot_number * 32 + slot_number * 4
+  ; 最大 15*36=540 で 8 ビットに収まらないため 16 ビット (HL) で乗算
   mov l, a
   mvi h, 0              ; HL = slot_number
   dad h                 ; HL = slot_number × 2
   dad h                 ; HL = slot_number × 4
+  mov d, h
+  mov e, l              ; DE = slot_number × 4 (退避)
   dad h                 ; HL = slot_number × 8
   dad h                 ; HL = slot_number × 16
   dad h                 ; HL = slot_number × 32
+  dad d                 ; HL = slot_number × 36
   lxi d, COLLECTION_POOL_BASE
   dad d
   ret
@@ -1795,17 +1834,15 @@ cc_ary_copy:
   jnz cc_ary_copy
   jmp vm_loop
 
-cc_src_len:    db 0
-cc_dst_len:    db 0
-cc_total_len:  db 0
-cc_src_data:   dw 0
-cc_ary_count:  db 0
-
-; ===============================================================
-; send_push — push: 配列に要素を追加 (send_concat の配列パスと同じ)
-; ===============================================================
-send_push:
-  jmp concat_array
+; --- concat 一時変数 ---
+; メインコード領域 (0xA800-0xAFFF) の末尾がグローバル変数領域 (0xB000)
+; に侵食するのを防ぐため、VM 状態領域の空きバイトを使う。
+; OFF_COL_SP (0x1F) の直後、0x20-0x25 を割り当てる。
+cc_src_len    EQU VM_STATE_BASE + 20h   ; 1B
+cc_dst_len    EQU VM_STATE_BASE + 21h   ; 1B
+cc_total_len  EQU VM_STATE_BASE + 22h   ; 1B
+cc_src_data   EQU VM_STATE_BASE + 23h   ; 2B (LE)
+cc_ary_count  EQU VM_STATE_BASE + 25h   ; 1B
 
 .include "vm_hash.a80"
 

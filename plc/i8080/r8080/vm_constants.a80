@@ -107,6 +107,7 @@ FRAME_OFF_OUTER          EQU  0Ah  ; 1B
 ; フレーム種別
 FRAME_KIND_CALL          EQU  00h
 FRAME_KIND_ITERATE       EQU  01h  ; times / upto
+FRAME_KIND_EACH          EQU  02h  ; each (配列要素反復)
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
 FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
 
@@ -129,6 +130,7 @@ METHOD_RAND              EQU  21h  ; rand(n)
 METHOD_SLICE             EQU  22h  ; [](offset, length) 文字列スライス
 METHOD_LENGTH            EQU  12h  ; length / size
 METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
+METHOD_EACH              EQU  15h  ; each (配列要素反復)
 METHOD_PUSH              EQU  16h  ; push (配列追加)
 KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
 KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
@@ -145,17 +147,17 @@ MAX_IVARS                EQU  07h
 
 COLLECTION_POOL_BASE     EQU  0B2E0h
 MAX_COL_SLOTS            EQU  10h
-COL_SLOT_SIZE            EQU  20h  ; 32B/スロット
+COL_SLOT_SIZE            EQU  24h  ; 36B/スロット
 COL_HEADER_SIZE          EQU  02h  ; +0: type, +1: count
-COL_DATA_SIZE            EQU  1Eh  ; データ領域 (30B)
-COL_MAX_STRING_LEN       EQU  1Eh
-COL_MAX_ARRAY_ELEMS      EQU  07h
+COL_DATA_SIZE            EQU  22h  ; データ領域 (34B)
+COL_MAX_STRING_LEN       EQU  22h
+COL_MAX_ARRAY_ELEMS      EQU  08h
 COL_TYPE_FREE            EQU  00h
 COL_TYPE_STRING          EQU  01h
 COL_TYPE_ARRAY           EQU  02h
 COL_TYPE_HASH            EQU  03h
 HASH_PAIR_BYTES          EQU  08h  ; 8B/ペア (key+value)
-COL_MAX_HASH_PAIRS       EQU  03h  ; 最大3ペア
+COL_MAX_HASH_PAIRS       EQU  04h  ; 最大4ペア
 
 ; --- Phase 1 オペコード ---
 
