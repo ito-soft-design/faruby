@@ -1,7 +1,4 @@
-; vm_hash.a80 — Hash (連想配列) ハンドラ
-;
-; メインコード領域 (0x8400-0xAFFF) に空きがないため、
-; コレクションプール末尾の後 (0xB520) にオーバーフロー配置する。
+; vm_hash.a80 — Hash (連想配列) ハンドラ / GC / コレクション操作
 ;
 ; Hash スロット形式 (コレクションプール 36B スロット内):
 ;   +0: type  (1B)  COL_TYPE_HASH = 3
@@ -9,10 +6,6 @@
 ;   +2: data  (34B) key(4B)+value(4B) × 4 = 32B 使用
 ;
 ; キー検索は線形 4 バイト比較。
-;
-; do_op_array2 もメインコード領域から溢れたためここに配置。
-
-  org 0B520h
 
 ; ===============================================================
 ; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
@@ -515,10 +508,15 @@ slice_new_slot:  db 0
 ;   エラー: 全スロット使用中 → vm_error
 ; ===============================================================
 col_gc_alloc:
-  ; 1. ビットマップクリア (16 スロット = 2 バイト)
+  ; 1. ビットマップクリア (64 スロット = 8 バイト)
   xra a
-  sta gc_bitmap
-  sta gc_bitmap + 1
+  lxi h, gc_bitmap
+  mvi c, 8
+gc_clear_bm:
+  mov m, a
+  inx h
+  dcr c
+  jnz gc_clear_bm
 
   ; 2. レジスタファイル全体をスキャン (64 スロット × 4B)
   lxi h, REG_FILE_BASE
@@ -613,18 +611,21 @@ gc_mark_gl_done:
   pop h
   jmp gc_next_global
 
-; --- gc_set_bit: A = slot (0-15) のビットを gc_bitmap に立てる ---
+; --- gc_set_bit: A = slot (0-63) のビットを gc_bitmap に立てる ---
 gc_set_bit:
   push h
   push d
   mov c, a              ; C = slot
-  ani 08h               ; slot >= 8?
+  rrc
+  rrc
+  rrc
+  ani 07h               ; A = byte index (slot >> 3)
+  mov e, a
+  mvi d, 0
   lxi h, gc_bitmap
-  jz gsb_lo
-  inx h                 ; gc_bitmap + 1
-gsb_lo:
+  dad d                 ; HL = &gc_bitmap[byte_index]
   mov a, c
-  ani 07h               ; bit position (0-7)
+  ani 07h               ; bit position (slot & 7)
   mov e, a
   mvi d, 0
   push h                ; ビットマップバイトアドレス退避
@@ -638,19 +639,22 @@ gsb_lo:
   pop h
   ret
 
-; --- gc_check_bit: A = slot (0-15) のビットを検査 ---
+; --- gc_check_bit: A = slot (0-63) のビットを検査 ---
 ; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
 gc_check_bit:
   push h
   push d
-  mov c, a
-  ani 08h
+  mov c, a              ; C = slot
+  rrc
+  rrc
+  rrc
+  ani 07h               ; A = byte index (slot >> 3)
+  mov e, a
+  mvi d, 0
   lxi h, gc_bitmap
-  jz gcb_lo
-  inx h
-gcb_lo:
+  dad d                 ; HL = &gc_bitmap[byte_index]
   mov a, c
-  ani 07h
+  ani 07h               ; bit position (slot & 7)
   mov e, a
   mvi d, 0
   push h
@@ -664,7 +668,7 @@ gcb_lo:
   ret
 
 ; --- GC データ ---
-gc_bitmap:  db 0, 0
+gc_bitmap:  db 0, 0, 0, 0, 0, 0, 0, 0
 gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
 
 ; ===============================================================

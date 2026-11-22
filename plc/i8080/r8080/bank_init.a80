@@ -2,6 +2,11 @@
 ;
 ; ROM (0x0000-0x7FFF) の内容を拡張 RAM にクローンし、
 ; 拡張 RAM モード (ポート 0x9C bit3=1) に切り替える。
+;
+; クローン後、拡張 RAM 上のモニタ KEY ルーチンをパッチして
+; OUT 9C の値に bit3 を立てる。これにより KEY ルーチンが
+; 呼ばれても拡張 RAM モードが維持される。
+;
 ; 完了後はリモートモードに復帰する。
 ;
 ; Rakefile の i8080:upload タスクが ROM モード検出時に自動実行する。
@@ -16,6 +21,14 @@ DISPLAY_SIZE  EQU 8
 CLONE_BUF     EQU 0EF00h    ; ROM クローン用 256B バッファ
 REMOTE_ENTRY  EQU 00821h    ; N80MON2D REMOTE リモートモード再入口
 STACK_ADDR    EQU 0F000h    ; スタック (VM と同じ)
+BANK_BIT      EQU 08h       ; ポート 9C bit3: 0=ROM, 1=拡張RAM
+
+; KEY ルーチン内の MVI A オペランドアドレス (OUT 9C の直前)
+; KEY (0647h) が OUT 9C に書く値: F6/F5/F3 (すべて bit3=0)
+; パッチで bit3 を立てて拡張 RAM モードを維持する
+KEY_PATCH1    EQU 064Bh     ; MVI A,F6 → MVI A,FE
+KEY_PATCH2    EQU 0658h     ; MVI A,F5 → MVI A,FD
+KEY_PATCH3    EQU 0665h     ; MVI A,F3 → MVI A,FB
 
 ; 7 セグパターン
 SEG_R         EQU 050h      ; 'r'
@@ -84,7 +97,22 @@ clone_write:
   cpi 080h              ; 128 ページ完了?
   jnz clone_page
 
-  ; bit3=1 のまま (拡張 RAM 選択を維持)
+  ; --- KEY ルーチンの OUT 9C 値をパッチ ---
+  ; 拡張 RAM 上のモニタコピーの MVI A オペランドに bit3 を立てる。
+  ; これにより KEY ルーチンが呼ばれても拡張 RAM モードが維持される。
+  ; (現在 bit3=1 なので書き込みは拡張 RAM に行く)
+  lda KEY_PATCH1
+  ori BANK_BIT
+  sta KEY_PATCH1            ; F6 → FE
+
+  lda KEY_PATCH2
+  ori BANK_BIT
+  sta KEY_PATCH2            ; F5 → FD
+
+  lda KEY_PATCH3
+  ori BANK_BIT
+  sta KEY_PATCH3            ; F3 → FB
+
   ; リモートモードに復帰
   jmp REMOTE_ENTRY
 

@@ -81,6 +81,7 @@ module FaRuby
       lines << "; --- メモリマップ ---"
       lines << ""
       lines << equ("VM_CODE_ORG",    layout::VM_CODE_ORG,    width: 4)
+      lines << equ("VM_ENTRY_POINT", layout::VM_ENTRY_POINT, width: 4, comment: "起動スタブ (通常 RAM)")
       lines << equ("BYTECODE_BASE",  layout::BYTECODE_BASE,  width: 4)
       lines << equ("BYTECODE_SIZE",  layout::BYTECODE_SIZE,  width: 4)
       lines << equ("POOL_BASE",      layout::POOL_BASE,      width: 4)
@@ -262,7 +263,7 @@ module FaRuby
       lines << equ("METHOD_TABLE_BASE",     layout::METHOD_TABLE_BASE,     width: 4)
       lines << equ("MAX_CLASSES",           layout::MAX_CLASSES)
       lines << equ("MAX_METHODS_PER_CLASS", layout::MAX_METHODS_PER_CLASS)
-      lines << equ("METHOD_TABLE_SIZE",     layout::METHOD_TABLE_SIZE)
+      lines << equ("METHOD_TABLE_SIZE",     layout::METHOD_TABLE_SIZE, width: 4)
       lines << equ("CLASS_MAIN",            layout::CLASS_MAIN)
       lines << equ("METHOD_NEW",            layout::METHOD_NEW,            comment: "Class#new")
       lines << equ("METHOD_DISPLAY",        layout::METHOD_DISPLAY,        comment: "display(value)")

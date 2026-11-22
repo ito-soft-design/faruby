@@ -2,31 +2,34 @@
 
 # i8080 用メモリレイアウト
 #
-# ND8080 ボード (32KB RAM: 0x8000-0xFFFF) を想定した固定メモリマップ。
-# PLC 版 (MemoryLayout) が設定ファイルからアドレスを計算するのに対し、
-# こちらはアドレスが固定で、ROM/RAM の境界も決まっています。
+# ND8080 ボード (拡張 RAM 搭載時: 0x0000-0xFFFF 全域 RAM) の
+# 固定メモリマップ。PLC 版 (MemoryLayout) が設定ファイルからアドレスを
+# 計算するのに対し、こちらはアドレスが固定です。
 #
 # すべてバイトアドレスです。PLC 版はワード (16 ビット) 単位ですが、
 # i8080 は 8 ビット CPU なのでバイト単位で扱います。
 #
-# ## メモリマップ (ND8080: すべて RAM 0x8000-0xFFFF)
+# ## メモリマップ (拡張 RAM: 0x0000-0xFFFF)
 #
+#   0x0000 - 0x0FFF : ND80Z モニタ ROM クローン + 予約  (4KB, 書き換え不可)
+#   0x1000 - 0x4FFF : VM コード          (16KB, org 1000h)
+#   0x5000 - 0x6FFF : mruby バイトコード (8KB)
+#   0x7000 - 0x7FFF : 定数プール         (4KB)
+#   ─── 通常 RAM (バンク状態に無関係) ───
 #   0x8000 - 0x80FF : VM 状態           (256B)
-#   0x8100 - 0x81FF : レジスタファイル   (32 × 8B = 256B)
+#   0x8100 - 0x81FF : レジスタファイル   (64 × 4B = 256B)
 #   0x8200 - 0x82FF : IREP テーブル      (256B)
 #   0x8300 - 0x83C6 : シンボルテーブル    (198B, GETGV/SETGV 用)
 #   0x83C7 - 0x83F7 : === 除外 (割り込みベクタ) ===
 #   0x83F8 - 0x83FF : (free)            (8B)
-#   0x8400 - 0x8FFF : VM コード          (3KB, org 8400h)
-#   0x9000 - 0x9FFF : mruby バイトコード (4KB)
-#   0xA000 - 0xA7FF : 定数プール         (2KB)
-#   0xA800 - 0xAFFF : (free)            (2KB)
-#   0xB000 - 0xB0FF : グローバル変数      (256B, 64 スロット)
-#   0xB100 - 0xB15F : フレームスタック    (96B, 8 フレーム × 12B)
-#   0xB160 - 0xB1DF : メソッド表         (128B, 4 クラス × 32 メソッド)
-#   0xB1E0 - 0xB2DF : オブジェクトプール  (256B, 8 オブジェクト × 32B)
-#   0xB2E0 - 0xB51F : コレクションプール  (576B, 16 スロット × 36B)
-#   0xB520 - 0xEFFF : (free)            (~15KB)
+#   0x8400 - 0x840F : VM 起動スタブ      (10B, SP + OUT 9C + JMP vm_start)
+#   0x8410 - 0x8FFF : (空き / bank_init) (3,056B)
+#   0x9000 - 0x90FF : グローバル変数      (256B, 64 スロット)
+#   0x9100 - 0x91BF : フレームスタック    (192B, 16 フレーム × 12B)
+#   0x91C0 - 0x92BF : メソッド表         (256B, 8 クラス × 32 メソッド)
+#   0x92C0 - 0x96BF : オブジェクトプール  (1,024B, 32 オブジェクト × 32B)
+#   0x96C0 - 0x9FBF : コレクションプール  (2,304B, 64 スロット × 36B)
+#   0x9FC0 - 0xEFFF : (free)            (~20KB)
 #   0xF000 - 0xFDFF : CPU スタック (SP)  (3.5KB)
 #   0xFFB8 - 0xFFF7 : ND80Z モニタワーク (RST ベクタ, レジスタ退避等)
 #   0xFFF8 - 0xFFFF : 7 セグ表示 (DIG)  (8B)
@@ -54,7 +57,7 @@ module FaRuby
     SLOT_TYPE_OFFSET  = 0   # バイトオフセット
     SLOT_VALUE_OFFSET = 2   # バイトオフセット
 
-    # --- RAM 領域 (ND8080: 0x8000-0xFFFF) ---
+    # --- 通常 RAM 領域 (バンク状態に無関係: 0x8000-0xFFFF) ---
     RAM_BASE          = 0x8000
 
     VM_STATE_BASE     = 0x8000
@@ -69,14 +72,21 @@ module FaRuby
 
     # 0x83C7-0x83F7 は ND8080 割り込みベクタのため除外
 
-    VM_CODE_ORG       = 0x8400   # VM コードの org アドレス
-    VM_CODE_SIZE      = 0x0C00   # 3KB
+    # --- 拡張 RAM 領域 (0x0000-0x7FFF、バンク切り替えで使用) ---
 
-    BYTECODE_BASE     = 0x9000
-    BYTECODE_SIZE     = 0x1000   # 4KB
+    VM_CODE_ORG       = 0x1000   # VM コードの org アドレス (拡張 RAM)
+    VM_CODE_SIZE      = 0x4000   # 16KB
 
-    POOL_BASE         = 0xA000
-    POOL_SIZE         = 0x0800   # 2KB
+    # 起動スタブ (通常 RAM、常にアクセス可能)
+    # SP 設定 → OUT 9C, F8h (拡張 RAM 選択) → JMP vm_start
+    # bank_init が事前に ROM → 拡張 RAM クローンを実行する前提。
+    VM_ENTRY_POINT    = 0x8400
+
+    BYTECODE_BASE     = 0x5000
+    BYTECODE_SIZE     = 0x2000   # 8KB
+
+    POOL_BASE         = 0x7000
+    POOL_SIZE         = 0x1000   # 4KB
 
     # シンボルテーブル (OP_GETGV / OP_SETGV 用)
     # 各エントリ 2 バイト: グローバルスロットのアドレス (LE)
@@ -87,7 +97,7 @@ module FaRuby
 
     # グローバル変数スロット ($foo, $bar 等)
     # レジスタと同じ 4 バイト形式 (型タグ + 予約 + val_lo + val_hi)
-    GLOBALS_BASE      = 0xB000
+    GLOBALS_BASE      = 0x9000
     GLOBALS_SIZE      = 0x0100   # 256B
     MAX_GLOBALS       = 64       # 256 / 4
 
@@ -113,10 +123,10 @@ module FaRuby
     #   +8,+9  limit           (2B)  反復上限
     #   +10    outer           (1B)  外側フレーム番号 (FRAME_NONE=トップレベル)
     #   +11    reserved        (1B)
-    FRAME_STACK_BASE  = 0xB100
+    FRAME_STACK_BASE  = 0x9100
     FRAME_BYTES       = 12
-    MAX_FRAMES        = 8
-    FRAME_STACK_SIZE  = FRAME_BYTES * MAX_FRAMES  # 96B
+    MAX_FRAMES        = 16
+    FRAME_STACK_SIZE  = FRAME_BYTES * MAX_FRAMES  # 192B
 
     # フレームフィールドのバイトオフセット
     FRAME_OFF_RETURN_PC       = 0
@@ -142,9 +152,9 @@ module FaRuby
     #
     # クラス × メソッド名の 2 次元表。1 バイト/エントリ (irep 番号、0=未定義)。
     # method_table[class_number * MAX_METHODS_PER_CLASS + method_id]
-    # class_number * 32 は 5 回の add a で計算 (最大 3*32=96、バイトに収まる)。
-    METHOD_TABLE_BASE      = 0xB160
-    MAX_CLASSES            = 4    # 0=main + 3 ユーザークラス
+    # class_number * 32 は 5 回の add a で計算 (最大 7*32=224、バイトに収まる)。
+    METHOD_TABLE_BASE      = 0x91C0
+    MAX_CLASSES            = 8    # 0=main + 7 ユーザークラス
     MAX_METHODS_PER_CLASS  = 32
     METHOD_TABLE_SIZE      = MAX_CLASSES * MAX_METHODS_PER_CLASS  # 128B
 
@@ -153,8 +163,8 @@ module FaRuby
     # Class#new で確保されるオブジェクトの格納領域。
     # 各スロット 32 バイト: ヘッダ 4B + インスタンス変数 7 個 × 4B。
     # TT_OBJECT の値は slot+1 (0 は main と区別するため)。
-    OBJECT_POOL_BASE    = METHOD_TABLE_BASE + METHOD_TABLE_SIZE  # 0xB1E0
-    MAX_OBJECTS         = 8
+    OBJECT_POOL_BASE    = METHOD_TABLE_BASE + METHOD_TABLE_SIZE  # 0x92C0
+    MAX_OBJECTS         = 32
     OBJECT_SLOT_SIZE    = 32   # 2^5 (add a × 5 で乗算)
     OBJECT_HEADER_SIZE  = 4    # +0: class_number, +1-3: reserved
     MAX_IVARS           = 7    # (32 - 4) / 4
@@ -167,8 +177,8 @@ module FaRuby
     #   文字列: data = ASCII バイト列 (最大 34 文字)
     #   配列:   data = 要素スロット × 8 (4B × 8 = 32B)
     # TT_STRING / TT_ARRAY の val_lo = slot+1 (0 は「なし」)。
-    COLLECTION_POOL_BASE = OBJECT_POOL_BASE + OBJECT_POOL_SIZE  # 0xB2E0
-    MAX_COL_SLOTS        = 16
+    COLLECTION_POOL_BASE = OBJECT_POOL_BASE + OBJECT_POOL_SIZE  # 0x96C0
+    MAX_COL_SLOTS        = 64
     COL_SLOT_SIZE        = 36    # ×36 = ×32 + ×4 で乗算
     COL_HEADER_SIZE      = 2     # +0: type, +1: count
     COL_DATA_SIZE        = COL_SLOT_SIZE - COL_HEADER_SIZE  # 34B
@@ -184,7 +194,7 @@ module FaRuby
 
     # Hash ペアのバイトサイズ (key 4B + value 4B)
     HASH_PAIR_BYTES     = 2 * SLOT_BYTES                      # 8
-    COL_MAX_HASH_PAIRS  = COL_DATA_SIZE / HASH_PAIR_BYTES     # 3
+    COL_MAX_HASH_PAIRS  = COL_DATA_SIZE / HASH_PAIR_BYTES     # 4
 
     # --- シンボルテーブルの種別コード ---
     #
@@ -334,20 +344,21 @@ module FaRuby
     # メモリマップの要約を文字列で返す (デバッグ・ドキュメント用)
     def self.summary
       <<~MAP
-        i8080 Memory Map (ND8080 RAM: 0x8000-0xFFFF)
+        i8080 Memory Map (ND8080 拡張 RAM: 0x0000-0xFFFF)
         ────────────────────────────────────────
+        0x0000-0x0FFF  Monitor ROM clone (4KB, read-only)
+        0x1000-0x4FFF  VM code          (#{VM_CODE_SIZE / 1024}KB, org 1000h)
+        0x5000-0x6FFF  Bytecode         (#{BYTECODE_SIZE / 1024}KB)
+        0x7000-0x7FFF  Constant pool    (#{POOL_SIZE / 1024}KB)
         0x8000-0x80FF  VM state         (#{VM_STATE_SIZE}B)
         0x8100-0x81FF  Register file    (#{MAX_REGS} × #{SLOT_BYTES}B = #{REG_FILE_SIZE}B)
         0x8200-0x82FF  IREP table       (#{IREP_TABLE_SIZE}B)
-        0x83C7-0x83F7  (excluded: interrupt vectors)
-        0x8400-0x8FFF  VM code          (#{VM_CODE_SIZE / 1024}KB, org 8400h)
-        0x9000-0x9FFF  Bytecode         (#{BYTECODE_SIZE / 1024}KB)
-        0xA000-0xA7FF  Constant pool    (#{POOL_SIZE / 1024}KB)
-        0xB000-0xB0FF  Global vars      (#{MAX_GLOBALS} × #{SLOT_BYTES}B = #{GLOBALS_SIZE}B)
-        0xB100-0xB15F  Frame stack      (#{MAX_FRAMES} × #{FRAME_BYTES}B = #{FRAME_STACK_SIZE}B)
-        0xB160-0xB1DF  Method table     (#{MAX_CLASSES} × #{MAX_METHODS_PER_CLASS} = #{METHOD_TABLE_SIZE}B)
-        0xB1E0-0xB2DF  Object pool      (#{MAX_OBJECTS} × #{OBJECT_SLOT_SIZE}B = #{OBJECT_POOL_SIZE}B)
-        0xB2E0-0xB4DF  Collection pool  (#{MAX_COL_SLOTS} × #{COL_SLOT_SIZE}B = #{COLLECTION_POOL_SIZE}B)
+        0x8400         Startup stub     (JMP vm_start)
+        0x9000-0x90FF  Global vars      (#{MAX_GLOBALS} × #{SLOT_BYTES}B = #{GLOBALS_SIZE}B)
+        0x9100-0x91BF  Frame stack      (#{MAX_FRAMES} × #{FRAME_BYTES}B = #{FRAME_STACK_SIZE}B)
+        0x91C0-0x92BF  Method table     (#{MAX_CLASSES} × #{MAX_METHODS_PER_CLASS} = #{METHOD_TABLE_SIZE}B)
+        0x92C0-0x96BF  Object pool      (#{MAX_OBJECTS} × #{OBJECT_SLOT_SIZE}B = #{OBJECT_POOL_SIZE}B)
+        0x96C0-0x9FBF  Collection pool  (#{MAX_COL_SLOTS} × #{COL_SLOT_SIZE}B = #{COLLECTION_POOL_SIZE}B)
         0xF000-0xFDFF  CPU stack        (#{STACK_SIZE}B)
         0xFFB8-0xFFF7  ND80Z monitor work
         0xFFF8-0xFFFF  7-seg display    (#{DISPLAY_SIZE}B)

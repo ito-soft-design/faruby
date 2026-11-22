@@ -75,31 +75,46 @@ module FaRuby
     # Intel HEX 文字列を生成する
     #
     # vm_hex_path が指定されていれば VM コードのレコードも含める。
+    # bank_init が事前に拡張 RAM モードに切り替え済みのため、
+    # 0x0000-0x7FFF のデータは直接拡張 RAM に書き込まれる。
     def generate_hex(vm_hex_path: nil)
-      lines = []
+      # VM コードの HEX をメモリイメージに読み込む
+      vm_mem = vm_hex_path ? parse_hex_file(vm_hex_path) : {}
 
-      # VM コードの HEX を取り込む (EOF レコードを除く)
-      if vm_hex_path
-        File.readlines(vm_hex_path).each do |line|
-          line = line.strip
-          next if line.empty?
-          next if line == ":00000001FF" # EOF レコードは後で追加
-          next if line.start_with?(":00") && line.include?("01") && line.length < 15
+      # バイトコード・プール・IREP テーブルのメモリイメージ
+      app_mem = build_memory
 
-          lines << line
-        end
-      end
+      # 統合 (app_mem が vm_mem を上書き)
+      all_mem = vm_mem.merge(app_mem)
 
-      # バイトコード・プール・IREP テーブルの HEX レコード
-      mem = build_memory
-      lines.concat(memory_to_hex_records(mem))
-
-      # EOF レコード
-      lines << ":00000001FF"
+      # HEX レコード生成
+      lines = memory_to_hex_records(all_mem)
+      lines << ":00000001FF" # EOF
       lines.join("\n") + "\n"
     end
 
     private
+
+    # --- Intel HEX ファイルをメモリイメージに読み込む ---
+    #
+    # 戻り値: { addr => byte } のハッシュ
+    def parse_hex_file(path)
+      mem = {}
+      File.readlines(path).each do |line|
+        line = line.strip
+        next if line.empty? || !line.start_with?(":")
+
+        len  = line[1, 2].to_i(16)
+        addr = line[3, 4].to_i(16)
+        type = line[7, 2].to_i(16)
+        next unless type == 0x00 # データレコードのみ
+
+        len.times do |i|
+          mem[addr + i] = line[9 + i * 2, 2].to_i(16)
+        end
+      end
+      mem
+    end
 
     # --- すべての irep をフラット化 (DFS 前順) ---
     def flatten_ireps

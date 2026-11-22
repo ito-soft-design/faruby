@@ -146,7 +146,7 @@ module FaRuby
     # 戻り値: 停止理由 (:finished, :error, :timeout, :halted)
     def run(max_steps: 2_000_000)
       @cpu.reset
-      @cpu.pc = Layout::VM_CODE_ORG
+      @cpu.pc = Layout::VM_ENTRY_POINT
       @halted = false
       steps = 0
 
@@ -156,8 +156,8 @@ module FaRuby
 
         # 停止検出:
         # 1) HLT: PC が進まない
-        # 2) ROM 領域へのジャンプ: モニタ復帰 (実機では NDZENT1 等)
-        if @cpu.pc == old_pc || @cpu.pc < Layout::RAM_BASE
+        # 2) VM コード領域外へのジャンプ: モニタ復帰 (実機では NDZENT1 等)
+        if @cpu.pc == old_pc || @cpu.pc < Layout::VM_CODE_ORG
           @halted = true
           break
         end
