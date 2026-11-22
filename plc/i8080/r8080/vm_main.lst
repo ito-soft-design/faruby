@@ -2837,7 +2837,7 @@ A84A   86 87                  DW   do_op_jmp   ; 25 OP_JMP
 A84C   8F 87                  DW   do_op_jmpif   ; 26 OP_JMPIF
 A84E   AE 87                  DW   do_op_jmpnot   ; 27 OP_JMPNOT
 A850   00 00                  DW   0000h   ; 28 OP_JMPNIL
-A852   00 00                  DW   0000h   ; 29 OP_JMPUW
+A852   86 87                  DW   do_op_jmp   ; 29 OP_JMPUW (= OP_JMP)
 A854   00 00                  DW   0000h   ; 2A OP_EXCEPT
 A856   00 00                  DW   0000h   ; 2B OP_RESCUE
 A858   00 00                  DW   0000h   ; 2C OP_RAISEIF
@@ -5960,6 +5960,7 @@ APPLY_JUMP:         877D DEFINED AT LINE 15 IN vm_jump.a80
                     > USED AT LINE 69 IN vm_jump.a80
 DO_OP_JMP:          8786 DEFINED AT LINE 25 IN vm_jump.a80
                     > USED AT LINE 358
+                    > USED AT LINE 362
 DO_OP_JMPIF:        878F DEFINED AT LINE 35 IN vm_jump.a80
                     > USED AT LINE 359
 JMPIF_SKIP:         87AB DEFINED AT LINE 50 IN vm_jump.a80

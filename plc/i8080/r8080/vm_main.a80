@@ -359,7 +359,7 @@ dispatch_table:
   dw do_op_jmpif      ; 26 OP_JMPIF
   dw do_op_jmpnot     ; 27 OP_JMPNOT
   dw 0000h            ; 28 OP_JMPNIL
-  dw 0000h            ; 29 OP_JMPUW
+  dw do_op_jmp        ; 29 OP_JMPUW (= OP_JMP)
   dw 0000h            ; 2A OP_EXCEPT
   dw 0000h            ; 2B OP_RESCUE
   dw 0000h            ; 2C OP_RAISEIF

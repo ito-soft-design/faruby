@@ -514,6 +514,24 @@ class TestI8080Vm < Minitest::Test
     assert_equal 5, board[:board].reg_value(1)
   end
 
+  def test_break_from_until_inside_times
+    # OP_JMPUW: ブロック (times) 内の until から break
+    board = run_ruby(<<~RUBY)
+      a = 0
+      3.times do
+        n = 0
+        until n == 5
+          break if n == 3
+          n = n + 1
+        end
+        a = a + n
+      end
+    RUBY
+    assert_equal :finished, board[:result]
+    # n は毎回 3 で break → a = 3 + 3 + 3 = 9
+    assert_equal 9, board[:board].reg_value(1)
+  end
+
   def test_times_upvar
     # ブロック内から外側のローカル変数にアクセス (GETUPVAR / SETUPVAR)
     board = run_ruby(<<~RUBY)
