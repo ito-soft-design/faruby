@@ -81,6 +81,7 @@ module FaRuby
       lines << "; --- メモリマップ ---"
       lines << ""
       lines << equ("VM_CODE_ORG",    layout::VM_CODE_ORG,    width: 4)
+      lines << equ("VM_ENTRY_POINT", layout::VM_ENTRY_POINT, width: 4, comment: "起動スタブ (通常 RAM)")
       lines << equ("BYTECODE_BASE",  layout::BYTECODE_BASE,  width: 4)
       lines << equ("BYTECODE_SIZE",  layout::BYTECODE_SIZE,  width: 4)
       lines << equ("POOL_BASE",      layout::POOL_BASE,      width: 4)
@@ -242,6 +243,7 @@ module FaRuby
       lines << "; フレーム種別"
       lines << equ("FRAME_KIND_CALL",    layout::FRAME_KIND_CALL)
       lines << equ("FRAME_KIND_ITERATE", layout::FRAME_KIND_ITERATE, comment: "times / upto")
+      lines << equ("FRAME_KIND_EACH",    layout::FRAME_KIND_EACH,    comment: "each (配列要素反復)")
       lines << equ("FRAME_KIND_LOOP",    layout::FRAME_KIND_LOOP,    comment: "loop (無限)")
       lines << equ("FRAME_KIND_NEW",     layout::FRAME_KIND_NEW,     comment: "Class#new → initialize")
       lines << ""
@@ -261,7 +263,7 @@ module FaRuby
       lines << equ("METHOD_TABLE_BASE",     layout::METHOD_TABLE_BASE,     width: 4)
       lines << equ("MAX_CLASSES",           layout::MAX_CLASSES)
       lines << equ("MAX_METHODS_PER_CLASS", layout::MAX_METHODS_PER_CLASS)
-      lines << equ("METHOD_TABLE_SIZE",     layout::METHOD_TABLE_SIZE)
+      lines << equ("METHOD_TABLE_SIZE",     layout::METHOD_TABLE_SIZE, width: 4)
       lines << equ("CLASS_MAIN",            layout::CLASS_MAIN)
       lines << equ("METHOD_NEW",            layout::METHOD_NEW,            comment: "Class#new")
       lines << equ("METHOD_DISPLAY",        layout::METHOD_DISPLAY,        comment: "display(value)")
@@ -272,9 +274,15 @@ module FaRuby
       lines << equ("METHOD_SLICE",         layout::METHOD_SLICE,          comment: "[](offset, length) 文字列スライス")
       lines << equ("METHOD_LENGTH",        layout::METHOD_LENGTH,         comment: "length / size")
       lines << equ("METHOD_CONCAT",        layout::METHOD_CONCAT,         comment: "<< (文字列追記/配列追加)")
+      lines << equ("METHOD_EACH",          layout::METHOD_EACH,           comment: "each (配列要素反復)")
       lines << equ("METHOD_PUSH",          layout::METHOD_PUSH,           comment: "push (配列追加)")
       lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力 (ブロッキング)")
       lines << equ("KEY_ADDR",              layout::KEY_ADDR,              width: 4, comment: "ND80Z キー 1 回スキャン (ノンブロッキング)")
+      lines << ""
+      lines << "; バンク切り替え (ND8080 拡張 RAM)"
+      lines << equ("PORT_9C",          layout::PORT_9C,          comment: "I/O ポート 9C")
+      lines << equ("PORT_9C_BANK_BIT", layout::PORT_9C_BANK_BIT, comment: "bit3: ROM/RAM 切替")
+      lines << equ("CLONE_BUF",        layout::CLONE_BUF,        width: 4, comment: "ROM クローン用バッファ")
       lines << ""
       lines
     end
@@ -304,9 +312,9 @@ module FaRuby
       lines << ""
       lines << equ("COLLECTION_POOL_BASE", layout::COLLECTION_POOL_BASE, width: 4)
       lines << equ("MAX_COL_SLOTS",        layout::MAX_COL_SLOTS)
-      lines << equ("COL_SLOT_SIZE",        layout::COL_SLOT_SIZE,        comment: "32B/スロット")
+      lines << equ("COL_SLOT_SIZE",        layout::COL_SLOT_SIZE,        comment: "36B/スロット")
       lines << equ("COL_HEADER_SIZE",      layout::COL_HEADER_SIZE,      comment: "+0: type, +1: count")
-      lines << equ("COL_DATA_SIZE",        layout::COL_DATA_SIZE,        comment: "データ領域 (30B)")
+      lines << equ("COL_DATA_SIZE",        layout::COL_DATA_SIZE,        comment: "データ領域 (34B)")
       lines << equ("COL_MAX_STRING_LEN",   layout::COL_MAX_STRING_LEN)
       lines << equ("COL_MAX_ARRAY_ELEMS",  layout::COL_MAX_ARRAY_ELEMS)
       lines << equ("COL_TYPE_FREE",        layout::COL_TYPE_FREE)
@@ -314,7 +322,7 @@ module FaRuby
       lines << equ("COL_TYPE_ARRAY",       layout::COL_TYPE_ARRAY)
       lines << equ("COL_TYPE_HASH",        layout::COL_TYPE_HASH)
       lines << equ("HASH_PAIR_BYTES",      layout::HASH_PAIR_BYTES,       comment: "8B/ペア (key+value)")
-      lines << equ("COL_MAX_HASH_PAIRS",   layout::COL_MAX_HASH_PAIRS,    comment: "最大3ペア")
+      lines << equ("COL_MAX_HASH_PAIRS",   layout::COL_MAX_HASH_PAIRS,    comment: "最大4ペア")
       lines << ""
       lines
     end

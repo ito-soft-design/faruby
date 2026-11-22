@@ -1,0 +1,163 @@
+0000                             ; bank_init.a80 — ND8080 バンク切り替え初期化プログラム
+0000                             ; 
+0000                             ; ROM (0x0000-0x7FFF) の内容を拡張 RAM にクローンし、
+0000                             ; 拡張 RAM モード (ポート 0x9C bit3=1) に切り替える。
+0000                             ; 
+0000                             ; クローン後、拡張 RAM 上のモニタ KEY ルーチンをパッチして
+0000                             ; OUT 9C の値に bit3 を立てる。これにより KEY ルーチンが
+0000                             ; 呼ばれても拡張 RAM モードが維持される。
+0000                             ; 
+0000                             ; 完了後はリモートモードに復帰する。
+0000                             ; 
+0000                             ; Rakefile の i8080:upload タスクが ROM モード検出時に自動実行する。
+0000                             ; 7 セグに "rOM" を表示し、クローン完了後にリモートモードへ戻る。
+0000                             ; 
+0000                             ; asm80 -m I8080 bank_init.a80
+0000                             ; --- 定数 ---
+0000                PORT_9C:   EQU   09Ch   
+0000                DISPLAY_BASE:   EQU   0FFF8h   
+0000                DISPLAY_SIZE:   EQU   8   
+0000                CLONE_BUF:   EQU   0EF00h   ; ROM クローン用 256B バッファ
+0000                REMOTE_ENTRY:   EQU   00821h   ; N80MON2D REMOTE リモートモード再入口
+0000                STACK_ADDR:   EQU   0F000h   ; スタック (VM と同じ)
+0000                BANK_BIT:   EQU   08h   ; ポート 9C bit3: 0=ROM, 1=拡張RAM
+0000                             ; KEY ルーチン内の MVI A オペランドアドレス (OUT 9C の直前)
+0000                             ; KEY (0647h) が OUT 9C に書く値: F6/F5/F3 (すべて bit3=0)
+0000                             ; パッチで bit3 を立てて拡張 RAM モードを維持する
+0000                KEY_PATCH1:   EQU   064Bh   ; MVI A,F6 → MVI A,FE
+0000                KEY_PATCH2:   EQU   0658h   ; MVI A,F5 → MVI A,FD
+0000                KEY_PATCH3:   EQU   0665h   ; MVI A,F3 → MVI A,FB
+0000                             ; 7 セグパターン
+0000                SEG_R:    EQU   050h   ; "r"
+0000                SEG_O:    EQU   05Ch   ; "O"
+0000                SEG_M:    EQU   055h   ; "M"
+8400                          .ORG   08400h   
+8400   C3 03 84               JMP   init_start   
+8403                INIT_START:      
+8403   31 00 F0               LXI   sp,STACK_ADDR   
+8406                             ; --- "rOM" を 7 セグに表示 ---
+8406   CD 68 84               CALL   clear_display   
+8409   3E 50                  MVI   a,SEG_R   
+840B   32 FD FF               STA   DISPLAY_BASE + 5   
+840E   3E 5C                  MVI   a,SEG_O   
+8410   32 FE FF               STA   DISPLAY_BASE + 6   
+8413   3E 55                  MVI   a,SEG_M   
+8415   32 FF FF               STA   DISPLAY_BASE + 7   
+8418                             ; --- ROM バンクを明示的に選択 ---
+8418                             ; モニタの KEY ルーチンが bit3=1 にしている可能性があるため
+8418   3E F0                  MVI   a,0F0h   
+841A   D3 9C                  OUT   PORT_9C   
+841C                             ; --- 128 ページ (32KB) クローン ---
+841C   06 00                  MVI   b,0   ; ページ番号 (0-127)
+841E                CLONE_PAGE:      
+841E                             ; (1) ROM バンク選択 (bit3=0)
+841E   3E F0                  MVI   a,0F0h   
+8420   D3 9C                  OUT   PORT_9C   
+8422                             ; (2) ROM → バッファにコピー (256B)
+8422   60                     MOV   h,b   
+8423   2E 00                  MVI   l,0   ; HL = page × 256 (ソース)
+8425   11 00 EF               LXI   d,CLONE_BUF   ; DE = バッファ
+8428   0E 00                  MVI   c,0   ; 256 回
+842A                CLONE_READ:      
+842A   7E                     MOV   a,m   
+842B   12                     STAX   d   
+842C   23                     INX   h   
+842D   13                     INX   d   
+842E   0D                     DCR   c   
+842F   C2 2A 84               JNZ   clone_read   
+8432                             ; (3) 拡張 RAM バンク選択 (bit3=1)
+8432   3E F8                  MVI   a,0F8h   
+8434   D3 9C                  OUT   PORT_9C   
+8436                             ; (4) バッファ → 拡張 RAM にコピー (256B)
+8436   60                     MOV   h,b   
+8437   2E 00                  MVI   l,0   ; HL = page × 256 (デスト)
+8439   11 00 EF               LXI   d,CLONE_BUF   ; DE = バッファ
+843C   0E 00                  MVI   c,0   
+843E                CLONE_WRITE:      
+843E   1A                     LDAX   d   
+843F   77                     MOV   m,a   
+8440   23                     INX   h   
+8441   13                     INX   d   
+8442   0D                     DCR   c   
+8443   C2 3E 84               JNZ   clone_write   
+8446   04                     INR   b   
+8447   78                     MOV   a,b   
+8448   FE 80                  CPI   080h   ; 128 ページ完了?
+844A   C2 1E 84               JNZ   clone_page   
+844D                             ; --- KEY ルーチンの OUT 9C 値をパッチ ---
+844D                             ; 拡張 RAM 上のモニタコピーの MVI A オペランドに bit3 を立てる。
+844D                             ; これにより KEY ルーチンが呼ばれても拡張 RAM モードが維持される。
+844D                             ; (現在 bit3=1 なので書き込みは拡張 RAM に行く)
+844D   3A 4B 06               LDA   KEY_PATCH1   
+8450   F6 08                  ORI   BANK_BIT   
+8452   32 4B 06               STA   KEY_PATCH1   ; F6 → FE
+8455   3A 58 06               LDA   KEY_PATCH2   
+8458   F6 08                  ORI   BANK_BIT   
+845A   32 58 06               STA   KEY_PATCH2   ; F5 → FD
+845D   3A 65 06               LDA   KEY_PATCH3   
+8460   F6 08                  ORI   BANK_BIT   
+8462   32 65 06               STA   KEY_PATCH3   ; F3 → FB
+8465                             ; リモートモードに復帰
+8465   C3 21 08               JMP   REMOTE_ENTRY   
+8468                             ; --- 表示バッファクリア ---
+8468                CLEAR_DISPLAY:      
+8468   21 F8 FF               LXI   h,DISPLAY_BASE   
+846B   0E 08                  MVI   c,DISPLAY_SIZE   
+846D                CLEAR_LOOP:      
+846D   36 00                  MVI   m,0   
+846F   23                     INX   h   
+8470   0D                     DCR   c   
+8471   C2 6D 84               JNZ   clear_loop   
+8474   C9                     RET      
+8475                          END      
+
+
+PORT_9C:            009C DEFINED AT LINE 18
+                    > USED AT LINE 56
+                    > USED AT LINE 63
+                    > USED AT LINE 80
+DISPLAY_BASE:       FFF8 DEFINED AT LINE 19
+                    > USED AT LINE 47
+                    > USED AT LINE 49
+                    > USED AT LINE 51
+                    > USED AT LINE 121
+DISPLAY_SIZE:       0008 DEFINED AT LINE 20
+                    > USED AT LINE 122
+CLONE_BUF:          EF00 DEFINED AT LINE 21
+                    > USED AT LINE 68
+                    > USED AT LINE 85
+REMOTE_ENTRY:       0821 DEFINED AT LINE 22
+                    > USED AT LINE 117
+STACK_ADDR:         F000 DEFINED AT LINE 23
+                    > USED AT LINE 42
+BANK_BIT:           0008 DEFINED AT LINE 24
+                    > USED AT LINE 105
+                    > USED AT LINE 109
+                    > USED AT LINE 113
+KEY_PATCH1:         064B DEFINED AT LINE 29
+                    > USED AT LINE 104
+                    > USED AT LINE 106
+KEY_PATCH2:         0658 DEFINED AT LINE 30
+                    > USED AT LINE 108
+                    > USED AT LINE 110
+KEY_PATCH3:         0665 DEFINED AT LINE 31
+                    > USED AT LINE 112
+                    > USED AT LINE 114
+SEG_R:              0050 DEFINED AT LINE 34
+                    > USED AT LINE 46
+SEG_O:              005C DEFINED AT LINE 35
+                    > USED AT LINE 48
+SEG_M:              0055 DEFINED AT LINE 36
+                    > USED AT LINE 50
+INIT_START:         8403 DEFINED AT LINE 41
+                    > USED AT LINE 39
+CLONE_PAGE:         841E DEFINED AT LINE 60
+                    > USED AT LINE 98
+CLONE_READ:         842A DEFINED AT LINE 70
+                    > USED AT LINE 76
+CLONE_WRITE:        843E DEFINED AT LINE 87
+                    > USED AT LINE 93
+CLEAR_DISPLAY:      8468 DEFINED AT LINE 120
+                    > USED AT LINE 45
+CLEAR_LOOP:         846D DEFINED AT LINE 123
+                    > USED AT LINE 127

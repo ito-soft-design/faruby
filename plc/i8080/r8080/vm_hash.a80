@@ -1,18 +1,11 @@
-; vm_hash.a80 — Hash (連想配列) ハンドラ
+; vm_hash.a80 — Hash (連想配列) ハンドラ / GC / コレクション操作
 ;
-; メインコード領域 (0x8400-0xAFFF) に空きがないため、
-; コレクションプール末尾の後 (0xB500) にオーバーフロー配置する。
-;
-; Hash スロット形式 (コレクションプール 32B スロット内):
+; Hash スロット形式 (コレクションプール 36B スロット内):
 ;   +0: type  (1B)  COL_TYPE_HASH = 3
-;   +1: count (1B)  ペア数 (最大 3)
-;   +2: data  (30B) key(4B)+value(4B) × 3 = 24B 使用
+;   +1: count (1B)  ペア数 (最大 4)
+;   +2: data  (34B) key(4B)+value(4B) × 4 = 32B 使用
 ;
 ; キー検索は線形 4 バイト比較。
-;
-; do_op_array2 もメインコード領域から溢れたためここに配置。
-
-  org 0B500h
 
 ; ===============================================================
 ; do_op_array2 — OP_ARRAY2 (BBB): R[a] = [R[b], ..., R[b+c-1]]
@@ -347,6 +340,9 @@ getkey_poll_loop:
   cpi 0FFh
   jnz getkey_timeout_got ; キー押下!
 
+  push b                ; カウンタ退避
+  call lfsr_next        ; 待機中に LFSR を進める
+  pop b
   dcx b                 ; カウンタ--
   jmp getkey_poll_loop
 
@@ -512,10 +508,15 @@ slice_new_slot:  db 0
 ;   エラー: 全スロット使用中 → vm_error
 ; ===============================================================
 col_gc_alloc:
-  ; 1. ビットマップクリア (16 スロット = 2 バイト)
+  ; 1. ビットマップクリア (64 スロット = 8 バイト)
   xra a
-  sta gc_bitmap
-  sta gc_bitmap + 1
+  lxi h, gc_bitmap
+  mvi c, 8
+gc_clear_bm:
+  mov m, a
+  inx h
+  dcr c
+  jnz gc_clear_bm
 
   ; 2. レジスタファイル全体をスキャン (64 スロット × 4B)
   lxi h, REG_FILE_BASE
@@ -610,18 +611,21 @@ gc_mark_gl_done:
   pop h
   jmp gc_next_global
 
-; --- gc_set_bit: A = slot (0-15) のビットを gc_bitmap に立てる ---
+; --- gc_set_bit: A = slot (0-63) のビットを gc_bitmap に立てる ---
 gc_set_bit:
   push h
   push d
   mov c, a              ; C = slot
-  ani 08h               ; slot >= 8?
+  rrc
+  rrc
+  rrc
+  ani 07h               ; A = byte index (slot >> 3)
+  mov e, a
+  mvi d, 0
   lxi h, gc_bitmap
-  jz gsb_lo
-  inx h                 ; gc_bitmap + 1
-gsb_lo:
+  dad d                 ; HL = &gc_bitmap[byte_index]
   mov a, c
-  ani 07h               ; bit position (0-7)
+  ani 07h               ; bit position (slot & 7)
   mov e, a
   mvi d, 0
   push h                ; ビットマップバイトアドレス退避
@@ -635,19 +639,22 @@ gsb_lo:
   pop h
   ret
 
-; --- gc_check_bit: A = slot (0-15) のビットを検査 ---
+; --- gc_check_bit: A = slot (0-63) のビットを検査 ---
 ; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
 gc_check_bit:
   push h
   push d
-  mov c, a
-  ani 08h
+  mov c, a              ; C = slot
+  rrc
+  rrc
+  rrc
+  ani 07h               ; A = byte index (slot >> 3)
+  mov e, a
+  mvi d, 0
   lxi h, gc_bitmap
-  jz gcb_lo
-  inx h
-gcb_lo:
+  dad d                 ; HL = &gc_bitmap[byte_index]
   mov a, c
-  ani 07h
+  ani 07h               ; bit position (slot & 7)
   mov e, a
   mvi d, 0
   push h
@@ -661,5 +668,105 @@ gcb_lo:
   ret
 
 ; --- GC データ ---
-gc_bitmap:  db 0, 0
+gc_bitmap:  db 0, 0, 0, 0, 0, 0, 0, 0
 gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
+
+; ===============================================================
+; sendb_each — Array#each: 配列要素を反復
+;
+;   R[a] = TT_ARRAY (レシーバ)
+;   R[a+argc+1] = TT_PROC (ブロック)
+;   各反復で R[1] = array[index]
+;
+; FRAME_KIND_EACH フレームを使い、フレーム +11 (reserved) に
+; コレクションスロット番号を格納する。
+; ===============================================================
+sendb_each:
+  ; R[a] が TT_ARRAY か確認
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_ARRAY
+  jnz vm_error
+
+  ; コレクションスロット番号を取得
+  lda sendb_reg_a
+  call get_reg_addr
+  call slot_to_value    ; HL = 値先頭
+  mov a, m              ; val_lo = slot + 1
+  dcr a                 ; slot number (0-based)
+  sta each_col_slot
+
+  ; 要素数を読む
+  lda each_col_slot
+  call col_slot_addr    ; HL = スロットアドレス
+  inx h                 ; +1: count
+  mov a, m
+  sta each_count
+  ora a
+  jz vm_loop            ; 空配列 → ブロック実行しない
+
+  ; ブロック (TT_PROC) の情報を読む
+  lda sendb_argc
+  inr a                 ; argc + 1
+  mov b, a
+  lda sendb_reg_a
+  add b                 ; A = a + argc + 1
+  call get_reg_addr     ; HL = R[a+argc+1]
+  call slot_to_value
+  mov a, m              ; irep 番号
+  sta sendb_block_irep
+  inx h
+  mov a, m              ; outer
+  sta sendb_block_outer
+
+  ; push_frame(a, FRAME_KIND_EACH, outer)
+  lda sendb_reg_a
+  mvi b, FRAME_KIND_EACH
+  lda sendb_block_outer
+  mov c, a
+  lda sendb_reg_a
+  call push_frame
+
+  ; フレームに limit = count - 1 を設定
+  call cur_frame_addr
+  lxi d, FRAME_OFF_LIMIT
+  dad d
+  lda each_count
+  dcr a                 ; limit = count - 1
+  mov m, a              ; limit_lo
+  inx h
+  mvi m, 0              ; limit_hi
+
+  ; フレーム +11 (reserved) にコレクションスロット番号を格納
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  lda each_col_slot
+  mov m, a
+
+  ; R[1] = array[0] (最初の要素)
+  lda each_col_slot
+  call col_slot_addr    ; HL = スロットアドレス
+  inx h                 ; skip type
+  inx h                 ; skip count → data[0]
+  ; data[0] を R[1] にコピー (4 バイト)
+  push h                ; source 退避
+  mvi a, 1
+  call get_reg_addr     ; HL = R[1]
+  xchg                  ; DE = R[1] (dest)
+  pop h                 ; HL = data[0] (source)
+  call copy_slot
+
+  ; 子 irep に切り替え
+  lda sendb_block_irep
+  call switch_irep
+
+  ; PC = 0
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+; --- sendb_each データ ---
+each_col_slot: db 0
+each_count:    db 0

@@ -3,10 +3,11 @@
 
 ; --- メモリマップ ---
 
-VM_CODE_ORG              EQU  8400h
-BYTECODE_BASE            EQU  9000h
-BYTECODE_SIZE            EQU  1000h
-POOL_BASE                EQU  0A000h
+VM_CODE_ORG              EQU  1000h
+VM_ENTRY_POINT           EQU  8400h  ; 起動スタブ (通常 RAM)
+BYTECODE_BASE            EQU  5000h
+BYTECODE_SIZE            EQU  2000h
+POOL_BASE                EQU  7000h
 IREP_TABLE_BASE          EQU  8200h
 VM_STATE_BASE            EQU  8000h
 REG_FILE_BASE            EQU  8100h
@@ -82,7 +83,7 @@ VM_ERROR                 EQU  03h
 ; --- シンボルテーブル / グローバル変数 ---
 
 SYM_TABLE_BASE           EQU  8300h
-GLOBALS_BASE             EQU  0B000h
+GLOBALS_BASE             EQU  9000h
 
 ; シンボル種別コード (上位バイト)
 SYM_KIND_USER_METHOD     EQU  01h  ; ユーザー定義メソッド
@@ -91,9 +92,9 @@ SYM_KIND_IVAR            EQU  03h  ; インスタンス変数
 
 ; --- フレームスタック ---
 
-FRAME_STACK_BASE         EQU  0B100h
+FRAME_STACK_BASE         EQU  9100h
 FRAME_BYTES              EQU  0Ch  ; 12 バイト/フレーム
-MAX_FRAMES               EQU  08h
+MAX_FRAMES               EQU  10h
 
 ; フレームフィールドのバイトオフセット
 FRAME_OFF_RETURN_PC      EQU  00h  ; 2B
@@ -107,6 +108,7 @@ FRAME_OFF_OUTER          EQU  0Ah  ; 1B
 ; フレーム種別
 FRAME_KIND_CALL          EQU  00h
 FRAME_KIND_ITERATE       EQU  01h  ; times / upto
+FRAME_KIND_EACH          EQU  02h  ; each (配列要素反復)
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
 FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
 
@@ -115,10 +117,10 @@ FRAME_NONE               EQU  0FFh
 
 ; --- メソッド表 ---
 
-METHOD_TABLE_BASE        EQU  0B160h
-MAX_CLASSES              EQU  04h
+METHOD_TABLE_BASE        EQU  91C0h
+MAX_CLASSES              EQU  08h
 MAX_METHODS_PER_CLASS    EQU  20h
-METHOD_TABLE_SIZE        EQU  80h
+METHOD_TABLE_SIZE        EQU  0100h
 CLASS_MAIN               EQU  00h
 METHOD_NEW               EQU  1Ch  ; Class#new
 METHOD_DISPLAY           EQU  1Dh  ; display(value)
@@ -129,33 +131,39 @@ METHOD_RAND              EQU  21h  ; rand(n)
 METHOD_SLICE             EQU  22h  ; [](offset, length) 文字列スライス
 METHOD_LENGTH            EQU  12h  ; length / size
 METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
+METHOD_EACH              EQU  15h  ; each (配列要素反復)
 METHOD_PUSH              EQU  16h  ; push (配列追加)
 KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
 KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
 
+; バンク切り替え (ND8080 拡張 RAM)
+PORT_9C                  EQU  9Ch  ; I/O ポート 9C
+PORT_9C_BANK_BIT         EQU  08h  ; bit3: ROM/RAM 切替
+CLONE_BUF                EQU  0EF00h  ; ROM クローン用バッファ
+
 ; --- オブジェクトプール ---
 
-OBJECT_POOL_BASE         EQU  0B1E0h
-MAX_OBJECTS              EQU  08h
+OBJECT_POOL_BASE         EQU  92C0h
+MAX_OBJECTS              EQU  20h
 OBJECT_SLOT_SIZE         EQU  20h  ; 32B/スロット
 OBJECT_HEADER_SIZE       EQU  04h
 MAX_IVARS                EQU  07h
 
 ; --- コレクションプール (文字列・配列) ---
 
-COLLECTION_POOL_BASE     EQU  0B2E0h
-MAX_COL_SLOTS            EQU  10h
-COL_SLOT_SIZE            EQU  20h  ; 32B/スロット
+COLLECTION_POOL_BASE     EQU  96C0h
+MAX_COL_SLOTS            EQU  40h
+COL_SLOT_SIZE            EQU  24h  ; 36B/スロット
 COL_HEADER_SIZE          EQU  02h  ; +0: type, +1: count
-COL_DATA_SIZE            EQU  1Eh  ; データ領域 (30B)
-COL_MAX_STRING_LEN       EQU  1Eh
-COL_MAX_ARRAY_ELEMS      EQU  07h
+COL_DATA_SIZE            EQU  22h  ; データ領域 (34B)
+COL_MAX_STRING_LEN       EQU  22h
+COL_MAX_ARRAY_ELEMS      EQU  08h
 COL_TYPE_FREE            EQU  00h
 COL_TYPE_STRING          EQU  01h
 COL_TYPE_ARRAY           EQU  02h
 COL_TYPE_HASH            EQU  03h
 HASH_PAIR_BYTES          EQU  08h  ; 8B/ペア (key+value)
-COL_MAX_HASH_PAIRS       EQU  03h  ; 最大3ペア
+COL_MAX_HASH_PAIRS       EQU  04h  ; 最大4ペア
 
 ; --- Phase 1 オペコード ---
 
