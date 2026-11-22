@@ -1122,6 +1122,27 @@ class TestI8080Vm < Minitest::Test
     assert_equal "ghzzzzzzzz"[2, 8], board[:board].reg_string(2)
   end
 
+  # --- バンク切り替え ---
+
+  def test_bank_no_clone_without_rom
+    # ROM データなし → クローンスキップ → 通常動作
+    r = run_ruby("a = 42\n")
+    assert_equal :finished, r[:result]
+    assert_equal 42, r[:board].reg_value(1)
+  end
+
+  def test_bank_rom_write_protection
+    # BankedMemory の ROM 保護: ROM バンク選択時は書き込みが無視される
+    board = FaRuby::I8080Board.new(banked: true)
+    board.load_rom_data(0x0000, [0xC3, 0x00, 0x00])
+    # bank_bit=false (ROM 選択) のとき ROM が読める
+    board.instance_variable_get(:@memory).bank_bit = false
+    assert_equal [0xC3, 0x00, 0x00], board.read_memory(0x0000, 3)
+    # ROM バンク選択時、書き込みは無視される
+    board.write_memory(0x0000, [0xFF, 0xFF, 0xFF])
+    assert_equal [0xC3, 0x00, 0x00], board.read_memory(0x0000, 3)
+  end
+
   private
 
   def find_mrbc
@@ -1192,6 +1213,37 @@ class TestI8080Vm < Minitest::Test
     ensure
       rb_file.unlink
       File.delete(mrb_path) if File.exist?(mrb_path)
+    end
+  end
+
+  # Ruby ソースをバンク切り替え対応モードで実行する
+  def run_ruby_banked(source, max_steps: 2_500_000, rom_data: {})
+    rb_file = Tempfile.new(["i8080_test", ".rb"])
+    rb_file.write(source)
+    rb_file.close
+    mrb_path = rb_file.path.sub(/\.rb$/, ".mrb")
+
+    begin
+      success = system(@mrbc, "-o", mrb_path, rb_file.path)
+      raise "mrbc compilation failed for: #{source.inspect}" unless success
+
+      mrb_data = File.binread(mrb_path)
+      hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
+
+      combined = Tempfile.new(["combined", ".hex"])
+      combined.write(hex_gen.generate_hex(vm_hex_path: VM_HEX))
+      combined.close
+
+      board = FaRuby::I8080Board.new(banked: true)
+      rom_data.each { |addr, bytes| board.load_rom_data(addr, bytes) }
+      board.load_hex(combined.path)
+      result = board.run(max_steps: max_steps)
+
+      { result: result, board: board }
+    ensure
+      rb_file.unlink
+      File.delete(mrb_path) if File.exist?(mrb_path)
+      combined&.unlink
     end
   end
 end

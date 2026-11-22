@@ -1,0 +1,102 @@
+; bank_init.a80 — ND8080 バンク切り替え初期化プログラム
+;
+; ROM (0x0000-0x7FFF) の内容を拡張 RAM にクローンし、
+; 拡張 RAM モード (ポート 0x9C bit3=1) に切り替える。
+; 完了後はリモートモードに復帰する。
+;
+; Rakefile の i8080:upload タスクが ROM モード検出時に自動実行する。
+; 7 セグに "rOM" を表示し、クローン完了後にリモートモードへ戻る。
+;
+; asm80 -m I8080 bank_init.a80
+
+; --- 定数 ---
+PORT_9C       EQU 09Ch
+DISPLAY_BASE  EQU 0FFF8h
+DISPLAY_SIZE  EQU 8
+CLONE_BUF     EQU 0EF00h    ; ROM クローン用 256B バッファ
+REMOTE_ENTRY  EQU 00821h    ; N80MON2D REMOTE リモートモード再入口
+STACK_ADDR    EQU 0F000h    ; スタック (VM と同じ)
+
+; 7 セグパターン
+SEG_R         EQU 050h      ; 'r'
+SEG_O         EQU 05Ch      ; 'O'
+SEG_M         EQU 055h      ; 'M'
+
+  org 08400h
+  jmp init_start
+
+init_start:
+  lxi sp, STACK_ADDR
+
+  ; --- "rOM" を 7 セグに表示 ---
+  call clear_display
+  mvi a, SEG_R
+  sta DISPLAY_BASE + 5
+  mvi a, SEG_O
+  sta DISPLAY_BASE + 6
+  mvi a, SEG_M
+  sta DISPLAY_BASE + 7
+
+  ; --- ROM バンクを明示的に選択 ---
+  ; モニタの KEY ルーチンが bit3=1 にしている可能性があるため
+  mvi a, 0F0h
+  out PORT_9C
+
+  ; --- 128 ページ (32KB) クローン ---
+  mvi b, 0              ; ページ番号 (0-127)
+clone_page:
+  ; (1) ROM バンク選択 (bit3=0)
+  mvi a, 0F0h
+  out PORT_9C
+
+  ; (2) ROM → バッファにコピー (256B)
+  mov h, b
+  mvi l, 0              ; HL = page × 256 (ソース)
+  lxi d, CLONE_BUF      ; DE = バッファ
+  mvi c, 0              ; 256 回
+clone_read:
+  mov a, m
+  stax d
+  inx h
+  inx d
+  dcr c
+  jnz clone_read
+
+  ; (3) 拡張 RAM バンク選択 (bit3=1)
+  mvi a, 0F8h
+  out PORT_9C
+
+  ; (4) バッファ → 拡張 RAM にコピー (256B)
+  mov h, b
+  mvi l, 0              ; HL = page × 256 (デスト)
+  lxi d, CLONE_BUF      ; DE = バッファ
+  mvi c, 0
+clone_write:
+  ldax d
+  mov m, a
+  inx h
+  inx d
+  dcr c
+  jnz clone_write
+
+  inr b
+  mov a, b
+  cpi 080h              ; 128 ページ完了?
+  jnz clone_page
+
+  ; bit3=1 のまま (拡張 RAM 選択を維持)
+  ; リモートモードに復帰
+  jmp REMOTE_ENTRY
+
+; --- 表示バッファクリア ---
+clear_display:
+  lxi h, DISPLAY_BASE
+  mvi c, DISPLAY_SIZE
+clear_loop:
+  mvi m, 0
+  inx h
+  dcr c
+  jnz clear_loop
+  ret
+
+  end

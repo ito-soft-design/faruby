@@ -1,0 +1,126 @@
+0000                             ; bank_init.a80 — ND8080 バンク切り替え初期化プログラム
+0000                             ; 
+0000                             ; ROM (0x0000-0x7FFF) の内容を拡張 RAM にクローンし、
+0000                             ; 拡張 RAM モード (ポート 0x9C bit3=1) に切り替える。
+0000                             ; 完了後はリモートモードに復帰する。
+0000                             ; 
+0000                             ; Rakefile の i8080:upload タスクが ROM モード検出時に自動実行する。
+0000                             ; 7 セグに "rOM" を表示し、クローン完了後にリモートモードへ戻る。
+0000                             ; 
+0000                             ; asm80 -m I8080 bank_init.a80
+0000                             ; --- 定数 ---
+0000                PORT_9C:   EQU   09Ch   
+0000                DISPLAY_BASE:   EQU   0FFF8h   
+0000                DISPLAY_SIZE:   EQU   8   
+0000                CLONE_BUF:   EQU   0EF00h   ; ROM クローン用 256B バッファ
+0000                REMOTE_ENTRY:   EQU   00821h   ; N80MON2D REMOTE リモートモード再入口
+0000                STACK_ADDR:   EQU   0F000h   ; スタック (VM と同じ)
+0000                             ; 7 セグパターン
+0000                SEG_R:    EQU   050h   ; "r"
+0000                SEG_O:    EQU   05Ch   ; "O"
+0000                SEG_M:    EQU   055h   ; "M"
+8400                          .ORG   08400h   
+8400   C3 03 84               JMP   init_start   
+8403                INIT_START:      
+8403   31 00 F0               LXI   sp,STACK_ADDR   
+8406                             ; --- "rOM" を 7 セグに表示 ---
+8406   CD 50 84               CALL   clear_display   
+8409   3E 50                  MVI   a,SEG_R   
+840B   32 FD FF               STA   DISPLAY_BASE + 5   
+840E   3E 5C                  MVI   a,SEG_O   
+8410   32 FE FF               STA   DISPLAY_BASE + 6   
+8413   3E 55                  MVI   a,SEG_M   
+8415   32 FF FF               STA   DISPLAY_BASE + 7   
+8418                             ; --- ROM バンクを明示的に選択 ---
+8418                             ; モニタの KEY ルーチンが bit3=1 にしている可能性があるため
+8418   3E F0                  MVI   a,0F0h   
+841A   D3 9C                  OUT   PORT_9C   
+841C                             ; --- 128 ページ (32KB) クローン ---
+841C   06 00                  MVI   b,0   ; ページ番号 (0-127)
+841E                CLONE_PAGE:      
+841E                             ; (1) ROM バンク選択 (bit3=0)
+841E   3E F0                  MVI   a,0F0h   
+8420   D3 9C                  OUT   PORT_9C   
+8422                             ; (2) ROM → バッファにコピー (256B)
+8422   60                     MOV   h,b   
+8423   2E 00                  MVI   l,0   ; HL = page × 256 (ソース)
+8425   11 00 EF               LXI   d,CLONE_BUF   ; DE = バッファ
+8428   0E 00                  MVI   c,0   ; 256 回
+842A                CLONE_READ:      
+842A   7E                     MOV   a,m   
+842B   12                     STAX   d   
+842C   23                     INX   h   
+842D   13                     INX   d   
+842E   0D                     DCR   c   
+842F   C2 2A 84               JNZ   clone_read   
+8432                             ; (3) 拡張 RAM バンク選択 (bit3=1)
+8432   3E F8                  MVI   a,0F8h   
+8434   D3 9C                  OUT   PORT_9C   
+8436                             ; (4) バッファ → 拡張 RAM にコピー (256B)
+8436   60                     MOV   h,b   
+8437   2E 00                  MVI   l,0   ; HL = page × 256 (デスト)
+8439   11 00 EF               LXI   d,CLONE_BUF   ; DE = バッファ
+843C   0E 00                  MVI   c,0   
+843E                CLONE_WRITE:      
+843E   1A                     LDAX   d   
+843F   77                     MOV   m,a   
+8440   23                     INX   h   
+8441   13                     INX   d   
+8442   0D                     DCR   c   
+8443   C2 3E 84               JNZ   clone_write   
+8446   04                     INR   b   
+8447   78                     MOV   a,b   
+8448   FE 80                  CPI   080h   ; 128 ページ完了?
+844A   C2 1E 84               JNZ   clone_page   
+844D                             ; bit3=1 のまま (拡張 RAM 選択を維持)
+844D                             ; リモートモードに復帰
+844D   C3 21 08               JMP   REMOTE_ENTRY   
+8450                             ; --- 表示バッファクリア ---
+8450                CLEAR_DISPLAY:      
+8450   21 F8 FF               LXI   h,DISPLAY_BASE   
+8453   0E 08                  MVI   c,DISPLAY_SIZE   
+8455                CLEAR_LOOP:      
+8455   36 00                  MVI   m,0   
+8457   23                     INX   h   
+8458   0D                     DCR   c   
+8459   C2 55 84               JNZ   clear_loop   
+845C   C9                     RET      
+845D                          END      
+
+
+PORT_9C:            009C DEFINED AT LINE 13
+                    > USED AT LINE 43
+                    > USED AT LINE 50
+                    > USED AT LINE 67
+DISPLAY_BASE:       FFF8 DEFINED AT LINE 14
+                    > USED AT LINE 34
+                    > USED AT LINE 36
+                    > USED AT LINE 38
+                    > USED AT LINE 93
+DISPLAY_SIZE:       0008 DEFINED AT LINE 15
+                    > USED AT LINE 94
+CLONE_BUF:          EF00 DEFINED AT LINE 16
+                    > USED AT LINE 55
+                    > USED AT LINE 72
+REMOTE_ENTRY:       0821 DEFINED AT LINE 17
+                    > USED AT LINE 89
+STACK_ADDR:         F000 DEFINED AT LINE 18
+                    > USED AT LINE 29
+SEG_R:              0050 DEFINED AT LINE 21
+                    > USED AT LINE 33
+SEG_O:              005C DEFINED AT LINE 22
+                    > USED AT LINE 35
+SEG_M:              0055 DEFINED AT LINE 23
+                    > USED AT LINE 37
+INIT_START:         8403 DEFINED AT LINE 28
+                    > USED AT LINE 26
+CLONE_PAGE:         841E DEFINED AT LINE 47
+                    > USED AT LINE 85
+CLONE_READ:         842A DEFINED AT LINE 57
+                    > USED AT LINE 63
+CLONE_WRITE:        843E DEFINED AT LINE 74
+                    > USED AT LINE 80
+CLEAR_DISPLAY:      8450 DEFINED AT LINE 92
+                    > USED AT LINE 32
+CLEAR_LOOP:         8455 DEFINED AT LINE 95
+                    > USED AT LINE 99

@@ -221,6 +221,11 @@ module FaRuby
     METHOD_RAND    = 33   # rand(n): 0〜n-1 の擬似乱数を返す
     METHOD_SLICE   = 34   # [](offset, length): 文字列スライス
 
+    # --- バンク切り替え (ND8080 拡張 RAM) ---
+    PORT_9C          = 0x9C    # I/O ポート 9C
+    PORT_9C_BANK_BIT = 0x08    # bit 3: 0=ROM, 1=拡張RAM
+    CLONE_BUF        = 0xEF00  # ROM クローン用 256B バッファ
+
     # ND80Z モニタ ROM ルーチン
     KEYIN1_ADDR = 0x0616  # キー入力待ち (ブロッキング)
     KEY_ADDR    = 0x0647  # キー 1 回スキャン (ノンブロッキング, A=FF:なし)

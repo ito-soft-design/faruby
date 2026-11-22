@@ -135,6 +135,11 @@ METHOD_PUSH              EQU  16h  ; push (配列追加)
 KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
 KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
 
+; バンク切り替え (ND8080 拡張 RAM)
+PORT_9C                  EQU  9Ch  ; I/O ポート 9C
+PORT_9C_BANK_BIT         EQU  08h  ; bit3: ROM/RAM 切替
+CLONE_BUF                EQU  0EF00h  ; ROM クローン用バッファ
+
 ; --- オブジェクトプール ---
 
 OBJECT_POOL_BASE         EQU  0B1E0h

@@ -12,6 +12,70 @@ require_relative "i8080_memory_layout"
 require_relative "vm_constants"
 
 module FaRuby
+  # ND8080 バンク切り替え対応メモリマネージャ
+  #
+  # I/O ポート 0x9C の bit 3 で ROM (0x0000-0x7FFF) と
+  # 拡張 RAM を切り替える。0x8000-0xFFFF は常に通常 RAM。
+  class BankedMemory
+    attr_accessor :bank_bit
+
+    def initialize
+      @rom           = [0] * 0x8000  # 0x0000-0x7FFF ROM
+      @expansion_ram = [0] * 0x8000  # 0x0000-0x7FFF 拡張 RAM
+      @ram           = [0] * 0x8000  # 0x8000-0xFFFF 通常 RAM
+      @bank_bit = false              # false=ROM, true=拡張RAM
+    end
+
+    def [](addr)
+      addr &= 0xFFFF
+      if addr < 0x8000
+        @bank_bit ? @expansion_ram[addr] : @rom[addr]
+      else
+        @ram[addr - 0x8000]
+      end
+    end
+
+    def []=(addr, val)
+      addr &= 0xFFFF
+      if addr < 0x8000
+        @expansion_ram[addr] = val if @bank_bit
+        # ROM バンク選択時: 書き込みは無視 (実機と同じ)
+      else
+        @ram[addr - 0x8000] = val
+      end
+    end
+
+    # ROM への直接書き込み (hex ローダー / テスト用)
+    def load_rom(addr, val)
+      @rom[addr] = val if addr >= 0 && addr < 0x8000
+    end
+  end
+
+  # ND8080 I/O デリゲート (ポート 0x9C でバンク切り替え)
+  class ND8080IoDelegate
+    attr_reader :values
+
+    def initialize(memory)
+      @memory = memory
+      @values = {}
+    end
+
+    def in(port)
+      @values[port] || 0
+    end
+
+    def out(port, data)
+      @values[port] = data
+      if port == I8080MemoryLayout::PORT_9C
+        @memory.bank_bit = (data & I8080MemoryLayout::PORT_9C_BANK_BIT) != 0
+      end
+    end
+
+    def reset
+      @values = {}
+    end
+  end
+
   class I8080Board
     include VmConstants
 
@@ -22,9 +86,16 @@ module FaRuby
       File.expand_path("../../r8080/lib", __dir__)
     }
 
-    def initialize
+    def initialize(banked: false)
       load_r8080
-      @cpu = I8080.new
+      @banked = banked
+      if banked
+        @memory = BankedMemory.new
+        @io_delegate = ND8080IoDelegate.new(@memory)
+        @cpu = I8080.new(memory_manager: @memory, io_delegate: @io_delegate)
+      else
+        @cpu = I8080.new
+      end
       @halted = false
     end
 
@@ -56,6 +127,17 @@ module FaRuby
     # 32 ビット値を読む (リトルエンディアン)
     def read_u32(addr)
       read_u16(addr) | (read_u16(addr + 2) << 16)
+    end
+
+    # ROM バンクにデータを直接書き込む (banked モード専用)
+    def load_rom_data(addr, bytes)
+      raise "not in banked mode" unless @banked
+      bytes.each_with_index { |b, i| @memory.load_rom(addr + i, b) }
+    end
+
+    # バンク切り替え状態へのアクセサ
+    def bank_bit
+      @banked ? @memory.bank_bit : nil
     end
 
     # CPU をリセットして実行する

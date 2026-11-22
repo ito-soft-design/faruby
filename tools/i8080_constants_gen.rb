@@ -278,6 +278,11 @@ module FaRuby
       lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力 (ブロッキング)")
       lines << equ("KEY_ADDR",              layout::KEY_ADDR,              width: 4, comment: "ND80Z キー 1 回スキャン (ノンブロッキング)")
       lines << ""
+      lines << "; バンク切り替え (ND8080 拡張 RAM)"
+      lines << equ("PORT_9C",          layout::PORT_9C,          comment: "I/O ポート 9C")
+      lines << equ("PORT_9C_BANK_BIT", layout::PORT_9C_BANK_BIT, comment: "bit3: ROM/RAM 切替")
+      lines << equ("CLONE_BUF",        layout::CLONE_BUF,        width: 4, comment: "ROM クローン用バッファ")
+      lines << ""
       lines
     end
 

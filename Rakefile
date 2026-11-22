@@ -275,6 +275,8 @@ namespace :i8080 do
     mrb&.unlink
   end
 
+  bank_init_hex = File.expand_path("plc/i8080/r8080/bank_init.hex", __dir__)
+
   desc "Upload combined HEX to ND8080 via USB"
   task :upload do
     src = ENV["SRC"]
@@ -285,6 +287,7 @@ namespace :i8080 do
     require "tempfile"
     require_relative "tools/i8080_bytecode_hex"
     require_relative "tools/intel_hex"
+    require_relative "tools/nd8080_hid"
 
     # mrbc でコンパイル
     mrb = Tempfile.new(["faruby", ".mrb"])
@@ -296,32 +299,67 @@ namespace :i8080 do
     hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
     hex_text = hex_gen.generate_hex(vm_hex_path: vm_hex)
 
-    # Intel HEX → メモリイメージ → BTK ファイル群
+    # Intel HEX → メモリイメージ → BTK データ群
     mem = FaRuby::IntelHex.parse(hex_text)
     btks = FaRuby::IntelHex.to_nd8080_btks(mem)
 
-    btk_files = []
-    btks.each_with_index do |(s, e, btk_data), i|
-      f = Tempfile.new(["nd8080_#{i}", ".btk"])
-      f.binmode
-      f.write(btk_data)
-      f.close
-      btk_files << f
+    btks.each_with_index do |(s, e, _), i|
       puts format("領域 %d: %04X-%04X (%d バイト)", i, s, e, e - s + 1)
     end
 
-    # nd8080.rb で書き込み
-    btk_files.each_with_index do |f, i|
-      puts "書き込み中 (領域 #{i})..."
-      sh "ruby #{nd8080_rb} load #{f.path} --verify"
+    # ND8080 に接続
+    r = ND8080::Remote.new
+    r.on_text = nil
+    r.connect
+    puts "ND8080 に接続しました"
+
+    # --- バンク状態チェック ---
+    # 0x0000 に書き込んで読み戻し、成功したら RAM モード
+    original = r.save(0x0000, 0x0000)
+    original_byte = original.getbyte(4)
+    test_byte = (original_byte == 0xAA) ? 0x55 : 0xAA
+    poke_btk = [0x0000, 0x0000].pack("nn") + [test_byte].pack("C")
+    r.load(poke_btk)
+    readback = r.save(0x0000, 0x0000)
+    readback_byte = readback.getbyte(4)
+
+    if readback_byte == test_byte
+      # 書き込み成功 → RAM モード (拡張 RAM 選択済み)
+      restore_btk = [0x0000, 0x0000].pack("nn") + [original_byte].pack("C")
+      r.load(restore_btk)
+      puts "RAM モード (拡張 RAM 選択済み)"
+    else
+      # 書き込み失敗 → ROM モード → 初期化プログラムを実行
+      puts "ROM モード → 初期化プログラムを実行します..."
+      bank_hex_text = File.read(bank_init_hex)
+      bank_mem = FaRuby::IntelHex.parse(bank_hex_text)
+      bank_btks = FaRuby::IntelHex.to_nd8080_btks(bank_mem)
+      bank_btks.each { |_, _, btk_data| r.load(btk_data) }
+      r.run(0x8400)
+      r.wait_ready(10)
+      puts "初期化完了 (ROM → 拡張 RAM クローン済み)"
     end
 
+    # --- VM hex を書き込み ---
+    btks.each_with_index do |(s, e, btk_data), i|
+      puts format("書き込み中 (領域 %d: %04X-%04X)...", i, s, e)
+      r.load(btk_data)
+      back = r.save(s, e)
+      if back == btk_data
+        puts "  照合OK"
+      else
+        diff = (4...btk_data.bytesize).find { |j| back.getbyte(j) != btk_data.getbyte(j) }
+        abort format("  照合NG: %04X 番地 書込=%02X 読出=%02X",
+                      s + diff - 4, btk_data.getbyte(diff), back.getbyte(diff))
+      end
+    end
+
+    r.close
     puts ""
     puts "書き込み完了。実行するには:"
     puts "  ruby #{nd8080_rb} run 8400"
   ensure
     mrb&.unlink
-    btk_files&.each(&:unlink)
   end
 
   desc "Run program on ND8080 hardware"

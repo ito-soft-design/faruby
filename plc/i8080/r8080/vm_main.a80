@@ -433,6 +433,11 @@ vm_start:
   ; スタックポインタを設定
   lxi sp, STACK_TOP + 1
 
+  ; 拡張 RAM バンクに切り替え (ND8080 拡張 RAM 搭載時)
+  ; bank_init でクローン済みの拡張 RAM を参照する。非搭載時は影響なし。
+  mvi a, 0F8h
+  out PORT_9C
+
   ; VM 状態領域をゼロクリア (256 バイト)
   lxi h, VM_STATE_BASE
   mvi c, 0              ; 256 回 (0 は 256 として扱う)
