@@ -251,19 +251,16 @@ namespace :i8080 do
     end
   end
 
-  # **asm80 のコマンドを直に呼びません。**
+  # **asm80 は新しいものを入れてください** (`npm install -g asm80@latest`)。
   #
-  # npm で入れた asm80 (0.9.3) には 2 つ困るところがあります。
-  #
-  #   1. `bin` の指定が無いので `npm install -g` でもコマンドができません
-  #   2. CLI が `.include` の読み取り関数を登録しないため、取り込みのある
-  #      ファイルは `fileGet is not a function` で落ちます
-  #
-  # tools/asm80_build.js が本体と同じ手順を踏み、取り込みだけ自分で繋ぎます。
-  # asm80 の置き場は ASM80_PATH で指せます。
+  # `npm install -g asm80` だと **0.9.3 が入ります** — 新しい版の
+  # `engines` が `npm: '1'` を要求していて、今の npm が外れるため、
+  # npm が条件に合う古い版を選びます。0.9.3 は `bin` を持たないので
+  # コマンドができず、`.include` も扱えません (doc/nd8080-guide.md)。
   desc "Assemble the i8080 VM (vm_main.a80 → vm_main.hex)"
   task :asm do
-    sh "#{ENV.fetch('NODE', 'node')} tools/asm80_build.js #{vm_main}"
+    sh "asm80 -m I8080 #{vm_main}"
+    puts "アセンブル完了: #{vm_hex}"
   end
 
   desc "Build the i8080 VM (constants + assemble)"

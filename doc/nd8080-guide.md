@@ -17,7 +17,7 @@ faRuby の i8080 バックエンドを中日電工 ND8080 ボードで動かす�
 
 ```bash
 # asm80 (Node 製。npm が要ります)
-npm install -g asm80          # https://github.com/asm80/asm80-node
+npm install -g asm80@latest   # https://github.com/asm80/asm80-node
 
 # r8080 (隣に置くか R8080_PATH で指す)
 git clone https://github.com/katsuyoshi/r8080.git ../r8080
@@ -28,23 +28,23 @@ git clone https://github.com/katsuyoshi/r8080.git ../r8080
 `vm_main.hex` はコミットされているので、アセンブラの無い環境では
 **古いバイナリでテストが通ってしまいます。**
 
-### asm80 (npm 版 0.9.3) の落とし穴 3 つ
+### asm80 は `@latest` で入れること
 
-**1. `npm install -g` してもコマンドはできません。** パッケージに `bin` の
-指定が無いためです。`rake i8080:asm` は `asm80` を呼ばず、
-`node tools/asm80_build.js` を使います。置き場は `ASM80_PATH` で指せます。
+**`npm install -g asm80` では 0.9.3 が入ります。** 新しい版の `engines` が
+`npm: '1'` を要求していて今の npm が外れるため、**npm が条件に合う古い版を
+選びます。** `@latest` を付けると警告 (`EBADENGINE`) を出しつつ 1.11.14 が
+入ります。
 
-**2. CLI は `.include` を扱えません。** 取り込みには `ASM.fileGet()` で
-読み取り関数を登録する必要があるのに、`asm80.js` が登録しないので
-`fileGet is not a function` で落ちます。しかも**エラー表示の側も**
-`e.s.numline` を読もうとして落ちるため、何行目かも出ません。
-`tools/asm80_build.js` が本体と同じ手順を踏み、取り込みだけ繋いでいます。
+0.9.3 を引くと、**faRuby とは関係のないところで 2 回つまずきます。**
 
-**3. コメントの中でも `.` で始まる語は指示として読まれます。** 前処理が
-行のどこにあっても `/\s*(\.[^\s]+)(.*)/` で拾うので、コメントに
-`.include` と書くと存在しないファイルを探して止まります
-(`; サブルーチン群 (.include で取り込む)` で実際に止まりました)。
-**`.` 付きの語をコメントに書かないでください。**
+| | 0.9.3 | 1.11.14 |
+|---|---|---|
+| `bin` の指定 | **無い** (コマンドができない) | ある |
+| `.include` | **`fileGet is not a function` で落ちる** | 通る |
+| エラー表示 | `e.s.numline` を読んで**表示自体が落ちる** (行番号が出ない) | — |
+
+**1 つめは「コマンドが無い」、2 つめは「あっても取り込みが通らない」**なので、
+シムを自分で作っても進めません。バージョンを上げるのが唯一の道です。
 
 ## クイックスタート
 
