@@ -1435,7 +1435,7 @@ module FaRuby
     # **レジスタは窓ではなく全部見ます。** 窓の外に残っている外側のフレームの
     # 値も、戻ったときに使うので生きています。
     def gc_mark_roots
-      note "ルート — レジスタ全 #{layout.max_regs} 個と汎用グローバル #{layout.max_globals} 個"
+      note "ルート。レジスタ全 #{layout.max_regs} 個と汎用グローバル #{layout.max_globals} 個"
       note "**窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている"
       line "FOR #{gc_slot} = 0 TO #{layout.max_regs + layout.max_globals - 1}"
       indent
@@ -1466,7 +1466,7 @@ module FaRuby
         if_("#{gc_tag} <= #{TT_OBJECT}") do
           chain_head(true, "#{gc_tag} = #{TT_HASH}")
           indent
-          note "鍵と値で 2 本。**どちらも配列として印を付ける** —"
+          note "鍵と値で 2 本。**どちらも配列として印を付ける。**"
           note "中身が値スロットの並びで、読み方はふつうの配列と同じ"
           gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), TT_ARRAY)
           gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET + 1), TT_ARRAY)
@@ -1988,14 +1988,14 @@ module FaRuby
     # スロットの +1 と +2 に番号を別々に持っているので、離れていても変わり
     # ません (doc/gc.md)。
     def new_hash(name, count_name, error_code)
-      note "ハッシュは配列 2 本。**別々に取る** — 回収が返すスロットは連続しない"
+      note "ハッシュは配列 2 本。**別々に取る。** 回収が返すスロットは連続しない"
       alloc_check(error_code)
       if_("#{operand(count_name)} > #{layout.max_array_len}") do
         note "1 スロットの容量を超える組の数"
         vm_error(error_code)
       end
 
-      note "鍵の配列の見出し。**要素数は 0 にしておく** —"
+      note "鍵の配列の見出し。**要素数は 0 にしておく。**"
       note "まだ中身を写していないので、回収に要素を見せない"
       alloc_header_into(2)
       line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = 0"

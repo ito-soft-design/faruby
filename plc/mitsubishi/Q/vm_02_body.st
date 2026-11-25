@@ -732,7 +732,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             D1Z6 := 0;
             D2Z6 := 0;
           END_FOR;
-          (* ルート — レジスタ全 80 個と汎用グローバル 300 個 *)
+          (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
           (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
           FOR VMW3672 := 0 TO 379 DO
             IF VMW3672 < 80 THEN
@@ -744,7 +744,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             IF VMW3674 >= 7 THEN
               IF VMW3674 <= 10 THEN
                 IF VMW3674 = 9 THEN
-                  (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                   (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                   Z6 := (D1Z7) * 52 + 6008;
                   IF D1Z6 = 0 THEN
@@ -824,7 +824,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                           IF VMW3674 >= 7 THEN
                             IF VMW3674 <= 10 THEN
                               IF VMW3674 = 9 THEN
-                                (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                                 (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                                 Z6 := (D1Z7) * 52 + 6008;
                                 IF D1Z6 = 0 THEN
@@ -2586,7 +2586,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 D1Z6 := 0;
                 D2Z6 := 0;
               END_FOR;
-              (* ルート — レジスタ全 80 個と汎用グローバル 300 個 *)
+              (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
               (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
               FOR VMW3672 := 0 TO 379 DO
                 IF VMW3672 < 80 THEN
@@ -2598,7 +2598,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 IF VMW3674 >= 7 THEN
                   IF VMW3674 <= 10 THEN
                     IF VMW3674 = 9 THEN
-                      (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                       (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                       Z6 := (D1Z7) * 52 + 6008;
                       IF D1Z6 = 0 THEN
@@ -2678,7 +2678,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                               IF VMW3674 >= 7 THEN
                                 IF VMW3674 <= 10 THEN
                                   IF VMW3674 = 9 THEN
-                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                                     (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                                     Z6 := (D1Z7) * 52 + 6008;
                                     IF D1Z6 = 0 THEN
@@ -3057,7 +3057,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               D1Z6 := 0;
               D2Z6 := 0;
             END_FOR;
-            (* ルート — レジスタ全 80 個と汎用グローバル 300 個 *)
+            (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
             (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
             FOR VMW3672 := 0 TO 379 DO
               IF VMW3672 < 80 THEN
@@ -3069,7 +3069,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               IF VMW3674 >= 7 THEN
                 IF VMW3674 <= 10 THEN
                   IF VMW3674 = 9 THEN
-                    (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                     (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                     Z6 := (D1Z7) * 52 + 6008;
                     IF D1Z6 = 0 THEN
@@ -3149,7 +3149,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                             IF VMW3674 >= 7 THEN
                               IF VMW3674 <= 10 THEN
                                 IF VMW3674 = 9 THEN
-                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                                   (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                                   Z6 := (D1Z7) * 52 + 6008;
                                   IF D1Z6 = 0 THEN
@@ -3867,7 +3867,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 D1Z6 := 0;
                 D2Z6 := 0;
               END_FOR;
-              (* ルート — レジスタ全 80 個と汎用グローバル 300 個 *)
+              (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
               (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
               FOR VMW3672 := 0 TO 379 DO
                 IF VMW3672 < 80 THEN
@@ -3879,7 +3879,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 IF VMW3674 >= 7 THEN
                   IF VMW3674 <= 10 THEN
                     IF VMW3674 = 9 THEN
-                      (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                       (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                       Z6 := (D1Z7) * 52 + 6008;
                       IF D1Z6 = 0 THEN
@@ -3959,7 +3959,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                               IF VMW3674 >= 7 THEN
                                 IF VMW3674 <= 10 THEN
                                   IF VMW3674 = 9 THEN
-                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける** — *)
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
                                     (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
                                     Z6 := (D1Z7) * 52 + 6008;
                                     IF D1Z6 = 0 THEN

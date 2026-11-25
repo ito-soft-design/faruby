@@ -261,6 +261,34 @@ class TestKvsGenerator < Minitest::Test
                  "通してください (doc/gc.md):\n#{writes.join}"
   end
 
+  # === エンジニアリングツールの文字集合 ===
+  #
+  # **生成物は windows-31j に収まる文字だけで書きます。** KV Studio の
+  # ニーモニック書き出しがこの文字集合なので、入らない文字は `?` になって
+  # 戻ります。すると `rake transfer` が毎回「違い」と言い、**取り込み漏れを
+  # 見つける役に立たなくなります。**
+  #
+  # 実際に em ダッシュ (U+2014) でそうなりました。Shift_JIS にあるのは
+  # U+2015 のほうで、見た目が似ているだけに気づきにくいところです。
+  # 直すのは簡単ですが、**気づけるかどうかが問題**なのでテストにします。
+  #
+  # **キーエンスだけです。** 三菱はニーモニックの照合が無く、GX Works の
+  # ラベル CSV は中国語・韓国語の見出しを持つ UTF-16 なので、同じ縛りを
+  # かけると見出しそのものが引っかかります。
+  def test_生成物は_windows31j_に収まる
+    %w[KV-5000 KV-X500].each do |model|
+      generator = FaRuby::KvsGenerator.new(dialect: FaRuby::Dialect.for(model))
+      generator.generate.each do |name, content|
+        content.each_line.with_index(1) do |line, number|
+          line.encode("windows-31j")
+        rescue Encoding::UndefinedConversionError => e
+          flunk "#{model} #{name}:#{number} に windows-31j へ入らない文字が " \
+                "あります (#{e.error_char.inspect}):\n  #{line}"
+        end
+      end
+    end
+  end
+
   # 生成されるコードの側。**9 箇所ぶん出ていることは変わりません**
   def test_上限検査は確保のたびに展開される
     checks = @source.scan(/#{Regexp.escape("#{emitter.state(layout.array_sp_addr)} >= #{layout.max_arrays}")}/)
