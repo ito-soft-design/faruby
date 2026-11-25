@@ -13,6 +13,21 @@ faRuby の i8080 バックエンドを中日電工 ND8080 ボードで動かす�
 | asm80 | i8080 アセンブラ (PATH に入っていること) |
 | r8080 | i8080 エミュレータ (環境変数 `R8080_PATH` またはリポジトリ隣) |
 
+**入手先:**
+
+```bash
+# asm80 (Node 製。npm が要ります)
+npm install -g asm80          # https://github.com/asm80/asm80-node
+
+# r8080 (隣に置くか R8080_PATH で指す)
+git clone https://github.com/katsuyoshi/r8080.git ../r8080
+```
+
+**この 2 つは別物です。** r8080 が無いと `rake test:i8080` が全部飛び、
+**asm80 が無いと `.a80` を直しても `.hex` に反映できません** —
+`vm_main.hex` はコミットされているので、アセンブラの無い環境では
+**古いバイナリでテストが通ってしまいます。**
+
 ## クイックスタート
 
 ```bash

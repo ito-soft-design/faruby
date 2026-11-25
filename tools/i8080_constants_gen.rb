@@ -211,6 +211,9 @@ module FaRuby
       lines << ""
       lines << equ("SYM_TABLE_BASE",       layout::SYM_TABLE_BASE,       width: 4)
       lines << equ("GLOBALS_BASE",         layout::GLOBALS_BASE,         width: 4)
+      # **数も出します。** 走査するところで `MAX_REGS` を「同じ 64 だから」と
+      # 流用していて、片方を変えたときに気づけませんでした
+      lines << equ("MAX_GLOBALS",          layout::MAX_GLOBALS,          comment: "グローバル変数の数")
       lines << ""
       lines << "; シンボル種別コード (上位バイト)"
       lines << equ("SYM_KIND_USER_METHOD", layout::SYM_KIND_USER_METHOD, comment: "ユーザー定義メソッド")

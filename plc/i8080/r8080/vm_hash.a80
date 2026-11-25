@@ -491,75 +491,93 @@ slice_length:    db 0
 slice_new_slot:  db 0
 
 ; ===============================================================
-; col_gc_alloc — 簡易 GC 付きコレクションスロット確保
+; col_gc_alloc — 到達性を辿る回収つきのスロット確保
 ;
 ; col_alloc がプール満杯 (col_sp >= MAX_COL_SLOTS) のとき呼ばれる。
-; レジスタファイル全体とグローバル変数をスキャンして参照ビットマップを構築し、
-; 未参照のスロットを見つけて再利用する。
 ;
-; スキャン対象:
-;   - レジスタファイル (64 スロット): TT_STRING / TT_ARRAY / TT_HASH
-;   - グローバル変数 (64 スロット): 同上
+; **ルートに印を付けるだけでは足りない。** 配列やハッシュの中が指す
+; スロットには印が付かず、`a = ["ab"]` の "ab" が生きたまま配られる。
+; PLC 版で同じ判断をして直した (doc/gc.md「ルートだけでは足りない」)。
 ;
-; 注意: 配列要素・Hash 値・インスタンス変数からの間接参照をスキャンしない。
-;       配列/Hash 自体は保持されるが、**その中が指すスロットは保持されない**。
-;       `a = ["ab"]` の "ab" は印が付かず、プールを使い切ると配られる。
-;       これは保守的ではなく、生きている値を壊す側の誤りである。
-;       PLC 版は到達性を辿って直した (doc/gc.md「i8080 へ戻すときの助言」)。
+; ルート:
+;   レジスタファイル    MAX_REGS 個の値スロット
+;   グローバル変数      MAX_GLOBALS 個の値スロット
+;   オブジェクトの ivar MAX_OBJECTS × MAX_IVARS 個の値スロット
+;
+; **オブジェクト自身には印を付けない。** 別のプールに居て回収の対象では
+; なく、印が要るのはその中が指す先だけ。使っていないオブジェクトスロットは
+; 起動時にゼロクリアされていて型 0 なので素通りする。
+;
+; 伝播:
+;   印が付いていてまだ走査していないスロットの中身を辿り、印が増えなく
+;   なるまで繰り返す。**文字列の中身はバイト列なので辿らない。**
 ;
 ;   出力: A = スロット番号, HL = スロットアドレス
-;   エラー: 全スロット使用中 → vm_error
+;   エラー: 全スロット生きている → vm_error
 ; ===============================================================
 col_gc_alloc:
-  ; 1. ビットマップクリア (64 スロット = 8 バイト)
+  ; 印と走査済みを消す (64 スロット = 8 バイト × 2 枚)
   xra a
   lxi h, gc_bitmap
-  mvi c, 8
+  mvi c, 16
 gc_clear_bm:
   mov m, a
   inx h
   dcr c
   jnz gc_clear_bm
 
-  ; 2. レジスタファイル全体をスキャン (64 スロット × 4B)
+  ; --- ルート: レジスタファイル ---
+  ; **窓ではなく全部。** 外側のフレームが持っている値も生きている
   lxi h, REG_FILE_BASE
   mvi b, MAX_REGS
-gc_scan_regs:
-  mov a, m              ; A = 型タグ
-  cpi TT_STRING
-  jz gc_mark_reg
-  cpi TT_ARRAY
-  jz gc_mark_reg
-  cpi TT_HASH
-  jz gc_mark_reg
-gc_next_reg:
+gc_root_reg:
+  call gc_mark_value
   inx h
   inx h
   inx h
-  inx h                 ; HL += SLOT_BYTES
+  inx h
   dcr b
-  jnz gc_scan_regs
+  jnz gc_root_reg
 
-  ; 3. グローバル変数をスキャン (64 スロット × 4B)
+  ; --- ルート: グローバル変数 ---
   lxi h, GLOBALS_BASE
-  mvi b, MAX_REGS       ; MAX_GLOBALS = MAX_REGS = 64
-gc_scan_globals:
-  mov a, m
-  cpi TT_STRING
-  jz gc_mark_global
-  cpi TT_ARRAY
-  jz gc_mark_global
-  cpi TT_HASH
-  jz gc_mark_global
-gc_next_global:
+  mvi b, MAX_GLOBALS
+gc_root_global:
+  call gc_mark_value
   inx h
   inx h
   inx h
   inx h
   dcr b
-  jnz gc_scan_globals
+  jnz gc_root_global
 
-  ; 4. 空きスロットを探す (B をカウンタに使う。gc_check_bit は B を破壊しない)
+  ; --- ルート: オブジェクトのインスタンス変数 ---
+  lxi h, OBJECT_POOL_BASE + OBJECT_HEADER_SIZE
+  mvi b, MAX_OBJECTS
+gc_root_obj:
+  push b
+  push h
+  mvi b, MAX_IVARS
+gc_root_ivar:
+  call gc_mark_value
+  inx h
+  inx h
+  inx h
+  inx h
+  dcr b
+  jnz gc_root_ivar
+  pop h
+  lxi d, OBJECT_SLOT_SIZE
+  dad d                 ; 次のオブジェクトの ivar 先頭
+  pop b
+  dcr b
+  jnz gc_root_obj
+
+  ; --- 到達性を伝播する ---
+  call gc_propagate
+
+  ; --- 印の付かなかったスロットを探す ---
+  ; B をカウンタに使う (gc_check_bit は B を壊さない)
   mvi b, 0
 gc_find_free:
   mov a, b              ; A = 検査対象スロット番号
@@ -573,105 +591,240 @@ gc_find_free:
 
 gc_found_free:
   mov a, b              ; A = 空きスロット番号 (B から復帰)
-  push psw              ; スロット番号を退避 (col_slot_addr が A を破壊する)
+  push psw              ; スロット番号を退避
   call col_slot_addr    ; HL = スロットアドレス
   pop psw               ; A = スロット番号を復帰
   ret
 
-; --- gc_mark_reg: レジスタの val_lo からスロットを参照マーク ---
-gc_mark_reg:
-  push h
+; ---------------------------------------------------------------
+; gc_propagate — 印が増えなくなるまで中身を辿る
+;
+; **印は増える一方なので必ず止まる。** 最悪 MAX_COL_SLOTS 周。
+; 1 周で 1 つも走査しなければ終わり。
+; ---------------------------------------------------------------
+gc_propagate:
+  xra a
+  sta gc_changed
+  mvi b, 0              ; B = スロット番号
+gc_prop_slot:
+  mov a, b
+  call gc_check_bit     ; 印が無ければ飛ばす
+  jz gc_prop_next
+  mov a, b
+  call gc_check_scanned ; 走査済みなら飛ばす
+  jnz gc_prop_next
+  mov a, b
+  call gc_set_scanned
+  mvi a, 1
+  sta gc_changed
+  mov a, b
   push b
-  inx h
-  inx h                 ; +2: val_lo
-  mov a, m              ; A = slot + 1
-  ora a
-  jz gc_mark_reg_done   ; val_lo = 0 → 無効
-  dcr a                 ; A = slot number
-  cpi MAX_COL_SLOTS
-  jnc gc_mark_reg_done  ; 範囲外
-  call gc_set_bit
-gc_mark_reg_done:
+  call gc_scan_slot
   pop b
-  pop h
-  jmp gc_next_reg
+gc_prop_next:
+  inr b
+  mov a, b
+  cpi MAX_COL_SLOTS
+  jc gc_prop_slot
+  lda gc_changed
+  ora a
+  jnz gc_propagate      ; 印が増えたのでもう 1 周
+  ret
 
-; --- gc_mark_global: グローバルの val_lo からスロットを参照マーク ---
-gc_mark_global:
-  push h
+; ---------------------------------------------------------------
+; gc_scan_slot — A = スロット番号。中身が指す先に印を付ける
+;
+; **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットとして
+; 読むと、前に入っていた文字列のバイトが型タグに見える。
+;
+; **要素数は容量で頭を打たせる。** 同じ理由で、見出しのバイトがでたらめ
+; でも隣のスロットまで歩かないようにする。
+; ---------------------------------------------------------------
+gc_scan_slot:
   push b
+  call col_slot_addr    ; HL = スロットアドレス (A は残る)
+  mov a, m              ; +0: 型
   inx h
-  inx h
-  mov a, m
+  mov b, m              ; +1: 要素数 / 組の数
+  inx h                 ; HL = データ先頭
+  cpi COL_TYPE_ARRAY
+  jz gc_scan_array
+  cpi COL_TYPE_HASH
+  jz gc_scan_hash
+  jmp gc_scan_done      ; 文字列と空きは辿らない
+gc_scan_array:
+  mov a, b
   ora a
-  jz gc_mark_gl_done
-  dcr a
-  cpi MAX_COL_SLOTS
-  jnc gc_mark_gl_done
-  call gc_set_bit
-gc_mark_gl_done:
+  jz gc_scan_done       ; 要素数 0
+  ; **即値に式を書かない。** アセンブラを持たない環境で直すことがあるので、
+  ; `+ 1` を足して 1 回で済ませるより、確実に通る形を選ぶ
+  cpi COL_MAX_ARRAY_ELEMS
+  jc gc_scan_aloop      ; 容量未満
+  jz gc_scan_aloop      ; ちょうど容量
+  mvi b, COL_MAX_ARRAY_ELEMS
+gc_scan_aloop:
+  call gc_mark_value
+  inx h
+  inx h
+  inx h
+  inx h
+  dcr b
+  jnz gc_scan_aloop
+  jmp gc_scan_done
+gc_scan_hash:
+  mov a, b
+  ora a
+  jz gc_scan_done       ; 組の数 0
+  cpi COL_MAX_HASH_PAIRS
+  jc gc_scan_hloop
+  jz gc_scan_hloop
+  mvi b, COL_MAX_HASH_PAIRS
+gc_scan_hloop:
+  call gc_mark_value    ; 鍵
+  inx h
+  inx h
+  inx h
+  inx h
+  call gc_mark_value    ; 値
+  inx h
+  inx h
+  inx h
+  inx h
+  dcr b
+  jnz gc_scan_hloop
+gc_scan_done:
   pop b
-  pop h
-  jmp gc_next_global
+  ret
 
-; --- gc_set_bit: A = slot (0-63) のビットを gc_bitmap に立てる ---
+; ---------------------------------------------------------------
+; gc_mark_value — HL = 値スロットのアドレス。指す先に印を付ける
+;
+; 印を持つのは文字列・配列・ハッシュだけ。**オブジェクトは別のプール**
+; なのでここでは何もしない (中身はルート走査で辿る)。
+;
+; **値は スロット + 1。** 0 は「無し」。
+; **上位バイトが 0 でないものと範囲外は捨てる。** 古いバイト列が型タグに
+; 見えたときに、8 バイトしかないビットマップの外を壊さないため。
+;
+;   HL / DE / BC は保たれる
+; ---------------------------------------------------------------
+gc_mark_value:
+  push h
+  push d
+  push b
+  mov a, m              ; A = 型タグ
+  cpi TT_STRING
+  jz gc_mv_ref
+  cpi TT_ARRAY
+  jz gc_mv_ref
+  cpi TT_HASH
+  jz gc_mv_ref
+  jmp gc_mv_done
+gc_mv_ref:
+  inx h
+  inx h
+  inx h
+  mov a, m              ; +3: val_hi
+  ora a
+  jnz gc_mv_done        ; 上位が 0 でなければスロット番号ではない
+  dcx h
+  mov a, m              ; +2: val_lo = スロット + 1
+  ora a
+  jz gc_mv_done         ; 0 = 無し
+  dcr a                 ; A = スロット番号
+  cpi MAX_COL_SLOTS
+  jnc gc_mv_done        ; 範囲外
+  call gc_set_bit
+gc_mv_done:
+  pop b
+  pop d
+  pop h
+  ret
+
+; ---------------------------------------------------------------
+; ビットの出し入れ
+;
+; **ビットマップが 2 枚あるので、場所の計算は 1 つにまとめる** — 片方だけ
+; 直して食い違うのを避けるため。
+;
+; gc_bit_ptr: A = スロット番号, DE = ビットマップの先頭
+;   → HL = バイトのアドレス, A = マスク (C と DE は壊れる)
+; ---------------------------------------------------------------
+gc_bit_ptr:
+  mov c, a              ; C = スロット番号
+  rrc
+  rrc
+  rrc
+  ani 07h               ; A = バイト位置 (slot >> 3)
+  mov l, a
+  mvi h, 0
+  dad d                 ; HL = 先頭 + バイト位置
+  push h
+  mov a, c
+  ani 07h               ; ビット位置 (slot & 7)
+  mov l, a
+  mvi h, 0
+  lxi d, gc_bit_table
+  dad d
+  mov a, m              ; A = ビットマスク
+  pop h                 ; HL = ビットマップのバイト
+  ret
+
+; --- gc_set_bit: A = slot (0-63) の印を立てる ---
 gc_set_bit:
   push h
   push d
-  mov c, a              ; C = slot
-  rrc
-  rrc
-  rrc
-  ani 07h               ; A = byte index (slot >> 3)
-  mov e, a
-  mvi d, 0
-  lxi h, gc_bitmap
-  dad d                 ; HL = &gc_bitmap[byte_index]
-  mov a, c
-  ani 07h               ; bit position (slot & 7)
-  mov e, a
-  mvi d, 0
-  push h                ; ビットマップバイトアドレス退避
-  lxi h, gc_bit_table
-  dad d
-  mov a, m              ; A = ビットマスク
-  pop h                 ; HL = ビットマップバイト
-  ora m                 ; ビットを立てる
+  lxi d, gc_bitmap
+  call gc_bit_ptr
+  ora m
   mov m, a
   pop d
   pop h
   ret
 
-; --- gc_check_bit: A = slot (0-63) のビットを検査 ---
+; --- gc_check_bit: A = slot の印を検査 ---
 ; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
 gc_check_bit:
   push h
   push d
-  mov c, a              ; C = slot
-  rrc
-  rrc
-  rrc
-  ani 07h               ; A = byte index (slot >> 3)
-  mov e, a
-  mvi d, 0
-  lxi h, gc_bitmap
-  dad d                 ; HL = &gc_bitmap[byte_index]
-  mov a, c
-  ani 07h               ; bit position (slot & 7)
-  mov e, a
-  mvi d, 0
-  push h
-  lxi h, gc_bit_table
-  dad d
-  mov a, m              ; A = ビットマスク
+  lxi d, gc_bitmap
+  call gc_bit_ptr
+  ana m                 ; Z=1 ならビットクリア
+  pop d                 ; POP はフラグを変えない
   pop h
-  ana m                 ; テスト (Z=1 ならビットクリア)
+  ret
+
+; --- gc_set_scanned: A = slot を走査済みにする ---
+gc_set_scanned:
+  push h
+  push d
+  lxi d, gc_scanned
+  call gc_bit_ptr
+  ora m
+  mov m, a
+  pop d
+  pop h
+  ret
+
+; --- gc_check_scanned: A = slot が走査済みか ---
+; 戻り: Z=1 → まだ、Z=0 → 済み
+gc_check_scanned:
+  push h
+  push d
+  lxi d, gc_scanned
+  call gc_bit_ptr
+  ana m
   pop d
   pop h
   ret
 
 ; --- GC データ ---
+;
+; **gc_bitmap と gc_scanned は隣に置くこと。** 消すときに 16 バイトまとめて
+; 回している
 gc_bitmap:  db 0, 0, 0, 0, 0, 0, 0, 0
+gc_scanned: db 0, 0, 0, 0, 0, 0, 0, 0
+gc_changed: db 0
 gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
 
 ; ===============================================================
