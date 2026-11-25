@@ -546,13 +546,31 @@ class TestArrays < Minitest::Test
     assert_equal HEAP_ERROR, error
   end
 
-  # ハッシュ 1 つが 2 スロット。奇数個目でも 2 つ空いていないと作れない
+  # ハッシュ 1 つが 2 スロット。1 つしか空いていないと作れない
+  #
+  # **埋めるのは別々のレジスタです。** 同じレジスタに作り続けると回収されて
+  # しまい、尽きた状態になりません。**2 本目は回収も通ります** — 1 本目を
+  # 守っている (GC_PINNED) ので、回収しても空きは見つかりません (doc/gc.md)
   def test_a_hash_needs_two_free_slots
-    fill = [ARRAY, 5, 0] * (layout.max_arrays - 1)
-    run_bytecode(fill + [HASH, 1, 0, STOP])
+    fill = (5..(layout.max_arrays + 3)).flat_map { |r| [ARRAY, r, 0] }
+    run_bytecode(fill + [HASH, 1, 0, STOP], nregs: layout.max_arrays + 8)
 
     assert_equal VM_ERROR, status
     assert_equal HEAP_ERROR, error
+  end
+
+  # **鍵と値の配列は離れていてよい。** 回収が返すスロットは連続しないので、
+  # 「ARRAY_SP と ARRAY_SP + 1」を前提にすると値の配列を読み違えます
+  def test_a_hash_works_when_its_two_slots_are_not_adjacent
+    # 全スロットを生きた配列で埋める (レジスタ 5 + k がスロット k になる)
+    fill = (5..(layout.max_arrays + 4)).flat_map { |r| [ARRAY, r, 0] }
+    # スロット 3 と 10 だけ捨てる。空きが離れた状態になる
+    drop = load(8, 0) + load(15, 0)
+    run_bytecode(fill + drop + build_hash([[10, 11], [20, 21]]) +
+                 load(2, 20) + [GETIDX, 1, STOP], nregs: layout.max_arrays + 8)
+
+    assert_equal VM_FINISHED, status
+    assert_equal 21, value_of(1), "値の配列を読み違えている (隣だと決め打ちしている?)"
   end
 
   # 鍵は型と値の両方で照合する。Ruby の Hash も eql? で引く

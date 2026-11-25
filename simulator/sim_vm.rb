@@ -430,6 +430,9 @@ module FaRuby
       end
       layout.max_regs.times { |i| mark_from_slot(layout.reg_slot_addr(i)) }
       layout.max_globals.times { |i| mark_from_slot(layout.general_global_slot_addr(i)) }
+      # 確保してレジスタへ書くまでのスロット。**まだどこからも届かない**
+      pinned = @em.read_u16(layout.gc_pinned_addr)
+      mark_slot(pinned - 1, TT_ARRAY) if pinned.positive?
       propagate_marks
       (0...layout.max_arrays).find { |slot| @em.read_u16(layout.slot_mark_addr(slot)).zero? }
     end
@@ -497,25 +500,46 @@ module FaRuby
     # スロット番号を入れる。専用のプールは作らない。
 
     # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
+    #
+    # **鍵の配列と値の配列を別々に取ります。** 回収が返すスロットは連続
+    # しないためです。読む側は値スロットの +1 と +2 に番号を別々に持って
+    # いるので、離れていても変わりません (doc/gc.md)。
     def new_hash(name, count_name, error_code)
-      keys = array_sp
       count = operand(count_name)
-      return vm_error(error_code) if keys + 1 >= layout.max_arrays
+      keys = allocate_slot
+      return vm_error(error_code) unless keys
       return vm_error(error_code) if count > layout.max_array_len
 
-      values = keys + 1
-      set_array_length(keys, count)
-      set_array_length(values, count)
+      # **要素数は 0 にしておく。** まだ中身が無いので回収に要素を見せない
+      set_array_length(keys, 0)
+      # **レジスタへ書くまで守る。** 2 本目の確保が回収を起こしたとき、
+      # 1 本目はまだどのレジスタからも届かない
+      @em.write_u16(layout.gc_pinned_addr, keys + 1)
+      commit_slot(keys)
+
+      values = allocate_slot
+      unless values
+        @em.write_u16(layout.gc_pinned_addr, 0)
+        return vm_error(error_code)
+      end
+
+      set_array_length(values, 0)
+      commit_slot(values)
       first = operand(name)
       count.times do |i|
         write_array_element(keys, i, read_reg_tag(first + i * 2), read_reg(first + i * 2))
         write_array_element(values, i, read_reg_tag(first + i * 2 + 1), read_reg(first + i * 2 + 1))
       end
 
+      # 写し終えたので要素数を入れる
+      set_array_length(keys, count)
+      set_array_length(values, count)
+
       @em.write_u16(reg_type_addr(operand(name)), TT_HASH)
       @em.write_u16(reg_addr(operand(name)), keys)
       @em.write_u16(reg_addr(operand(name)) + 1, values)
-      @em.write_u16(layout.array_sp_addr, values + 1)
+      # レジスタから届くようになったので守りを解く
+      @em.write_u16(layout.gc_pinned_addr, 0)
     end
 
     # 鍵の配列と値の配列のスロット番号

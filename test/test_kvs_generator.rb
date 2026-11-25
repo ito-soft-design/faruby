@@ -234,30 +234,29 @@ class TestKvsGenerator < Minitest::Test
   GENERATOR_SOURCE = File.read(File.expand_path("../tools/kvs_generator.rb", __dir__),
                                encoding: "utf-8")
 
-  # 4 つの内訳 — 増えたら確保かGCの外に検査が漏れた疑い
+  # 3 つの内訳 — 増えたら確保かGCの外に検査が漏れた疑い
   #
-  #   alloc_check       順に渡すぶんが尽きたか / 回収しても見つからなかったか
-  #   alloc_check_pair  ハッシュの 2 スロット
-  #   gc_find_free      まだ見つかっていないか
+  #   alloc_check   順に渡すぶんが尽きたか / 回収しても見つからなかったか
+  #   gc_find_free  まだ見つかっていないか
   def test_プールの上限検査は_alloc_と_gc_のヘルパーだけが書く
     checks = GENERATOR_SOURCE.lines.grep(/>= \#\{layout\.max_arrays\}/)
 
-    assert_equal 4, checks.size,
+    assert_equal 3, checks.size,
                  "上限の検査がヘルパーの外にあります。確保を増やすときは " \
                  "alloc_check を通してください (doc/gc.md):\n#{checks.join}"
   end
 
-  # **ARRAY_SP を書くのは 3 箇所だけです。**
+  # **ARRAY_SP を書くのは 2 箇所だけです。**
   #
-  #   alloc_commit  確保したので 1 つ進める
-  #   new_hash      2 本取るので 2 つ進める (回収を入れるとき 2 回確保に直す)
-  #   vm_init       読み込み時に 0 へ戻す
+  #   alloc_bump  順に渡したぶんだけ 1 つ進める
+  #   vm_init     読み込み時に 0 へ戻す
   #
+  # ハッシュも 2 回確保に直したので、`alloc_bump` を 2 回呼ぶだけになりました。
   # ここが増えると「誰がプールを進めたか」が追えなくなります。
   def test_ARRAY_SP_を進めるのは確保と初期化だけ
     writes = GENERATOR_SOURCE.lines.grep(/line "\#\{array_sp\} = /)
 
-    assert_equal 3, writes.size,
+    assert_equal 2, writes.size,
                  "ARRAY_SP を書く行が増えています。確保は alloc_commit を " \
                  "通してください (doc/gc.md):\n#{writes.join}"
   end

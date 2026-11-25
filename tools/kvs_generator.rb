@@ -1269,6 +1269,7 @@ module FaRuby
     def gc_saved_z6 = state(layout.gc_saved_z6_addr)
     def gc_saved_z7 = state(layout.gc_saved_z7_addr)
     def gc_changed  = state(layout.gc_changed_addr)
+    def gc_pinned   = state(layout.gc_pinned_addr)
     def gc_pass     = state(layout.gc_pass_addr)
     def gc_header   = state(layout.gc_header_addr)
     def gc_elem     = state(layout.gc_elem_addr)
@@ -1290,19 +1291,6 @@ module FaRuby
       end_block
     end
 
-    # 2 スロット続きで取れるか。z は検査に使うテンポラリ
-    #
-    # **ハッシュは鍵の配列と値の配列で 2 本使います。** ここは回収を通しません
-    # — 返ってくるスロットが連続しないためです。2 回取る形へ直すのは別の
-    # 段階で、それまでは尽きたら止まります (doc/gc.md)
-    def alloc_check_pair(z, error_code)
-      note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
-      note "**回収は通さない。** 返ってくるスロットが連続しない"
-      line "Z#{z} = #{array_sp} + 1"
-      if_("Z#{z} >= #{layout.max_arrays}") { vm_error(error_code) }
-      line "#{gc_found} = #{array_sp}"
-    end
-
     def alloc_header_into(z)
       line "Z#{z} = #{gc_found} * #{layout.array_slot_words} + " \
            "#{block_offset(layout.array_pool_base)}"
@@ -1315,6 +1303,15 @@ module FaRuby
       comment = offset.zero? ? "スロット番号" : "スロット番号 + #{offset}"
       line "#{slot.value} = #{gc_found}#{suffix}   ' #{comment}"
       line "#{slot.tag} = #{type_tag}"
+      alloc_bump
+    end
+
+    # **順に渡したぶんだけ ARRAY_SP を進めます。** 回収で返ってきたスロットは
+    # ARRAY_SP より手前なので動かしません。
+    #
+    # **1 つの命令で 2 つ取るときは 1 つめの直後に呼びます** (ハッシュ)。
+    # 進めないままだと 2 つめが同じスロットを受け取ります。
+    def alloc_bump
       note "順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない"
       if_("#{gc_found} = #{array_sp}") { line "#{array_sp} = #{array_sp} + 1" }
     end
@@ -1404,21 +1401,26 @@ module FaRuby
           if_("#{gc_tag} <> #{TT_STRING}") do
             if_else_block("#{gc_tag} = #{TT_OBJECT}") do
               note "インスタンス変数は容量いっぱい使う"
-              line "#{gc_limit} = #{layout.max_array_len - 1}"
+              line "#{gc_limit} = #{layout.max_array_len}"
             end
-            note "配列は要素数まで。**0 のとき引き算をしない** —"
-            note "符号なしなので 0 - 1 が 65535 になる"
+            note "配列は要素数まで"
             line "#{gc_limit} = #{word_at(6, MemoryLayout::ARRAY_LENGTH)}"
-            if_("#{gc_limit} > 0") { line "#{gc_limit} = #{gc_limit} - 1" }
             end_block
-            note "要素は値スロットの並び。ルートと同じ手で印を付ける"
-            line "FOR #{gc_elem} = 0 TO #{gc_limit}"
-            indent
-            line "Z7 = #{gc_header} + #{MemoryLayout::ARRAY_HEADER_WORDS} + " \
-                 "#{gc_elem} * #{SLOT_WORDS}"
-            gc_mark_from_slot
-            dedent
-            line "NEXT"
+            note "**要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと"
+            note "して読むと、前に入っていた文字列のバイト列が型タグに見え、"
+            note "プールの外へ印を書きに行くことがある"
+            note "符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける"
+            if_("#{gc_limit} > 0") do
+              line "#{gc_limit} = #{gc_limit} - 1"
+              note "要素は値スロットの並び。ルートと同じ手で印を付ける"
+              line "FOR #{gc_elem} = 0 TO #{gc_limit}"
+              indent
+              line "Z7 = #{gc_header} + #{MemoryLayout::ARRAY_HEADER_WORDS} + " \
+                   "#{gc_elem} * #{SLOT_WORDS}"
+              gc_mark_from_slot
+              dedent
+              line "NEXT"
+            end
           end
         end
       end
@@ -1446,6 +1448,12 @@ module FaRuby
       gc_mark_from_slot
       dedent
       line "NEXT"
+
+      note "確保してレジスタへ書くまでのスロット。**まだどこからも届かない**"
+      note "1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し"
+      if_("#{gc_pinned} > 0") do
+        gc_mark_slot("#{gc_pinned} - 1", TT_ARRAY)
+      end
     end
 
     # Z7 の値スロットが指しているスロットに印を付ける
@@ -1975,18 +1983,32 @@ module FaRuby
     # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
     #
     # 鍵と値が交互に並んでいるので、1 組ごとに 2 レジスタ進みます。
+    # **鍵の配列と値の配列を別々に取ります。** 回収が返すスロットは連続しない
+    # ので、「ARRAY_SP と ARRAY_SP + 1」を前提にはできません。読む側は値
+    # スロットの +1 と +2 に番号を別々に持っているので、離れていても変わり
+    # ません (doc/gc.md)。
     def new_hash(name, count_name, error_code)
-      alloc_check_pair(2, error_code)
+      note "ハッシュは配列 2 本。**別々に取る** — 回収が返すスロットは連続しない"
+      alloc_check(error_code)
       if_("#{operand(count_name)} > #{layout.max_array_len}") do
         note "1 スロットの容量を超える組の数"
         vm_error(error_code)
       end
 
-      note "鍵の配列と値の配列の見出し"
+      note "鍵の配列の見出し。**要素数は 0 にしておく** —"
+      note "まだ中身を写していないので、回収に要素を見せない"
       alloc_header_into(2)
-      line "Z3 = Z2 + #{layout.array_slot_words}"
-      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
-      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = 0"
+      note "**レジスタへ書くまで守る。** 2 本目の確保が回収を起こしたとき、"
+      note "1 本目はまだどのレジスタからも届かない"
+      line "#{gc_pinned} = #{gc_found} + 1"
+      alloc_bump
+
+      note "値の配列の見出し。ここでも回収が走り得る"
+      alloc_check(error_code)
+      alloc_header_into(3)
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = 0"
+      alloc_bump
 
       note "組を写す。組の数 0 (空ハッシュ) では引き算もしない"
       if_("#{operand(count_name)} > 0") do
@@ -2003,12 +2025,17 @@ module FaRuby
         line "NEXT"
       end
 
+      note "写し終えたので要素数を入れる"
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
+
       dest = reg_slot(name)
-      line "#{dest.word(0)} = #{array_sp}   ' 鍵の配列"
-      line "Z2 = #{array_sp} + 1"
-      line "#{dest.word(1)} = Z2   ' 値の配列"
+      note "鍵の配列の番号は守っていたところから戻す (スロット + 1)"
+      line "#{dest.word(0)} = #{gc_pinned} - 1   ' 鍵の配列"
+      line "#{dest.word(1)} = #{gc_found}   ' 値の配列"
       line "#{dest.tag} = #{TT_HASH}"
-      line "#{array_sp} = Z2 + 1"
+      note "レジスタから届くようになったので守りを解く"
+      line "#{gc_pinned} = 0"
     end
 
     # Z に載っている値スロットどうしを写す
