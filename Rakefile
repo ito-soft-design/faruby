@@ -251,6 +251,12 @@ namespace :i8080 do
     end
   end
 
+  # **asm80 は新しいものを入れてください** (`npm install -g asm80@latest`)。
+  #
+  # `npm install -g asm80` だと **0.9.3 が入ります** — 新しい版の
+  # `engines` が `npm: '1'` を要求していて、今の npm が外れるため、
+  # npm が条件に合う古い版を選びます。0.9.3 は `bin` を持たないので
+  # コマンドができず、`.include` も扱えません (doc/nd8080-guide.md)。
   desc "Assemble the i8080 VM (vm_main.a80 → vm_main.hex)"
   task :asm do
     sh "asm80 -m I8080 #{vm_main}"

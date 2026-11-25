@@ -84,6 +84,7 @@ VM_ERROR                 EQU  03h
 
 SYM_TABLE_BASE           EQU  8300h
 GLOBALS_BASE             EQU  9000h
+MAX_GLOBALS              EQU  40h  ; グローバル変数の数
 
 ; シンボル種別コード (上位バイト)
 SYM_KIND_USER_METHOD     EQU  01h  ; ユーザー定義メソッド

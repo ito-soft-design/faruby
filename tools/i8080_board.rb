@@ -140,6 +140,20 @@ module FaRuby
       @banked ? @memory.bank_bit : nil
     end
 
+    # STATUS を見にいく間隔 (命令数)
+    #
+    # **走り終わった後の待ちループを踏まないためです。** VM は `vm_loop` で
+    # STATUS が RUNNING でなくなると `vm_halt` へ抜けますが、そこは **LED の
+    # 表示を 3 秒見せるための空ループ**で、`8080` 命令にして **1,048,576 回**
+    # (4 × 65536 × 4 命令) 回ってからモニタへ飛びます。実機では要る待ちですが、
+    # エミュレータでは 1 本あたりその全部が丸損です (実測で 1 本 106 万命令の
+    # うち 98%)。**`vm_halt` は VM 状態を 1 ワードも書かない**ので、待たずに
+    # 切り上げても結果は変わりません。
+    #
+    # 毎命令ではなく間隔を空けて見ます。踏み越しても最大 64 命令で、
+    # 104 万と比べれば無視できます。
+    STATUS_POLL = 64
+
     # CPU をリセットして実行する
     #
     # max_steps: 最大命令数 (無限ループ防止)
@@ -149,6 +163,9 @@ module FaRuby
       @cpu.pc = Layout::VM_ENTRY_POINT
       @halted = false
       steps = 0
+      # **RUNNING を一度見るまでは STATUS で打ち切らない。** 起動直後は
+      # 初期化がゼロクリアを回しているところで、STATUS はまだ 0 です
+      running_seen = false
 
       while steps < max_steps
         old_pc = @cpu.pc
@@ -163,6 +180,17 @@ module FaRuby
         end
 
         steps += 1
+
+        next unless (steps % STATUS_POLL).zero?
+
+        if running_seen
+          unless vm_status == VM_RUNNING
+            @halted = true
+            break
+          end
+        elsif vm_status == VM_RUNNING
+          running_seen = true
+        end
       end
 
       return :timeout unless @halted

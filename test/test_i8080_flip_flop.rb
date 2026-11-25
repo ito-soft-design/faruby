@@ -316,14 +316,21 @@ class TestI8080FlipFlop < Minitest::Test
 
   private
 
+  # **Windows の置き場を忘れないこと。** ここに入れ忘れていたため、この
+  # ファイルの 23 本が Windows では黙って飛ばされていました (他のテストは
+  # 同じ mrbc で走っていたので、気づく手がかりがありませんでした)
   def find_mrbc
     candidates = [
       File.expand_path("../../mruby/build/host/bin/mrbc", __dir__),
       File.expand_path("../../mruby/build/host/bin/mrbc.exe", __dir__),
+      "C:/mruby-build/mruby/build/host/bin/mrbc.exe",
     ]
     found = candidates.find { |c| File.exist?(c) }
     return found if found
-    system("mrbc --version > /dev/null 2>&1") ? "mrbc" : nil
+
+    # PATH から探す。**`> /dev/null` は Windows で「パスが見つかりません」を
+    # 出すので使わない** (探索が失敗しただけなのに毎回出て紛らわしい)
+    system("mrbc", "--version", out: File::NULL, err: File::NULL) ? "mrbc" : nil
   end
 
   def run_ruby(source, max_steps: 2_000_000)
