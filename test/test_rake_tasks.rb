@@ -48,4 +48,32 @@ class TestRakeTasks < Minitest::Test
     assert_match(/ENV\["CONNECTION"\].*\?.*--connection/m, source,
                  "CONNECTION の有無で分けていません")
   end
+
+  # === テストの分け方 ===
+  #
+  # **PLC と i8080 は要るものが違います。** i8080 は r8080 エミュレータと
+  # vm_main.hex が要るので、PLC だけを触る環境では飛びます。分け方は
+  # ファイル名 (`test/test_i8080_*.rb`) です。
+
+  def test_rake_test_は_plc_と_i8080_の両方を走らせる
+    assert_match(/^task test: .*test:plc.*test:i8080/, RAKEFILE,
+                 "rake test がどちらか片方しか走らせていません")
+  end
+
+  # **どちらにも入らないファイルを作れないこと。** 名前で分けているので、
+  # i8080 を触るのに別の名前を付けると PLC 側に混ざり、r8080 が無い環境で
+  # 落ちます (飛ばされるのではなく落ちます)
+  def test_i8080_を触るテストは_test_i8080_で始まる
+    strays = Dir[File.join(FaRuby::Config::PROJECT_ROOT, "test", "test_*.rb")].reject do |path|
+      File.basename(path).start_with?("test_i8080_")
+    end.select do |path|
+      # **読み込んでいるものを見ます。** 名前が出てくるだけ (この検査自身の
+      # ように) では引っかけません
+      File.read(path, encoding: "utf-8").match?(/require_relative\s+["'][^"']*i8080_board/)
+    end
+
+    assert_empty strays.map { |p| File.basename(p) },
+                 "i8080 を触るテストは test_i8080_ で始めてください " \
+                 "(rake test:plc に混ざり、r8080 が無い環境で落ちます)"
+  end
 end

@@ -1,11 +1,48 @@
 require "rake/testtask"
 
-Rake::TestTask.new(:test) do |t|
-  t.libs << "tools"
-  t.libs << "simulator"
-  t.libs << "test"
-  t.test_files = FileList["test/test_*.rb"]
+# =========================================================================
+# テスト
+# =========================================================================
+#
+# **PLC と i8080 で分けます。** 要るものが違うためです。PLC 側は mrbc だけで
+# 動きますが、i8080 側は r8080 エミュレータ (隣のリポジトリか R8080_PATH) と
+# asm80 でアセンブルした vm_main.hex が要ります。
+#
+#   rake test         両方
+#   rake test:plc     キーエンス・三菱と、共通のところ
+#   rake test:i8080   i8080 バックエンド
+#
+# **分け方はファイル名です。** `test/test_i8080_*.rb` が i8080 側で、残りが
+# PLC 側。どちらにも入らないファイルができないよう test_rake_tasks.rb が
+# 見ています。
+I8080_TESTS = FileList["test/test_i8080_*.rb"]
+PLC_TESTS   = FileList["test/test_*.rb"].exclude(/test_i8080_/)
+
+def test_libs(task)
+  task.libs << "tools"
+  task.libs << "simulator"
+  task.libs << "test"
 end
+
+namespace :test do
+  # **見出しは Rake::TestTask が付けます** ("Run tests for plc")。ここで
+  # desc を書いても上書きされるので、代わりに後ろで足しています
+  Rake::TestTask.new(:plc) do |t|
+    test_libs(t)
+    t.test_files = PLC_TESTS
+  end
+
+  Rake::TestTask.new(:i8080) do |t|
+    test_libs(t)
+    t.test_files = I8080_TESTS
+  end
+end
+
+Rake::Task["test:plc"].add_description("Keyence and MELSEC, plus everything shared")
+Rake::Task["test:i8080"].add_description("Needs r8080 (R8080_PATH) and vm_main.hex")
+
+desc "Run every test (PLC and i8080)"
+task test: %w[test:plc test:i8080]
 
 desc "Start faRuby console (CONNECTION=name で接続先を選べる)"
 task :console do

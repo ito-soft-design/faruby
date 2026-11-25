@@ -25,6 +25,9 @@ class TestI8080Vm < Minitest::Test
     @mrbc = find_mrbc
     skip "mrbc not found" unless @mrbc
     skip "vm_main.hex not found" unless File.exist?(VM_HEX)
+    # **隣に r8080 が無い環境では飛ばします。** 上の 2 つと同じ扱いで、
+    # PLC だけを触る環境でも rake test:plc と rake test が通るように
+    skip "r8080 not found (R8080_PATH)" unless FaRuby::I8080Board.available?
   end
 
   # === 基本テスト ===

@@ -24,6 +24,7 @@ class TestI8080FlipFlop < Minitest::Test
     @mrbc = find_mrbc
     skip "mrbc not found" unless @mrbc
     skip "vm_main.hex not found" unless File.exist?(VM_HEX)
+    skip "r8080 not found (R8080_PATH)" unless FaRuby::I8080Board.available?
   end
 
   # ============================================================

@@ -417,11 +417,33 @@ module FaRuby
       end
     end
 
-    def load_r8080
+    # r8080 が読めるか
+    #
+    # **無いときはテストを飛ばします。** mrbc や vm_main.hex と同じ扱いで、
+    # PLC だけを触る環境でも `rake test` が通るようにするためです。隣に
+    # リポジトリが無い環境では、ここが false になって i8080 のテストが
+    # 飛びます (R8080_PATH で場所を指せます)。
+    #
+    # **実際に require して確かめます。** パスの有無を見るだけだと、
+    # gem で入れてある環境を取りこぼします。
+    def self.available?
+      return @available unless @available.nil?
+
+      @available = begin
+        load_r8080
+        true
+      rescue LoadError
+        false
+      end
+    end
+
+    def self.load_r8080
       $LOAD_PATH.unshift(R8080_LIB) unless $LOAD_PATH.include?(R8080_LIB)
       require "i8080"
       require "intel_hex"
     end
+
+    def load_r8080 = self.class.load_r8080
   end
 end
 
