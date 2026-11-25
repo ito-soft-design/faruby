@@ -224,6 +224,47 @@ class TestKvsGenerator < Minitest::Test
     assert_equal 0x15, getiv.enters
   end
 
+  # === 配列プールの確保 ===
+  #
+  # **確保は alloc_* ヘルパーだけが書きます。** 以前は 9 箇所が同じ 3 行を
+  # 持っていて、回収 (GC) を入れるなら 9 箇所に同じものを展開することに
+  # なっていました (doc/gc.md)。散らばり直すと気づけないので、生成器の
+  # ソースを見て 1 箇所に留まっていることを確かめます。
+
+  GENERATOR_SOURCE = File.read(File.expand_path("../tools/kvs_generator.rb", __dir__),
+                               encoding: "utf-8")
+
+  def test_プールの上限検査は_alloc_のヘルパーだけが書く
+    checks = GENERATOR_SOURCE.lines.grep(/>= \#\{layout\.max_arrays\}/)
+
+    assert_equal 2, checks.size,
+                 "上限の検査が alloc_check / alloc_check_pair の外にあります。" \
+                 "確保を増やすときはヘルパーを通してください (doc/gc.md)"
+  end
+
+  # **ARRAY_SP を書くのは 3 箇所だけです。**
+  #
+  #   alloc_commit  確保したので 1 つ進める
+  #   new_hash      2 本取るので 2 つ進める (回収を入れるとき 2 回確保に直す)
+  #   vm_init       読み込み時に 0 へ戻す
+  #
+  # ここが増えると「誰がプールを進めたか」が追えなくなります。
+  def test_ARRAY_SP_を進めるのは確保と初期化だけ
+    writes = GENERATOR_SOURCE.lines.grep(/line "\#\{array_sp\} = /)
+
+    assert_equal 3, writes.size,
+                 "ARRAY_SP を書く行が増えています。確保は alloc_commit を " \
+                 "通してください (doc/gc.md):\n#{writes.join}"
+  end
+
+  # 生成されるコードの側。**9 箇所ぶん出ていることは変わりません**
+  def test_上限検査は確保のたびに展開される
+    checks = @source.scan(/#{Regexp.escape("#{emitter.state(layout.array_sp_addr)} >= #{layout.max_arrays}")}/)
+
+    assert_operator checks.size, :>=, 8,
+                    "確保の場所で上限を見ていない。ヘルパーに寄せても展開は要る"
+  end
+
   # loop は上限が無い。**break でしか終わらない**
   def test_loop_skips_the_limit_check
     kind = emitter.frame_kind

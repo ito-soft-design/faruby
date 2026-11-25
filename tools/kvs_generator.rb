@@ -558,11 +558,9 @@ module FaRuby
         note "1 スロットに収まらない桁数"
         vm_error(heap_code)
       end
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      alloc_check(heap_code)
 
-      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(3)
       line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{str_temp}"
       note "ワード単位で写す。並びが同じなので詰め替えは要らない"
       line "#{str_limit} = #{str_temp} + 1"
@@ -602,9 +600,7 @@ module FaRuby
         devices.high_byte_of("Z7")
         line "#{word_at(4, 0)} = Z7 * 256"
       end
-      line "#{slot.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{slot.tag} = #{TT_STRING}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(slot, TT_STRING)
     end
 
     def store_reg_into_global(sym_operand, src)
@@ -952,15 +948,12 @@ module FaRuby
         note "そこまで文字が無い。範囲外は nil (Ruby と同じ)"
         set_slot_nil(ref)
       end
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
-      string_header_into(3, state(layout.array_sp_addr))
+      alloc_check(heap_code)
+      string_header_into(3, array_sp)
       line "#{scratch32} = 0   ' 新しいスロットは空から始める"
       line "#{scratch32_b} = #{str_found_end} - #{str_found}   ' その文字のバイト数"
       append_string_bytes(source_offset: str_found)
-      line "#{ref.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{ref.tag} = #{TT_STRING}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(ref, TT_STRING)
       end_block
       dedent
       line "END IF"
@@ -1036,7 +1029,7 @@ module FaRuby
     def reset_to_top_irep
       note "実行中の irep をトップレベル (0番) に戻す"
       line "#{state(layout.frame_sp_addr)} = 0      ' 呼び出しの深さ"
-      line "#{state(layout.array_sp_addr)} = 0      ' 配列プールの空き先頭"
+      line "#{array_sp} = 0      ' 配列プールの空き先頭"
       line "#{state(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
            "      ' レジスタ窓の先頭"
       line "#{state(layout.cur_irep_addr)} = 0"
@@ -1253,18 +1246,64 @@ module FaRuby
     # 実体は配列プールのスロットに置き、レジスタにはスロット番号だけを
     # 入れます。スロットは順に渡して返しません。使い切ったら止まります。
     #
+    # --- 配列プールの確保 ---
+    #
+    # **確保はこの 4 つを通します。** 以前は 9 箇所が同じ 3 行を書いていて、
+    # 回収 (GC) を入れるなら 9 箇所に同じものを展開することになっていました
+    # ([簡易 GC](../doc/gc.md))。
+    #
+    # いまは案 2 (順に渡して返さない) なので中身は変わりません。
+    #
+    #   alloc_check         空きがあるか。無ければ止まる
+    #   alloc_check_pair    2 つ要るとき (ハッシュ)
+    #   alloc_header_into   取るスロットの見出しのアドレスを Z に載せる
+    #   alloc_commit        スロット番号と型タグを入れ、ARRAY_SP を進める
+    #
+    # **使う Z は引数です。** 確保の場所ごとに空いている Z が違い、共通には
+    # できません。文字列の作業場所を VM 状態に置いてあるのと同じ事情です。
+
+    def array_sp = state(layout.array_sp_addr)
+
+    def alloc_check(error_code)
+      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
+      if_("#{array_sp} >= #{layout.max_arrays}") { vm_error(error_code) }
+    end
+
+    # 2 スロット続きで取れるか。z は検査に使うテンポラリ
+    #
+    # **ハッシュは鍵の配列と値の配列で 2 本使います。** 回収を入れると空きが
+    # 連続しなくなるので、そのときに 2 回取る形へ直します (doc/gc.md)
+    def alloc_check_pair(z, error_code)
+      note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
+      line "Z#{z} = #{array_sp} + 1"
+      if_("Z#{z} >= #{layout.max_arrays}") { vm_error(error_code) }
+    end
+
+    def alloc_header_into(z)
+      line "Z#{z} = #{array_sp} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+    end
+
+    # offset はスロット番号に足す数。**オブジェクトだけ +1 します** —
+    # 値 0 がトップレベルの self (main) なので、スロット 0 と区別が付きません
+    def alloc_commit(slot, type_tag, offset: 0)
+      suffix = offset.zero? ? "" : " + #{offset}"
+      comment = offset.zero? ? "スロット番号" : "スロット番号 + #{offset}"
+      line "#{slot.value} = #{array_sp}#{suffix}   ' #{comment}"
+      line "#{slot.tag} = #{type_tag}"
+      line "#{array_sp} = #{array_sp} + 1"
+    end
+
     # OP_ARRAY は dest と first が同じレジスタなので、**要素を写し終えて
     # から R[dest] を書きます。**
     def new_array(dest_name, first_name, count_name, error_code)
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      alloc_check(error_code)
       if_("#{operand(count_name)} > #{layout.max_array_len}") do
         note "1 スロットの容量を超える要素数"
         vm_error(error_code)
       end
       note "スロットの見出し"
-      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(2)
       line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
       note "要素を写す。要素数 0 (空配列) では引き算もしない"
       note "EM は16ビット符号なしのため、0 - 1 は 65535 になり得る"
@@ -1282,9 +1321,7 @@ module FaRuby
         line "NEXT"
       end
       dest = reg_slot(dest_name)
-      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{dest.tag} = #{TT_ARRAY}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_ARRAY)
     end
 
     # 既に Z に載っている先頭アドレスを値スロットとして扱う
@@ -1310,15 +1347,13 @@ module FaRuby
       note "文字列は値スロットに入らない。位置とバイト数だけが入っている"
       line "Z3 = #{src.word(0)}   ' 文字列領域の位置 (ワード)"
       line "Z4 = #{src.word(1)}   ' バイト数"
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(error_code) }
+      alloc_check(error_code)
       if_("Z4 > #{layout.max_string_bytes}") do
         note "1 スロットに収まらない (ホストでも見ているが念のため)"
         vm_error(error_code)
       end
       note "スロットの見出しはバイト数"
-      line "Z5 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(5)
       line "#{word_at(5, MemoryLayout::ARRAY_LENGTH)} = Z4"
       note "ワード単位で写す。並びが同じなので詰め替えは要らない"
       note "奇数バイトのときは最後のワードの下位バイトが 0 になる"
@@ -1334,9 +1369,7 @@ module FaRuby
         line "NEXT"
       end
       dest = reg_slot(name)
-      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{dest.tag} = #{TT_STRING}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_STRING)
     end
 
     # --- 文字列の中身を比べる ---
@@ -1579,8 +1612,7 @@ module FaRuby
 
     # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
     def add_strings(dest, rhs, heap_code)
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      alloc_check(heap_code)
       string_header_into(4, dest.value)
       line "#{scratch32} = #{word_at(4, MemoryLayout::ARRAY_LENGTH)}"
       string_header_into(5, rhs.value)
@@ -1590,8 +1622,7 @@ module FaRuby
       if_("Z6 > #{layout.max_string_bytes}") { vm_error(heap_code) }
 
       note "新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま"
-      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(3)
       line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{scratch32}"
       line "#{str_limit} = #{scratch32} + 1"
       line "#{str_limit} = #{str_limit} / 2"
@@ -1610,9 +1641,7 @@ module FaRuby
       line "Z4 = Z5"
       append_string_bytes
 
-      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{dest.tag} = #{TT_STRING}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_STRING)
     end
 
     # 配列をデバイスへ写す
@@ -1719,17 +1748,14 @@ module FaRuby
     #
     # 鍵と値が交互に並んでいるので、1 組ごとに 2 レジスタ進みます。
     def new_hash(name, count_name, error_code)
-      note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
-      line "Z2 = #{state(layout.array_sp_addr)} + 1"
-      if_("Z2 >= #{layout.max_arrays}") { vm_error(error_code) }
+      alloc_check_pair(2, error_code)
       if_("#{operand(count_name)} > #{layout.max_array_len}") do
         note "1 スロットの容量を超える組の数"
         vm_error(error_code)
       end
 
       note "鍵の配列と値の配列の見出し"
-      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(2)
       line "Z3 = Z2 + #{layout.array_slot_words}"
       line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
       line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = #{operand(count_name)}"
@@ -1750,11 +1776,11 @@ module FaRuby
       end
 
       dest = reg_slot(name)
-      line "#{dest.word(0)} = #{state(layout.array_sp_addr)}   ' 鍵の配列"
-      line "Z2 = #{state(layout.array_sp_addr)} + 1"
+      line "#{dest.word(0)} = #{array_sp}   ' 鍵の配列"
+      line "Z2 = #{array_sp} + 1"
       line "#{dest.word(1)} = Z2   ' 値の配列"
       line "#{dest.tag} = #{TT_HASH}"
-      line "#{state(layout.array_sp_addr)} = Z2 + 1"
+      line "#{array_sp} = Z2 + 1"
     end
 
     # Z に載っている値スロットどうしを写す
@@ -2647,10 +2673,8 @@ module FaRuby
       dest = reg_slot(name)
       note "クラス番号を控える。R[a] はオブジェクトで上書きする"
       line "Z8 = #{dest.word(0)}"
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
-      line "Z3 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-       "#{block_offset(layout.array_pool_base)}"
+      alloc_check(heap_code)
+      alloc_header_into(3)
       line "#{word_at(3, MemoryLayout::OBJECT_CLASS)} = Z8   ' クラス番号"
       note "インスタンス変数は未代入 (TT_EMPTY) から始める"
       line "Z4 = Z3 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
@@ -2661,9 +2685,7 @@ module FaRuby
       dedent
       line "NEXT"
       note "**値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない"
-      line "#{dest.value} = #{state(layout.array_sp_addr)} + 1   ' スロット番号 + 1"
-      line "#{dest.tag} = #{TT_OBJECT}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_OBJECT, offset: 1)
 
       note "initialize があれば呼ぶ。名前の ID はホストが load で書いている"
       if_("#{state(layout.init_method_id_addr)} <> 0") do
@@ -2827,12 +2849,10 @@ end
     #
     # source_z は写す元の見出しが載っている Z (鍵か値のどちらか)。
     def hash_column_into(dest, source_z, heap_code)
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      alloc_check(heap_code)
       hash_slots_into_z(dest)
       note "新しいスロットの見出し。組の数がそのまま要素数になる"
-      line "Z2 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(2)
       line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = #{scratch32_b}"
       note "写す。組の数 0 (空ハッシュ) では引き算もしない"
       if_("#{scratch32_b} > 0") do
@@ -2848,9 +2868,7 @@ end
       end
       note "R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので"
       note "上位に入っていた値の配列のスロット番号も消える"
-      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{dest.tag} = #{TT_ARRAY}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_ARRAY)
     end
 
     # R[a] << R[a+1] / R[a].push(R[a+1])
@@ -3005,11 +3023,9 @@ end
         note "1 スロットの容量を超える個数"
         vm_error(heap_code)
       end
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{state(layout.array_sp_addr)} >= #{layout.max_arrays}") { vm_error(heap_code) }
+      alloc_check(heap_code)
 
-      line "Z4 = #{state(layout.array_sp_addr)} * #{layout.array_slot_words} + " \
-           "#{block_offset(layout.array_pool_base)}"
+      alloc_header_into(4)
       line "#{word_at(4, MemoryLayout::ARRAY_LENGTH)} = #{scratch32_b}"
       if_("#{scratch32_b} > 0") do
         line "Z7 = #{scratch32_b}"
@@ -3023,9 +3039,7 @@ end
         line "NEXT"
       end
       note "R[a] はデバイス参照から配列に変わる"
-      line "#{dest.value} = #{state(layout.array_sp_addr)}   ' スロット番号"
-      line "#{dest.tag} = #{TT_ARRAY}"
-      line "#{state(layout.array_sp_addr)} = #{state(layout.array_sp_addr)} + 1"
+      alloc_commit(dest, TT_ARRAY)
       end_block
     end
 
