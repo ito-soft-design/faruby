@@ -177,6 +177,43 @@ module FaRuby
     # 経路が分かれるので混ざらない
     OBJECT_CLASS       = 0
 
+    # 見出しの予備ワードに置く回収 (GC) の印
+    #
+    # **ビットマップを持たないのはスロットが 32 個あるからです。** 16 ビット
+    # 1 ワードに入らず、VM 状態の空きは +59 の 1 ワードだけです。見出しには
+    # 予備が 3 ワードあるので、そこに置きます (doc/gc.md)。
+    #
+    # **印には到達したときの型タグを入れます。** スロット自身は自分の型を
+    # 持っていないため (+0 は要素数)、これが無いと中身の読み方が決まりません。
+    # 文字列の中身を値スロットとして読むと、バイト列を番号と見て無関係な
+    # スロットをマークします。
+    SLOT_MARK          = 1   # 0 = 未到達、それ以外は到達したときの型タグ
+    SLOT_SCANNED       = 2   # 中身を走査したか (伝播の打ち切り判定)
+
+    # --- GC の作業領域 (配列プールの後ろ) ---
+    #
+    # **予備から 8 ワード取ります。** VM 状態 (72 ワード) を広げると後ろの
+    # 領域が全部ずれて 4 機種とも配置の作り直しになるので、末尾に足して
+    # 既存のアドレスを動かしません。1 インスタンスは 4000 ワードのままです。
+    #
+    # **インデックスレジスタではなくデバイスのワードに置きます。** 確保の
+    # 場所ごとに空いている Z が違い、共通の手順にできないためです。`FOR` の
+    # ループ変数はデバイスでもよいので、走査はここだけで足ります。文字列の
+    # 作業場所を VM 状態に置いてあるのと同じ事情です。
+    GC_WORK_WORDS = 8
+
+    GC_SLOT    = 0   # 走査中のスロット番号 (FOR のループ変数)
+    GC_HEADER  = 1   # そのスロットの見出しのアドレス
+    GC_FOUND   = 2   # 見つけた空きスロットの番号
+    GC_CHANGED = 3   # この周で印が増えたか (伝播を続けるかの判定)
+    # 確保してからレジスタへ書くまでのスロット
+    #
+    # **1 つの命令で 2 つ確保するところで要ります** (ハッシュ)。1 つめは
+    # まだどのレジスタからも届かないので、ルート走査では見つかりません。
+    GC_PINNED  = 4
+    GC_TAG     = 5   # 走査中の型タグ
+    # +6, +7 は予備
+
     # 「フレームが無い」を表す番号。トップレベルで定義されたブロックの定義元
     #
     # レジスタ窓はレジスタ領域の先頭になる。実在するフレーム番号
@@ -478,6 +515,25 @@ module FaRuby
     # 配列スロット 1 個のワード数。全スロット同じ
     def array_slot_words = ARRAY_HEADER_WORDS + max_array_len * SLOT_WORDS
 
+    # 配列プール全体のワード数
+    def array_pool_words = max_arrays * array_slot_words
+
+    # GC の作業領域。**プールの後ろ、予備から取る**
+    def gc_work_base = array_pool_base + array_pool_words
+
+    def gc_work_addr(offset) = gc_work_base + offset
+
+    def gc_slot_addr    = gc_work_addr(GC_SLOT)
+    def gc_header_addr  = gc_work_addr(GC_HEADER)
+    def gc_found_addr   = gc_work_addr(GC_FOUND)
+    def gc_changed_addr = gc_work_addr(GC_CHANGED)
+    def gc_pinned_addr  = gc_work_addr(GC_PINNED)
+    def gc_tag_addr     = gc_work_addr(GC_TAG)
+
+    # スロットの見出しの中の印のアドレス
+    def slot_mark_addr(index)    = array_slot_addr(index) + SLOT_MARK
+    def slot_scanned_addr(index) = array_slot_addr(index) + SLOT_SCANNED
+
     # このインスタンスの固定ブロック先頭 (FM の絶対アドレス)
     def fixed_origin = fixed_base + instance_index * fixed_instance_size
 
@@ -526,7 +582,8 @@ module FaRuby
     # 可変領域の合計 (パディングを含まない)
     def content_size
       VM_STATE_WORDS + max_regs * SLOT_WORDS + max_frames * FRAME_WORDS +
-        method_table_words + max_globals * SLOT_WORDS + max_arrays * array_slot_words
+        method_table_words + max_globals * SLOT_WORDS + array_pool_words +
+        GC_WORK_WORDS
     end
 
     # 固定領域の合計 (パディングを含まない)
@@ -702,7 +759,8 @@ module FaRuby
         ["呼び出しスタック",  frame_stack_base,    method_table_base - 1],
         ["メソッド表",        method_table_base,   general_global_base - 1],
         ["汎用グローバル変数", general_global_base, array_pool_base - 1],
-        ["配列プール",        array_pool_base,     array_pool_base + max_arrays * array_slot_words - 1],
+        ["配列プール",        array_pool_base,     array_pool_base + array_pool_words - 1],
+        ["GC作業領域",        gc_work_base,        gc_work_base + GC_WORK_WORDS - 1],
       ]
       list << ["予備 (端数調整)", origin + content_size, origin + instance_size - 1] if padding.positive?
       list.map { |name, from, to| [name, from, to, to - from + 1] }

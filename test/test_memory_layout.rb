@@ -95,6 +95,48 @@ class TestMemoryLayout < Minitest::Test
     end
   end
 
+  # === GC の作業領域 ===
+  #
+  # **予備から取り、末尾に置きます。** VM 状態を広げると後ろの領域が全部
+  # ずれて 4 機種とも配置の作り直しになるためです (doc/gc.md)。
+
+  def test_gc_の作業領域はプールの後ろにある
+    l = Layout.default
+
+    assert_equal l.array_pool_base + l.array_pool_words, l.gc_work_base
+    assert_operator l.gc_work_base + Layout::GC_WORK_WORDS - 1, :<=, l.block_last_addr
+  end
+
+  # **末尾にあることが「既存のアドレスが動かない」の中身です。**
+  # 途中に入れると後ろの領域がずれます
+  def test_gc_の作業領域は予備の直前にある
+    names = Layout.default.regions.map(&:first)
+
+    assert_equal "GC作業領域", names[-2]
+    assert_match(/予備/, names[-1], "GC 作業領域の後ろが予備ではありません")
+  end
+
+  def test_gc_の作業ワードは重ならない
+    offsets = { "GC_SLOT" => Layout::GC_SLOT, "GC_HEADER" => Layout::GC_HEADER,
+                "GC_FOUND" => Layout::GC_FOUND, "GC_CHANGED" => Layout::GC_CHANGED,
+                "GC_PINNED" => Layout::GC_PINNED, "GC_TAG" => Layout::GC_TAG }
+
+    assert_equal offsets.size, offsets.values.uniq.size, "作業ワードが重なっています"
+    offsets.each do |name, offset|
+      assert_operator offset, :<, Layout::GC_WORK_WORDS, name
+    end
+  end
+
+  # **印はスロットの見出しの予備に置きます。** +0 は要素数 (オブジェクトは
+  # クラス番号) なので、そこへ書くと中身が壊れます
+  def test_gc_の印は見出しの予備に収まる
+    [["SLOT_MARK", Layout::SLOT_MARK], ["SLOT_SCANNED", Layout::SLOT_SCANNED]].each do |name, offset|
+      assert_operator offset, :>, Layout::ARRAY_LENGTH, "#{name} が要素数を潰します"
+      assert_operator offset, :<, Layout::ARRAY_HEADER_WORDS, "#{name} が見出しの外です"
+    end
+    refute_equal Layout::SLOT_MARK, Layout::SLOT_SCANNED
+  end
+
   def test_every_clock_slot_starts_on_a_slot_boundary
     l = Layout.default
     Layout::CLOCK_OFFSETS.each_key do |period|
