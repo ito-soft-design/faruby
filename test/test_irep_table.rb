@@ -170,11 +170,29 @@ class TestIrepTable < Minitest::Test
 
     { "バイトコード" => layout.bytecode_base,
       "定数プール"   => layout.pool_base,
-      "シンボル表"   => layout.device_table_base,
-      "レジスタ"     => layout.reg_file_base }.each do |name, base|
+      "シンボル表"   => layout.device_table_base }.each do |name, base|
       refute_includes source, "+ #{emitter.block_offset(base)}",
                       "#{name}の先頭が定数で焼き込まれている"
     end
+  end
+
+  # **レジスタの先頭を直に指すのは回収 (GC) だけです。**
+  #
+  # ふつうのレジスタ参照は窓 (REG_BASE) を通ります。GC だけは窓の外に残って
+  # いる外側のフレームの値も見る必要があるので、物理的な先頭から全部なめます
+  # (doc/gc.md)。ここが増えたら、窓を無視したレジスタ参照が入った疑いです。
+  def test_only_the_collector_reaches_past_the_register_window
+    source = FaRuby::KvsGenerator.new.source
+    emitter = FaRuby::KvsEmitter.new(layout: layout)
+    base = "+ #{emitter.block_offset(layout.reg_file_base)}"
+
+    lines = source.lines.grep(/#{Regexp.escape(base)}/)
+
+    refute_empty lines, "レジスタの先頭を指す行が無い (回収の走査が消えた?)"
+    strays = lines.reject { |l| l.include?(emitter.state(layout.gc_slot_addr)) }
+
+    assert_empty strays, "回収の走査以外がレジスタの先頭を指しています " \
+                         "(窓を無視したレジスタ参照):\n#{strays.join}"
   end
 
   # リセットでトップレベルの irep に戻る

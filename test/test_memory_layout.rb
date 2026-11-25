@@ -117,9 +117,11 @@ class TestMemoryLayout < Minitest::Test
   end
 
   def test_gc_の作業ワードは重ならない
-    offsets = { "GC_SLOT" => Layout::GC_SLOT, "GC_HEADER" => Layout::GC_HEADER,
-                "GC_FOUND" => Layout::GC_FOUND, "GC_CHANGED" => Layout::GC_CHANGED,
-                "GC_PINNED" => Layout::GC_PINNED, "GC_TAG" => Layout::GC_TAG }
+    offsets = { "GC_SLOT" => Layout::GC_SLOT, "GC_FOUND" => Layout::GC_FOUND,
+                "GC_TAG" => Layout::GC_TAG, "GC_PINNED" => Layout::GC_PINNED,
+                "GC_CHANGED" => Layout::GC_CHANGED,
+                "GC_SAVED_Z6" => Layout::GC_SAVED_Z6,
+                "GC_SAVED_Z7" => Layout::GC_SAVED_Z7 }
 
     assert_equal offsets.size, offsets.values.uniq.size, "作業ワードが重なっています"
     offsets.each do |name, offset|

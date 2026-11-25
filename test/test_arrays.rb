@@ -134,8 +134,19 @@ class TestArrays < Minitest::Test
     assert_equal layout.max_arrays, array_sp
   end
 
+  # **同じレジスタに作り続けるぶんは回収されます。** 前のものはどこからも
+  # 届かなくなるので、使い切ったところで配り直します (doc/gc.md)
+  def test_arrays_in_one_register_are_collected
+    bytes = ([ARRAY, 1, 0] * (layout.max_arrays * 2)) + [STOP]
+    run_bytecode(bytes)
+
+    assert_equal VM_FINISHED, status
+  end
+
+  # **別々のレジスタに残っているものは回収できません。** 全部が届くところに
+  # 居るので、今までどおり止まります
   def test_running_out_of_slots_stops_the_vm
-    bytes = ([ARRAY, 1, 0] * (layout.max_arrays + 1)) + [STOP]
+    bytes = (1..(layout.max_arrays + 1)).flat_map { |r| [ARRAY, r, 0] } + [STOP]
     run_bytecode(bytes)
 
     assert_equal VM_ERROR, status
@@ -639,9 +650,12 @@ class TestArrays < Minitest::Test
   end
 
   # 返さないスロットを 1 つ取るため、プールが尽きていると作れない
+  #
+  # **埋めるのは別々のレジスタです。** 同じレジスタに作り続けると回収されて
+  # しまい、尽きた状態になりません
   def test_keys_with_a_full_pool_stops_the_vm
     argc = put_method("keys")
-    fill = [ARRAY, 5, 0] * (layout.max_arrays - 2)
+    fill = (5..(layout.max_arrays + 2)).flat_map { |r| [ARRAY, r, 0] }
     run_bytecode(build_hash([[10, 11]]) + fill + [SEND, 1, 0x00, argc, STOP])
 
     assert_equal VM_ERROR, status

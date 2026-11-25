@@ -118,8 +118,8 @@ module FaRuby
     # **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
     # 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
     def new_object(index, argc, heap_code, depth_code)
-      slot = array_sp
-      return vm_error(heap_code) if slot >= layout.max_arrays
+      slot = allocate_slot
+      return vm_error(heap_code) unless slot
 
       class_number = read_reg(index)
       base = layout.array_slot_addr(slot)
@@ -131,7 +131,7 @@ module FaRuby
       # **値は スロット + 1 です。** 0 は main なので、そのままだと
       # スロット 0 のオブジェクトと見分けが付きません
       write_slot(index, TT_OBJECT, slot + 1)
-      @em.write_u16(layout.array_sp_addr, slot + 1)
+      commit_slot(slot)
 
       init_id = @em.read_u16(layout.init_method_id_addr)
       return if init_id.zero?
@@ -150,15 +150,15 @@ module FaRuby
 
     # R[a] = R[a] + R[a+1] を新しいスロットに作る (文字列の +)
     def concat_new_string(index, heap_code)
-      slot = array_sp
-      return vm_error(heap_code) if slot >= layout.max_arrays
+      slot = allocate_slot
+      return vm_error(heap_code) unless slot
 
       bytes = string_bytes(read_reg(index)) + string_bytes(read_reg(index + 1))
       return vm_error(heap_code) if bytes.bytesize > layout.max_string_bytes
 
       write_string_slot(slot, bytes)
       write_slot(index, TT_STRING, slot)
-      @em.write_u16(layout.array_sp_addr, slot + 1)
+      commit_slot(slot)
     end
 
     # R[a] = R[a] + R[a+1] (OP_STRCAT)。継ぎ足す先をそのまま伸ばす
@@ -337,8 +337,9 @@ module FaRuby
       return vm_error(error_code) if width.zero?
       return vm_error(heap_code) if width > layout.max_string_bytes
 
-      slot = array_sp
-      return vm_error(heap_code) if slot >= layout.max_arrays
+      slot = allocate_slot
+
+      return vm_error(heap_code) unless slot
 
       bytes = +""
       ((width + 1) / 2).times do |i|
@@ -347,7 +348,7 @@ module FaRuby
       end
       write_string_slot(slot, bytes.byteslice(0, width))
       write_slot(index, TT_STRING, slot)
-      @em.write_u16(layout.array_sp_addr, slot + 1)
+      commit_slot(slot)
     end
 
     # --- メソッドの定義と呼び出し ---
@@ -382,9 +383,9 @@ module FaRuby
     # OP_ARRAY は dest と first が同じレジスタなので、要素を写し終えてから
     # R[dest] を書く。
     def new_array(dest_name, first_name, count_name, error_code)
-      index = array_sp
+      index = allocate_slot
       count = operand(count_name)
-      return vm_error(error_code) if index >= layout.max_arrays
+      return vm_error(error_code) unless index
       return vm_error(error_code) if count > layout.max_array_len
 
       @em.write_u16(layout.array_slot_addr(index) + MemoryLayout::ARRAY_LENGTH, count)
@@ -395,11 +396,100 @@ module FaRuby
         @em.write_s32(addr + SLOT_VALUE_OFFSET, read_reg(first + i))
       end
       write_slot(operand(dest_name), TT_ARRAY, index)
-      @em.write_u16(layout.array_sp_addr, index + 1)
+      commit_slot(index)
     end
+
+    # --- 配列プールの確保 ---
+    #
+    # **生成コードと同じ手順です** (`kvs_generator.rb` の `alloc_*` /
+    # `collect_pool`)。順に渡し、尽きたら回収して印の付かなかったスロットを
+    # 1 つ返します。見つからなければ nil で、呼ぶ側がエラーにします。
 
     # 次に渡すスロット番号
     def array_sp = @em.read_u16(layout.array_sp_addr)
+
+    # これから使うスロット。尽きていたら回収して探す
+    def allocate_slot
+      sp = array_sp
+      return sp if sp < layout.max_arrays
+
+      collect_pool
+    end
+
+    # 使い終わったら呼ぶ。**順に渡したぶんだけ進める** —
+    # 回収で返ってきたスロットでは ARRAY_SP を動かさない
+    def commit_slot(slot)
+      @em.write_u16(layout.array_sp_addr, slot + 1) if slot == array_sp
+    end
+
+    # 使い切ったときだけ走る回収
+    def collect_pool
+      layout.max_arrays.times do |slot|
+        @em.write_u16(layout.slot_mark_addr(slot), 0)
+        @em.write_u16(layout.slot_scanned_addr(slot), 0)
+      end
+      layout.max_regs.times { |i| mark_from_slot(layout.reg_slot_addr(i)) }
+      layout.max_globals.times { |i| mark_from_slot(layout.general_global_slot_addr(i)) }
+      propagate_marks
+      (0...layout.max_arrays).find { |slot| @em.read_u16(layout.slot_mark_addr(slot)).zero? }
+    end
+
+    # 到達性を伝播する
+    #
+    # **印の付いたスロットの中身も辿ります。** オブジェクトのインスタンス
+    # 変数・ハッシュの要素・入れ子の配列が、プールの中から他のスロットを
+    # 指すためです。印が増えなくなったら終わり、最悪 max_arrays 周です。
+    def propagate_marks
+      layout.max_arrays.times do
+        @em.write_u16(layout.gc_changed_addr, 0)
+        layout.max_arrays.times { |slot| scan_marked_slot(slot) }
+        break if @em.read_u16(layout.gc_changed_addr).zero?
+      end
+    end
+
+    def scan_marked_slot(slot)
+      mark = @em.read_u16(layout.slot_mark_addr(slot))
+      return if mark.zero?
+      return unless @em.read_u16(layout.slot_scanned_addr(slot)).zero?
+
+      @em.write_u16(layout.slot_scanned_addr(slot), 1)
+      # 文字列の中身はバイト列。辿らない
+      return if mark == TT_STRING
+
+      # オブジェクトのインスタンス変数は容量いっぱい。配列は要素数まで
+      count = mark == TT_OBJECT ? layout.max_array_len : array_length(slot)
+      count.times { |i| mark_from_slot(layout.array_element_addr(slot, i)) }
+    end
+
+    # その値スロットが指しているスロットに印を付ける
+    #
+    # **プールを指す型タグは TT_STRING から TT_OBJECT まで連続しています。**
+    def mark_from_slot(addr)
+      tag = @em.read_u16(addr + SLOT_TYPE_OFFSET)
+      return unless tag >= TT_STRING && tag <= TT_OBJECT
+
+      value = @em.read_u16(addr + SLOT_VALUE_OFFSET)
+      case tag
+      when TT_HASH
+        # 鍵と値で 2 本。どちらも配列として印を付ける
+        mark_slot(value, TT_ARRAY)
+        mark_slot(@em.read_u16(addr + SLOT_VALUE_OFFSET + 1), TT_ARRAY)
+      when TT_OBJECT
+        # **値は スロット + 1。** 0 は main でスロットを持たない
+        mark_slot(value - 1, TT_OBJECT) if value.positive?
+      else
+        mark_slot(value, tag)
+      end
+    end
+
+    # **まだ印の無いものにだけ書きます。** 付いている印を上から書くと、
+    # ハッシュ経由で配列として印を付けたものを別の型に変えてしまいます
+    def mark_slot(slot, tag)
+      return unless @em.read_u16(layout.slot_mark_addr(slot)).zero?
+
+      @em.write_u16(layout.slot_mark_addr(slot), tag)
+      @em.write_u16(layout.gc_changed_addr, 1)
+    end
 
     # --- ハッシュ ---
     #
@@ -488,8 +578,9 @@ module FaRuby
       offset = @fixed.read_u16(slot)
       length = @fixed.read_u16(slot + 1)
 
-      index = array_sp
-      return vm_error(error_code) if index >= layout.max_arrays
+      index = allocate_slot
+
+      return vm_error(error_code) unless index
       return vm_error(error_code) if length > layout.max_string_bytes
 
       set_array_length(index, length)
@@ -498,7 +589,7 @@ module FaRuby
                       @fixed.read_u16(layout.string_addr(offset + i)))
       end
       write_slot(operand(name), TT_STRING, index)
-      @em.write_u16(layout.array_sp_addr, index + 1)
+      commit_slot(index)
     end
 
     # 文字列スロットのバイト列を取り出す (シミュレータの検査用)
@@ -569,12 +660,13 @@ module FaRuby
         return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL))
       end
 
-      new_slot = array_sp
-      return vm_error(heap_code) if new_slot >= layout.max_arrays
+      new_slot = allocate_slot
+
+      return vm_error(heap_code) unless new_slot
 
       write_string_slot(new_slot, string_bytes(slot).byteslice(found, found_end - found))
       write_slot(index, TT_STRING, new_slot)
-      @em.write_u16(layout.array_sp_addr, new_slot + 1)
+      commit_slot(new_slot)
     end
 
     # 定数への代入 (OP_SETCONST)
@@ -1520,8 +1612,8 @@ module FaRuby
     #
     # which は 0 が鍵、1 が値。プールを使い切ったら止まる。
     def send_hash_column(index, which, heap_code)
-      slot = array_sp
-      return vm_error(heap_code) if slot >= layout.max_arrays
+      slot = allocate_slot
+      return vm_error(heap_code) unless slot
 
       source = hash_slots(index)[which]
       length = array_length(source)
@@ -1532,7 +1624,7 @@ module FaRuby
                             @em.read_s32(addr + SLOT_VALUE_OFFSET))
       end
       write_slot(index, TT_ARRAY, slot)
-      @em.write_u16(layout.array_sp_addr, slot + 1)
+      commit_slot(slot)
     end
 
     # R[a] << R[a+1] / R[a].push(R[a+1])
@@ -1567,8 +1659,9 @@ module FaRuby
       return write_slot(index, TT_NIL, TT_CANONICAL_VALUE.fetch(TT_NIL)) if count.negative?
       return vm_error(heap_code) if count > layout.max_array_len
 
-      slot = array_sp
-      return vm_error(heap_code) if slot >= layout.max_arrays
+      slot = allocate_slot
+
+      return vm_error(heap_code) unless slot
 
       step = ACCESS_WORDS.fetch(ref[:access], 1)
       step *= 16 unless STRING_DEVICE_TYPES.include?(ref[:type])
@@ -1580,7 +1673,7 @@ module FaRuby
                               layout.array_element_addr(slot, i))
       end
       write_slot(index, TT_ARRAY, slot)
-      @em.write_u16(layout.array_sp_addr, slot + 1)
+      commit_slot(slot)
     end
 
     # デバイス 1 つを値スロットへ読む (プールの要素へ読むために切り出した)

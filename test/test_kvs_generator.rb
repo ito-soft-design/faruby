@@ -234,12 +234,17 @@ class TestKvsGenerator < Minitest::Test
   GENERATOR_SOURCE = File.read(File.expand_path("../tools/kvs_generator.rb", __dir__),
                                encoding: "utf-8")
 
-  def test_プールの上限検査は_alloc_のヘルパーだけが書く
+  # 4 つの内訳 — 増えたら確保かGCの外に検査が漏れた疑い
+  #
+  #   alloc_check       順に渡すぶんが尽きたか / 回収しても見つからなかったか
+  #   alloc_check_pair  ハッシュの 2 スロット
+  #   gc_find_free      まだ見つかっていないか
+  def test_プールの上限検査は_alloc_と_gc_のヘルパーだけが書く
     checks = GENERATOR_SOURCE.lines.grep(/>= \#\{layout\.max_arrays\}/)
 
-    assert_equal 2, checks.size,
-                 "上限の検査が alloc_check / alloc_check_pair の外にあります。" \
-                 "確保を増やすときはヘルパーを通してください (doc/gc.md)"
+    assert_equal 4, checks.size,
+                 "上限の検査がヘルパーの外にあります。確保を増やすときは " \
+                 "alloc_check を通してください (doc/gc.md):\n#{checks.join}"
   end
 
   # **ARRAY_SP を書くのは 3 箇所だけです。**

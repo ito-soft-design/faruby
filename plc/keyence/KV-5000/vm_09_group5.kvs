@@ -775,11 +775,160 @@ IF EM54:Z9 <= 62 THEN
           END IF
         ELSE IF Z5 = 24 THEN
           ' keys
-          ' プールの空きスロットを取る。返さないので使い切ったら止まる
+          ' プールの空きスロットを決める
           IF EM39:Z9 >= 32 THEN
-            EM1:Z9 = 3
-            EM2:Z9 = 10
-            BREAK
+            ' 順に渡すぶんは尽きた。回収して空きを探す
+            ' --- 回収 (使い切ったときだけ走る) ---
+            ' アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+            EM3677:Z9 = Z6
+            EM3678:Z9 = Z7
+            ' 印と走査済みを消す
+            FOR EM3672:Z9 = 0 TO 31
+              Z6 = EM3672:Z9 * 52 + 2008 + Z9
+              EM1:Z6 = 0
+              EM2:Z6 = 0
+            NEXT
+            ' ルート — レジスタ全 80 個と汎用グローバル 300 個
+            ' **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+            FOR EM3672:Z9 = 0 TO 379
+              IF EM3672:Z9 < 80 THEN
+                Z7 = EM3672:Z9 * 4 + 72 + Z9
+              ELSE
+                Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
+              END IF
+              EM3674:Z9 = EM0:Z7
+              IF EM3674:Z9 >= 7 THEN
+                IF EM3674:Z9 <= 10 THEN
+                  IF EM3674:Z9 = 9 THEN
+                    ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                    ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                    Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                  ELSE IF EM3674:Z9 = 10 THEN
+                    ' **値は スロット + 1。** 0 は main でスロットを持たない
+                    IF EM1:Z7 > 0 THEN
+                      Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 10
+                        EM3676:Z9 = 1
+                      END IF
+                    END IF
+                  ELSE
+                    ' 文字列と配列。値がそのままスロット番号
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = EM3674:Z9
+                      EM3676:Z9 = 1
+                    END IF
+                  END IF
+                END IF
+              END IF
+            NEXT
+            ' 到達性を伝播する。印の付いたスロットの中身も辿る
+            ' **印が増えなくなったら空回りします。** 最悪 32 周
+            ' **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+            ' 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+            ' ルート走査で印が付いているので 1 周は回す
+            EM3676:Z9 = 1
+            FOR EM3679:Z9 = 0 TO 31
+              IF EM3676:Z9 <> 0 THEN
+                EM3676:Z9 = 0
+                FOR EM3672:Z9 = 0 TO 31
+                  Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                  ' 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+                  EM3680:Z9 = Z6
+                  EM3674:Z9 = EM1:Z6
+                  IF EM3674:Z9 <> 0 THEN
+                    IF EM2:Z6 = 0 THEN
+                      EM2:Z6 = 1
+                      ' 文字列の中身はバイト列。辿らない
+                      IF EM3674:Z9 <> 7 THEN
+                        IF EM3674:Z9 = 10 THEN
+                          ' インスタンス変数は容量いっぱい使う
+                          EM3682:Z9 = 11
+                        ELSE
+                          ' 配列は要素数まで。**0 のとき引き算をしない** —
+                          ' 符号なしなので 0 - 1 が 65535 になる
+                          EM3682:Z9 = EM0:Z6
+                          IF EM3682:Z9 > 0 THEN
+                            EM3682:Z9 = EM3682:Z9 - 1
+                          END IF
+                        END IF
+                        ' 要素は値スロットの並び。ルートと同じ手で印を付ける
+                        FOR EM3681:Z9 = 0 TO EM3682:Z9
+                          Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
+                          EM3674:Z9 = EM0:Z7
+                          IF EM3674:Z9 >= 7 THEN
+                            IF EM3674:Z9 <= 10 THEN
+                              IF EM3674:Z9 = 9 THEN
+                                ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                                ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                                Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                              ELSE IF EM3674:Z9 = 10 THEN
+                                ' **値は スロット + 1。** 0 は main でスロットを持たない
+                                IF EM1:Z7 > 0 THEN
+                                  Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 10
+                                    EM3676:Z9 = 1
+                                  END IF
+                                END IF
+                              ELSE
+                                ' 文字列と配列。値がそのままスロット番号
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = EM3674:Z9
+                                  EM3676:Z9 = 1
+                                END IF
+                              END IF
+                            END IF
+                          END IF
+                        NEXT
+                      END IF
+                    END IF
+                  END IF
+                NEXT
+              END IF
+            NEXT
+            ' 印の付かなかったスロットを探す。32 なら見つからなかった印
+            EM3673:Z9 = 32
+            FOR EM3672:Z9 = 0 TO 31
+              IF EM3673:Z9 >= 32 THEN
+                Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM3673:Z9 = EM3672:Z9
+                END IF
+              END IF
+            NEXT
+            ' 借りた Z を返す
+            Z6 = EM3677:Z9
+            Z7 = EM3678:Z9
+            IF EM3673:Z9 >= 32 THEN
+              ' 全スロットが生きている。回収しても足りない
+              EM1:Z9 = 3
+              EM2:Z9 = 10
+              BREAK
+            END IF
+          ELSE
+            ' まだ順に渡せる
+            EM3673:Z9 = EM39:Z9
           END IF
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
@@ -788,7 +937,7 @@ IF EM54:Z9 <= 62 THEN
           Z5 = EM2:Z1   ' 値の配列
           Z5 = Z5 * 52 + 2008 + Z9
           ' 新しいスロットの見出し。組の数がそのまま要素数になる
-          Z2 = EM39:Z9 * 52 + 2008 + Z9
+          Z2 = EM3673:Z9 * 52 + 2008 + Z9
           EM0:Z2 = EM18.L:Z9
           ' 写す。組の数 0 (空ハッシュ) では引き算もしない
           IF EM18.L:Z9 > 0 THEN
@@ -803,16 +952,168 @@ IF EM54:Z9 <= 62 THEN
           END IF
           ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
           ' 上位に入っていた値の配列のスロット番号も消える
-          EM1.L:Z1 = EM39:Z9   ' スロット番号
+          EM1.L:Z1 = EM3673:Z9   ' スロット番号
           EM0:Z1 = 8
-          EM39:Z9 = EM39:Z9 + 1
+          ' 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+          IF EM3673:Z9 = EM39:Z9 THEN
+            EM39:Z9 = EM39:Z9 + 1
+          END IF
         ELSE IF Z5 = 25 THEN
           ' values
-          ' プールの空きスロットを取る。返さないので使い切ったら止まる
+          ' プールの空きスロットを決める
           IF EM39:Z9 >= 32 THEN
-            EM1:Z9 = 3
-            EM2:Z9 = 10
-            BREAK
+            ' 順に渡すぶんは尽きた。回収して空きを探す
+            ' --- 回収 (使い切ったときだけ走る) ---
+            ' アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+            EM3677:Z9 = Z6
+            EM3678:Z9 = Z7
+            ' 印と走査済みを消す
+            FOR EM3672:Z9 = 0 TO 31
+              Z6 = EM3672:Z9 * 52 + 2008 + Z9
+              EM1:Z6 = 0
+              EM2:Z6 = 0
+            NEXT
+            ' ルート — レジスタ全 80 個と汎用グローバル 300 個
+            ' **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+            FOR EM3672:Z9 = 0 TO 379
+              IF EM3672:Z9 < 80 THEN
+                Z7 = EM3672:Z9 * 4 + 72 + Z9
+              ELSE
+                Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
+              END IF
+              EM3674:Z9 = EM0:Z7
+              IF EM3674:Z9 >= 7 THEN
+                IF EM3674:Z9 <= 10 THEN
+                  IF EM3674:Z9 = 9 THEN
+                    ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                    ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                    Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                  ELSE IF EM3674:Z9 = 10 THEN
+                    ' **値は スロット + 1。** 0 は main でスロットを持たない
+                    IF EM1:Z7 > 0 THEN
+                      Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 10
+                        EM3676:Z9 = 1
+                      END IF
+                    END IF
+                  ELSE
+                    ' 文字列と配列。値がそのままスロット番号
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = EM3674:Z9
+                      EM3676:Z9 = 1
+                    END IF
+                  END IF
+                END IF
+              END IF
+            NEXT
+            ' 到達性を伝播する。印の付いたスロットの中身も辿る
+            ' **印が増えなくなったら空回りします。** 最悪 32 周
+            ' **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+            ' 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+            ' ルート走査で印が付いているので 1 周は回す
+            EM3676:Z9 = 1
+            FOR EM3679:Z9 = 0 TO 31
+              IF EM3676:Z9 <> 0 THEN
+                EM3676:Z9 = 0
+                FOR EM3672:Z9 = 0 TO 31
+                  Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                  ' 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+                  EM3680:Z9 = Z6
+                  EM3674:Z9 = EM1:Z6
+                  IF EM3674:Z9 <> 0 THEN
+                    IF EM2:Z6 = 0 THEN
+                      EM2:Z6 = 1
+                      ' 文字列の中身はバイト列。辿らない
+                      IF EM3674:Z9 <> 7 THEN
+                        IF EM3674:Z9 = 10 THEN
+                          ' インスタンス変数は容量いっぱい使う
+                          EM3682:Z9 = 11
+                        ELSE
+                          ' 配列は要素数まで。**0 のとき引き算をしない** —
+                          ' 符号なしなので 0 - 1 が 65535 になる
+                          EM3682:Z9 = EM0:Z6
+                          IF EM3682:Z9 > 0 THEN
+                            EM3682:Z9 = EM3682:Z9 - 1
+                          END IF
+                        END IF
+                        ' 要素は値スロットの並び。ルートと同じ手で印を付ける
+                        FOR EM3681:Z9 = 0 TO EM3682:Z9
+                          Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
+                          EM3674:Z9 = EM0:Z7
+                          IF EM3674:Z9 >= 7 THEN
+                            IF EM3674:Z9 <= 10 THEN
+                              IF EM3674:Z9 = 9 THEN
+                                ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                                ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                                Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                              ELSE IF EM3674:Z9 = 10 THEN
+                                ' **値は スロット + 1。** 0 は main でスロットを持たない
+                                IF EM1:Z7 > 0 THEN
+                                  Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 10
+                                    EM3676:Z9 = 1
+                                  END IF
+                                END IF
+                              ELSE
+                                ' 文字列と配列。値がそのままスロット番号
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = EM3674:Z9
+                                  EM3676:Z9 = 1
+                                END IF
+                              END IF
+                            END IF
+                          END IF
+                        NEXT
+                      END IF
+                    END IF
+                  END IF
+                NEXT
+              END IF
+            NEXT
+            ' 印の付かなかったスロットを探す。32 なら見つからなかった印
+            EM3673:Z9 = 32
+            FOR EM3672:Z9 = 0 TO 31
+              IF EM3673:Z9 >= 32 THEN
+                Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM3673:Z9 = EM3672:Z9
+                END IF
+              END IF
+            NEXT
+            ' 借りた Z を返す
+            Z6 = EM3677:Z9
+            Z7 = EM3678:Z9
+            IF EM3673:Z9 >= 32 THEN
+              ' 全スロットが生きている。回収しても足りない
+              EM1:Z9 = 3
+              EM2:Z9 = 10
+              BREAK
+            END IF
+          ELSE
+            ' まだ順に渡せる
+            EM3673:Z9 = EM39:Z9
           END IF
           ' 鍵の配列の見出し。R[a] を書き換える前に読む
           Z4 = EM1:Z1
@@ -821,7 +1122,7 @@ IF EM54:Z9 <= 62 THEN
           Z5 = EM2:Z1   ' 値の配列
           Z5 = Z5 * 52 + 2008 + Z9
           ' 新しいスロットの見出し。組の数がそのまま要素数になる
-          Z2 = EM39:Z9 * 52 + 2008 + Z9
+          Z2 = EM3673:Z9 * 52 + 2008 + Z9
           EM0:Z2 = EM18.L:Z9
           ' 写す。組の数 0 (空ハッシュ) では引き算もしない
           IF EM18.L:Z9 > 0 THEN
@@ -836,9 +1137,12 @@ IF EM54:Z9 <= 62 THEN
           END IF
           ' R[a] はハッシュから配列に変わる。値ワードを 32 ビットで書くので
           ' 上位に入っていた値の配列のスロット番号も消える
-          EM1.L:Z1 = EM39:Z9   ' スロット番号
+          EM1.L:Z1 = EM3673:Z9   ' スロット番号
           EM0:Z1 = 8
-          EM39:Z9 = EM39:Z9 + 1
+          ' 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+          IF EM3673:Z9 = EM39:Z9 THEN
+            EM39:Z9 = EM39:Z9 + 1
+          END IF
         ELSE IF Z5 = 26 THEN
           ' []
           Z3 = (EM7:Z9 + 2) * 4 + EM32:Z9 + Z9
@@ -922,13 +1226,162 @@ IF EM54:Z9 <= 62 THEN
               EM2:Z9 = 10
               BREAK
             END IF
-            ' プールの空きスロットを取る。返さないので使い切ったら止まる
+            ' プールの空きスロットを決める
             IF EM39:Z9 >= 32 THEN
-              EM1:Z9 = 3
-              EM2:Z9 = 10
-              BREAK
+              ' 順に渡すぶんは尽きた。回収して空きを探す
+              ' --- 回収 (使い切ったときだけ走る) ---
+              ' アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+              EM3677:Z9 = Z6
+              EM3678:Z9 = Z7
+              ' 印と走査済みを消す
+              FOR EM3672:Z9 = 0 TO 31
+                Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                EM1:Z6 = 0
+                EM2:Z6 = 0
+              NEXT
+              ' ルート — レジスタ全 80 個と汎用グローバル 300 個
+              ' **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+              FOR EM3672:Z9 = 0 TO 379
+                IF EM3672:Z9 < 80 THEN
+                  Z7 = EM3672:Z9 * 4 + 72 + Z9
+                ELSE
+                  Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
+                END IF
+                EM3674:Z9 = EM0:Z7
+                IF EM3674:Z9 >= 7 THEN
+                  IF EM3674:Z9 <= 10 THEN
+                    IF EM3674:Z9 = 9 THEN
+                      ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                      ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                      Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 8
+                        EM3676:Z9 = 1
+                      END IF
+                      Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 8
+                        EM3676:Z9 = 1
+                      END IF
+                    ELSE IF EM3674:Z9 = 10 THEN
+                      ' **値は スロット + 1。** 0 は main でスロットを持たない
+                      IF EM1:Z7 > 0 THEN
+                        Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                        IF EM1:Z6 = 0 THEN
+                          EM1:Z6 = 10
+                          EM3676:Z9 = 1
+                        END IF
+                      END IF
+                    ELSE
+                      ' 文字列と配列。値がそのままスロット番号
+                      Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = EM3674:Z9
+                        EM3676:Z9 = 1
+                      END IF
+                    END IF
+                  END IF
+                END IF
+              NEXT
+              ' 到達性を伝播する。印の付いたスロットの中身も辿る
+              ' **印が増えなくなったら空回りします。** 最悪 32 周
+              ' **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+              ' 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+              ' ルート走査で印が付いているので 1 周は回す
+              EM3676:Z9 = 1
+              FOR EM3679:Z9 = 0 TO 31
+                IF EM3676:Z9 <> 0 THEN
+                  EM3676:Z9 = 0
+                  FOR EM3672:Z9 = 0 TO 31
+                    Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                    ' 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+                    EM3680:Z9 = Z6
+                    EM3674:Z9 = EM1:Z6
+                    IF EM3674:Z9 <> 0 THEN
+                      IF EM2:Z6 = 0 THEN
+                        EM2:Z6 = 1
+                        ' 文字列の中身はバイト列。辿らない
+                        IF EM3674:Z9 <> 7 THEN
+                          IF EM3674:Z9 = 10 THEN
+                            ' インスタンス変数は容量いっぱい使う
+                            EM3682:Z9 = 11
+                          ELSE
+                            ' 配列は要素数まで。**0 のとき引き算をしない** —
+                            ' 符号なしなので 0 - 1 が 65535 になる
+                            EM3682:Z9 = EM0:Z6
+                            IF EM3682:Z9 > 0 THEN
+                              EM3682:Z9 = EM3682:Z9 - 1
+                            END IF
+                          END IF
+                          ' 要素は値スロットの並び。ルートと同じ手で印を付ける
+                          FOR EM3681:Z9 = 0 TO EM3682:Z9
+                            Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
+                            EM3674:Z9 = EM0:Z7
+                            IF EM3674:Z9 >= 7 THEN
+                              IF EM3674:Z9 <= 10 THEN
+                                IF EM3674:Z9 = 9 THEN
+                                  ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                                  ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 8
+                                    EM3676:Z9 = 1
+                                  END IF
+                                  Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 8
+                                    EM3676:Z9 = 1
+                                  END IF
+                                ELSE IF EM3674:Z9 = 10 THEN
+                                  ' **値は スロット + 1。** 0 は main でスロットを持たない
+                                  IF EM1:Z7 > 0 THEN
+                                    Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                                    IF EM1:Z6 = 0 THEN
+                                      EM1:Z6 = 10
+                                      EM3676:Z9 = 1
+                                    END IF
+                                  END IF
+                                ELSE
+                                  ' 文字列と配列。値がそのままスロット番号
+                                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = EM3674:Z9
+                                    EM3676:Z9 = 1
+                                  END IF
+                                END IF
+                              END IF
+                            END IF
+                          NEXT
+                        END IF
+                      END IF
+                    END IF
+                  NEXT
+                END IF
+              NEXT
+              ' 印の付かなかったスロットを探す。32 なら見つからなかった印
+              EM3673:Z9 = 32
+              FOR EM3672:Z9 = 0 TO 31
+                IF EM3673:Z9 >= 32 THEN
+                  Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                  IF EM1:Z6 = 0 THEN
+                    EM3673:Z9 = EM3672:Z9
+                  END IF
+                END IF
+              NEXT
+              ' 借りた Z を返す
+              Z6 = EM3677:Z9
+              Z7 = EM3678:Z9
+              IF EM3673:Z9 >= 32 THEN
+                ' 全スロットが生きている。回収しても足りない
+                EM1:Z9 = 3
+                EM2:Z9 = 10
+                BREAK
+              END IF
+            ELSE
+              ' まだ順に渡せる
+              EM3673:Z9 = EM39:Z9
             END IF
-            Z4 = EM39:Z9 * 52 + 2008 + Z9
+            Z4 = EM3673:Z9 * 52 + 2008 + Z9
             EM0:Z4 = EM18.L:Z9
             IF EM18.L:Z9 > 0 THEN
               Z7 = EM18.L:Z9
@@ -1159,21 +1612,173 @@ IF EM54:Z9 <= 62 THEN
               NEXT
             END IF
             ' R[a] はデバイス参照から配列に変わる
-            EM1.L:Z1 = EM39:Z9   ' スロット番号
+            EM1.L:Z1 = EM3673:Z9   ' スロット番号
             EM0:Z1 = 8
-            EM39:Z9 = EM39:Z9 + 1
+            ' 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+            IF EM3673:Z9 = EM39:Z9 THEN
+              EM39:Z9 = EM39:Z9 + 1
+            END IF
           END IF
         ELSE IF Z5 = 28 THEN
           ' new
           ' クラス番号を控える。R[a] はオブジェクトで上書きする
           Z8 = EM1:Z1
-          ' プールの空きスロットを取る。返さないので使い切ったら止まる
+          ' プールの空きスロットを決める
           IF EM39:Z9 >= 32 THEN
-            EM1:Z9 = 3
-            EM2:Z9 = 10
-            BREAK
+            ' 順に渡すぶんは尽きた。回収して空きを探す
+            ' --- 回収 (使い切ったときだけ走る) ---
+            ' アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+            EM3677:Z9 = Z6
+            EM3678:Z9 = Z7
+            ' 印と走査済みを消す
+            FOR EM3672:Z9 = 0 TO 31
+              Z6 = EM3672:Z9 * 52 + 2008 + Z9
+              EM1:Z6 = 0
+              EM2:Z6 = 0
+            NEXT
+            ' ルート — レジスタ全 80 個と汎用グローバル 300 個
+            ' **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+            FOR EM3672:Z9 = 0 TO 379
+              IF EM3672:Z9 < 80 THEN
+                Z7 = EM3672:Z9 * 4 + 72 + Z9
+              ELSE
+                Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
+              END IF
+              EM3674:Z9 = EM0:Z7
+              IF EM3674:Z9 >= 7 THEN
+                IF EM3674:Z9 <= 10 THEN
+                  IF EM3674:Z9 = 9 THEN
+                    ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                    ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                    Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = 8
+                      EM3676:Z9 = 1
+                    END IF
+                  ELSE IF EM3674:Z9 = 10 THEN
+                    ' **値は スロット + 1。** 0 は main でスロットを持たない
+                    IF EM1:Z7 > 0 THEN
+                      Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 10
+                        EM3676:Z9 = 1
+                      END IF
+                    END IF
+                  ELSE
+                    ' 文字列と配列。値がそのままスロット番号
+                    Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                    IF EM1:Z6 = 0 THEN
+                      EM1:Z6 = EM3674:Z9
+                      EM3676:Z9 = 1
+                    END IF
+                  END IF
+                END IF
+              END IF
+            NEXT
+            ' 到達性を伝播する。印の付いたスロットの中身も辿る
+            ' **印が増えなくなったら空回りします。** 最悪 32 周
+            ' **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+            ' 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+            ' ルート走査で印が付いているので 1 周は回す
+            EM3676:Z9 = 1
+            FOR EM3679:Z9 = 0 TO 31
+              IF EM3676:Z9 <> 0 THEN
+                EM3676:Z9 = 0
+                FOR EM3672:Z9 = 0 TO 31
+                  Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                  ' 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+                  EM3680:Z9 = Z6
+                  EM3674:Z9 = EM1:Z6
+                  IF EM3674:Z9 <> 0 THEN
+                    IF EM2:Z6 = 0 THEN
+                      EM2:Z6 = 1
+                      ' 文字列の中身はバイト列。辿らない
+                      IF EM3674:Z9 <> 7 THEN
+                        IF EM3674:Z9 = 10 THEN
+                          ' インスタンス変数は容量いっぱい使う
+                          EM3682:Z9 = 11
+                        ELSE
+                          ' 配列は要素数まで。**0 のとき引き算をしない** —
+                          ' 符号なしなので 0 - 1 が 65535 になる
+                          EM3682:Z9 = EM0:Z6
+                          IF EM3682:Z9 > 0 THEN
+                            EM3682:Z9 = EM3682:Z9 - 1
+                          END IF
+                        END IF
+                        ' 要素は値スロットの並び。ルートと同じ手で印を付ける
+                        FOR EM3681:Z9 = 0 TO EM3682:Z9
+                          Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
+                          EM3674:Z9 = EM0:Z7
+                          IF EM3674:Z9 >= 7 THEN
+                            IF EM3674:Z9 <= 10 THEN
+                              IF EM3674:Z9 = 9 THEN
+                                ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                                ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                                Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = 8
+                                  EM3676:Z9 = 1
+                                END IF
+                              ELSE IF EM3674:Z9 = 10 THEN
+                                ' **値は スロット + 1。** 0 は main でスロットを持たない
+                                IF EM1:Z7 > 0 THEN
+                                  Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 10
+                                    EM3676:Z9 = 1
+                                  END IF
+                                END IF
+                              ELSE
+                                ' 文字列と配列。値がそのままスロット番号
+                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 = EM3674:Z9
+                                  EM3676:Z9 = 1
+                                END IF
+                              END IF
+                            END IF
+                          END IF
+                        NEXT
+                      END IF
+                    END IF
+                  END IF
+                NEXT
+              END IF
+            NEXT
+            ' 印の付かなかったスロットを探す。32 なら見つからなかった印
+            EM3673:Z9 = 32
+            FOR EM3672:Z9 = 0 TO 31
+              IF EM3673:Z9 >= 32 THEN
+                Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM3673:Z9 = EM3672:Z9
+                END IF
+              END IF
+            NEXT
+            ' 借りた Z を返す
+            Z6 = EM3677:Z9
+            Z7 = EM3678:Z9
+            IF EM3673:Z9 >= 32 THEN
+              ' 全スロットが生きている。回収しても足りない
+              EM1:Z9 = 3
+              EM2:Z9 = 10
+              BREAK
+            END IF
+          ELSE
+            ' まだ順に渡せる
+            EM3673:Z9 = EM39:Z9
           END IF
-          Z3 = EM39:Z9 * 52 + 2008 + Z9
+          Z3 = EM3673:Z9 * 52 + 2008 + Z9
           EM0:Z3 = Z8   ' クラス番号
           ' インスタンス変数は未代入 (TT_EMPTY) から始める
           Z4 = Z3 + 4
@@ -1182,9 +1787,12 @@ IF EM54:Z9 <= 62 THEN
             EM0:Z6 = 0
           NEXT
           ' **値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない
-          EM1.L:Z1 = EM39:Z9 + 1   ' スロット番号 + 1
+          EM1.L:Z1 = EM3673:Z9 + 1   ' スロット番号 + 1
           EM0:Z1 = 10
-          EM39:Z9 = EM39:Z9 + 1
+          ' 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+          IF EM3673:Z9 = EM39:Z9 THEN
+            EM39:Z9 = EM39:Z9 + 1
+          END IF
           ' initialize があれば呼ぶ。名前の ID はホストが load で書いている
           IF EM15:Z9 <> 0 THEN
             Z3 = Z8 * 32 + EM15:Z9 + 552 + Z9
@@ -1812,11 +2420,160 @@ IF EM54:Z9 <= 62 THEN
           EM0:Z1 = 5
         ELSE
           IF EM0:Z1 = 7 THEN
-            ' プールの空きスロットを取る。返さないので使い切ったら止まる
+            ' プールの空きスロットを決める
             IF EM39:Z9 >= 32 THEN
-              EM1:Z9 = 3
-              EM2:Z9 = 10
-              BREAK
+              ' 順に渡すぶんは尽きた。回収して空きを探す
+              ' --- 回収 (使い切ったときだけ走る) ---
+              ' アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+              EM3677:Z9 = Z6
+              EM3678:Z9 = Z7
+              ' 印と走査済みを消す
+              FOR EM3672:Z9 = 0 TO 31
+                Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                EM1:Z6 = 0
+                EM2:Z6 = 0
+              NEXT
+              ' ルート — レジスタ全 80 個と汎用グローバル 300 個
+              ' **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+              FOR EM3672:Z9 = 0 TO 379
+                IF EM3672:Z9 < 80 THEN
+                  Z7 = EM3672:Z9 * 4 + 72 + Z9
+                ELSE
+                  Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
+                END IF
+                EM3674:Z9 = EM0:Z7
+                IF EM3674:Z9 >= 7 THEN
+                  IF EM3674:Z9 <= 10 THEN
+                    IF EM3674:Z9 = 9 THEN
+                      ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                      ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                      Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 8
+                        EM3676:Z9 = 1
+                      END IF
+                      Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = 8
+                        EM3676:Z9 = 1
+                      END IF
+                    ELSE IF EM3674:Z9 = 10 THEN
+                      ' **値は スロット + 1。** 0 は main でスロットを持たない
+                      IF EM1:Z7 > 0 THEN
+                        Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                        IF EM1:Z6 = 0 THEN
+                          EM1:Z6 = 10
+                          EM3676:Z9 = 1
+                        END IF
+                      END IF
+                    ELSE
+                      ' 文字列と配列。値がそのままスロット番号
+                      Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                      IF EM1:Z6 = 0 THEN
+                        EM1:Z6 = EM3674:Z9
+                        EM3676:Z9 = 1
+                      END IF
+                    END IF
+                  END IF
+                END IF
+              NEXT
+              ' 到達性を伝播する。印の付いたスロットの中身も辿る
+              ' **印が増えなくなったら空回りします。** 最悪 32 周
+              ' **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+              ' 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+              ' ルート走査で印が付いているので 1 周は回す
+              EM3676:Z9 = 1
+              FOR EM3679:Z9 = 0 TO 31
+                IF EM3676:Z9 <> 0 THEN
+                  EM3676:Z9 = 0
+                  FOR EM3672:Z9 = 0 TO 31
+                    Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                    ' 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+                    EM3680:Z9 = Z6
+                    EM3674:Z9 = EM1:Z6
+                    IF EM3674:Z9 <> 0 THEN
+                      IF EM2:Z6 = 0 THEN
+                        EM2:Z6 = 1
+                        ' 文字列の中身はバイト列。辿らない
+                        IF EM3674:Z9 <> 7 THEN
+                          IF EM3674:Z9 = 10 THEN
+                            ' インスタンス変数は容量いっぱい使う
+                            EM3682:Z9 = 11
+                          ELSE
+                            ' 配列は要素数まで。**0 のとき引き算をしない** —
+                            ' 符号なしなので 0 - 1 が 65535 になる
+                            EM3682:Z9 = EM0:Z6
+                            IF EM3682:Z9 > 0 THEN
+                              EM3682:Z9 = EM3682:Z9 - 1
+                            END IF
+                          END IF
+                          ' 要素は値スロットの並び。ルートと同じ手で印を付ける
+                          FOR EM3681:Z9 = 0 TO EM3682:Z9
+                            Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
+                            EM3674:Z9 = EM0:Z7
+                            IF EM3674:Z9 >= 7 THEN
+                              IF EM3674:Z9 <= 10 THEN
+                                IF EM3674:Z9 = 9 THEN
+                                  ' 鍵と値で 2 本。**どちらも配列として印を付ける** —
+                                  ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 8
+                                    EM3676:Z9 = 1
+                                  END IF
+                                  Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = 8
+                                    EM3676:Z9 = 1
+                                  END IF
+                                ELSE IF EM3674:Z9 = 10 THEN
+                                  ' **値は スロット + 1。** 0 は main でスロットを持たない
+                                  IF EM1:Z7 > 0 THEN
+                                    Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
+                                    IF EM1:Z6 = 0 THEN
+                                      EM1:Z6 = 10
+                                      EM3676:Z9 = 1
+                                    END IF
+                                  END IF
+                                ELSE
+                                  ' 文字列と配列。値がそのままスロット番号
+                                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                                  IF EM1:Z6 = 0 THEN
+                                    EM1:Z6 = EM3674:Z9
+                                    EM3676:Z9 = 1
+                                  END IF
+                                END IF
+                              END IF
+                            END IF
+                          NEXT
+                        END IF
+                      END IF
+                    END IF
+                  NEXT
+                END IF
+              NEXT
+              ' 印の付かなかったスロットを探す。32 なら見つからなかった印
+              EM3673:Z9 = 32
+              FOR EM3672:Z9 = 0 TO 31
+                IF EM3673:Z9 >= 32 THEN
+                  Z6 = EM3672:Z9 * 52 + 2008 + Z9
+                  IF EM1:Z6 = 0 THEN
+                    EM3673:Z9 = EM3672:Z9
+                  END IF
+                END IF
+              NEXT
+              ' 借りた Z を返す
+              Z6 = EM3677:Z9
+              Z7 = EM3678:Z9
+              IF EM3673:Z9 >= 32 THEN
+                ' 全スロットが生きている。回収しても足りない
+                EM1:Z9 = 3
+                EM2:Z9 = 10
+                BREAK
+              END IF
+            ELSE
+              ' まだ順に渡せる
+              EM3673:Z9 = EM39:Z9
             END IF
             Z4 = EM1.L:Z1
             Z4 = Z4 * 52 + 2008 + Z9
@@ -1832,7 +2589,7 @@ IF EM54:Z9 <= 62 THEN
               BREAK
             END IF
             ' 新しいスロットへ左側をワード単位で写す。並びが同じなのでそのまま
-            Z3 = EM39:Z9 * 52 + 2008 + Z9
+            Z3 = EM3673:Z9 * 52 + 2008 + Z9
             EM0:Z3 = EM16.L:Z9
             EM45:Z9 = EM16.L:Z9 + 1
             EM45:Z9 = EM45:Z9 / 2
@@ -1884,9 +2641,12 @@ IF EM54:Z9 <= 62 THEN
             ' 長さを更新する
             EM16.L:Z9 = EM16.L:Z9 + EM18.L:Z9
             EM0:Z3 = EM16.L:Z9
-            EM1.L:Z1 = EM39:Z9   ' スロット番号
+            EM1.L:Z1 = EM3673:Z9   ' スロット番号
             EM0:Z1 = 7
-            EM39:Z9 = EM39:Z9 + 1
+            ' 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+            IF EM3673:Z9 = EM39:Z9 THEN
+              EM39:Z9 = EM39:Z9 + 1
+            END IF
           ELSE
             EM1.L:Z1 = EM1.L:Z1 + EM1.L:Z2
             EM0:Z1 = 4

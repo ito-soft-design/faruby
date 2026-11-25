@@ -127,16 +127,50 @@ class TestStrings < Minitest::Test
     assert_equal "", string_bytes(sim, 0)
   end
 
-  # 返さないスロットを使うため、ループの中のリテラルは使い切る
-  def test_literals_in_a_loop_exhaust_the_pool
+  # **ループの中のリテラルは回収されます。** 前の周のスロットはどこからも
+  # 届かなくなるので、使い切ったところで回収して配り直します。以前は
+  # エラー 10 で止まりました (doc/gc.md)
+  def test_literals_in_a_loop_are_collected
     sim = run_source(<<~RUBY)
-      #{layout.max_arrays + 1}.times do |i|
+      #{layout.max_arrays * 3}.times do |i|
         s = "x"
       end
     RUBY
 
+    assert_finished sim
+  end
+
+  # **生きているものは回収しません。** 全スロットが届くところに居れば、
+  # 今までどおりエラー 10 で止まります
+  def test_a_pool_full_of_live_strings_still_stops
+    assignments = (0..layout.max_arrays).map { |i| %(s#{i} = "x#{i}"\n) }.join
+    sim = run_source(assignments)
+
     assert_equal VM_ERROR, status(sim)
-    assert_equal 10, error(sim)
+    assert_equal FaRuby::OpcodeTable::HEAP_ERROR, error(sim)
+  end
+
+  # **配列に入れた文字列は要素から辿ります。** ルートからの直接参照だけを
+  # 見ていると、生きている文字列を回収して**黙って値が変わります**
+  #
+  # 使い捨ての文字列でプールを一度使い切らせ、その後も配列の中身が
+  # 読めることを見ます (確保は 1 + 10 + 30 = 41 回で、スロットは 32 個)
+  def test_strings_held_by_an_array_survive_a_collection
+    assert_result 1, <<~RUBY
+      a = []
+      10.times do |i|
+        a << "ab"
+      end
+      30.times do |i|
+        t = "x"
+      end
+      $DM0 = 0
+      if a[0] == "ab"
+        if a[9] == "ab"
+          $DM0 = 1
+        end
+      end
+    RUBY
   end
 
   # === FARUBY_STR_FILL ===
@@ -575,18 +609,19 @@ class TestStrings < Minitest::Test
   end
 
   # 1 文字ごとにスロットを取るので、ループの中では使い切る
-  def test_index_takes_a_pool_slot
+  # 1 文字取り出すとスロットを 1 つ使うが、**次の周には届かなくなるので
+  # 回収されます。** 以前はエラー 10 で止まりました
+  def test_index_takes_a_pool_slot_that_is_collected
     sim = run_source(<<~RUBY)
       s = "abcdefghijklmnop"
       i = 0
-      while i < #{layout.max_arrays + 1}
+      while i < #{layout.max_arrays * 3}
         t = s[0]
         i = i + 1
       end
     RUBY
 
-    assert_equal VM_ERROR, status(sim)
-    assert_equal FaRuby::OpcodeTable::HEAP_ERROR, error(sim)
+    assert_finished sim
   end
 
   # === 生成コードの見張り ===
@@ -683,17 +718,16 @@ class TestStrings < Minitest::Test
   end
 
   # 読むたびにスロットを取るので、ループの中では使い切る
-  def test_a_read_takes_a_pool_slot
+  def test_a_read_takes_a_pool_slot_that_is_collected
     sim = run_source(<<~RUBY)
       i = 0
-      while i < #{layout.max_arrays + 1}
+      while i < #{layout.max_arrays * 3}
         s = $DM800T4
         i = i + 1
       end
     RUBY
 
-    assert_equal VM_ERROR, status(sim)
-    assert_equal FaRuby::OpcodeTable::HEAP_ERROR, error(sim)
+    assert_finished sim
   end
 
   # 添字を付けた形。桁は名前側に付ける

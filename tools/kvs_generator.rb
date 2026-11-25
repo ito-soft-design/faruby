@@ -949,7 +949,7 @@ module FaRuby
         set_slot_nil(ref)
       end
       alloc_check(heap_code)
-      string_header_into(3, array_sp)
+      string_header_into(3, gc_found)
       line "#{scratch32} = 0   ' 新しいスロットは空から始める"
       line "#{scratch32_b} = #{str_found_end} - #{str_found}   ' その文字のバイト数"
       append_string_bytes(source_offset: str_found)
@@ -1262,25 +1262,49 @@ module FaRuby
     # **使う Z は引数です。** 確保の場所ごとに空いている Z が違い、共通には
     # できません。文字列の作業場所を VM 状態に置いてあるのと同じ事情です。
 
-    def array_sp = state(layout.array_sp_addr)
+    def array_sp    = state(layout.array_sp_addr)
+    def gc_found    = state(layout.gc_found_addr)
+    def gc_slot     = state(layout.gc_slot_addr)
+    def gc_tag      = state(layout.gc_tag_addr)
+    def gc_saved_z6 = state(layout.gc_saved_z6_addr)
+    def gc_saved_z7 = state(layout.gc_saved_z7_addr)
+    def gc_changed  = state(layout.gc_changed_addr)
+    def gc_pass     = state(layout.gc_pass_addr)
+    def gc_header   = state(layout.gc_header_addr)
+    def gc_elem     = state(layout.gc_elem_addr)
+    def gc_limit    = state(layout.gc_limit_addr)
 
+    # これから使うスロットを決める。**尽きていたら回収してから探す**
     def alloc_check(error_code)
-      note "プールの空きスロットを取る。返さないので使い切ったら止まる"
-      if_("#{array_sp} >= #{layout.max_arrays}") { vm_error(error_code) }
+      note "プールの空きスロットを決める"
+      if_else_block("#{array_sp} >= #{layout.max_arrays}") do
+        note "順に渡すぶんは尽きた。回収して空きを探す"
+        collect_pool
+        if_("#{gc_found} >= #{layout.max_arrays}") do
+          note "全スロットが生きている。回収しても足りない"
+          vm_error(error_code)
+        end
+      end
+      note "まだ順に渡せる"
+      line "#{gc_found} = #{array_sp}"
+      end_block
     end
 
     # 2 スロット続きで取れるか。z は検査に使うテンポラリ
     #
-    # **ハッシュは鍵の配列と値の配列で 2 本使います。** 回収を入れると空きが
-    # 連続しなくなるので、そのときに 2 回取る形へ直します (doc/gc.md)
+    # **ハッシュは鍵の配列と値の配列で 2 本使います。** ここは回収を通しません
+    # — 返ってくるスロットが連続しないためです。2 回取る形へ直すのは別の
+    # 段階で、それまでは尽きたら止まります (doc/gc.md)
     def alloc_check_pair(z, error_code)
       note "ハッシュは配列 2 本。空きスロットが 2 つ要る"
+      note "**回収は通さない。** 返ってくるスロットが連続しない"
       line "Z#{z} = #{array_sp} + 1"
       if_("Z#{z} >= #{layout.max_arrays}") { vm_error(error_code) }
+      line "#{gc_found} = #{array_sp}"
     end
 
     def alloc_header_into(z)
-      line "Z#{z} = #{array_sp} * #{layout.array_slot_words} + " \
+      line "Z#{z} = #{gc_found} * #{layout.array_slot_words} + " \
            "#{block_offset(layout.array_pool_base)}"
     end
 
@@ -1289,9 +1313,213 @@ module FaRuby
     def alloc_commit(slot, type_tag, offset: 0)
       suffix = offset.zero? ? "" : " + #{offset}"
       comment = offset.zero? ? "スロット番号" : "スロット番号 + #{offset}"
-      line "#{slot.value} = #{array_sp}#{suffix}   ' #{comment}"
+      line "#{slot.value} = #{gc_found}#{suffix}   ' #{comment}"
       line "#{slot.tag} = #{type_tag}"
-      line "#{array_sp} = #{array_sp} + 1"
+      note "順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない"
+      if_("#{gc_found} = #{array_sp}") { line "#{array_sp} = #{array_sp} + 1" }
+    end
+
+    # --- 回収 (GC) ---
+    #
+    # **使い切ったときだけ走ります。** 生きているスロットに印を付け、印の
+    # 付かなかったものを 1 つ返します。見つからなければ呼ぶ側が止めます。
+    # 案 2 (順に渡して返さない) と意味は変わりません — エラーで止まっていた
+    # ところが止まらなくなるだけです (doc/heap.md)。
+    #
+    # **ルートからの直接参照だけでは足りません。** オブジェクトのインスタンス
+    # 変数・ハッシュの要素・入れ子の配列はプールの中から他のスロットを指す
+    # ので、印の付いたスロットの中身も辿ります。辿らないと生きているものを
+    # 回収し、**エラーも出さずに値が変わります** (doc/gc.md)。
+    #
+    # **Z6 と Z7 を借りて返します。** 確保の場所ごとに空いている Z が違う
+    # ため、ここで退避・復元します (文字列が Z3 を借りるのと同じ手)。
+    def collect_pool
+      note "--- 回収 (使い切ったときだけ走る) ---"
+      note "アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う"
+      line "#{gc_saved_z6} = Z6"
+      line "#{gc_saved_z7} = Z7"
+
+      gc_clear_marks
+      gc_mark_roots
+      gc_propagate
+      gc_find_free
+
+      note "借りた Z を返す"
+      line "Z6 = #{gc_saved_z6}"
+      line "Z7 = #{gc_saved_z7}"
+    end
+
+    # 印を消す。**見出しの予備ワードを使う** (+0 は要素数なので触れない)
+    def gc_clear_marks
+      note "印と走査済みを消す"
+      line "FOR #{gc_slot} = 0 TO #{layout.max_arrays - 1}"
+      indent
+      gc_slot_header_into(6)
+      line "#{word_at(6, MemoryLayout::SLOT_MARK)} = 0"
+      line "#{word_at(6, MemoryLayout::SLOT_SCANNED)} = 0"
+      dedent
+      line "NEXT"
+    end
+
+    # 到達性を伝播する
+    #
+    # **印の付いたスロットの中身も辿ります。** オブジェクトのインスタンス
+    # 変数・ハッシュの要素・入れ子の配列が、プールの中から他のスロットを
+    # 指すためです。ここが無いと生きているものを回収します。
+    #
+    # **印が増えなくなるまで回します。** 1 周で届かないのは、番号の小さい
+    # スロットが大きいスロットから指されている形です。走査済みの印がある
+    # ので同じスロットを 2 度は見ず、**最悪 max_arrays 周**で止まります。
+    def gc_propagate
+      note "到達性を伝播する。印の付いたスロットの中身も辿る"
+      note "**印が増えなくなったら空回りします。** 最悪 #{layout.max_arrays} 周"
+      note "**BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を"
+      note "抜けるだけですが、エラーの BREAK と見分けが付かなくなります"
+      note "ルート走査で印が付いているので 1 周は回す"
+      line "#{gc_changed} = 1"
+      line "FOR #{gc_pass} = 0 TO #{layout.max_arrays - 1}"
+      indent
+      if_("#{gc_changed} <> 0") do
+        line "#{gc_changed} = 0"
+        line "FOR #{gc_slot} = 0 TO #{layout.max_arrays - 1}"
+        indent
+        gc_scan_one
+        dedent
+        line "NEXT"
+      end
+      dedent
+      line "NEXT"
+    end
+
+    # 印の付いたスロット 1 つの中身を辿る
+    def gc_scan_one
+      gc_slot_header_into(6)
+      note "見出しのアドレスを覚える。印を付けるときに Z6 が壊れる"
+      line "#{gc_header} = Z6"
+      line "#{gc_tag} = #{word_at(6, MemoryLayout::SLOT_MARK)}"
+      if_("#{gc_tag} <> 0") do
+        if_("#{word_at(6, MemoryLayout::SLOT_SCANNED)} = 0") do
+          line "#{word_at(6, MemoryLayout::SLOT_SCANNED)} = 1"
+          note "文字列の中身はバイト列。辿らない"
+          if_("#{gc_tag} <> #{TT_STRING}") do
+            if_else_block("#{gc_tag} = #{TT_OBJECT}") do
+              note "インスタンス変数は容量いっぱい使う"
+              line "#{gc_limit} = #{layout.max_array_len - 1}"
+            end
+            note "配列は要素数まで。**0 のとき引き算をしない** —"
+            note "符号なしなので 0 - 1 が 65535 になる"
+            line "#{gc_limit} = #{word_at(6, MemoryLayout::ARRAY_LENGTH)}"
+            if_("#{gc_limit} > 0") { line "#{gc_limit} = #{gc_limit} - 1" }
+            end_block
+            note "要素は値スロットの並び。ルートと同じ手で印を付ける"
+            line "FOR #{gc_elem} = 0 TO #{gc_limit}"
+            indent
+            line "Z7 = #{gc_header} + #{MemoryLayout::ARRAY_HEADER_WORDS} + " \
+                 "#{gc_elem} * #{SLOT_WORDS}"
+            gc_mark_from_slot
+            dedent
+            line "NEXT"
+          end
+        end
+      end
+    end
+
+    # ルート走査
+    #
+    # **レジスタと汎用グローバルは同じ値スロットの並びです。** 1 つの FOR で
+    # 回し、番号で先頭を切り替えます。間にある呼び出しスタックとメソッド表は
+    # 値スロットではないので、まとめて舐めるとタグに見える値を拾います。
+    #
+    # **レジスタは窓ではなく全部見ます。** 窓の外に残っている外側のフレームの
+    # 値も、戻ったときに使うので生きています。
+    def gc_mark_roots
+      note "ルート — レジスタ全 #{layout.max_regs} 個と汎用グローバル #{layout.max_globals} 個"
+      note "**窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている"
+      line "FOR #{gc_slot} = 0 TO #{layout.max_regs + layout.max_globals - 1}"
+      indent
+      if_else_block("#{gc_slot} < #{layout.max_regs}") do
+        line "Z7 = #{gc_slot} * #{SLOT_WORDS} + #{block_offset(layout.reg_file_base)}"
+      end
+      line "Z7 = (#{gc_slot} - #{layout.max_regs}) * #{SLOT_WORDS} + " \
+           "#{block_offset(layout.general_global_base)}"
+      end_block
+      gc_mark_from_slot
+      dedent
+      line "NEXT"
+    end
+
+    # Z7 の値スロットが指しているスロットに印を付ける
+    #
+    # **プールを指す型タグは TT_STRING から TT_OBJECT まで連続しています。**
+    # 範囲の比較 2 回で振り分けられます (真偽判定と同じ手)。
+    def gc_mark_from_slot
+      line "#{gc_tag} = #{word_at(7, SLOT_TYPE_OFFSET)}"
+      if_("#{gc_tag} >= #{TT_STRING}") do
+        if_("#{gc_tag} <= #{TT_OBJECT}") do
+          chain_head(true, "#{gc_tag} = #{TT_HASH}")
+          indent
+          note "鍵と値で 2 本。**どちらも配列として印を付ける** —"
+          note "中身が値スロットの並びで、読み方はふつうの配列と同じ"
+          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), TT_ARRAY)
+          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET + 1), TT_ARRAY)
+          dedent
+          chain_head(false, "#{gc_tag} = #{TT_OBJECT}")
+          indent
+          note "**値は スロット + 1。** 0 は main でスロットを持たない"
+          if_("#{word_at(7, SLOT_VALUE_OFFSET)} > 0") do
+            gc_mark_slot("#{word_at(7, SLOT_VALUE_OFFSET)} - 1", TT_OBJECT)
+          end
+          dedent
+          line "ELSE"
+          indent
+          note "文字列と配列。値がそのままスロット番号"
+          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), gc_tag)
+          dedent
+          line "END IF"
+        end
+      end
+    end
+
+    # スロット番号 number の見出しに印 (型タグ) を書く
+    #
+    # **まだ印の無いものにだけ書きます。** 付いている印を上から書くと、
+    # ハッシュ経由で配列として印を付けたものを別の型に変えてしまいます。
+    # 新しく付いたときだけ `GC_CHANGED` を立て、伝播を続けるかの判断にします。
+    def gc_mark_slot(number, type_tag)
+      line "Z6 = (#{number}) * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
+      if_("#{word_at(6, MemoryLayout::SLOT_MARK)} = 0") do
+        line "#{word_at(6, MemoryLayout::SLOT_MARK)} = #{type_tag}"
+        line "#{gc_changed} = 1"
+      end
+    end
+
+    # 印の付かなかったスロットを 1 つ探す
+    #
+    # **番号の小さいほうから取ります。** 入れ子は内側が先に確保されて小さい
+    # 番号になるので、その並びを崩さないほうが到達性の伝播が 1 周で済みます。
+    #
+    # **BREAK は使いません。** 見つけたかどうかの比較で足りるので、FOR を
+    # 抜ける命令の機種差を持ち込まずに済みます。
+    def gc_find_free
+      note "印の付かなかったスロットを探す。#{layout.max_arrays} なら見つからなかった印"
+      line "#{gc_found} = #{layout.max_arrays}"
+      line "FOR #{gc_slot} = 0 TO #{layout.max_arrays - 1}"
+      indent
+      if_("#{gc_found} >= #{layout.max_arrays}") do
+        gc_slot_header_into(6)
+        if_("#{word_at(6, MemoryLayout::SLOT_MARK)} = 0") do
+          line "#{gc_found} = #{gc_slot}"
+        end
+      end
+      dedent
+      line "NEXT"
+    end
+
+    # 走査中のスロット (GC_SLOT) の見出しのアドレスを Z に載せる
+    def gc_slot_header_into(z)
+      line "Z#{z} = #{gc_slot} * #{layout.array_slot_words} + " \
+           "#{block_offset(layout.array_pool_base)}"
     end
 
     # OP_ARRAY は dest と first が同じレジスタなので、**要素を写し終えて
@@ -3889,6 +4117,10 @@ end
              "(値スロット #{SLOT_WORDS}ワード/変数)"
       e.note "  +#{layout.offset_of(layout.array_pool_base)}~ = 配列プール " \
              "(#{layout.array_slot_words}ワード/スロット: 要素数 + 予備 + 要素#{layout.max_array_len}個)"
+      e.note "         見出しの +#{MemoryLayout::SLOT_MARK} が回収の印 " \
+             "(0 = 未到達、それ以外は到達したときの型タグ)"
+      e.note "  +#{layout.offset_of(layout.gc_work_base)}~ = GC 作業領域 " \
+             "(#{MemoryLayout::GC_WORK_WORDS}ワード。使い切ったときだけ走る)"
       e.note ""
       e.note "実行中に変わらないものは #{layout.fixed_device_name} のバンク " \
              "#{layout.fixed_bank} (#{layout.fixed_device(0)} から) に置く。"

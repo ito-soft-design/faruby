@@ -200,19 +200,38 @@ module FaRuby
     # 場所ごとに空いている Z が違い、共通の手順にできないためです。`FOR` の
     # ループ変数はデバイスでもよいので、走査はここだけで足ります。文字列の
     # 作業場所を VM 状態に置いてあるのと同じ事情です。
-    GC_WORK_WORDS = 8
+    GC_WORK_WORDS = 12
 
-    GC_SLOT    = 0   # 走査中のスロット番号 (FOR のループ変数)
-    GC_HEADER  = 1   # そのスロットの見出しのアドレス
-    GC_FOUND   = 2   # 見つけた空きスロットの番号
-    GC_CHANGED = 3   # この周で印が増えたか (伝播を続けるかの判定)
-    # 確保してからレジスタへ書くまでのスロット
+    GC_SLOT     = 0   # 走査中のスロット番号 (FOR のループ変数)
+    # **これから使うスロット。** 回収で返ってきたものか、順に渡した ARRAY_SP
+    #
+    # `max_arrays` が「無い」の印です。65535 にしないのは、三菱のワードが
+    # 符号付き (INT) で入らないためです。
+    GC_FOUND    = 1
+    GC_TAG      = 2   # 走査中の型タグ。見出しの印にそのまま入れる
+    # 確保してからレジスタへ書くまでのスロット + 1 (0 = なし)
     #
     # **1 つの命令で 2 つ確保するところで要ります** (ハッシュ)。1 つめは
     # まだどのレジスタからも届かないので、ルート走査では見つかりません。
-    GC_PINNED  = 4
-    GC_TAG     = 5   # 走査中の型タグ
-    # +6, +7 は予備
+    # 使うのは `new_hash` を 2 回確保に直すときです。
+    GC_PINNED   = 3
+    GC_CHANGED  = 4   # 伝播で印が増えたか (到達性を辿るとき)
+    # 借りたインデックスレジスタの退避先
+    #
+    # **確保の場所ごとに空いている Z が違います。** 走査にはアドレスを載せる
+    # Z が 2 本要るので、借りて返します (文字列が Z3 を借りるのと同じ手)。
+    GC_SAVED_Z6 = 5
+    GC_SAVED_Z7 = 6
+    # --- 到達性の伝播で使う ---
+    GC_PASS   = 7    # 何周目か。最悪 max_arrays 周で止まる
+    # 走査中のスロットの見出しのアドレス
+    #
+    # **Z には置けません。** 中身から印を付けるときに Z を使うので、
+    # 走査しているスロットのアドレスが壊れます。
+    GC_HEADER = 8
+    GC_ELEM   = 9    # 中身を見るときの要素番号
+    GC_LIMIT  = 10   # その要素番号の上限
+    # +11 は予備
 
     # 「フレームが無い」を表す番号。トップレベルで定義されたブロックの定義元
     #
@@ -523,12 +542,17 @@ module FaRuby
 
     def gc_work_addr(offset) = gc_work_base + offset
 
-    def gc_slot_addr    = gc_work_addr(GC_SLOT)
-    def gc_header_addr  = gc_work_addr(GC_HEADER)
-    def gc_found_addr   = gc_work_addr(GC_FOUND)
-    def gc_changed_addr = gc_work_addr(GC_CHANGED)
-    def gc_pinned_addr  = gc_work_addr(GC_PINNED)
-    def gc_tag_addr     = gc_work_addr(GC_TAG)
+    def gc_slot_addr     = gc_work_addr(GC_SLOT)
+    def gc_found_addr    = gc_work_addr(GC_FOUND)
+    def gc_tag_addr      = gc_work_addr(GC_TAG)
+    def gc_pinned_addr   = gc_work_addr(GC_PINNED)
+    def gc_changed_addr  = gc_work_addr(GC_CHANGED)
+    def gc_saved_z6_addr = gc_work_addr(GC_SAVED_Z6)
+    def gc_saved_z7_addr = gc_work_addr(GC_SAVED_Z7)
+    def gc_pass_addr     = gc_work_addr(GC_PASS)
+    def gc_header_addr   = gc_work_addr(GC_HEADER)
+    def gc_elem_addr     = gc_work_addr(GC_ELEM)
+    def gc_limit_addr    = gc_work_addr(GC_LIMIT)
 
     # スロットの見出しの中の印のアドレス
     def slot_mark_addr(index)    = array_slot_addr(index) + SLOT_MARK
