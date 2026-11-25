@@ -1175,8 +1175,9 @@ class TestI8080Vm < Minitest::Test
     found = candidates.find { |c| File.exist?(c) }
     return found if found
 
-    # PATH から探す
-    system("mrbc --version > /dev/null 2>&1") ? "mrbc" : nil
+    # PATH から探す。**`> /dev/null` は Windows で「パスが見つかりません」を
+    # 出すので使わない**
+    system("mrbc", "--version", out: File::NULL, err: File::NULL) ? "mrbc" : nil
   end
 
   # Ruby ソースをコンパイルして i8080 VM で実行する
