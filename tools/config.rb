@@ -57,6 +57,15 @@ module FaRuby
   # 設定が不正・不足している場合に発生
   class ConfigError < StandardError; end
 
+  # PLC に届かない場合に発生
+  #
+  # **ここに置くのは `rake hw` と `rake bench` の両方が投げるからです。**
+  # 片方 (hardware_check.rb) に置いていたため、bench から投げると
+  # 名前が解決できず、**届かないことではなく NameError が出ていました。**
+  # 低位の `Console::PlcAdapters::UnreachableError` を、どこへ繋ごうと
+  # したかを添えて包み直したものです。
+  class UnreachableError < StandardError; end
+
   class Config
     PROJECT_ROOT     = File.expand_path("..", __dir__)
     DEFAULT_FILENAME = "faruby_default.yml"

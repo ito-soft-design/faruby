@@ -33,9 +33,8 @@ require_relative "console/plc_connection"
 require_relative "console/memory_transfer"
 
 module FaRuby
-  # PLC に届かない場合に発生
-  class UnreachableError < StandardError; end
-
+  # 届かないときのエラー (UnreachableError) は config.rb にあります。
+  # bench も同じものを投げるためです
   class HardwareCheck
     include VmConstants
 
