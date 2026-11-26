@@ -698,7 +698,10 @@ module FaRuby
     # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書く。
     # それ以外の定数は利用者のものなので何もしない。
     def set_constant(name, sym_name)
-      setting, _, _, kind = device_entry(operand(sym_name))
+      setting, addr, _argc, kind = device_entry(operand(sym_name))
+      # 利用者の定数は値スロットへ。**再代入も通します** (Ruby は警告するが
+      # 見分けるには「もう書いたか」を覚える場所が要る)
+      return copy_reg_into_slot(operand(name), addr) if kind == SYMBOL_KIND_GLOBAL
       return unless kind == SYMBOL_KIND_SETTING
       return unless setting == SETTING_STR_FILL
 
@@ -804,6 +807,18 @@ module FaRuby
       return vm_error(error_code) unless kind == SYMBOL_KIND_CLASS
 
       write_slot(operand(name), TT_CLASS, class_number)
+    end
+
+    # R[a] = 定数 (OP_GETCONST)
+    #
+    # **クラス名と利用者の定数が同じ命令で来ます。** 種別で分けます。
+    # 定数は汎用グローバルと同じ値スロットなので、読み方も同じです。
+    def load_constant(name, sym_name, error_code)
+      first, addr, _argc, kind = device_entry(operand(sym_name))
+      return write_slot(operand(name), TT_CLASS, first) if kind == SYMBOL_KIND_CLASS
+      return copy_slot_into_reg(addr, operand(name)) if kind == SYMBOL_KIND_GLOBAL
+
+      vm_error(error_code)
     end
 
     # クラス本体を実行する (OP_EXEC)

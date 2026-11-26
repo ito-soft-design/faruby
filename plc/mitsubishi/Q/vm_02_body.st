@@ -1180,41 +1180,64 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
   ELSIF VMCURRENTOPCODE <= 37 THEN
     (* オペコード 0x1A - 0x25 *)
     IF VMCURRENTOPCODE = 29 THEN
-      (* OP_GETCONST (BB): R[a] = 定数 symbols[b] (クラス) *)
+      (* OP_GETCONST (BB): R[a] = 定数 symbols[b] (クラス名か利用者の定数) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       VMOPERANDB := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       (* シンボル表参照 (4ワード/エントリ) *)
       Z3 := VMOPERANDB * 4 + VMCURSYMBOLS;
-      Z5 := ZR0Z3;   (* メソッド番号 *)
+      Z4 := Z3 + 1;
+      Z5 := ZR0Z3;
+      Z6 := ZR0Z4;
       Z7 := Z3 + 2;
-      Z8 := ZR0Z7;   (* 引数の数 *)
+      Z8 := ZR0Z7;
       Z7 := Z3 + 3;
-      Z4 := ZR0Z7;   (* シンボル種別 *)
-      IF Z4 <> 6 THEN
-        (* クラス名でないシンボルを定数として読もうとした *)
-        VMSTATUS := 3;
-        VMERROR := 3;
-        EXIT;
+      Z1 := ZR0Z7;   (* シンボル種別 *)
+      IF Z1 = 6 THEN
+        (* クラス名。実行時に作らないので番号を置くだけ *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* クラス番号 *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 13;
+      ELSE
+        IF Z1 = 5 THEN
+          (* 定数は値スロット。型タグごと写す *)
+          Z3 := Z6;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[(Z3 - 4000) / 4].SLNUM;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := VMSLOT[(Z3 - 4000) / 4].SLTAG;
+        ELSE
+          (* クラスでも定数でもないシンボルを定数として読もうとした *)
+          VMSTATUS := 3;
+          VMERROR := 3;
+          EXIT;
+        END_IF;
       END_IF;
-      VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* クラス番号 *)
-      VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 13;
 
     ELSIF VMCURRENTOPCODE = 30 THEN
-      (* OP_SETCONST (BB): FARUBY_ の設定なら VM 状態へ書く *)
+      (* OP_SETCONST (BB): 定数 symbols[b] = R[a] (設定なら VM 状態へ) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       VMOPERANDB := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
+      (* シンボル表参照 (4ワード/エントリ) *)
       Z3 := VMOPERANDB * 4 + VMCURSYMBOLS;
-      Z4 := Z3 + 3;
-      Z5 := ZR0Z4;   (* シンボル種別 *)
-      IF Z5 = 3 THEN
-        Z6 := ZR0Z3;   (* 設定番号 *)
-        IF Z6 = 1 THEN
+      Z4 := Z3 + 1;
+      Z5 := ZR0Z3;
+      Z6 := ZR0Z4;
+      Z7 := Z3 + 2;
+      Z8 := ZR0Z7;
+      Z7 := Z3 + 3;
+      Z1 := ZR0Z7;   (* シンボル種別 *)
+      IF Z1 = 3 THEN
+        IF Z5 = 1 THEN
           (* 固定長でデバイスへ書いたときの余りを埋めるバイト *)
           VMSTRFILL := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
+        END_IF;
+      ELSE
+        IF Z1 = 5 THEN
+          (* 利用者の定数は値スロット。型タグごと写す *)
+          Z3 := Z6;
+          VMSLOT[(Z3 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+          VMSLOT[(Z3 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG;
         END_IF;
       END_IF;
 

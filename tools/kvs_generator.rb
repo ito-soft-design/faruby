@@ -1107,6 +1107,34 @@ module FaRuby
       line "#{dest.tag} = #{TT_CLASS}"
     end
 
+    # R[a] = 定数 (OP_GETCONST)
+    #
+    # **クラス名と利用者の定数が同じ命令で来ます。** `Counter.new` の
+    # `Counter` も `LIMIT` も `OP_GETCONST` なので、シンボルの種別で分けます。
+    # ホスト側は `OP_CLASS` に出てきた名前だけをクラスとして登録するので、
+    # 残りは定数です (tools/plc_codegen.rb)。
+    #
+    # **定数は汎用グローバルのスロットに置いてあります。** 読み方は `$foo` と
+    # 同じで、VM に新しい置き場は要りません。
+    def load_constant(name, sym_name, error_code)
+      device_table_lookup(sym_name)
+      dest = reg_slot(name)
+      if_else_block("Z1 = #{SYMBOL_KIND_CLASS}")do
+        note "クラス名。実行時に作らないので番号を置くだけ"
+        line "#{dest.value} = Z5   ' クラス番号"
+        line "#{dest.tag} = #{TT_CLASS}"
+      end
+      if_else_block("Z1 = #{SYMBOL_KIND_GLOBAL}") do
+        note "定数は値スロット。型タグごと写す"
+        line "Z3 = Z6"
+        copy_slot(from: slot_on(3), to: dest)
+      end
+      note "クラスでも定数でもないシンボルを定数として読もうとした"
+      vm_error(error_code)
+      end_block
+      end_block
+    end
+
     # クラス本体を R[a] を self として実行する (OP_EXEC)
     #
     # **メソッド呼び出しと同じ経路です。** 窓を R[a] までずらすので、本体から
@@ -1952,21 +1980,27 @@ module FaRuby
 
     # 定数への代入 (OP_SETCONST)
     #
-    # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書きます。
-    # それ以外の定数は利用者のものなので放っておきます。読む手段
-    # (OP_GETCONST) が無いため、使おうとすれば未知のオペコードで止まります。
+    # 行き先は 2 つです。faRuby の設定 (`FARUBY_` で始まる名前) は VM 状態へ、
+    # 利用者の定数は汎用グローバルのスロットへ書きます。
+    #
+    # **再代入も通します。** Ruby は警告しますが、ここで見分けるには「もう
+    # 書いたか」を覚える場所が要り、定数 1 つにつき 1 ワード増えます。
+    # 警告を出せないので、止めるか通すかのどちらかで、通す方を採りました。
     def set_constant(name, sym_name)
-      line "Z3 = #{operand(sym_name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
-      line "Z4 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
-      line "Z5 = #{fixed_at(4, 0)}   ' シンボル種別"
-      if_("Z5 = #{SYMBOL_KIND_SETTING}") do
-        line "Z6 = #{fixed_at(3, 0)}   ' 設定番号"
-        src = reg_slot(name)
-        if_("Z6 = #{SETTING_STR_FILL}") do
+      device_table_lookup(sym_name)
+      src = reg_slot(name)
+      if_else_block("Z1 = #{SYMBOL_KIND_SETTING}") do
+        if_("Z5 = #{SETTING_STR_FILL}") do
           note "固定長でデバイスへ書いたときの余りを埋めるバイト"
           line "#{state(layout.str_fill_addr)} = #{src.value}"
         end
       end
+      if_("Z1 = #{SYMBOL_KIND_GLOBAL}") do
+        note "利用者の定数は値スロット。型タグごと写す"
+        line "Z3 = Z6"
+        copy_slot(from: src, to: slot_on(3))
+      end
+      end_block
     end
 
     # --- ハッシュ ---

@@ -1,5 +1,5 @@
 // =======================================
-// faRuby VM - オペコード 0x1F - 0x2D
+// faRuby VM - オペコード 0x1D - 0x27
 // =======================================
 // 【自動生成】このファイルを直接編集しないでください。
 //   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 // 並び順と役割は vm_02_prologue.st の先頭にあります。
 
 // 担当外の番号はここで素通りする。**判定はループの外に置く。**
-// 見るのは上限だけ。31 未満は手前の群が実行して
+// 見るのは上限だけ。29 未満は手前の群が実行して
 // 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 45 THEN
+IF EM54:Z9 <= 39 THEN
 
   // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   // 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,7 +21,75 @@ IF EM54:Z9 <= 45 THEN
   // BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 := 1 TO 1 DO
 
-    IF EM6:Z9 = 33 THEN
+    IF EM6:Z9 = 29 THEN
+      // OP_GETCONST (BB): R[a] = 定数 symbols[b] (クラス名か利用者の定数)
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM8:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // シンボル表参照 (4ワード/エントリ)
+      Z3 := EM8:Z9 * 4 + EM35:Z9;
+      Z4 := Z3 + 1;
+      Z5 := ZF98304:Z3;
+      Z6 := ZF98304:Z4;
+      Z7 := Z3 + 2;
+      Z8 := ZF98304:Z7;
+      Z7 := Z3 + 3;
+      Z1 := ZF98304:Z7;   // シンボル種別
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      IF Z1 = 6 THEN
+        // クラス名。実行時に作らないので番号を置くだけ
+        EM1.L:Z1 := Z5;   // クラス番号
+        EM0:Z1 := 13;
+      ELSE
+        IF Z1 = 5 THEN
+          // 定数は値スロット。型タグごと写す
+          Z3 := Z6;
+          EM1.L:Z1 := EM1.L:Z3;
+          EM0:Z1 := EM0:Z3;
+        ELSE
+          // クラスでも定数でもないシンボルを定数として読もうとした
+          EM1:Z9 := 3;
+          EM2:Z9 := 3;
+          EXIT;
+        END_IF;
+      END_IF;
+
+    ELSIF EM6:Z9 = 30 THEN
+      // OP_SETCONST (BB): 定数 symbols[b] = R[a] (設定なら VM 状態へ)
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM8:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // シンボル表参照 (4ワード/エントリ)
+      Z3 := EM8:Z9 * 4 + EM35:Z9;
+      Z4 := Z3 + 1;
+      Z5 := ZF98304:Z3;
+      Z6 := ZF98304:Z4;
+      Z7 := Z3 + 2;
+      Z8 := ZF98304:Z7;
+      Z7 := Z3 + 3;
+      Z1 := ZF98304:Z7;   // シンボル種別
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      IF Z1 = 3 THEN
+        IF Z5 = 1 THEN
+          // 固定長でデバイスへ書いたときの余りを埋めるバイト
+          EM41:Z9 := EM1.L:Z1;
+        END_IF;
+      ELSE
+        IF Z1 = 5 THEN
+          // 利用者の定数は値スロット。型タグごと写す
+          Z3 := Z6;
+          EM1.L:Z3 := EM1.L:Z1;
+          EM0:Z3 := EM0:Z1;
+        END_IF;
+      END_IF;
+
+    ELSIF EM6:Z9 = 33 THEN
       // OP_GETUPVAR (BBB): R[a] = 外側 c 段の R[b]
       Z1 := EM0:Z9 + EM33:Z9;
       EM7:Z9 := ZF98304:Z1;
@@ -1742,27 +1810,6 @@ IF EM54:Z9 <= 45 THEN
       END_IF;
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF EM0:Z1 <= 2 THEN
-        EM0:Z9 := EM0:Z9 + EM8:Z9;
-      END_IF;
-
-    ELSIF EM6:Z9 = 40 THEN
-      // OP_JMPNIL (BS): if R[a] が nil then PC += signed16(b)
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      // 16bit big-endian: hi byte, lo byte
-      Z1 := EM0:Z9 + EM33:Z9;
-      Z3 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      Z4 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      EM8:Z9 := Z3 * 256 + Z4;
-      IF EM8:Z9 >= 32768 THEN
-        EM8:Z9 := EM8:Z9 - 65536;
-      END_IF;
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      IF EM0:Z1 = 1 THEN
         EM0:Z9 := EM0:Z9 + EM8:Z9;
       END_IF;
 

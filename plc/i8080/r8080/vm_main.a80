@@ -364,10 +364,10 @@ dispatch_table:
   dw 0000h            ; 18 OP_SETSV
   dw do_op_getgv      ; 19 OP_GETIV (= OP_GETGV)
   dw do_op_setgv      ; 1A OP_SETIV (= OP_SETGV)
-  dw 0000h            ; 1B OP_GETCV
-  dw 0000h            ; 1C OP_SETCV
+  dw do_op_getgv      ; 1B OP_GETCV (= OP_GETGV)
+  dw do_op_setgv      ; 1C OP_SETCV (= OP_SETGV)
   dw do_op_getconst   ; 1D OP_GETCONST
-  dw 0000h            ; 1E OP_SETCONST
+  dw do_op_setgv      ; 1E OP_SETCONST (= OP_SETGV)
   dw 0000h            ; 1F OP_GETMCNST
   dw 0000h            ; 20 OP_SETMCNST
   dw do_op_getupvar   ; 21 OP_GETUPVAR

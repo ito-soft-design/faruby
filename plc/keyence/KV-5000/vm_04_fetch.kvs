@@ -31,6 +31,16 @@ ELSE
     EM6:Z9 = 22
   END IF
 
+  ' OP_GETCV: R[a] = @@名前 (OP_GETGV の枝へ)
+  IF EM6:Z9 = 27 THEN
+    EM6:Z9 = 21
+  END IF
+
+  ' OP_SETCV: @@名前 = R[a] (OP_SETGV の枝へ)
+  IF EM6:Z9 = 28 THEN
+    EM6:Z9 = 22
+  END IF
+
   ' OP_SSEND: self をレシーバ位置に置いて OP_SEND へ
   IF EM6:Z9 = 45 THEN
     ' オペランド a を覗く。枝の中で読み直すので PC は進めない

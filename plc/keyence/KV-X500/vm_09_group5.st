@@ -1,5 +1,5 @@
 // =======================================
-// faRuby VM - オペコード 0x2E - 0x3E
+// faRuby VM - オペコード 0x28 - 0x3C
 // =======================================
 // 【自動生成】このファイルを直接編集しないでください。
 //   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 // 並び順と役割は vm_02_prologue.st の先頭にあります。
 
 // 担当外の番号はここで素通りする。**判定はループの外に置く。**
-// 見るのは上限だけ。46 未満は手前の群が実行して
+// 見るのは上限だけ。40 未満は手前の群が実行して
 // 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 62 THEN
+IF EM54:Z9 <= 60 THEN
 
   // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   // 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,7 +21,28 @@ IF EM54:Z9 <= 62 THEN
   // BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 := 1 TO 1 DO
 
-    IF EM6:Z9 = 47 THEN
+    IF EM6:Z9 = 40 THEN
+      // OP_JMPNIL (BS): if R[a] が nil then PC += signed16(b)
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // 16bit big-endian: hi byte, lo byte
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z3 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      Z4 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      EM8:Z9 := Z3 * 256 + Z4;
+      IF EM8:Z9 >= 32768 THEN
+        EM8:Z9 := EM8:Z9 - 65536;
+      END_IF;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      IF EM0:Z1 = 1 THEN
+        EM0:Z9 := EM0:Z9 + EM8:Z9;
+      END_IF;
+
+    ELSIF EM6:Z9 = 47 THEN
       // OP_SEND (BBB): R[a] = R[a].symbols[b](R[a+1]..)
       Z1 := EM0:Z9 + EM33:Z9;
       EM7:Z9 := ZF98304:Z1;
@@ -2687,48 +2708,6 @@ IF EM54:Z9 <= 62 THEN
             EM1.L:Z1 := EM1.L:Z1 + EM1.L:Z2;
             EM0:Z1 := 4;
           END_IF;
-        END_IF;
-      END_IF;
-
-    ELSIF EM6:Z9 = 61 THEN
-      // OP_ADDI (BB): R[a] = R[a] + b
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      IF EM0:Z1 = 5 THEN
-        EM1.F:Z1 := EM1.F:Z1 + EM8:Z9;
-        EM0:Z1 := 5;
-      ELSE
-        EM1.L:Z1 := EM1.L:Z1 + EM8:Z9;
-        EM0:Z1 := 4;
-      END_IF;
-
-    ELSIF EM6:Z9 = 62 THEN
-      // OP_SUB (B): R[a] = R[a] - R[a+1]
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
-      IF EM0:Z1 = 5 THEN
-        IF EM0:Z2 = 5 THEN
-          EM1.F:Z1 := EM1.F:Z1 - EM1.F:Z2;
-          EM0:Z1 := 5;
-        ELSE
-          EM1.F:Z1 := EM1.F:Z1 - EM1.L:Z2;
-          EM0:Z1 := 5;
-        END_IF;
-      ELSE
-        IF EM0:Z2 = 5 THEN
-          EM1.F:Z1 := EM1.L:Z1 - EM1.F:Z2;
-          EM0:Z1 := 5;
-        ELSE
-          EM1.L:Z1 := EM1.L:Z1 - EM1.L:Z2;
-          EM0:Z1 := 4;
         END_IF;
       END_IF;
 

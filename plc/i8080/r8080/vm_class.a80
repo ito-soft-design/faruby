@@ -131,35 +131,51 @@ def_irep_num:  db 0
 ; シンボル b の種別: SYM_KIND_CLASS (D=0x02), E=class_number
 ; ---------------------------------------------------------------
 do_op_class:
+; **クラス名と利用者の定数が同じ命令で来ます。** `Counter.new` の `Counter` も
+; `LIMIT` も OP_GETCONST なので、シンボルテーブルの種別で分けます。
+; ホスト側は `OP_CLASS` に出てきた名前だけをクラスとして登録するので、
+; 残りは定数です (tools/i8080_bytecode_hex.rb)。
+;
+; 定数はグローバル変数と同じ 4 バイトのスロットに置いてあるので、
+; **写しは do_op_getgv の続き (getgv_ok) に合流させます。** 同じ並びを
+; 2 か所に書くと、片方だけ直して食い違います。
 do_op_getconst:
   call fetch_byte       ; A = a
-  sta cls_reg_a
+  push psw
   call fetch_byte       ; A = b (シンボルインデックス)
 
-  ; シンボルテーブルから class_number を取得
+  ; シンボルテーブルのエントリを取る
   add a                 ; ×2
   mov e, a
   mvi d, 0
   lhld VM_STATE_BASE + OFF_SYM_BASE
   dad d                 ; HL = &sym_table[b]
-  mov a, m              ; A = class_number (下位)
-  sta cls_class_num
+  mov e, m
+  inx h
+  mov d, m              ; DE = エントリ値 (D=種別, E=値)
 
-  ; R[a] に TT_CLASS を書く
-  lda cls_reg_a
+  mov a, d
+  cpi SYM_KIND_CLASS
+  jz getconst_class
+
+  ; 利用者の定数。DE がグローバルスロットのアドレス
+  mov a, d
+  ora e
+  jnz getgv_ok          ; do_op_getgv の続きへ (a はスタックにある)
+  pop psw
+  jmp vm_error          ; クラスでも定数でもない
+
+getconst_class:
+  pop psw               ; A = a
   call get_reg_addr     ; HL = R[a]
   mvi m, TT_CLASS       ; +0: 型タグ
   inx h
   mvi m, 0              ; +1: 予約
   inx h
-  lda cls_class_num
-  mov m, a              ; +2: val_lo = class_number
+  mov m, e              ; +2: val_lo = class_number
   inx h
   mvi m, 0              ; +3: val_hi = 0
   jmp vm_loop
-
-cls_reg_a:    db 0
-cls_class_num: db 0
 
 ; ---------------------------------------------------------------
 ; OP_EXEC (BB): クラス本体を実行
