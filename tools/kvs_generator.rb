@@ -2409,9 +2409,12 @@ module FaRuby
     def predicate_decision(name)
       line "#{state(layout.pred_stop_addr)} = 0"
       if_("#{frame_kind} >= #{MemoryLayout::FRAME_KIND_ANY}") do
-        note "**鍵を分けています。** 同じ鍵だと「別の枝でアドレスを載せた」"
-        note "ことになり、生成器が止めます (ふつうの return も同じ場所を使う)"
-        value = devices.reg_slot([:pred_value, name], operand(name))
+        note "**鍵と Z の両方を分けます。** 鍵が同じだと「別の枝でアドレスを"
+        note "載せた」で生成器が止まり (ふつうの return も同じ場所を使う)、"
+        note "**Z が同じだと黙って後の方だけが残ります。** 既定は [:reg, :a]"
+        note "以外すべて Z2 なので、ここは Z1 を名指しします。Z1 はこの時点で"
+        note "命令の取り出しを終えていて空いています (Z3 はフレーム)"
+        value = devices.reg_slot([:pred_value, name], operand(name), z: Z_PRIMARY)
         result = devices.reg_slot([:pred_result, name], "0", z: Z_SECONDARY)
         MemoryLayout::PREDICATE_RULES.each do |kind, (stop_on_true, stopped)|
           if_("#{frame_kind} = #{kind}") do

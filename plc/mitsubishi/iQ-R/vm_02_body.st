@@ -6215,8 +6215,11 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           IF D5Z3 >= 1 THEN
             VMPREDSTOP := 0;
             IF D5Z3 >= 6 THEN
-              (* **鍵を分けています。** 同じ鍵だと「別の枝でアドレスを載せた」 *)
-              (* ことになり、生成器が止めます (ふつうの return も同じ場所を使う) *)
+              (* **鍵と Z の両方を分けます。** 鍵が同じだと「別の枝でアドレスを *)
+              (* 載せた」で生成器が止まり (ふつうの return も同じ場所を使う)、 *)
+              (* **Z が同じだと黙って後の方だけが残ります。** 既定は [:reg, :a] *)
+              (* 以外すべて Z2 なので、ここは Z1 を名指しします。Z1 はこの時点で *)
+              (* 命令の取り出しを終えていて空いています (Z3 はフレーム) *)
               IF D5Z3 = 6 THEN
                 (* any?: ブロックの値が真なら打ち切って true を返す *)
                 IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 2 THEN
