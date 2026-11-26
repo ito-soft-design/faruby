@@ -129,8 +129,32 @@ sendb_dispatch:
   jz sendb_each
   cpi 27          ; METHOD_LOOP
   jz sendb_loop
+  ; any? / all? / none? は each と同じ反復。フレームの種別だけが違う
+  cpi METHOD_ANY_P
+  jz sendb_any
+  cpi METHOD_ALL_P
+  jz sendb_all
+  cpi METHOD_NONE_P
+  jz sendb_none
   ; 未対応のブロックメソッド
   jmp vm_error
+
+; --- any? / all? / none? ---
+;
+; **渡す値は each と同じ**なので sendb_each に合流します。種別が持つのは
+; 「ブロックの値をどう使うか」だけで、配列かハッシュかはスロットの
+; 見出しの種別 (COL_TYPE_*) で決まります。
+sendb_any:
+  mvi a, FRAME_KIND_ANY
+  jmp sendb_pred
+sendb_all:
+  mvi a, FRAME_KIND_ALL
+  jmp sendb_pred
+sendb_none:
+  mvi a, FRAME_KIND_NONE
+sendb_pred:
+  sta each_arg_kind
+  jmp sendb_each_join
 
 ; --- times ---
 sendb_times:

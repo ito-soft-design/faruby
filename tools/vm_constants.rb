@@ -342,6 +342,19 @@ module FaRuby
     # 組み込みは引数の数を表と突き合わせますが、`new` はクラスごとに違う
     # ので、その検査だけ飛ばして `OP_ENTER` に任せます。
     METHOD_NEW     = 28
+    # 配列とハッシュの述語。ブロックを取る
+    #
+    # **末尾に置くのは番号を振り直さずに済ませるため**です (METHOD_LOOP と
+    # 同じ理由)。レシーバの区分は METHOD_RECEIVER_GROUPS の末尾を
+    # 「配列・ハッシュ」にして受けます。
+    #
+    # 止める条件と、止まったときの値だけが違います。
+    #   any?  真で止まって true、尽きたら false
+    #   all?  偽で止まって false、尽きたら true
+    #   none? 真で止まって false、尽きたら true
+    METHOD_ANY_P   = 29   # any?
+    METHOD_ALL_P   = 30   # all?
+    METHOD_NONE_P  = 31   # none?
 
     # レシーバが数値でなければならない範囲 (区分の先頭)
     METHOD_NUMERIC_MIN = METHOD_MOD
@@ -365,7 +378,10 @@ module FaRuby
       [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
       [METHOD_SLICE,   TT_DEVICE,  TT_DEVICE, "デバイス参照"],
       [METHOD_LOOP,    TT_OBJECT,  TT_OBJECT, "self"],
-      [nil,            TT_CLASS,   TT_CLASS,  "クラス"],
+      [METHOD_NEW,     TT_CLASS,   TT_CLASS,  "クラス"],
+      # **末尾は any? / all? / none?** です。番号を振り直さずに足すため
+      # 末尾に置いたので、「それ以上すべて」の区分もここになります
+      [nil,            TT_ARRAY,   TT_HASH,   "配列・ハッシュ"],
     ].freeze
 
     # メソッド番号 => 受け付けるレシーバのタグの範囲 ([下限, 上限])
@@ -412,6 +428,9 @@ module FaRuby
       "values" => [METHOD_VALUES, 0],
       "[]"     => [METHOD_SLICE,  2],
       "loop"   => [METHOD_LOOP,   0],
+      "any?"   => [METHOD_ANY_P,  0],
+      "all?"   => [METHOD_ALL_P,  0],
+      "none?"  => [METHOD_NONE_P, 0],
       # 引数の数は initialize が決めるので、ここの 0 は使いません
       "new"    => [METHOD_NEW,    0],
     }.freeze
@@ -420,7 +439,8 @@ module FaRuby
     #
     # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
     # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
-    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH, METHOD_LOOP].freeze
+    BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH, METHOD_LOOP,
+                     METHOD_ANY_P, METHOD_ALL_P, METHOD_NONE_P].freeze
 
     # 番号 => 生成コードのコメントに使う名前
     #

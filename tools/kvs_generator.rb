@@ -2354,7 +2354,7 @@ module FaRuby
       end
       if_else_block("#{word_at(3, MemoryLayout::FRAME_KIND)} >= " \
                     "#{MemoryLayout::FRAME_KIND_ITERATE}") do
-        advance_iteration
+        advance_iteration(name)
       end
       note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
       note "これで戻り値が呼び出し元から見える位置に入る"
@@ -2369,12 +2369,20 @@ module FaRuby
     end
 
     # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
-    def advance_iteration
+    #
+    # **any? / all? / none? はここでブロックの値を見ます。** ほかの反復は
+    # ブロックの値を捨てますが、述語は毎回それが答えになりうるためです。
+    def advance_iteration(name)
+      predicate_decision(name)
       line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_INDEX)} + 1"
       if_("#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}") do
         note "loop は上限が無い。**break でしか終わらない。**"
         note "上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)"
         line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}"
+      end
+      if_("#{state(layout.pred_stop_addr)} <> 0") do
+        note "述語が答えを出した。残りは見ずに終わらせる"
+        line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)} + 1"
       end
       if_else_block("#{scratch32} <= #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}") do
         note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
@@ -2384,8 +2392,54 @@ module FaRuby
         line "#{pc} = 0"
       end
       note "反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる"
+      note "**述語だけは R[0] を答えに書き換えます。** 打ち切ったときは"
+      note "predicate_decision が書いてあるので、尽きたときだけここで書く"
+      if_("#{state(layout.pred_stop_addr)} = 0") { predicate_exhausted }
       pop_frame
       end_block
+    end
+
+    # ブロックの値を見て、打ち切るかどうかを決める (any? / all? / none?)
+    #
+    # **旗は 1 つの命令の中でしか生きません。** ここで書いて
+    # advance_iteration がその場で読みます。
+    #
+    # 打ち切るときに R[0] (レシーバの位置) を答えで潰します。**もう要素を
+    # 取り出さないので潰してよい**のが、ここで場所を増やさずに済む理由です。
+    def predicate_decision(name)
+      line "#{state(layout.pred_stop_addr)} = 0"
+      if_("#{frame_kind} >= #{MemoryLayout::FRAME_KIND_ANY}") do
+        note "**鍵を分けています。** 同じ鍵だと「別の枝でアドレスを載せた」"
+        note "ことになり、生成器が止めます (ふつうの return も同じ場所を使う)"
+        value = devices.reg_slot([:pred_value, name], operand(name))
+        result = devices.reg_slot([:pred_result, name], "0", z: Z_SECONDARY)
+        MemoryLayout::PREDICATE_RULES.each do |kind, (stop_on_true, stopped)|
+          if_("#{frame_kind} = #{kind}") do
+            note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: " \
+                 "ブロックの値が#{stop_on_true ? '真' : '偽'}なら打ち切って " \
+                 "#{stopped} を返す"
+            comparison = stop_on_true ? "> #{TT_FALSE}" : "<= #{TT_FALSE}"
+            if_("#{value.tag} #{comparison}") do
+              assign_bool(result, stopped)
+              line "#{state(layout.pred_stop_addr)} = 1"
+            end
+          end
+        end
+      end
+    end
+
+    # 最後まで打ち切られなかったときの答え。**止まったときの逆**
+    def predicate_exhausted
+      if_("#{frame_kind} >= #{MemoryLayout::FRAME_KIND_ANY}") do
+        result = devices.reg_slot([:pred_done], "0", z: Z_SECONDARY)
+        MemoryLayout::PREDICATE_RULES.each do |kind, (_stop_on_true, stopped)|
+          if_("#{frame_kind} = #{kind}") do
+            note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: " \
+                 "尽きたら #{!stopped}"
+            assign_bool(result, !stopped)
+          end
+        end
+      end
     end
 
     # ブロックに渡す値と引数の数を書く
@@ -2410,10 +2464,22 @@ module FaRuby
       note "Ruby の loop { |i| } も i は nil で、ここでは未代入のまま"
       line "#{state(layout.call_argc_addr)} = 0"
       dedent
-      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ITERATE}")
       indent
-      note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
-      line "Z4 = 0 + #{reg_offset}"
+      note "times / upto は添字を渡す"
+      line "#{argument.value} = #{scratch32}"
+      line "#{argument.tag} = #{TT_INTEGER}"
+      line "#{state(layout.call_argc_addr)} = 1"
+      dedent
+      line "ELSE"
+      indent
+      note "**残りはコレクションの反復です** (each / any? / all? / none?)。"
+      note "渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。"
+      note "述語は配列とハッシュで種別を分けていないためです"
+      line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
+      chain_head(true, "#{slot_on(4).tag} = #{TT_HASH}")
+      indent
+      note "ハッシュは鍵と値を渡す"
       receiver = slot_on(4)
       pool_element_into_z(receiver.word(0))
       line "#{argument.value} = #{element.value}"
@@ -2424,10 +2490,9 @@ module FaRuby
       line "#{argument.tag} = #{element.tag}"
       line "#{state(layout.call_argc_addr)} = 2"
       dedent
-      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}")
+      line "ELSE"
       indent
-      note "a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
-      line "Z4 = 0 + #{reg_offset}"
+      note "配列はその位置の要素を渡す"
       note "**スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が"
       note "載っていて、これから要素の位置を出すのに使う"
       pool_element_into_z(long_at(4, SLOT_VALUE_OFFSET, secondary: true))
@@ -2435,12 +2500,7 @@ module FaRuby
       line "#{argument.tag} = #{element.tag}"
       line "#{state(layout.call_argc_addr)} = 1"
       dedent
-      line "ELSE"
-      indent
-      note "times / upto は添字を渡す"
-      line "#{argument.value} = #{scratch32}"
-      line "#{argument.tag} = #{TT_INTEGER}"
-      line "#{state(layout.call_argc_addr)} = 1"
+      line "END IF"
       dedent
       line "END IF"
     end
@@ -2523,10 +2583,20 @@ module FaRuby
       if_("#{block.tag} <> #{TT_PROC}") { vm_error(block_code) }
 
       iteration_range(name, recv, type_code)
-      if_("#{scratch32} <= #{scratch32_b}") do
+      if_else_block("#{scratch32} <= #{scratch32_b}") do
         enter_iteration(name, argc_name, depth_code)
       end
-      note "1 回も回らないときはレシーバがそのまま呼び出しの値になる"
+      note "1 回も回らないとき。each / times / upto はレシーバがそのまま値になる"
+      note "**述語だけは答えを書きます。** 空の any? は false、all? と none? は"
+      note "true で、1 回も回らないのでフレームを積まずにここで決まります"
+      MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+        stopped = MemoryLayout::PREDICATE_RULES.fetch(kind)[1]
+        if_("Z5 = #{code}") do
+          note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: 空なら #{!stopped}"
+          assign_bool(recv, !stopped)
+        end
+      end
+      end_block
     end
 
     # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
@@ -2543,23 +2613,24 @@ module FaRuby
       line "#{scratch32} = 0"
       line "#{scratch32_b} = #{recv.value} - 1"
       dedent
-      line "ELSE IF Z5 = #{METHOD_EACH} THEN"
-      indent
-      note "a.each / h.each は 0 から要素数-1 まで"
-      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
-      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
-      array_slot_into_z(recv)
-      end_block
-      line "#{scratch32} = 0"
-      line "#{scratch32_b} = #{scratch32_b} - 1"
-      dedent
-      line "ELSE"
+      line "ELSE IF Z5 = #{METHOD_UPTO} THEN"
       indent
       note "a.upto(b) は a から b まで"
       limit = reg_next_slot(name)
       if_("#{limit.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
       line "#{scratch32} = #{recv.value}"
       line "#{scratch32_b} = #{limit.value}"
+      dedent
+      line "ELSE"
+      indent
+      note "**残りはコレクションの反復です** (each / any? / all? / none?)。"
+      note "0 から要素数-1 まで回り、数え方はどれも同じ"
+      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
+      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
+      array_slot_into_z(recv)
+      end_block
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{scratch32_b} - 1"
       end_block
     end
 
@@ -2581,6 +2652,11 @@ module FaRuby
       if_("Z5 = #{METHOD_LOOP}") do
         note "loop は上限が無く、ブロックに渡す値も無い"
         line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
+      end
+      note "**述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、"
+      note "種別が持つのは「ブロックの値をどう使うか」だけです"
+      MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+        if_("Z5 = #{code}") { line "#{frame_kind} = #{kind}" }
       end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"

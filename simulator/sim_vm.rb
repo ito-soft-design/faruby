@@ -909,7 +909,7 @@ module FaRuby
       # **`new` は戻り値を写しません。** R[0] に残っているのは確保した
       # オブジェクトで、それがそのまま `Counter.new` の値になります
       return pop_frame if kind == MemoryLayout::FRAME_KIND_NEW
-      return advance_iteration(addr) if kind >= MemoryLayout::FRAME_KIND_ITERATE
+      return advance_iteration(addr, name) if kind >= MemoryLayout::FRAME_KIND_ITERATE
 
       # R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所
       index = operand(name)
@@ -918,18 +918,56 @@ module FaRuby
     end
 
     # 次の回があれば入り直し、無ければ抜ける
-    def advance_iteration(addr)
+    #
+    # **any? / all? / none? はここでブロックの値を見る。** ほかの反復は
+    # ブロックの値を捨てるが、述語は毎回それが答えになりうる。
+    def advance_iteration(addr, name)
+      kind = @em.read_u16(addr + MemoryLayout::FRAME_KIND)
       index = @em.read_s32(addr + MemoryLayout::FRAME_INDEX) + 1
       # loop は上限が無い。**break でしか終わらない**
-      if @em.read_u16(addr + MemoryLayout::FRAME_KIND) == MemoryLayout::FRAME_KIND_LOOP
-        index = @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
+      index = @em.read_s32(addr + MemoryLayout::FRAME_LIMIT) if kind == MemoryLayout::FRAME_KIND_LOOP
+      # 述語が答えを出したら残りは見ない (R[0] には答えが入っている)
+      return pop_frame if predicate_stops?(kind, name)
+
+      if index > @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
+        # 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
+        # **述語だけは R[0] を答えに書き換える**
+        predicate_exhausted(kind)
+        return pop_frame
       end
-      # 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
-      return pop_frame if index > @em.read_s32(addr + MemoryLayout::FRAME_LIMIT)
 
       @em.write_s32(addr + MemoryLayout::FRAME_INDEX, index)
       set_block_argument(addr, index)
       @em.write_u16(layout.pc_addr, 0)
+    end
+
+    # ブロックの値を見て打ち切るか決める。打ち切るなら R[0] に答えを書く
+    #
+    # **R[0] を潰してよい。** もう要素を取り出さないので、レシーバの場所が
+    # そのまま答えの置き場になる (呼んだ側の R[a] と同じ場所)。
+    def predicate_stops?(kind, name)
+      rule = MemoryLayout::PREDICATE_RULES[kind]
+      return false unless rule
+
+      stop_on_true, stopped = rule
+      return false unless (read_reg_tag(operand(name)) > TT_FALSE) == stop_on_true
+
+      write_bool(0, stopped)
+      true
+    end
+
+    # 最後まで打ち切られなかったときの答え。**止まったときの逆**
+    def predicate_exhausted(kind)
+      rule = MemoryLayout::PREDICATE_RULES[kind]
+      return unless rule
+
+      write_bool(0, !rule[1])
+    end
+
+    # スロットに true / false を書く
+    def write_bool(index, value)
+      tag = value ? TT_TRUE : TT_FALSE
+      write_slot(index, tag, TT_CANONICAL_VALUE.fetch(tag))
     end
 
     # ブロックに渡す値と引数の数を書く
@@ -945,18 +983,23 @@ module FaRuby
       when MemoryLayout::FRAME_KIND_LOOP
         # loop はブロックに何も渡さない。Ruby の loop { |i| } も i は nil
         @em.write_u16(layout.call_argc_addr, 0)
-      when MemoryLayout::FRAME_KIND_HASH_EACH
-        # h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
-        keys, values = hash_slots(0)
-        copy_element_into_reg(keys, index, 1)
-        copy_element_into_reg(values, index, 2)
-        @em.write_u16(layout.call_argc_addr, 2)
-      when MemoryLayout::FRAME_KIND_EACH
-        copy_element_into_reg(read_reg(0), index, 1)
-        @em.write_u16(layout.call_argc_addr, 1)
-      else
+      when MemoryLayout::FRAME_KIND_ITERATE
+        # times / upto は添字を渡す
         write_slot(1, TT_INTEGER, index)
         @em.write_u16(layout.call_argc_addr, 1)
+      else
+        # **残りはコレクションの反復** (each / any? / all? / none?)。
+        # 渡す値は種別ではなく R[0] (レシーバ) の型タグで決まる —
+        # 述語は配列とハッシュで種別を分けていないため
+        if read_reg_tag(0) == TT_HASH
+          keys, values = hash_slots(0)
+          copy_element_into_reg(keys, index, 1)
+          copy_element_into_reg(values, index, 2)
+          @em.write_u16(layout.call_argc_addr, 2)
+        else
+          copy_element_into_reg(read_reg(0), index, 1)
+          @em.write_u16(layout.call_argc_addr, 1)
+        end
       end
     end
 
@@ -996,10 +1039,19 @@ module FaRuby
 
       from, limit = iteration_range(code, index, argc)
       return vm_error(type_code) unless from
-      # 1 回も回らないときはレシーバがそのまま呼び出しの値になる
-      return if from > limit
+      # 1 回も回らないとき。each / times / upto はレシーバがそのまま値になる。
+      # **述語だけは答えを書く** (空の any? は false、all? と none? は true)
+      return empty_predicate_result(code, index) if from > limit
 
       enter_iteration(index, block, from, limit, depth_code, code)
+    end
+
+    # 1 回も回らなかった述語の答え。フレームを積まないのでここで決まる
+    def empty_predicate_result(code, index)
+      kind = MemoryLayout::PREDICATE_FRAME_KINDS[code]
+      return unless kind
+
+      write_bool(index, !MemoryLayout::PREDICATE_RULES.fetch(kind)[1])
     end
 
     # 反復の範囲 [開始, 上限]。扱えない型なら nil
@@ -1007,7 +1059,10 @@ module FaRuby
       # loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす
       return [0, 0] if code == METHOD_LOOP
       return [0, read_reg(index) - 1] if code == METHOD_TIMES
-      return [0, collection_length(index) - 1] if code == METHOD_EACH
+      # **残りはコレクションの反復** (each / any? / all? / none?)
+      unless code == METHOD_UPTO
+        return [0, collection_length(index) - 1]
+      end
 
       limit = index + 1
       return nil unless read_reg_tag(limit) == TT_INTEGER
@@ -1037,8 +1092,13 @@ module FaRuby
     end
 
     # 反復フレームの種別。ブロックに何を渡すかが決まる
+    # **述語は渡す値を種別で分けない。** R[0] の型タグで決まるので、
+    # 種別が持つのは「ブロックの値をどう使うか」だけ。
     def iteration_frame_kind(code, tag)
       return MemoryLayout::FRAME_KIND_LOOP if code == METHOD_LOOP
+
+      predicate = MemoryLayout::PREDICATE_FRAME_KINDS[code]
+      return predicate if predicate
       return MemoryLayout::FRAME_KIND_ITERATE unless code == METHOD_EACH
       return MemoryLayout::FRAME_KIND_HASH_EACH if tag == TT_HASH
 

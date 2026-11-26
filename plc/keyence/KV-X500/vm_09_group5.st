@@ -163,9 +163,21 @@ IF EM54:Z9 <= 60 THEN
               EM2:Z9 := 4;
               EXIT;
             END_IF;
-          ELSE
+          ELSIF Z5 <= 28 THEN
             // クラス (タグ 13)
             IF EM0:Z1 <> 13 THEN
+              EM1:Z9 := 3;
+              EM2:Z9 := 4;
+              EXIT;
+            END_IF;
+          ELSE
+            // 配列・ハッシュ (タグ 8-9)
+            IF EM0:Z1 < 8 THEN
+              EM1:Z9 := 3;
+              EM2:Z9 := 4;
+              EXIT;
+            END_IF;
+            IF EM0:Z1 > 9 THEN
               EM1:Z9 := 3;
               EM2:Z9 := 4;
               EXIT;
@@ -1986,6 +1998,15 @@ IF EM54:Z9 <= 60 THEN
       IF Z5 = 27 THEN
         Z6 := 1;
       END_IF;
+      IF Z5 = 29 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 30 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 31 THEN
+        Z6 := 1;
+      END_IF;
       IF Z6 = 0 THEN
         // ブロックを取らないメソッドにブロックを渡した
         EM1:Z9 := 3;
@@ -2077,9 +2098,21 @@ IF EM54:Z9 <= 60 THEN
             EM2:Z9 := 4;
             EXIT;
           END_IF;
-        ELSE
+        ELSIF Z5 <= 28 THEN
           // クラス (タグ 13)
           IF EM0:Z1 <> 13 THEN
+            EM1:Z9 := 3;
+            EM2:Z9 := 4;
+            EXIT;
+          END_IF;
+        ELSE
+          // 配列・ハッシュ (タグ 8-9)
+          IF EM0:Z1 < 8 THEN
+            EM1:Z9 := 3;
+            EM2:Z9 := 4;
+            EXIT;
+          END_IF;
+          IF EM0:Z1 > 9 THEN
             EM1:Z9 := 3;
             EM2:Z9 := 4;
             EXIT;
@@ -2101,8 +2134,19 @@ IF EM54:Z9 <= 60 THEN
         // n.times は 0 から n-1 まで
         EM16.L:Z9 := 0;
         EM18.L:Z9 := EM1.L:Z1 - 1;
-      ELSIF Z5 = 21 THEN
-        // a.each / h.each は 0 から要素数-1 まで
+      ELSIF Z5 = 12 THEN
+        // a.upto(b) は a から b まで
+        Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
+        IF EM0:Z2 <> 4 THEN
+          EM1:Z9 := 3;
+          EM2:Z9 := 4;
+          EXIT;
+        END_IF;
+        EM16.L:Z9 := EM1.L:Z1;
+        EM18.L:Z9 := EM1.L:Z2;
+      ELSE
+        // **残りはコレクションの反復です** (each / any? / all? / none?)。
+        // 0 から要素数-1 まで回り、数え方はどれも同じ
         // ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む
         IF EM0:Z1 = 9 THEN
           // 鍵の配列の見出し。R[a] を書き換える前に読む
@@ -2117,16 +2161,6 @@ IF EM54:Z9 <= 60 THEN
         END_IF;
         EM16.L:Z9 := 0;
         EM18.L:Z9 := EM18.L:Z9 - 1;
-      ELSE
-        // a.upto(b) は a から b まで
-        Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
-        IF EM0:Z2 <> 4 THEN
-          EM1:Z9 := 3;
-          EM2:Z9 := 4;
-          EXIT;
-        END_IF;
-        EM16.L:Z9 := EM1.L:Z1;
-        EM18.L:Z9 := EM1.L:Z2;
       END_IF;
       IF EM16.L:Z9 <= EM18.L:Z9 THEN
         IF EM31:Z9 >= 16 THEN
@@ -2160,6 +2194,17 @@ IF EM54:Z9 <= 60 THEN
           // loop は上限が無く、ブロックに渡す値も無い
           EM5:Z3 := 4;
         END_IF;
+        // **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、
+        // 種別が持つのは「ブロックの値をどう使うか」だけです
+        IF Z5 = 29 THEN
+          EM5:Z3 := 6;
+        END_IF;
+        IF Z5 = 30 THEN
+          EM5:Z3 := 7;
+        END_IF;
+        IF Z5 = 31 THEN
+          EM5:Z3 := 8;
+        END_IF;
         // 窓をずらした後、ブロックは R[引数の数 + 1] にある
         Z2 := (EM9:Z9 + 1) * 4 + EM32:Z9 + Z9;
         Z6 := EM1:Z2;   // 本体の irep
@@ -2174,40 +2219,44 @@ IF EM54:Z9 <= 60 THEN
           // loop はブロックに何も渡さない。**引数の数だけ書く。**
           // Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
           EM37:Z9 := 0;
-        ELSIF EM5:Z3 = 3 THEN
-          // h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
-          Z4 := 0 + EM32:Z9 + Z9;
-          Z7 := EM1:Z4;   // スロット番号
-          Z7 := Z7 * 52 + 2008 + Z9;
-          Z5 := EM16.L:Z9;
-          Z5 := Z5 * 4 + Z7 + 4;
-          EM1.L:Z2 := EM1.L:Z5;
-          EM0:Z2 := EM0:Z5;
-          Z2 := 2 * 4 + EM32:Z9 + Z9;   // R[2] に値
-          Z7 := EM2:Z4;   // スロット番号
-          Z7 := Z7 * 52 + 2008 + Z9;
-          Z5 := EM16.L:Z9;
-          Z5 := Z5 * 4 + Z7 + 4;
-          EM1.L:Z2 := EM1.L:Z5;
-          EM0:Z2 := EM0:Z5;
-          EM37:Z9 := 2;
-        ELSIF EM5:Z3 = 2 THEN
-          // a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
-          Z4 := 0 + EM32:Z9 + Z9;
-          // **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
-          // 載っていて、これから要素の位置を出すのに使う
-          Z7 := EM1.L:Z4;   // スロット番号
-          Z7 := Z7 * 52 + 2008 + Z9;
-          Z5 := EM16.L:Z9;
-          Z5 := Z5 * 4 + Z7 + 4;
-          EM1.L:Z2 := EM1.L:Z5;
-          EM0:Z2 := EM0:Z5;
-          EM37:Z9 := 1;
-        ELSE
+        ELSIF EM5:Z3 = 1 THEN
           // times / upto は添字を渡す
           EM1.L:Z2 := EM16.L:Z9;
           EM0:Z2 := 4;
           EM37:Z9 := 1;
+        ELSE
+          // **残りはコレクションの反復です** (each / any? / all? / none?)。
+          // 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。
+          // 述語は配列とハッシュで種別を分けていないためです
+          Z4 := 0 + EM32:Z9 + Z9;   // 窓をずらした後の R[0] がレシーバ
+          IF EM0:Z4 = 9 THEN
+            // ハッシュは鍵と値を渡す
+            Z7 := EM1:Z4;   // スロット番号
+            Z7 := Z7 * 52 + 2008 + Z9;
+            Z5 := EM16.L:Z9;
+            Z5 := Z5 * 4 + Z7 + 4;
+            EM1.L:Z2 := EM1.L:Z5;
+            EM0:Z2 := EM0:Z5;
+            Z2 := 2 * 4 + EM32:Z9 + Z9;   // R[2] に値
+            Z7 := EM2:Z4;   // スロット番号
+            Z7 := Z7 * 52 + 2008 + Z9;
+            Z5 := EM16.L:Z9;
+            Z5 := Z5 * 4 + Z7 + 4;
+            EM1.L:Z2 := EM1.L:Z5;
+            EM0:Z2 := EM0:Z5;
+            EM37:Z9 := 2;
+          ELSE
+            // 配列はその位置の要素を渡す
+            // **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
+            // 載っていて、これから要素の位置を出すのに使う
+            Z7 := EM1.L:Z4;   // スロット番号
+            Z7 := Z7 * 52 + 2008 + Z9;
+            Z5 := EM16.L:Z9;
+            Z5 := Z5 * 4 + Z7 + 4;
+            EM1.L:Z2 := EM1.L:Z5;
+            EM0:Z2 := EM0:Z5;
+            EM37:Z9 := 1;
+          END_IF;
         END_IF;
         EM30:Z9 := Z6;
         // IREP テーブルから実行中の irep の情報を写す
@@ -2225,8 +2274,26 @@ IF EM54:Z9 <= 60 THEN
           EXIT;
         END_IF;
         EM0:Z9 := 0;
+      ELSE
+        // 1 回も回らないとき。each / times / upto はレシーバがそのまま値になる
+        // **述語だけは答えを書きます。** 空の any? は false、all? と none? は
+        // true で、1 回も回らないのでフレームを積まずにここで決まります
+        IF Z5 = 29 THEN
+          // any?: 空なら false
+          EM1.L:Z1 := 0;
+          EM0:Z1 := 2;
+        END_IF;
+        IF Z5 = 30 THEN
+          // all?: 空なら true
+          EM1.L:Z1 := 1;
+          EM0:Z1 := 3;
+        END_IF;
+        IF Z5 = 31 THEN
+          // none?: 空なら true
+          EM1.L:Z1 := 1;
+          EM0:Z1 := 3;
+        END_IF;
       END_IF;
-      // 1 回も回らないときはレシーバがそのまま呼び出しの値になる
 
     ELSIF EM6:Z9 = 52 THEN
       // OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする
@@ -2314,11 +2381,46 @@ IF EM54:Z9 <= 60 THEN
           EM11:Z9 := ZF98308:Z1;
         ELSE
           IF EM5:Z3 >= 1 THEN
+            EM59:Z9 := 0;
+            IF EM5:Z3 >= 6 THEN
+              // **鍵を分けています。** 同じ鍵だと「別の枝でアドレスを載せた」
+              // ことになり、生成器が止めます (ふつうの return も同じ場所を使う)
+              Z2 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+              Z2 := 0 + EM32:Z9 + Z9;
+              IF EM5:Z3 = 6 THEN
+                // any?: ブロックの値が真なら打ち切って true を返す
+                IF EM0:Z2 > 2 THEN
+                  EM1.L:Z2 := 1;
+                  EM0:Z2 := 3;
+                  EM59:Z9 := 1;
+                END_IF;
+              END_IF;
+              IF EM5:Z3 = 7 THEN
+                // all?: ブロックの値が偽なら打ち切って false を返す
+                IF EM0:Z2 <= 2 THEN
+                  EM1.L:Z2 := 0;
+                  EM0:Z2 := 2;
+                  EM59:Z9 := 1;
+                END_IF;
+              END_IF;
+              IF EM5:Z3 = 8 THEN
+                // none?: ブロックの値が真なら打ち切って false を返す
+                IF EM0:Z2 > 2 THEN
+                  EM1.L:Z2 := 0;
+                  EM0:Z2 := 2;
+                  EM59:Z9 := 1;
+                END_IF;
+              END_IF;
+            END_IF;
             EM16.L:Z9 := EM6.L:Z3 + 1;
             IF EM5:Z3 = 4 THEN
               // loop は上限が無い。**break でしか終わらない。**
               // 上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)
               EM16.L:Z9 := EM8.L:Z3;
+            END_IF;
+            IF EM59:Z9 <> 0 THEN
+              // 述語が答えを出した。残りは見ずに終わらせる
+              EM16.L:Z9 := EM8.L:Z3 + 1;
             END_IF;
             IF EM16.L:Z9 <= EM8.L:Z3 THEN
               // 次の回。PC を 0 に戻し、ブロックの引数を更新するだけ
@@ -2329,44 +2431,70 @@ IF EM54:Z9 <= 60 THEN
                 // loop はブロックに何も渡さない。**引数の数だけ書く。**
                 // Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
                 EM37:Z9 := 0;
-              ELSIF EM5:Z3 = 3 THEN
-                // h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている
-                Z4 := 0 + EM32:Z9 + Z9;
-                Z7 := EM1:Z4;   // スロット番号
-                Z7 := Z7 * 52 + 2008 + Z9;
-                Z5 := EM16.L:Z9;
-                Z5 := Z5 * 4 + Z7 + 4;
-                EM1.L:Z2 := EM1.L:Z5;
-                EM0:Z2 := EM0:Z5;
-                Z2 := 2 * 4 + EM32:Z9 + Z9;   // R[2] に値
-                Z7 := EM2:Z4;   // スロット番号
-                Z7 := Z7 * 52 + 2008 + Z9;
-                Z5 := EM16.L:Z9;
-                Z5 := Z5 * 4 + Z7 + 4;
-                EM1.L:Z2 := EM1.L:Z5;
-                EM0:Z2 := EM0:Z5;
-                EM37:Z9 := 2;
-              ELSIF EM5:Z3 = 2 THEN
-                // a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている
-                Z4 := 0 + EM32:Z9 + Z9;
-                // **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
-                // 載っていて、これから要素の位置を出すのに使う
-                Z7 := EM1.L:Z4;   // スロット番号
-                Z7 := Z7 * 52 + 2008 + Z9;
-                Z5 := EM16.L:Z9;
-                Z5 := Z5 * 4 + Z7 + 4;
-                EM1.L:Z2 := EM1.L:Z5;
-                EM0:Z2 := EM0:Z5;
-                EM37:Z9 := 1;
-              ELSE
+              ELSIF EM5:Z3 = 1 THEN
                 // times / upto は添字を渡す
                 EM1.L:Z2 := EM16.L:Z9;
                 EM0:Z2 := 4;
                 EM37:Z9 := 1;
+              ELSE
+                // **残りはコレクションの反復です** (each / any? / all? / none?)。
+                // 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。
+                // 述語は配列とハッシュで種別を分けていないためです
+                Z4 := 0 + EM32:Z9 + Z9;   // 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  // ハッシュは鍵と値を渡す
+                  Z7 := EM1:Z4;   // スロット番号
+                  Z7 := Z7 * 52 + 2008 + Z9;
+                  Z5 := EM16.L:Z9;
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  EM1.L:Z2 := EM1.L:Z5;
+                  EM0:Z2 := EM0:Z5;
+                  Z2 := 2 * 4 + EM32:Z9 + Z9;   // R[2] に値
+                  Z7 := EM2:Z4;   // スロット番号
+                  Z7 := Z7 * 52 + 2008 + Z9;
+                  Z5 := EM16.L:Z9;
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  EM1.L:Z2 := EM1.L:Z5;
+                  EM0:Z2 := EM0:Z5;
+                  EM37:Z9 := 2;
+                ELSE
+                  // 配列はその位置の要素を渡す
+                  // **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
+                  // 載っていて、これから要素の位置を出すのに使う
+                  Z7 := EM1.L:Z4;   // スロット番号
+                  Z7 := Z7 * 52 + 2008 + Z9;
+                  Z5 := EM16.L:Z9;
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  EM1.L:Z2 := EM1.L:Z5;
+                  EM0:Z2 := EM0:Z5;
+                  EM37:Z9 := 1;
+                END_IF;
               END_IF;
               EM0:Z9 := 0;
             ELSE
               // 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる
+              // **述語だけは R[0] を答えに書き換えます。** 打ち切ったときは
+              // predicate_decision が書いてあるので、尽きたときだけここで書く
+              IF EM59:Z9 = 0 THEN
+                IF EM5:Z3 >= 6 THEN
+                  Z2 := 0 + EM32:Z9 + Z9;
+                  IF EM5:Z3 = 6 THEN
+                    // any?: 尽きたら false
+                    EM1.L:Z2 := 0;
+                    EM0:Z2 := 2;
+                  END_IF;
+                  IF EM5:Z3 = 7 THEN
+                    // all?: 尽きたら true
+                    EM1.L:Z2 := 1;
+                    EM0:Z2 := 3;
+                  END_IF;
+                  IF EM5:Z3 = 8 THEN
+                    // none?: 尽きたら true
+                    EM1.L:Z2 := 1;
+                    EM0:Z2 := 3;
+                  END_IF;
+                END_IF;
+              END_IF;
               EM31:Z9 := EM31:Z9 - 1;
               // 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない
               Z3 := EM31:Z9 * 10 + 392 + Z9;

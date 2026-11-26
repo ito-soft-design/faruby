@@ -92,6 +92,8 @@ class TestMethods < Minitest::Test
     "empty?" => [TT_STRING, TT_HASH],
     "<<" => [TT_INTEGER, TT_ARRAY],
     "each" => [TT_ARRAY, TT_HASH],
+    "any?" => [TT_ARRAY, TT_HASH], "all?" => [TT_ARRAY, TT_HASH],
+    "none?" => [TT_ARRAY, TT_HASH],
     "push" => [TT_ARRAY, TT_ARRAY],
     "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
     "values" => [TT_HASH, TT_HASH],

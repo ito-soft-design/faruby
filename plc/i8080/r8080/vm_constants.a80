@@ -113,6 +113,9 @@ FRAME_KIND_EACH          EQU  02h  ; each (配列要素反復)
 FRAME_KIND_HASH_EACH     EQU  03h  ; each (ハッシュの鍵と値)
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
 FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
+FRAME_KIND_ANY           EQU  06h  ; any?
+FRAME_KIND_ALL           EQU  07h  ; all?
+FRAME_KIND_NONE          EQU  08h  ; none?
 
 ; 外側フレームなし (トップレベル)
 FRAME_NONE               EQU  0FFh
@@ -135,6 +138,9 @@ METHOD_LENGTH            EQU  12h  ; length / size
 METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
 METHOD_EACH              EQU  15h  ; each (配列要素反復)
 METHOD_PUSH              EQU  16h  ; push (配列追加)
+METHOD_ANY_P             EQU  23h  ; any?
+METHOD_ALL_P             EQU  24h  ; all?
+METHOD_NONE_P            EQU  25h  ; none?
 KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
 KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
 

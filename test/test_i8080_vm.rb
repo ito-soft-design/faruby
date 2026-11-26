@@ -1234,6 +1234,124 @@ class TestI8080Vm < Minitest::Test
     assert_equal 15, board[:board].reg_value(3)
   end
 
+  # --- any? / all? / none? ---
+  #
+  # **新しいのはブロックの戻り値を見ることだけです。** 渡す値は each と
+  # 同じで、配列かハッシュかはスロットの見出し (COL_TYPE_*) で決まります。
+  # 答えは R[0] (レシーバの位置) に書きます — 打ち切る瞬間はもう要素を
+  # 取り出さないので、レシーバを潰してよいためです。
+
+  def test_any_true
+    board = run_ruby("a = [1, 2, 3]\nb = a.any? { |x| x == 2 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_any_false
+    board = run_ruby("a = [1, 2, 3]\nb = a.any? { |x| x == 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_any_empty_is_false
+    board = run_ruby("a = []\nb = a.any? { |x| true }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  # 打ち切っていること。全部回ると 6 になる
+  def test_any_stops_at_the_first_hit
+    src = <<~RUBY
+      n = 0
+      a = [1, 2, 3]
+      a.any? do |x|
+        n = n + x
+        x == 2
+      end
+      b = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  def test_all_true
+    board = run_ruby("a = [2, 4]\nb = a.all? { |x| x > 1 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_all_false
+    board = run_ruby("a = [2, 0]\nb = a.all? { |x| x > 1 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_all_empty_is_true
+    board = run_ruby("a = []\nb = a.all? { |x| false }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_none_true
+    board = run_ruby("a = [1, 2]\nb = a.none? { |x| x == 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_none_false
+    board = run_ruby("a = [1, 2]\nb = a.none? { |x| x == 2 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  # **0 も真です。** nil と false だけが偽
+  def test_predicate_treats_zero_as_true
+    board = run_ruby("a = [1]\nb = a.any? { |x| 0 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_predicate_treats_nil_as_false
+    board = run_ruby("a = [1]\nb = a.any? { |x| nil }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_hash_any_sees_key_and_value
+    board = run_ruby("h = {1 => 10, 2 => 20}\nb = h.any? { |k, v| v == 20 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_hash_all_
+    board = run_ruby("h = {1 => 10, 2 => 0}\nb = h.all? { |k, v| v > 5 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_hash_none_
+    board = run_ruby("h = {1 => 10}\nb = h.none? { |k, v| k > 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  # 入れ子。内側の判定が外側に漏れないこと
+  def test_nested_any
+    src = <<~RUBY
+      a = [1, 2]
+      c = [8, 9]
+      b = a.any? do |x|
+        c.any? { |y| x + y == 11 }
+      end
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(3)
+  end
+
   # --- GC (コレクションプール回収) ---
 
   def test_gc_string_loop

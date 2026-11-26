@@ -3750,9 +3750,21 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
-          ELSE
+          ELSIF Z5 <= 28 THEN
             (* クラス (タグ 13) *)
             IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 13 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
+          ELSE
+            (* 配列・ハッシュ (タグ 8-9) *)
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
@@ -5821,6 +5833,15 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z5 = 27 THEN
         Z6 := 1;
       END_IF;
+      IF Z5 = 29 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 30 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 31 THEN
+        Z6 := 1;
+      END_IF;
       IF Z6 = 0 THEN
         (* ブロックを取らないメソッドにブロックを渡した *)
         VMSTATUS := 3;
@@ -5911,9 +5932,21 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
-        ELSE
+        ELSIF Z5 <= 28 THEN
           (* クラス (タグ 13) *)
           IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 13 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
+        ELSE
+          (* 配列・ハッシュ (タグ 8-9) *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
@@ -5934,8 +5967,18 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         (* n.times は 0 から n-1 まで *)
         VMTEMP32L := 0;
         VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM - 1;
-      ELSIF Z5 = 21 THEN
-        (* a.each / h.each は 0 から要素数-1 まで *)
+      ELSIF Z5 = 12 THEN
+        (* a.upto(b) は a から b まで *)
+        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+        VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
+      ELSE
+        (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+        (* 0 から要素数-1 まで回り、数え方はどれも同じ *)
         (* ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む *)
         IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
@@ -5950,15 +5993,6 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
         VMTEMP32L := 0;
         VMTEMP32BL := VMTEMP32BL - 1;
-      ELSE
-        (* a.upto(b) は a から b まで *)
-        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
-          VMSTATUS := 3;
-          VMERROR := 4;
-          EXIT;
-        END_IF;
-        VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
-        VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
       END_IF;
       IF VMTEMP32L <= VMTEMP32BL THEN
         IF VMFRAMESP >= 16 THEN
@@ -5992,6 +6026,17 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* loop は上限が無く、ブロックに渡す値も無い *)
           D5Z3 := 4;
         END_IF;
+        (* **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、 *)
+        (* 種別が持つのは「ブロックの値をどう使うか」だけです *)
+        IF Z5 = 29 THEN
+          D5Z3 := 6;
+        END_IF;
+        IF Z5 = 30 THEN
+          D5Z3 := 7;
+        END_IF;
+        IF Z5 = 31 THEN
+          D5Z3 := 8;
+        END_IF;
         (* 窓をずらした後、ブロックは R[引数の数 + 1] にある *)
         Z2 := (VMOPERANDC + 1) * 4 + VMREGBASE + 4000;
         Z6 := D1Z2;   (* 本体の irep *)
@@ -6008,42 +6053,46 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
           (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
           VMCALLARGC := 0;
-        ELSIF D5Z3 = 3 THEN
-          (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
-          Z4 := 0 + VMREGBASE + 4000;
-          Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
-          Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          VMCALLARGC := 2;
-        ELSIF D5Z3 = 2 THEN
-          (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
-          Z4 := 0 + VMREGBASE + 4000;
-          (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
-          (* 載っていて、これから要素の位置を出すのに使う *)
-          VMTEMP32B := D1Z4;
-          VMTEMP32BHI := D2Z4;
-          Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          VMCALLARGC := 1;
-        ELSE
+        ELSIF D5Z3 = 1 THEN
           (* times / upto は添字を渡す *)
           VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
           VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
           VMCALLARGC := 1;
+        ELSE
+          (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+          (* 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。 *)
+          (* 述語は配列とハッシュで種別を分けていないためです *)
+          Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] がレシーバ *)
+          IF VMSLOT[(Z4 - 4000) / 4].SLTAG = 9 THEN
+            (* ハッシュは鍵と値を渡す *)
+            Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
+            Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            VMCALLARGC := 2;
+          ELSE
+            (* 配列はその位置の要素を渡す *)
+            (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+            (* 載っていて、これから要素の位置を出すのに使う *)
+            VMTEMP32B := D1Z4;
+            VMTEMP32BHI := D2Z4;
+            Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            VMCALLARGC := 1;
+          END_IF;
         END_IF;
         VMCURIREP := Z6;
         (* IREP テーブルから実行中の irep の情報を写す *)
@@ -6061,8 +6110,26 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           EXIT;
         END_IF;
         VMPC := 0;
+      ELSE
+        (* 1 回も回らないとき。each / times / upto はレシーバがそのまま値になる *)
+        (* **述語だけは答えを書きます。** 空の any? は false、all? と none? は *)
+        (* true で、1 回も回らないのでフレームを積まずにここで決まります *)
+        IF Z5 = 29 THEN
+          (* any?: 空なら false *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 0;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 2;
+        END_IF;
+        IF Z5 = 30 THEN
+          (* all?: 空なら true *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 1;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 3;
+        END_IF;
+        IF Z5 = 31 THEN
+          (* none?: 空なら true *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 1;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 3;
+        END_IF;
       END_IF;
-      (* 1 回も回らないときはレシーバがそのまま呼び出しの値になる *)
 
     ELSIF VMCURRENTOPCODE = 52 THEN
       (* OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする *)
@@ -6146,6 +6213,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMNREGS := ZR4Z1;
         ELSE
           IF D5Z3 >= 1 THEN
+            VMPREDSTOP := 0;
+            IF D5Z3 >= 6 THEN
+              (* **鍵を分けています。** 同じ鍵だと「別の枝でアドレスを載せた」 *)
+              (* ことになり、生成器が止めます (ふつうの return も同じ場所を使う) *)
+              IF D5Z3 = 6 THEN
+                (* any?: ブロックの値が真なら打ち切って true を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+              IF D5Z3 = 7 THEN
+                (* all?: ブロックの値が偽なら打ち切って false を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+              IF D5Z3 = 8 THEN
+                (* none?: ブロックの値が真なら打ち切って false を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+            END_IF;
             VMTEMP32 := D6Z3;
             VMTEMP32HI := D7Z3;
             VMTEMP32L := VMTEMP32L + 1;
@@ -6155,6 +6251,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMTEMP32B := D8Z3;
               VMTEMP32BHI := D9Z3;
               VMTEMP32L := VMTEMP32BL;
+            END_IF;
+            IF VMPREDSTOP <> 0 THEN
+              (* 述語が答えを出した。残りは見ずに終わらせる *)
+              VMTEMP32B := D8Z3;
+              VMTEMP32BHI := D9Z3;
+              VMTEMP32L := VMTEMP32BL + 1;
             END_IF;
             VMTEMP32B := D8Z3;
             VMTEMP32BHI := D9Z3;
@@ -6168,46 +6270,71 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
                 (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
                 VMCALLARGC := 0;
-              ELSIF D5Z3 = 3 THEN
-                (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
-                Z4 := 0 + VMREGBASE + 4000;
-                Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
-                Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                VMCALLARGC := 2;
-              ELSIF D5Z3 = 2 THEN
-                (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
-                Z4 := 0 + VMREGBASE + 4000;
-                (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
-                (* 載っていて、これから要素の位置を出すのに使う *)
-                VMTEMP32B := D1Z4;
-                VMTEMP32BHI := D2Z4;
-                Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                VMCALLARGC := 1;
-              ELSE
+              ELSIF D5Z3 = 1 THEN
                 (* times / upto は添字を渡す *)
                 VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
                 VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
                 VMCALLARGC := 1;
+              ELSE
+                (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+                (* 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。 *)
+                (* 述語は配列とハッシュで種別を分けていないためです *)
+                Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] がレシーバ *)
+                IF VMSLOT[(Z4 - 4000) / 4].SLTAG = 9 THEN
+                  (* ハッシュは鍵と値を渡す *)
+                  Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
+                  Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  VMCALLARGC := 2;
+                ELSE
+                  (* 配列はその位置の要素を渡す *)
+                  (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+                  (* 載っていて、これから要素の位置を出すのに使う *)
+                  VMTEMP32B := D1Z4;
+                  VMTEMP32BHI := D2Z4;
+                  Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  VMCALLARGC := 1;
+                END_IF;
               END_IF;
               VMPC := 0;
             ELSE
               (* 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる *)
+              (* **述語だけは R[0] を答えに書き換えます。** 打ち切ったときは *)
+              (* predicate_decision が書いてあるので、尽きたときだけここで書く *)
+              IF VMPREDSTOP = 0 THEN
+                IF D5Z3 >= 6 THEN
+                  IF D5Z3 = 6 THEN
+                    (* any?: 尽きたら false *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  END_IF;
+                  IF D5Z3 = 7 THEN
+                    (* all?: 尽きたら true *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  END_IF;
+                  IF D5Z3 = 8 THEN
+                    (* none?: 尽きたら true *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  END_IF;
+                END_IF;
+              END_IF;
               VMFRAMESP := VMFRAMESP - 1;
               (* 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない *)
               Z3 := VMFRAMESP * 10 + 392 + Z9;

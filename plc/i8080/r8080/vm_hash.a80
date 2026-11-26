@@ -843,7 +843,8 @@ gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
 ; 違うのはブロックへ渡す値だけで、そこは each_block_args に出しています。
 ; ===============================================================
 sendb_each:
-  ; レシーバの型でフレーム種別を決める
+  ; each はレシーバの型でフレーム種別を決める
+  ; (述語は sendb_pred が種別を書いてから合流する)
   lda sendb_reg_a
   call get_reg_addr     ; HL = R[a]
   mov a, m
@@ -857,6 +858,17 @@ each_kind_array:
   mvi a, FRAME_KIND_EACH
 each_kind_set:
   sta each_arg_kind
+
+sendb_each_join:
+  ; レシーバが配列かハッシュであること (述語もここを通る)
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_ARRAY
+  jz each_recv_ok
+  cpi TT_HASH
+  jnz vm_error
+each_recv_ok:
 
   ; コレクションスロット番号を取得 (配列・ハッシュとも val_lo = slot + 1)
   lda sendb_reg_a
@@ -873,7 +885,7 @@ each_kind_set:
   mov a, m
   sta each_count
   ora a
-  jz vm_loop            ; 空 → ブロック実行しない
+  jz each_empty         ; 空 → ブロック実行しない
 
   ; ブロック (TT_PROC) の情報を読む
   lda sendb_argc
@@ -929,6 +941,33 @@ each_kind_set:
   jmp vm_loop
 
 ; ===============================================================
+; each_empty — 1 回も回らないとき
+;
+; each はレシーバがそのまま呼び出しの値になるので何もしません。
+; **述語だけは答えを書きます** (空の any? は false、all? と none? は true)。
+; フレームを積まないので、ここで決まります。
+; ===============================================================
+each_empty:
+  lda each_arg_kind
+  cpi FRAME_KIND_ANY
+  jc vm_loop            ; 述語ではない → レシーバのまま
+  cpi FRAME_KIND_ANY
+  jz each_empty_false   ; any? → false
+  mvi a, TT_TRUE        ; all? / none? → true
+  jmp each_empty_write
+each_empty_false:
+  mvi a, TT_FALSE
+each_empty_write:
+  sta each_empty_tag
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a] (呼び出しの値になる場所)
+  lda each_empty_tag
+  call set_slot_special
+  jmp vm_loop
+
+each_empty_tag: db 0
+
+; ===============================================================
 ; each_block_args — 反復のその回の値をブロックの引数へ
 ;
 ;   入力: each_arg_kind / each_col_slot / each_index
@@ -945,10 +984,14 @@ each_kind_set:
 each_block_args:
   lda each_col_slot
   call col_slot_addr    ; HL = スロットアドレス
+  mov a, m              ; +0: 見出しの種別 (COL_TYPE_*)
+  sta eba_col_type
   inx h                 ; skip type
   inx h                 ; skip count → data
-  lda each_arg_kind
-  cpi FRAME_KIND_HASH_EACH
+  ; **渡す値はスロットの見出しで決めます。** フレームの種別ではありません —
+  ; 述語は配列とハッシュで種別を分けていないためです
+  lda eba_col_type
+  cpi COL_TYPE_HASH
   jz eba_hash
 
   ; --- 配列: data + index * 4 ---
@@ -999,3 +1042,4 @@ each_count:    db 0
 each_arg_kind: db 0
 each_index:    db 0
 eba_pair:      dw 0
+eba_col_type:  db 0

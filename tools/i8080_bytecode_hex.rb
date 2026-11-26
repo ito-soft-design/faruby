@@ -57,6 +57,9 @@ module FaRuby
       "<<"      => Layout::METHOD_CONCAT,
       "each"    => Layout::METHOD_EACH,
       "push"    => Layout::METHOD_PUSH,
+      "any?"    => Layout::METHOD_ANY_P,
+      "all?"    => Layout::METHOD_ALL_P,
+      "none?"   => Layout::METHOD_NONE_P,
       "[]"      => Layout::METHOD_SLICE,
     }.freeze
 

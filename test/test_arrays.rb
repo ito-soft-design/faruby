@@ -426,13 +426,26 @@ class TestArrays < Minitest::Test
   end
 
   # 生成コードは「反復中か」を範囲で見る。等値のままだと each が素通りする
+  #
+  # **等値そのものは禁じられません。** ブロックに何を渡すかを選ぶ側は
+  # `= FRAME_KIND_ITERATE` (times / upto) を見ます。見張るのは
+  # 「反復中か」を決める 2 か所で、どちらも範囲でなければいけません。
   def test_generated_code_treats_each_as_an_iteration
     source = FaRuby::KvsGenerator.new.source
     kind = "#{layout.device_name}#{Layout::FRAME_KIND}"
 
-    refute_includes source, "#{kind}:Z3 = #{Layout::FRAME_KIND_ITERATE} THEN",
-                    "反復の判定が等値のままになっている"
-    assert_includes source, "#{kind}:Z3 >= #{Layout::FRAME_KIND_ITERATE} THEN"
+    assert_includes source, "#{kind}:Z3 >= #{Layout::FRAME_KIND_ITERATE} THEN",
+                    "OP_RETURN の反復の判定が範囲でない"
+    assert_includes source, "#{kind}:Z3 < #{Layout::FRAME_KIND_ITERATE} THEN",
+                    "OP_BREAK の反復の判定が範囲でない"
+  end
+
+  # 述語の判定も範囲。間に別の種別を挟むと静かに外れる
+  def test_generated_code_treats_the_predicates_as_a_range
+    source = FaRuby::KvsGenerator.new.source
+    kind = "#{layout.device_name}#{Layout::FRAME_KIND}"
+
+    assert_includes source, "#{kind}:Z3 >= #{Layout::FRAME_KIND_ANY} THEN"
   end
 
   # === 生成コード ===

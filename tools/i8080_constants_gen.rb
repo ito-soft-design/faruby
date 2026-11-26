@@ -250,6 +250,9 @@ module FaRuby
       lines << equ("FRAME_KIND_HASH_EACH", layout::FRAME_KIND_HASH_EACH, comment: "each (ハッシュの鍵と値)")
       lines << equ("FRAME_KIND_LOOP",    layout::FRAME_KIND_LOOP,    comment: "loop (無限)")
       lines << equ("FRAME_KIND_NEW",     layout::FRAME_KIND_NEW,     comment: "Class#new → initialize")
+      lines << equ("FRAME_KIND_ANY",     layout::FRAME_KIND_ANY,     comment: "any?")
+      lines << equ("FRAME_KIND_ALL",     layout::FRAME_KIND_ALL,     comment: "all?")
+      lines << equ("FRAME_KIND_NONE",    layout::FRAME_KIND_NONE,    comment: "none?")
       lines << ""
       lines << "; 外側フレームなし (トップレベル)"
       lines << equ("FRAME_NONE", layout::FRAME_NONE)
@@ -280,6 +283,9 @@ module FaRuby
       lines << equ("METHOD_CONCAT",        layout::METHOD_CONCAT,         comment: "<< (文字列追記/配列追加)")
       lines << equ("METHOD_EACH",          layout::METHOD_EACH,           comment: "each (配列要素反復)")
       lines << equ("METHOD_PUSH",          layout::METHOD_PUSH,           comment: "push (配列追加)")
+      lines << equ("METHOD_ANY_P",         layout::METHOD_ANY_P,          comment: "any?")
+      lines << equ("METHOD_ALL_P",         layout::METHOD_ALL_P,          comment: "all?")
+      lines << equ("METHOD_NONE_P",        layout::METHOD_NONE_P,         comment: "none?")
       lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力 (ブロッキング)")
       lines << equ("KEY_ADDR",              layout::KEY_ADDR,              width: 4, comment: "ND80Z キー 1 回スキャン (ノンブロッキング)")
       lines << ""
