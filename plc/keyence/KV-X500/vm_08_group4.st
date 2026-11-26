@@ -38,17 +38,17 @@ IF EM54:Z9 <= 39 THEN
       Z8 := ZF98304:Z7;
       Z7 := Z3 + 3;
       Z1 := ZF98304:Z7;   // シンボル種別
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      Z2 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF Z1 = 6 THEN
         // クラス名。実行時に作らないので番号を置くだけ
-        EM1.L:Z1 := Z5;   // クラス番号
-        EM0:Z1 := 13;
+        EM1.L:Z2 := Z5;   // クラス番号
+        EM0:Z2 := 13;
       ELSE
         IF Z1 = 5 THEN
           // 定数は値スロット。型タグごと写す
           Z3 := Z6;
-          EM1.L:Z1 := EM1.L:Z3;
-          EM0:Z1 := EM0:Z3;
+          EM1.L:Z2 := EM1.L:Z3;
+          EM0:Z2 := EM0:Z3;
         ELSE
           // クラスでも定数でもないシンボルを定数として読もうとした
           EM1:Z9 := 3;
@@ -74,18 +74,18 @@ IF EM54:Z9 <= 39 THEN
       Z8 := ZF98304:Z7;
       Z7 := Z3 + 3;
       Z1 := ZF98304:Z7;   // シンボル種別
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      Z2 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       IF Z1 = 3 THEN
         IF Z5 = 1 THEN
           // 固定長でデバイスへ書いたときの余りを埋めるバイト
-          EM41:Z9 := EM1.L:Z1;
+          EM41:Z9 := EM1.L:Z2;
         END_IF;
       ELSE
         IF Z1 = 5 THEN
           // 利用者の定数は値スロット。型タグごと写す
           Z3 := Z6;
-          EM1.L:Z3 := EM1.L:Z1;
-          EM0:Z3 := EM0:Z1;
+          EM1.L:Z3 := EM1.L:Z2;
+          EM0:Z3 := EM0:Z2;
         END_IF;
       END_IF;
 

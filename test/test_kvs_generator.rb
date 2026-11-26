@@ -41,6 +41,39 @@ class TestKvsGenerator < Minitest::Test
     text.lines.map(&:rstrip).reject { |l| l.strip.empty? || l.strip.start_with?("'") }
   end
 
+  # シンボル種別を読んでから比べるまでに Z1 を書き替えていないこと
+  #
+  # **実機で ERROR=3 になりました。** `OP_GETCONST` に定数の枝を足したとき、
+  # 種別を Z1 に読んだ直後に `reg_slot` がレジスタのアドレスを **同じ Z1**
+  # へ置き、比較が種別ではなくアドレスを見ていました。クラス参照
+  # (`Counter.new`) が全部落ちます。
+  #
+  # **シミュレータでは出ません。** Z を持たないので、どの Z に何が載って
+  # いるかという話が丸ごと存在しません。生成コードを読むまで分からない形
+  # なので、ここで読みます。アドレスが要るときは `global_reg_slot`
+  # (Z2 を使う) を呼びます。
+  def test_種別を読んでから比べるまでに_z1_を壊さない
+    lines = @source.lines.map(&:rstrip)
+    broken = []
+
+    lines.each_with_index do |line, i|
+      next unless line.match?(/Z1 = .*' シンボル種別/)
+
+      # 次に Z1 を見る比較が来るまでの間に Z1 への代入が無いこと
+      ((i + 1)...lines.size).each do |j|
+        break if lines[j].match?(/\bZ1\b/) && lines[j].match?(/IF|ELSE IF/)
+
+        if lines[j].match?(/^\s*Z1 = /)
+          broken << "#{i + 1} 行目で読んだ種別を #{j + 1} 行目が潰しています: " \
+                    "#{lines[j].strip}"
+          break
+        end
+      end
+    end
+
+    assert_empty broken
+  end
+
   # === コミット済みファイルとの一致 ===
 
   # 生成物は手で編集しない。編集された場合はここで検出する。

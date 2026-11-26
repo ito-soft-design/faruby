@@ -1116,10 +1116,15 @@ module FaRuby
     #
     # **定数は汎用グローバルのスロットに置いてあります。** 読み方は `$foo` と
     # 同じで、VM に新しい置き場は要りません。
+    # **アドレスは `global_reg_slot` で取ります。** `reg_slot` はレジスタの
+    # アドレスを Z1 に置くので、`device_table_lookup` が Z1 に入れた**種別を
+    # 潰します。** 実機で ERROR=3 になりました — シミュレータは Z を持たない
+    # ので、この形は生成コードを読むまで分かりません
+    # (test_kvs_generator.rb が見ています)。
     def load_constant(name, sym_name, error_code)
       device_table_lookup(sym_name)
-      dest = reg_slot(name)
-      if_else_block("Z1 = #{SYMBOL_KIND_CLASS}")do
+      dest = global_reg_slot(name)
+      if_else_block("Z1 = #{SYMBOL_KIND_CLASS}") do
         note "クラス名。実行時に作らないので番号を置くだけ"
         line "#{dest.value} = Z5   ' クラス番号"
         line "#{dest.tag} = #{TT_CLASS}"
@@ -1986,9 +1991,10 @@ module FaRuby
     # **再代入も通します。** Ruby は警告しますが、ここで見分けるには「もう
     # 書いたか」を覚える場所が要り、定数 1 つにつき 1 ワード増えます。
     # 警告を出せないので、止めるか通すかのどちらかで、通す方を採りました。
+    # 読みと同じ理由で `global_reg_slot` を使います (Z1 は種別)
     def set_constant(name, sym_name)
       device_table_lookup(sym_name)
-      src = reg_slot(name)
+      src = global_reg_slot(name)
       if_else_block("Z1 = #{SYMBOL_KIND_SETTING}") do
         if_("Z5 = #{SETTING_STR_FILL}") do
           note "固定長でデバイスへ書いたときの余りを埋めるバイト"
