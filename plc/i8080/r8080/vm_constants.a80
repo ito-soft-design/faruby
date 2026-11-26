@@ -110,6 +110,7 @@ FRAME_OFF_OUTER          EQU  0Ah  ; 1B
 FRAME_KIND_CALL          EQU  00h
 FRAME_KIND_ITERATE       EQU  01h  ; times / upto
 FRAME_KIND_EACH          EQU  02h  ; each (配列要素反復)
+FRAME_KIND_HASH_EACH     EQU  03h  ; each (ハッシュの鍵と値)
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
 FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
 

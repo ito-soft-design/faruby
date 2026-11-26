@@ -1124,6 +1124,116 @@ class TestI8080Vm < Minitest::Test
     assert_equal 42, board[:board].reg_value(3)
   end
 
+  # --- ハッシュの each ---
+  #
+  # **ブロックには鍵と値の 2 つを渡します。** 配列の each と同じフレームの
+  # 数え方 (見出しの +1 が反復の回数) で、違うのは渡す値だけです。
+
+  def test_hash_each_keys_and_values
+    # 鍵と値をそれぞれ合計する
+    src = <<~RUBY
+      h = {1 => 10, 2 => 20}
+      ks = 0
+      vs = 0
+      h.each do |k, v|
+        ks = ks + k
+        vs = vs + v
+      end
+      a = ks
+      b = vs
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 3, board[:board].reg_value(4)
+    assert_equal 30, board[:board].reg_value(5)
+  end
+
+  def test_hash_each_empty
+    # 空ハッシュの each はブロックを実行しない
+    src = <<~RUBY
+      h = {}
+      n = 99
+      h.each do |k, v|
+        n = 0
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(2)
+  end
+
+  def test_hash_each_single
+    # ペア 1 つ。鍵と値が入れ違っていないこと
+    src = <<~RUBY
+      h = {7 => 42}
+      kk = 0
+      vv = 0
+      h.each do |k, v|
+        kk = k
+        vv = v
+      end
+      a = kk
+      b = vv
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 7, board[:board].reg_value(4)
+    assert_equal 42, board[:board].reg_value(5)
+  end
+
+  def test_hash_each_full
+    # 容量いっぱいの 4 ペア (COL_MAX_HASH_PAIRS)
+    src = <<~RUBY
+      h = {1 => 1, 2 => 2, 3 => 4, 4 => 8}
+      n = 0
+      h.each do |k, v|
+        n = n + v
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 15, board[:board].reg_value(2)
+  end
+
+  def test_hash_each_breaks
+    # break は反復を打ち切り、その値が呼び出しの値になる
+    src = <<~RUBY
+      h = {1 => 10, 2 => 20}
+      n = 0
+      h.each do |k, v|
+        n = v
+        break
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 10, board[:board].reg_value(2)
+  end
+
+  # **配列の each を壊していないこと。** 同じ枝を通るようにしたので、
+  # ハッシュを足したときに配列側が静かに変わっていないかを見ます
+  def test_hash_each_does_not_disturb_array_each
+    src = <<~RUBY
+      a = [1, 2, 3]
+      h = {4 => 5}
+      n = 0
+      a.each do |x|
+        n = n + x
+      end
+      h.each do |k, v|
+        n = n + k + v
+      end
+      b = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 15, board[:board].reg_value(3)
+  end
+
   # --- GC (コレクションプール回収) ---
 
   def test_gc_string_loop

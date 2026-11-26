@@ -557,6 +557,44 @@ irep 0  symbols=["C", "D", "LIMIT"]
 メッセージが出ます。名前が衝突して実際に困ってから入れるほうが
 割に合います。
 
+## ハッシュの each を i8080 にも — 実装済み
+
+PLC には最初からありましたが、**i8080 にはフレーム種別が `EACH` (配列) まで
+しかなく、`h.each` が「未対応のブロックメソッド」で止まっていました。**
+`any?` を入れる前にここを揃えました。
+
+**ツール側は 1 行も変えていません。** `each` は配列でもハッシュでも同じ
+`METHOD_EACH` に落ちるので、VM が `TT_HASH` を受けるようにするだけです。
+
+```ruby
+h = {1 => 10, 2 => 20}
+h.each do |k, v|   # ブロックには鍵と値の 2 つ
+  ...
+end
+```
+
+**見出しの +1 (count) がどちらも「反復の回数」でした。** 配列なら要素数、
+ハッシュならペア数なので、上限の出し方を分ける必要がありません。違うのは
+ブロックへ渡す値だけで、そこを `each_block_args` に出して
+`sendb_each` (1 回目) と `advance_iteration` (2 回目以降) の両方から
+呼んでいます。**以前は 1 回目の値を `sendb_each` に書き写していました。**
+
+| | |
+|---|---|
+| `FRAME_KIND_HASH_EACH = 3` | **番号は PLC 版と揃えました** |
+| `sendb_each` | `TT_ARRAY` / `TT_HASH` で種別を決める |
+| `each_block_args` | 配列は `data + index*4`、ハッシュは `data + index*8` と その +4 |
+| `advance_iteration` | `HASH_EACH` も `adv_each_load` へ |
+
+**`vm_constants.a80` は生成物です。** 手で `EQU` を足しても
+`rake i8080:build` の最初の工程 (`rake i8080:constants`) が上書きします。
+足す場所は [tools/i8080_constants_gen.rb](../tools/i8080_constants_gen.rb) と
+[tools/i8080_memory_layout.rb](../tools/i8080_memory_layout.rb) です。
+
+確かめ方は test_i8080_vm.rb の 6 本 (鍵と値・空・1 ペア・容量いっぱいの
+4 ペア・`break`・**配列の each を壊していないこと**) です。
+最後の 1 本は、同じ枝を通るようにしたので入れてあります。
+
 ## 当面やらないこと
 
 **例外 (`begin` / `rescue`)。** faRuby に例外機構はありません。0 除算などは

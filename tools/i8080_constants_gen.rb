@@ -247,6 +247,7 @@ module FaRuby
       lines << equ("FRAME_KIND_CALL",    layout::FRAME_KIND_CALL)
       lines << equ("FRAME_KIND_ITERATE", layout::FRAME_KIND_ITERATE, comment: "times / upto")
       lines << equ("FRAME_KIND_EACH",    layout::FRAME_KIND_EACH,    comment: "each (配列要素反復)")
+      lines << equ("FRAME_KIND_HASH_EACH", layout::FRAME_KIND_HASH_EACH, comment: "each (ハッシュの鍵と値)")
       lines << equ("FRAME_KIND_LOOP",    layout::FRAME_KIND_LOOP,    comment: "loop (無限)")
       lines << equ("FRAME_KIND_NEW",     layout::FRAME_KIND_NEW,     comment: "Class#new → initialize")
       lines << ""

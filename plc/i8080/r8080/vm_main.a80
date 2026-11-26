@@ -61,7 +61,7 @@ startup_stub:
 ; frame_sp == 0 → トップレベル: 表示して停止
 ; FRAME_KIND_CALL → メソッド復帰: R[a] を R[0] にコピー、pop_frame
 ; FRAME_KIND_NEW  → new 復帰: pop_frame のみ (R[a] をコピーしない)
-; FRAME_KIND_ITERATE/LOOP → ブロック内: advance_iteration
+; それ以外 (反復のフレーム) → ブロック内: advance_iteration
 ; ===============================================================
 do_op_return:
   call fetch_byte         ; A = a (戻り値のレジスタ)
@@ -81,7 +81,7 @@ do_op_return:
   jz return_call
   cpi FRAME_KIND_NEW
   jz return_new
-  ; ITERATE / LOOP → advance_iteration
+  ; 反復のフレーム (ITERATE / EACH / HASH_EACH / LOOP)
   jmp advance_iteration
 
 return_call:
@@ -116,7 +116,8 @@ return_reg_a: db 0
 ; ===============================================================
 ; advance_iteration — ブロックの 1 反復が終わった後の処理
 ;
-; ITERATE (times): index++ して limit と比較。超えたら pop_frame。
+; ITERATE (times / upto): index++ して limit と比較。超えたら pop_frame。
+; EACH / HASH_EACH: 同じ数え方で、ブロックに渡す値だけが違う。
 ; LOOP: 常に PC=0 で再実行 (無限ループ)。
 ; ===============================================================
 advance_iteration:
@@ -127,9 +128,9 @@ advance_iteration:
   mov a, m                ; A = kind
   cpi FRAME_KIND_LOOP
   jz adv_reenter          ; loop → 常に再実行
-  sta adv_kind            ; kind を退避 (ITERATE or EACH)
+  sta adv_kind            ; kind を退避 (ITERATE / EACH / HASH_EACH)
 
-  ; --- ITERATE / EACH 共通: index インクリメント + limit チェック ---
+  ; --- 反復に共通: index インクリメント + limit チェック ---
   call cur_frame_addr
   lxi d, FRAME_OFF_INDEX
   dad d
@@ -161,6 +162,8 @@ advance_iteration:
   lda adv_kind
   cpi FRAME_KIND_EACH
   jz adv_each_load
+  cpi FRAME_KIND_HASH_EACH
+  jz adv_each_load
 
   ; --- ITERATE (times): R[1] = index ---
   mvi a, 1
@@ -168,32 +171,23 @@ advance_iteration:
   call set_slot_int16     ; R[1] = index (ブロック引数 |i|)
   jmp adv_reenter
 
-  ; --- EACH: R[1] = array[index] ---
+  ; --- EACH / HASH_EACH: ブロックの引数を入れ直す ---
+  ;
+  ; **値の出し方は sendb_each と同じものを呼びます。** 配列なら要素、
+  ; ハッシュなら鍵と値で、分けているのは each_block_args の中だけです。
 adv_each_load:
-  ; BC = index を退避 (cur_frame_addr が BC を破壊するため)
-  push b
+  ; BC = index のうち下位バイトだけ使う (配列 8 要素・ハッシュ 4 ペアまで)
+  mov a, c
+  sta each_index
+  lda adv_kind
+  sta each_arg_kind
   ; フレーム +11 からコレクションスロット番号を読む
-  call cur_frame_addr
+  call cur_frame_addr     ; BC を破壊するが、添字は退避済み
   lxi d, 11
   dad d
   mov a, m                ; A = col_slot
-  call col_slot_addr      ; HL = スロットアドレス
-  inx h                   ; skip type
-  inx h                   ; skip count → data
-  pop b                   ; BC = index (復帰)
-  ; data + index * 4 (C = index_lo, 配列は最大 8 要素)
-  mov a, c
-  add a                   ; ×2
-  add a                   ; ×4
-  mov e, a
-  mvi d, 0
-  dad d                   ; HL = &data[index*4] (source)
-  push h
-  mvi a, 1
-  call get_reg_addr       ; HL = R[1] (dest)
-  xchg                    ; DE = R[1]
-  pop h                   ; HL = source
-  call copy_slot          ; R[1] = array[index]
+  sta each_col_slot
+  call each_block_args
 
 adv_reenter:
   ; PC = 0 で再実行

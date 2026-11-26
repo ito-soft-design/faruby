@@ -141,6 +141,9 @@ module FaRuby
     FRAME_KIND_CALL    = 0   # メソッド呼び出し / クラス本体 (OP_EXEC)
     FRAME_KIND_ITERATE = 1   # times / upto
     FRAME_KIND_EACH    = 2   # each (配列要素反復, +11 に col_slot 格納)
+    # each (ハッシュ。ブロックに鍵と値を渡す。+11 に col_slot 格納)
+    # **番号は PLC 版と揃えています** (MemoryLayout::FRAME_KIND_HASH_EACH)
+    FRAME_KIND_HASH_EACH = 3
     FRAME_KIND_LOOP    = 4   # loop (無限ループ)
     FRAME_KIND_NEW     = 5   # Class#new → initialize 呼び出し
                               # 戻り値を R[0] に写さない (オブジェクトを保持)
