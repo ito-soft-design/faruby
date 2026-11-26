@@ -8,6 +8,7 @@ require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
 require_relative "disasm"
+require_relative "array_new_check"
 require_relative "features"
 require "set"
 require "plc_access"
@@ -76,6 +77,7 @@ module FaRuby
       check_read_only_variables(list)
       check_features(list)
       check_scoped_constants
+      check_array_new_sizes
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -132,6 +134,21 @@ end
     # 定数は `OP_GETMCNST` / `OP_SETMCNST` になり、どちらも実装していません。
     # 名前を 1 つの空間で扱っているので、`C::LIMIT` と書かず `LIMIT` と
     # 書けばそのまま通ります。
+    # `Array.new(20)` のように大きさが書いてあれば、転送する前に止める
+    #
+    # **実行時にも止まります** (`ERROR=10`)。ここで見るのは、定数なら
+    # PLC へ送る前に分かるからです。**変数の大きさは見えません。**
+    def check_array_new_sizes
+      ArrayNewSizes.scan(irep_entries.map { |entry| entry[:irep] }).each do |found|
+        next if found[:size] >= 0 && found[:size] <= layout.max_array_len
+
+        form = found[:block] ? "Array.new(#{found[:size]}) { }" : "Array.new(#{found[:size]})"
+        raise CodegenError,
+              "#{form} は 1 スロットに収まりません。" \
+              "この機種の上限は #{layout.max_array_len} 要素です"
+      end
+    end
+
     def check_scoped_constants
       names = symbol_operands_of(%i[OP_GETMCNST OP_SETMCNST]).uniq
       return if names.empty?

@@ -191,21 +191,28 @@ class TestArrayNew < Minitest::Test
 
   # --- 止まるもの ---
 
-  def test_容量を超える大きさは止まる
-    assert_stops_with("a = Array.new(#{layout.max_array_len + 1})\n", HEAP_ERROR)
+  # **大きさは変数で渡します。** 定数で書くとコンパイル時に止まってしまい、
+  # 実行時の経路 (この枝) を通りません
+  def test_容量を超える大きさは実行時に止まる
+    assert_stops_with(<<~RUBY, HEAP_ERROR)
+      n = #{layout.max_array_len + 1}
+      a = Array.new(n)
+    RUBY
   end
 
-  def test_ブロック形も容量で止まる
-    assert_stops_with("a = Array.new(#{layout.max_array_len + 1}) { 1 }\n",
-                      HEAP_ERROR)
+  def test_ブロック形も実行時に容量で止まる
+    assert_stops_with(<<~RUBY, HEAP_ERROR)
+      n = #{layout.max_array_len + 1}
+      a = Array.new(n) { 1 }
+    RUBY
   end
 
   def test_大きさが整数でなければ止まる
     assert_stops_with("a = Array.new(true)\n", METHOD_TYPE_ERROR)
   end
 
-  def test_負の大きさは止まる
-    assert_stops_with("a = Array.new(-1)\n", METHOD_TYPE_ERROR)
+  def test_負の大きさは実行時にも止まる
+    assert_stops_with("n = -1\na = Array.new(n)\n", METHOD_TYPE_ERROR)
   end
 
   def test_引数が_3_つは止まる
@@ -249,6 +256,56 @@ class TestArrayNew < Minitest::Test
       a.each { |x| n = n + x }
       $DM0 = n
       $DM1 = a.length
+    RUBY
+  end
+
+  # --- 転送する前に止める ---
+  #
+  # **大きさが書いてあるときだけ見えます。** 実行時にも止まりますが
+  # (`ERROR=10`)、定数なら PLC へ送る前に分かります。
+  # **変数の大きさは見えません** — 見逃す側に倒しています。
+
+  def codegen_error(source)
+    FaRuby::PlcCodegen.new(compile(source)).validate!
+    nil
+  rescue FaRuby::CodegenError => e
+    e.message
+  end
+
+  def test_定数の大きさが容量を超えるとコンパイル時に止まる
+    message = codegen_error("a = Array.new(#{layout.max_array_len + 1})\n")
+    refute_nil message, "止まらなかった"
+    assert_includes message, "Array.new(#{layout.max_array_len + 1})"
+    assert_includes message, "#{layout.max_array_len} 要素"
+  end
+
+  def test_ブロック形も止まる
+    message = codegen_error("a = Array.new(20) { 1 }\n")
+    refute_nil message
+    assert_includes message, "Array.new(20) { }"
+  end
+
+  def test_上限ちょうどは通る
+    assert_nil codegen_error("a = Array.new(#{layout.max_array_len})\n")
+  end
+
+  def test_負の大きさも止まる
+    refute_nil codegen_error("a = Array.new(-1)\n")
+  end
+
+  # **変数は見逃します。** 実行時に ERROR=10 で止まります
+  def test_変数の大きさは通す
+    assert_nil codegen_error("n = 20\na = Array.new(n)\n")
+  end
+
+  def test_利用者のクラスの_new_は見ない
+    assert_nil codegen_error(<<~RUBY)
+      class Holder
+        def initialize(v)
+          @v = v
+        end
+      end
+      a = Holder.new(20)
     RUBY
   end
 

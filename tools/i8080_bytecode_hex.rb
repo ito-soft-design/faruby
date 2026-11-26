@@ -14,6 +14,7 @@ require_relative "mrb_parser"
 require_relative "vm_constants"
 require_relative "i8080_memory_layout"
 require_relative "disasm"
+require_relative "array_new_check"
 
 module FaRuby
   class I8080BytecodeHex
@@ -87,7 +88,22 @@ module FaRuby
     # vm_hex_path が指定されていれば VM コードのレコードも含める。
     # bank_init が事前に拡張 RAM モードに切り替え済みのため、
     # 0x0000-0x7FFF のデータは直接拡張 RAM に書き込まれる。
+    # `Array.new(20)` のように大きさが書いてあれば、書き込む前に止める
+    #
+    # **実行時にも止まります。** ここで見るのは、定数なら ND8080 へ送る前に
+    # 分かるからです。**上限は 8 要素** (PLC は 12)。
+    def check_array_new_sizes
+      ArrayNewSizes.scan(@all_ireps).each do |found|
+        next if found[:size] >= 0 && found[:size] <= Layout::COL_MAX_ARRAY_ELEMS
+
+        form = found[:block] ? "Array.new(#{found[:size]}) { }" : "Array.new(#{found[:size]})"
+        raise "#{form} は 1 スロットに収まりません " \
+              "(i8080 の上限は #{Layout::COL_MAX_ARRAY_ELEMS} 要素)"
+      end
+    end
+
     def generate_hex(vm_hex_path: nil)
+      check_array_new_sizes
       # VM コードの HEX をメモリイメージに読み込む
       vm_mem = vm_hex_path ? parse_hex_file(vm_hex_path) : {}
 

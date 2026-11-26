@@ -1033,8 +1033,8 @@ rake bench
 - [組み込みメソッド](#組み込みメソッド) 29 個
 - メソッドの定義と呼び出し (`def`、引数・再帰・`return`)
 - ブロック (`times` / `upto` / `each` / `any?` / `all?` / `none?`、入れ子・`break`)
-- 配列 (リテラル・添字・`length` / `size` / `<<` / `push` / `each` / `any?` / `all?` / `none?`)
-- ハッシュ (リテラル・添字・`length` / `key?` / `keys` / `values` / `each` / `any?` / `all?` / `none?`)
+- 配列 (リテラル・`Array.new`・添字・`length` / `size` / `<<` / `push` / `each` / `any?` / `all?` / `none?`)
+- ハッシュ (リテラル・`Hash.new`・添字・`length` / `key?` / `keys` / `values` / `each` / `any?` / `all?` / `none?`)
 - 文字列 (リテラル・デバイスとの読み書き・`==` / `+` / 式展開・
   `length` / `empty?` / `<<` / `[]`)
 - `if` / `while` による分岐と繰り返し
@@ -1154,7 +1154,7 @@ end
 | `keys` / `values` | 0 | ハッシュ | **新しい配列**を返す。プールを 1 スロット使う |
 | `[]` | 2 | デバイス参照 | `$DML[100, 3]` で 3 個読んで**新しい配列**にする。1 スロット使う |
 | `loop` | 0 | self | **ブロック必須。`break` でしか終わりません。** ブロックに値は渡しません |
-| `new` | initialize 次第 | クラス | オブジェクトを作り、`initialize` があれば呼びます |
+| `new` | initialize 次第 | クラス | オブジェクトを作り、`initialize` があれば呼びます。`Array.new(n)` / `Array.new(n, v)` / `Array.new(n) { |i| }` と `Hash.new` も書けます (`Hash.new(0)` は未対応) |
 
 `times` / `upto` / `each` / `loop` はブロック無しで呼ぶと実行時エラーです。
 

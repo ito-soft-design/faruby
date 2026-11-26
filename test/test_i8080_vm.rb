@@ -1443,14 +1443,21 @@ class TestI8080Vm < Minitest::Test
     assert_equal 8, board[:board].reg_value(2)
   end
 
+  # **大きさは変数で渡します。** 定数で書くと書き込む前に止まり
+  # (`check_array_new_sizes`)、実行時の枝を通りません
   def test_array_new_over_capacity_stops
-    board = run_ruby("a = Array.new(9)\n")
+    board = run_ruby("n = 9\na = Array.new(n)\n")
     refute_equal :finished, board[:result]
   end
 
   def test_array_new_negative_stops
-    board = run_ruby("a = Array.new(-1)\n")
+    board = run_ruby("n = -1\na = Array.new(n)\n")
     refute_equal :finished, board[:result]
+  end
+
+  # 書き込む前に止まる側
+  def test_array_new_literal_over_capacity_is_refused
+    assert_raises(RuntimeError) { run_ruby("a = Array.new(9)\n") }
   end
 
   def test_hash_new_is_empty
