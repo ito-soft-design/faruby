@@ -130,6 +130,9 @@ advance_iteration:
   jz adv_reenter          ; loop → 常に再実行
   sta adv_kind            ; kind を退避
 
+  ; **Array.new はブロックの値をその回の要素へ書く**
+  call array_fill_element
+
   ; **述語はここでブロックの値を見る。** 打ち切るなら R[0] に答えが入る
   call predicate_decision
   ora a
@@ -164,10 +167,15 @@ advance_iteration:
   jc adv_done             ; index > limit → 反復終了
 
   ; kind で R[1] の設定を分岐
-  ; ITERATE (times / upto) だけが添字。残りはコレクションの反復
+  ; 添字を渡すのは ITERATE (times / upto) と ARRAY_FILL。
+  ; **Array.new は R[0] が配列なので、種別で見分けないといけない** —
+  ; コレクションの枝に落ちると要素を渡してしまう
   lda adv_kind
   cpi FRAME_KIND_ITERATE
+  jz adv_index_load
+  cpi FRAME_KIND_ARRAY_FILL
   jnz adv_each_load
+adv_index_load:
 
   ; --- ITERATE (times): R[1] = index ---
   mvi a, 1
@@ -211,6 +219,48 @@ adv_stopped:
 adv_kind: db 0
 
 ; ===============================================================
+; array_fill_element — ブロックの値をその回の要素へ書く
+;
+;   入力: adv_kind / return_reg_a / フレーム (+11 = col_slot, INDEX = 添字)
+;
+; **添字は増やす前のもの。** いま終わった回の位置に書く。
+; Array.new 以外では何もしない。
+; ===============================================================
+array_fill_element:
+  lda adv_kind
+  cpi FRAME_KIND_ARRAY_FILL
+  rnz
+
+  ; 書き先 = スロットのデータ領域 + 添字 * 4
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  mov a, m              ; A = col_slot
+  call col_slot_addr
+  inx h                 ; skip type
+  inx h                 ; skip count → データ領域
+  shld afe_data
+  call cur_frame_addr
+  lxi d, FRAME_OFF_INDEX
+  dad d
+  mov a, m              ; A = 添字 (下位バイト。8 要素までなので足りる)
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  lhld afe_data
+  dad d                 ; HL = 書き先
+  xchg                  ; DE = 書き先
+
+  ; ブロックの戻り値を写す
+  lda return_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call copy_slot
+  ret
+
+afe_data: dw 0
+
+; ===============================================================
 ; predicate_decision — ブロックの値を見て打ち切るか決める
 ;
 ;   入力: adv_kind (フレーム種別) / return_reg_a (ブロックの戻り値)
@@ -227,6 +277,10 @@ predicate_decision:
   lda adv_kind
   cpi FRAME_KIND_ANY
   jc pd_continue          ; ANY 未満 → 述語ではない
+  ; **上限も見る。** ARRAY_FILL は ANY より上だがブロックの値の使い方が
+  ; 違う。上限を見ないと none? として扱われ、1 回目で打ち切ってしまう
+  cpi FRAME_KIND_NONE + 1
+  jnc pd_continue
 
   ; ブロックの戻り値の型タグ。TT_FALSE 以下が偽 (nil / false)
   lda return_reg_a
@@ -280,6 +334,8 @@ predicate_exhausted:
   lda adv_kind
   cpi FRAME_KIND_ANY
   jc pe_ret               ; 述語ではない
+  cpi FRAME_KIND_NONE + 1
+  jnc pe_ret              ; ARRAY_FILL は答えを書かない (R[0] は配列)
   cpi FRAME_KIND_ANY
   jz pe_false             ; any? → 尽きたら false
   mvi a, TT_TRUE          ; all? / none? → 尽きたら true

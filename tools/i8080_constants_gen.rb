@@ -180,6 +180,7 @@ module FaRuby
         "TT_OBJECT"  => TT_OBJECT,
         "TT_PROC"    => TT_PROC,
         "TT_CLASS"   => TT_CLASS,
+        "TT_BUILTIN_CLASS" => TT_BUILTIN_CLASS,
         "TT_FALSY_MAX" => TT_FALSY_MAX,
       }.each do |name, value|
         lines << equ(name, value)
@@ -219,6 +220,9 @@ module FaRuby
       lines << equ("SYM_KIND_USER_METHOD", layout::SYM_KIND_USER_METHOD, comment: "ユーザー定義メソッド")
       lines << equ("SYM_KIND_CLASS",       layout::SYM_KIND_CLASS,       comment: "クラス名")
       lines << equ("SYM_KIND_IVAR",        layout::SYM_KIND_IVAR,        comment: "インスタンス変数")
+      lines << equ("SYM_KIND_BUILTIN_CLASS", layout::SYM_KIND_BUILTIN_CLASS, comment: "Array / Hash")
+      lines << equ("BUILTIN_CLASS_ARRAY", layout::BUILTIN_CLASS_ARRAY, comment: "Array.new")
+      lines << equ("BUILTIN_CLASS_HASH",  layout::BUILTIN_CLASS_HASH,  comment: "Hash.new")
       lines << ""
       lines
     end

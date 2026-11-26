@@ -968,6 +968,153 @@ each_empty_write:
 each_empty_tag: db 0
 
 ; ===============================================================
+; sendb_array_new — Array.new(n) { |i| }
+;
+; **先に配列を確保して R[a] に置く。** 窓をずらすと R[0] が配列になり、
+; 反復の間ずっとそこから書き込む先を引ける。尽きればそれが呼び出しの値。
+;
+; 渡すのは添字 (times と同じ)。ブロックの値は advance_iteration が
+; その回の要素へ書く。**先に nil で埋めておく** — break で途中で抜けても、
+; 書いていない要素を値スロットとして読まれないようにするため。
+; ===============================================================
+sendb_array_new:
+  ; レシーバが Array であること
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_BUILTIN_CLASS
+  jnz vm_error
+  lda sendb_reg_a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m
+  cpi BUILTIN_CLASS_ARRAY
+  jnz vm_error
+
+  ; 大きさは R[a+1]
+  lda sendb_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  mov a, m
+  cpi TT_INTEGER
+  jnz vm_error
+  inx h
+  inx h                 ; +2: val_lo
+  mov c, m
+  inx h
+  mov a, m              ; 上位バイト
+  ora a
+  jnz vm_error          ; 負か大きすぎる
+  mov a, c
+  cpi COL_MAX_ARRAY_ELEMS + 1
+  jnc vm_error
+  sta san_count
+
+  ; スロットを確保して nil で埋める
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta san_slot
+  mvi m, COL_TYPE_ARRAY
+  inx h
+  lda san_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域
+  shld san_data
+  lda san_count
+  ora a
+  jz san_no_fill
+  sta san_left
+san_fill_loop:
+  lhld san_data
+  mvi m, TT_NIL
+  inx h
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+  shld san_data
+  lxi h, san_left
+  dcr m
+  jnz san_fill_loop
+
+san_no_fill:
+  ; R[a] = TT_ARRAY, val_lo = slot+1。**これが呼び出しの値になる**
+  lda sendb_reg_a
+  call get_reg_addr
+  mvi m, TT_ARRAY
+  inx h
+  mvi m, 0
+  inx h
+  lda san_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+
+  ; 0 個ならブロックを 1 回も回さない (配列はもう R[a] にある)
+  lda san_count
+  ora a
+  jz vm_loop
+
+  ; ブロック (TT_PROC) の情報を読む
+  lda sendb_argc
+  inr a
+  mov b, a
+  lda sendb_reg_a
+  add b                 ; A = a + argc + 1
+  call get_reg_addr
+  call slot_to_value
+  mov a, m
+  sta sendb_block_irep
+  inx h
+  mov a, m
+  sta sendb_block_outer
+
+  ; push_frame(a, FRAME_KIND_ARRAY_FILL, outer)
+  mvi b, FRAME_KIND_ARRAY_FILL
+  lda sendb_block_outer
+  mov c, a
+  lda sendb_reg_a
+  call push_frame
+
+  ; limit = count - 1
+  call cur_frame_addr
+  lxi d, FRAME_OFF_LIMIT
+  dad d
+  lda san_count
+  dcr a
+  mov m, a
+  inx h
+  mvi m, 0
+
+  ; フレーム +11 にコレクションスロット番号 (書き込む先を引くのに使う)
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  lda san_slot
+  mov m, a
+
+  ; ブロック引数 R[1] = 0 (添字)
+  mvi a, 1
+  call get_reg_addr
+  mvi b, 0
+  mvi c, 0
+  call set_slot_int16
+
+  ; 子 irep に切り替えて PC = 0
+  lda sendb_block_irep
+  call switch_irep
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+san_count: db 0
+san_slot:  db 0
+san_left:  db 0
+san_data:  dw 0
+
+; ===============================================================
 ; each_block_args — 反復のその回の値をブロックの引数へ
 ;
 ;   入力: each_arg_kind / each_col_slot / each_index

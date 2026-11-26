@@ -214,6 +214,11 @@ module FaRuby
     SYM_KIND_USER_METHOD = 0x01   # ユーザー定義メソッド (下位 = method_id)
     SYM_KIND_CLASS       = 0x02   # クラス名 (下位 = class_number)
     SYM_KIND_IVAR        = 0x03   # インスタンス変数 (下位 = ivar_index)
+    # 組み込みクラス (`Array` / `Hash`)。下位 = BUILTIN_CLASS_*
+    #
+    # **PLC 側とは番号が違います** (あちらは 8)。種別の空間がバックエンドごと
+    # に別で、ここは 1-3 しか使っていないためです
+    SYM_KIND_BUILTIN_CLASS = 0x04
 
     # INIT_METHOD_ID の格納アドレス
     #
@@ -224,6 +229,10 @@ module FaRuby
 
     # トップレベル (main) のクラス番号
     CLASS_MAIN = 0
+
+    # 組み込みクラスの番号。**PLC 側と同じ値です** (VmConstants)
+    BUILTIN_CLASS_ARRAY = 1
+    BUILTIN_CLASS_HASH  = 2
 
     # Class#new の組み込みメソッドコード
     METHOD_NEW = 28

@@ -157,6 +157,8 @@ do_op_getconst:
   mov a, d
   cpi SYM_KIND_CLASS
   jz getconst_class
+  cpi SYM_KIND_BUILTIN_CLASS
+  jz getconst_builtin
 
   ; 利用者の定数。DE がグローバルスロットのアドレス
   mov a, d
@@ -164,6 +166,22 @@ do_op_getconst:
   jnz getgv_ok          ; do_op_getgv の続きへ (a はスタックにある)
   pop psw
   jmp vm_error          ; クラスでも定数でもない
+
+; 組み込みクラス (Array / Hash)。**番号を置くだけ**
+;
+; 利用者のクラスと別のタグにする。`new` で作るものが違い、
+; メソッド表の行も持たない
+getconst_builtin:
+  pop psw               ; A = a
+  call get_reg_addr     ; HL = R[a]
+  mvi m, TT_BUILTIN_CLASS  ; +0: 型タグ
+  inx h
+  mvi m, 0              ; +1: 予約
+  inx h
+  mov m, e              ; +2: val_lo = BUILTIN_CLASS_*
+  inx h
+  mvi m, 0              ; +3: val_hi = 0
+  jmp vm_loop
 
 getconst_class:
   pop psw               ; A = a

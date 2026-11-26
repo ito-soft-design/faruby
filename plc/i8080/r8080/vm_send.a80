@@ -144,6 +144,13 @@ sum_irep:      db 0
 ; 3. initialize メソッドがあれば呼び出す
 ; ---------------------------------------------------------------
 send_new:
+  ; **組み込みクラスは作るものが違う。** メソッド表の行も持たない
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m              ; A = 型タグ
+  cpi TT_BUILTIN_CLASS
+  jz send_new_builtin
+
   ; OBJ_SP < MAX_OBJECTS を確認
   lda VM_STATE_BASE + OFF_OBJ_SP
   cpi MAX_OBJECTS
@@ -230,6 +237,164 @@ send_new:
   lxi h, 0
   shld VM_STATE_BASE + OFF_PC
   jmp vm_loop
+
+; ===============================================================
+; send_new_builtin — Array.new / Hash.new
+;
+; **引数の数はここで見る。** `new` は表と突き合わせない (クラスごとに
+; 違うため) ので、組み込みは自分で数える。
+;
+;   Array.new            空配列
+;   Array.new(n)         nil で埋める
+;   Array.new(n, v)      v の写しで埋める
+;   Hash.new             空ハッシュ (引数は取れない)
+; ===============================================================
+send_new_builtin:
+  call slot_to_value    ; HL = R[a] の値
+  mov a, m              ; A = BUILTIN_CLASS_*
+  cpi BUILTIN_CLASS_HASH
+  jz send_new_hash
+
+  ; --- Array.new ---
+  lda send_argc
+  cpi 3
+  jnc vm_error          ; 取るのは 0-2 個
+  ora a
+  jz snb_empty          ; 引数なし → 空配列
+
+  ; 大きさは R[a+1]。整数で 0-COL_MAX_ARRAY_ELEMS のこと
+  lda send_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  mov a, m              ; A = 型タグ
+  cpi TT_INTEGER
+  jnz vm_error
+  inx h                 ; +1: 予約
+  inx h                 ; +2: val_lo
+  mov c, m              ; C = 下位バイト
+  inx h
+  mov a, m              ; A = 上位バイト
+  ora a
+  jnz vm_error          ; 上位があれば負か大きすぎる (負は FFh)
+  mov a, c
+  cpi COL_MAX_ARRAY_ELEMS + 1
+  jnc vm_error          ; 1 スロットに収まらない
+  sta snb_count
+  ora a
+  jz snb_empty          ; 0 個 → 空配列
+
+  ; スロットを確保して見出しを書く
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta snb_slot
+  mvi m, COL_TYPE_ARRAY ; +0: type
+  inx h
+  lda snb_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域
+  shld snb_data
+
+  ; 要素を埋める。引数が 2 つなら R[a+2]、1 つなら nil
+  lda snb_count
+  sta snb_left
+snb_fill_loop:
+  lhld snb_data
+  xchg                  ; DE = 書き先
+  lda send_argc
+  cpi 2
+  jz snb_fill_value
+
+  ; nil で埋める
+  mvi a, TT_NIL
+  stax d
+  inx d
+  xra a
+  stax d
+  inx d
+  stax d
+  inx d
+  stax d
+  inx d
+  jmp snb_fill_next
+
+snb_fill_value:
+  ; R[a+2] の写し
+  lda send_reg_a
+  inr a
+  inr a
+  call get_reg_addr     ; HL = R[a+2]
+  call copy_slot        ; DE へ 4 バイト
+
+snb_fill_next:
+  ; 書き先を 1 スロット進める
+  lhld snb_data
+  lxi d, SLOT_BYTES
+  dad d
+  shld snb_data
+  lxi h, snb_left
+  dcr m
+  jnz snb_fill_loop
+
+  ; R[a] = TT_ARRAY, val_lo = slot+1
+  lda send_reg_a
+  call get_reg_addr
+  mvi m, TT_ARRAY
+  inx h
+  mvi m, 0
+  inx h
+  lda snb_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+; 空配列。count = 0 のスロットを 1 つ取る
+snb_empty:
+  call col_alloc
+  sta snb_slot
+  mvi m, COL_TYPE_ARRAY
+  inx h
+  mvi m, 0              ; +1: count = 0
+  lda send_reg_a
+  call get_reg_addr
+  mvi m, TT_ARRAY
+  inx h
+  mvi m, 0
+  inx h
+  lda snb_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+; Hash.new。**引数は取れない** — 既定値 (Hash.new(0)) を覚える場所が無い
+send_new_hash:
+  lda send_argc
+  ora a
+  jnz vm_error
+  call col_alloc
+  sta snb_slot
+  mvi m, COL_TYPE_HASH
+  inx h
+  mvi m, 0              ; +1: ペア数 = 0
+  lda send_reg_a
+  call get_reg_addr
+  mvi m, TT_HASH
+  inx h
+  mvi m, 0
+  inx h
+  lda snb_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+  jmp vm_loop
+
+snb_count: db 0
+snb_slot:  db 0
+snb_left:  db 0
+snb_data:  dw 0
 
 sn_slot:       db 0
 sn_class_num:  db 0

@@ -71,6 +71,7 @@ TT_HASH                  EQU  09h
 TT_OBJECT                EQU  0Ah
 TT_PROC                  EQU  0Ch
 TT_CLASS                 EQU  0Dh
+TT_BUILTIN_CLASS         EQU  0Eh
 TT_FALSY_MAX             EQU  02h
 
 ; --- VM 実行状態 ---
@@ -90,6 +91,9 @@ MAX_GLOBALS              EQU  40h  ; グローバル変数の数
 SYM_KIND_USER_METHOD     EQU  01h  ; ユーザー定義メソッド
 SYM_KIND_CLASS           EQU  02h  ; クラス名
 SYM_KIND_IVAR            EQU  03h  ; インスタンス変数
+SYM_KIND_BUILTIN_CLASS   EQU  04h  ; Array / Hash
+BUILTIN_CLASS_ARRAY      EQU  01h  ; Array.new
+BUILTIN_CLASS_HASH       EQU  02h  ; Hash.new
 
 ; --- フレームスタック ---
 
@@ -116,6 +120,7 @@ FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
 FRAME_KIND_ANY           EQU  06h  ; any?
 FRAME_KIND_ALL           EQU  07h  ; all?
 FRAME_KIND_NONE          EQU  08h  ; none?
+FRAME_KIND_ARRAY_FILL    EQU  09h  ; Array.new(n) { }
 
 ; 外側フレームなし (トップレベル)
 FRAME_NONE               EQU  0FFh

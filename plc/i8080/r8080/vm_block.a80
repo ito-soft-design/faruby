@@ -136,6 +136,8 @@ sendb_dispatch:
   jz sendb_all
   cpi METHOD_NONE_P
   jz sendb_none
+  cpi METHOD_NEW
+  jz sendb_array_new
   ; 未対応のブロックメソッド
   jmp vm_error
 

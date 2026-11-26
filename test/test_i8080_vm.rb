@@ -1352,6 +1352,145 @@ class TestI8080Vm < Minitest::Test
     assert_equal TT_TRUE, board[:board].reg_type(3)
   end
 
+  # --- Array.new / Hash.new ---
+  #
+  # **`Array` は組み込みクラスとして登録します。** 利用者の定数にすると
+  # 未代入のスロットになり、`.new` が型違いで止まります。型タグは
+  # `TT_BUILTIN_CLASS` で、`new` の中で作るものが違います。
+  #
+  # 容量は 1 スロット **8 要素**です (PLC は 12)。
+
+  # **`.nil?` は値として書けません。** 条件式の中なら mruby が畳みますが、
+  # 値にすると `OP_SEND :nil?` になり、組み込みに無いので止まります
+  def test_array_new_size_only
+    board = run_ruby("a = Array.new(3)\nb = a.length\nc = a[0] ? 1 : 2\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 3, board[:board].reg_value(2)
+    assert_equal 2, board[:board].reg_value(3)
+  end
+
+  def test_array_new_no_args
+    board = run_ruby("a = Array.new\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
+  def test_array_new_with_value
+    board = run_ruby("a = Array.new(3, 7)\nb = a[0]\nc = a[2]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 7, board[:board].reg_value(2)
+    assert_equal 7, board[:board].reg_value(3)
+  end
+
+  def test_array_new_with_true
+    board = run_ruby("a = Array.new(2, true)\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_array_new_with_block
+    src = <<~RUBY
+      a = Array.new(3) { |i| i * 10 }
+      b = a[0]
+      c = a[1]
+      d = a[2]
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 0, board[:board].reg_value(2)
+    assert_equal 10, board[:board].reg_value(3)
+    assert_equal 20, board[:board].reg_value(4)
+  end
+
+  def test_array_new_block_zero_rounds
+    src = <<~RUBY
+      n = 99
+      a = Array.new(0) { n = 0 }
+      b = a.length
+      c = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(3)
+    assert_equal 99, board[:board].reg_value(4)
+  end
+
+  # **break は打ち切って値をそのまま返す** (Ruby と同じ)
+  def test_array_new_block_break
+    board = run_ruby("r = Array.new(3) { break 5 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(1)
+  end
+
+  def test_array_new_block_reads_outer
+    src = <<~RUBY
+      n = 0
+      a = Array.new(3) { |i| n = n + 1 }
+      b = a[2]
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  # **8 要素が上限** (COL_MAX_ARRAY_ELEMS)
+  def test_array_new_at_capacity
+    board = run_ruby("a = Array.new(8, 1)\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 8, board[:board].reg_value(2)
+  end
+
+  def test_array_new_over_capacity_stops
+    board = run_ruby("a = Array.new(9)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  def test_array_new_negative_stops
+    board = run_ruby("a = Array.new(-1)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  def test_hash_new_is_empty
+    board = run_ruby("h = Hash.new\nb = h.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
+  def test_hash_new_then_used
+    board = run_ruby("h = Hash.new\nh[1] = 5\nb = h[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(2)
+  end
+
+  # **既定値は未対応** — 覚える場所が無い (見出しの空きが 2 バイト)
+  def test_hash_new_with_default_stops
+    board = run_ruby("h = Hash.new(0)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  # 利用者のクラスの new を壊していないこと
+  def test_user_class_new_still_works
+    src = <<~RUBY
+      class Holder
+        def initialize(v)
+          @v = v
+        end
+
+        def v
+          @v
+        end
+      end
+      a = Holder.new(7).v
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 7, board[:board].reg_value(1)
+  end
+
   # --- GC (コレクションプール回収) ---
 
   def test_gc_string_loop

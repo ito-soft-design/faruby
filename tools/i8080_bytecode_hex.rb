@@ -175,8 +175,12 @@ module FaRuby
     end
 
     # 利用者の定数の名前 (クラス名を引いた残り)
+    # **組み込みクラスの名前は外します** (`Array` / `Hash`)。外さないと
+    # 未代入の値スロットになり、`Array.new` が型違いで止まります
     def constant_names
-      @constant_names ||= symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys
+      @constant_names ||=
+        (symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys -
+         BUILTIN_CLASSES.keys)
     end
 
     def symbol_operands_of(opcodes)
@@ -483,6 +487,10 @@ module FaRuby
 
             mem[tbl_addr]     = slot_addr & 0xFF
             mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+          elsif BUILTIN_CLASSES.key?(sym)
+            # 組み込みクラス (`Array` / `Hash`)
+            mem[tbl_addr]     = BUILTIN_CLASSES[sym]
+            mem[tbl_addr + 1] = Layout::SYM_KIND_BUILTIN_CLASS
           elsif class_numbers.key?(sym)
             # クラス名
             mem[tbl_addr]     = class_numbers[sym]
