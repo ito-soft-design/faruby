@@ -165,6 +165,15 @@ module FaRuby
     FRAME_KIND_ANY      = 6
     FRAME_KIND_ALL      = 7
     FRAME_KIND_NONE     = 8
+    # `Array.new(8) { |i| }`。**ブロックの値を要素へ書く反復**
+    #
+    # **渡すのは添字です** (times と同じ)。R[0] には確保した配列が入って
+    # いて、それがそのまま呼び出しの値になります。
+    #
+    # **FRAME_KIND_ANY 以上でなければいけません。** ブロックの値を見る側の
+    # 判定を 1 比較で済ませているためです。渡す値の方は「添字か要素か」を
+    # 種別で見分けるので、述語と違って並びだけでは決まりません。
+    FRAME_KIND_ARRAY_FILL = 9
 
     # メソッド番号 => 反復フレームの種別
     PREDICATE_FRAME_KINDS = {

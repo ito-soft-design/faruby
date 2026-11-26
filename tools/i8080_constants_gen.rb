@@ -253,6 +253,7 @@ module FaRuby
       lines << equ("FRAME_KIND_ANY",     layout::FRAME_KIND_ANY,     comment: "any?")
       lines << equ("FRAME_KIND_ALL",     layout::FRAME_KIND_ALL,     comment: "all?")
       lines << equ("FRAME_KIND_NONE",    layout::FRAME_KIND_NONE,    comment: "none?")
+      lines << equ("FRAME_KIND_ARRAY_FILL", layout::FRAME_KIND_ARRAY_FILL, comment: "Array.new(n) { }")
       lines << ""
       lines << "; 外側フレームなし (トップレベル)"
       lines << equ("FRAME_NONE", layout::FRAME_NONE)

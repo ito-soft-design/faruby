@@ -464,7 +464,7 @@ module FaRuby
       # VM は再帰できないため、反復はフレームの状態として持つ。
       defs << OpcodeDef.new(0x30, "R[a].symbols[b](R[a+1]..) { ブロック }") do |vm|
         vm.send_block_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
-                             BLOCK_ERROR, CALL_DEPTH_ERROR)
+                             BLOCK_ERROR, CALL_DEPTH_ERROR, HEAP_ERROR)
       end
 
       # ブロックの中の break。反復を打ち切り、値を呼び出し全体の値にする

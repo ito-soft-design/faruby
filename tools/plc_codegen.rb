@@ -214,9 +214,12 @@ end
     # **入れ子は見ません。** `C::LIMIT` (`OP_GETMCNST`) は未対応で、
     # 名前は 1 つの空間を分け合います。2 つのクラスが同じ名前の定数を
     # 持つと同じ枠になります (doc/roadmap.md)。
+    # **組み込みクラスの名前は外します** (`Array` / `Hash`)。外さないと
+    # 未代入の値スロットになり、`Array.new` が型違いで止まります
     def constant_names
       @constant_names ||=
-        (symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys)
+        (symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys -
+         BUILTIN_CLASSES.keys)
         .reject { |name| name.start_with?(SETTING_PREFIX) }
     end
 
@@ -535,6 +538,13 @@ end
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_BUILTIN_CLASS
+          image[m[:table_addr]]     = m[:builtin_class]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = 0
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_SETTING
           image[m[:table_addr]]     = m[:setting]
           image[m[:table_addr] + 1] = 0
@@ -782,6 +792,14 @@ end
                 "(#{SETTING_NAMES.keys.join(', ')})"
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: SYMBOL_KIND_SETTING, setting: setting }
+      elsif BUILTIN_CLASSES.key?(sym)
+        # 組み込みクラス (`Array` / `Hash`)。**番号を置くだけです**
+        #
+        # 利用者のクラスと別のタグにするので、メソッド表の行も持ちません。
+        # `new` の中で作るものが違うだけです
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_BUILTIN_CLASS,
+          builtin_class: BUILTIN_CLASSES[sym] }
       elsif class_numbers.key?(sym)
         # クラス名。**実行時に作らないので番号を置くだけです**
         #
@@ -1017,6 +1035,11 @@ end
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_BUILTIN_CLASS
+          lines.concat(builtin_class_table_lines(m))
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_IVAR
           lines.concat(ivar_table_lines(m))
           next
@@ -1061,6 +1084,19 @@ end
         "#{layout.fixed_device(addr + 2)} = 0",
         "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_CLASS}    " \
         "' #{mapping[:symbol]} クラス名",
+      ]
+    end
+
+    # 組み込みクラスのエントリ。1 ワード目が BUILTIN_CLASS_*
+    def builtin_class_table_lines(mapping)
+      addr = mapping[:table_addr]
+      [
+        "#{layout.fixed_device(addr)} = #{mapping[:builtin_class]}    " \
+        "' #{mapping[:symbol]} 組み込みクラス番号",
+        "#{layout.fixed_device(addr + 1)} = 0",
+        "#{layout.fixed_device(addr + 2)} = 0",
+        "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = " \
+        "#{SYMBOL_KIND_BUILTIN_CLASS}    ' #{mapping[:symbol]} 組み込みクラス",
       ]
     end
 

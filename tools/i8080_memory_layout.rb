@@ -153,6 +153,8 @@ module FaRuby
     FRAME_KIND_ANY     = 6
     FRAME_KIND_ALL     = 7
     FRAME_KIND_NONE    = 8
+    # Array.new(8) { |i| }。ブロックの値を要素へ書く (渡すのは添字)
+    FRAME_KIND_ARRAY_FILL = 9
 
     # 「外側フレームなし」を表す値 (トップレベル)
     FRAME_NONE = 0xFF

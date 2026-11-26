@@ -46,6 +46,12 @@ module FaRuby
     TT_DEVICE  = 11    # デバイス族への参照 ($DM など)
     TT_PROC    = 12    # メソッドの本体への参照。値は irep 番号
     TT_CLASS   = 13    # クラス参照。値は class_number
+    # 組み込みクラス (`Array` / `Hash`)。値は BUILTIN_CLASS_*
+    #
+    # **利用者のクラスとは別のタグです。** `new` の中で作るものが違い、
+    # メソッド表の行も持ちません。TT_CLASS の隣に置いてあるので、
+    # `new` の受け手の検査は 13-14 の 1 範囲で済みます。
+    TT_BUILTIN_CLASS = 14
 
     # --- デバイス参照 (TT_DEVICE) の表現 ---
     #
@@ -206,6 +212,27 @@ module FaRuby
     # トップレベルの `@foo` は self が `main` 1 つなので、今までどおり
     # 汎用グローバル (`SYMBOL_KIND_GLOBAL`) のままです。
     SYMBOL_KIND_IVAR = 7
+    # 組み込みクラスの名前 (`Array` / `Hash`)。1 ワード目が BUILTIN_CLASS_*
+    #
+    # **利用者の定数と区別するために要ります。** 大文字の名前は `OP_CLASS` に
+    # 出てこなければ定数として登録されるので、これが無いと `Array` が
+    # 未代入の値スロットになり、`.new` が型違いで止まります。
+    SYMBOL_KIND_BUILTIN_CLASS = 8
+
+    # --- 組み込みクラス ---
+
+    # `Array.new` / `Hash.new` のレシーバ
+    #
+    # **クラス番号とは別の空間です。** 利用者のクラスはメソッド表の行を
+    # 持ちますが、組み込みクラスは `new` だけで、表を引きません。
+    BUILTIN_CLASS_ARRAY = 1
+    BUILTIN_CLASS_HASH  = 2
+
+    # 名前 => 番号。ホストがシンボル表に載せるときに引く
+    BUILTIN_CLASSES = {
+      "Array" => BUILTIN_CLASS_ARRAY,
+      "Hash"  => BUILTIN_CLASS_HASH,
+    }.freeze
 
     # --- クラス ---
 
@@ -378,7 +405,7 @@ module FaRuby
       [METHOD_VALUES,  TT_HASH,    TT_HASH,  "ハッシュ"],
       [METHOD_SLICE,   TT_DEVICE,  TT_DEVICE, "デバイス参照"],
       [METHOD_LOOP,    TT_OBJECT,  TT_OBJECT, "self"],
-      [METHOD_NEW,     TT_CLASS,   TT_CLASS,  "クラス"],
+      [METHOD_NEW,     TT_CLASS,   TT_BUILTIN_CLASS, "クラス"],
       # **末尾は any? / all? / none?** です。番号を振り直さずに足すため
       # 末尾に置いたので、「それ以上すべて」の区分もここになります
       [nil,            TT_ARRAY,   TT_HASH,   "配列・ハッシュ"],
@@ -439,8 +466,11 @@ module FaRuby
     #
     # レシーバの型で並べたため連続していません。判定は 1 比較では済まず、
     # OP_SENDB / OP_SEND のどちらもこの集合を並べて振り分けます。
+    # **`new` も入っています。** `Array.new(8) { |i| }` のためで、
+    # 利用者のクラスにブロックを渡すのは OP_SENDB の中で弾きます
     BLOCK_METHODS = [METHOD_TIMES, METHOD_UPTO, METHOD_EACH, METHOD_LOOP,
-                     METHOD_ANY_P, METHOD_ALL_P, METHOD_NONE_P].freeze
+                     METHOD_ANY_P, METHOD_ALL_P, METHOD_NONE_P,
+                     METHOD_NEW].freeze
 
     # 番号 => 生成コードのコメントに使う名前
     #
@@ -450,8 +480,13 @@ module FaRuby
     end.freeze
 
     # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
+    #
+    # **`new` は両方に入ります。** `Array.new(8)` はブロック無し、
+    # `Array.new(8) { |i| }` はブロック付きで、どちらも呼べる唯一のメソッドです。
     BUILTIN_PLAIN_METHODS =
-      METHOD_NAMES.reject { |code, _| BLOCK_METHODS.include?(code) }.freeze
+      METHOD_NAMES.reject { |code, _|
+        BLOCK_METHODS.include?(code) && code != METHOD_NEW
+      }.freeze
 
     # --- ユーザー定義メソッド ---
     #

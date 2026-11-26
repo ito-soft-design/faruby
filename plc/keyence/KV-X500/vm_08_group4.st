@@ -44,16 +44,22 @@ IF EM54:Z9 <= 39 THEN
         EM1.L:Z2 := Z5;   // クラス番号
         EM0:Z2 := 13;
       ELSE
-        IF Z1 = 5 THEN
-          // 定数は値スロット。型タグごと写す
-          Z3 := Z6;
-          EM1.L:Z2 := EM1.L:Z3;
-          EM0:Z2 := EM0:Z3;
+        IF Z1 = 8 THEN
+          // 組み込みクラス (Array / Hash)。番号を置くだけ
+          EM1.L:Z2 := Z5;   // 組み込みクラス番号
+          EM0:Z2 := 14;
         ELSE
-          // クラスでも定数でもないシンボルを定数として読もうとした
-          EM1:Z9 := 3;
-          EM2:Z9 := 3;
-          EXIT;
+          IF Z1 = 5 THEN
+            // 定数は値スロット。型タグごと写す
+            Z3 := Z6;
+            EM1.L:Z2 := EM1.L:Z3;
+            EM0:Z2 := EM0:Z3;
+          ELSE
+            // クラスでも定数でもないシンボルを定数として読もうとした
+            EM1:Z9 := 3;
+            EM2:Z9 := 3;
+            EXIT;
+          END_IF;
         END_IF;
       END_IF;
 

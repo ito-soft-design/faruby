@@ -117,7 +117,12 @@ module FaRuby
     #
     # **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
     # 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
-    def new_object(index, argc, heap_code, depth_code)
+    def new_object(index, argc, unknown_code, type_code, heap_code, depth_code)
+      # **組み込みクラスは作るものが違う。** メソッド表の行も持たない
+      if read_reg_tag(index) == TT_BUILTIN_CLASS
+        return new_builtin(index, argc, unknown_code, type_code, heap_code)
+      end
+
       slot = allocate_slot
       return vm_error(heap_code) unless slot
 
@@ -499,6 +504,70 @@ module FaRuby
     # 実体は配列 2 本 (鍵と値)。値スロットの下位に鍵の配列、上位に値の配列の
     # スロット番号を入れる。専用のプールは作らない。
 
+    # Array.new / Hash.new
+    #
+    # **引数の数はここで見る。** `new` は表と突き合わせないので
+    # (クラスごとに違うため)、組み込みは自分で数える。
+    def new_builtin(index, argc, unknown_code, type_code, heap_code)
+      return new_builtin_hash(index, argc, unknown_code, heap_code) if
+        read_reg(index) == BUILTIN_CLASS_HASH
+
+      return vm_error(unknown_code) if argc > 2
+      return new_array_slot(index, 0, nil, heap_code) if argc.zero?
+
+      size = index + 1
+      return vm_error(type_code) unless read_reg_tag(size) == TT_INTEGER
+      return vm_error(type_code) if read_reg(size).negative?
+      # **1 スロットに収まらない大きさ。** 配列の容量と同じ上限
+      return vm_error(heap_code) if read_reg(size) > layout.max_array_len
+
+      new_array_slot(index, read_reg(size), argc == 2 ? index + 2 : nil, heap_code)
+    end
+
+    # 配列を 1 つ確保して R[index] に置く。fill が nil なら nil で埋める
+    def new_array_slot(index, size, fill, heap_code)
+      slot = allocate_slot
+      return vm_error(heap_code) unless slot
+
+      set_array_length(slot, size)
+      size.times do |i|
+        if fill
+          write_array_element(slot, i, read_reg_tag(fill), read_reg(fill))
+        else
+          write_array_element(slot, i, TT_NIL, 0)
+        end
+      end
+      write_slot(index, TT_ARRAY, slot)
+      commit_slot(slot)
+    end
+
+    # Hash.new。**引数は取れない** — 既定値 (`Hash.new(0)`) を覚える場所が無い
+    def new_builtin_hash(index, argc, unknown_code, heap_code)
+      return vm_error(unknown_code) unless argc.zero?
+
+      keys = allocate_slot
+      return vm_error(heap_code) unless keys
+
+      set_array_length(keys, 0)
+      # **レジスタへ書くまで守る。** 2 本目の確保が回収を起こしたとき、
+      # 1 本目はまだどのレジスタからも届かない
+      @em.write_u16(layout.gc_pinned_addr, keys + 1)
+      commit_slot(keys)
+
+      values = allocate_slot
+      unless values
+        @em.write_u16(layout.gc_pinned_addr, 0)
+        return vm_error(heap_code)
+      end
+
+      set_array_length(values, 0)
+      commit_slot(values)
+      @em.write_u16(reg_type_addr(index), TT_HASH)
+      @em.write_u16(reg_addr(index), keys)
+      @em.write_u16(reg_addr(index) + 1, values)
+      @em.write_u16(layout.gc_pinned_addr, 0)
+    end
+
     # R[a] = { R[a] => R[a+1], .. } (OP_HASH)
     #
     # **鍵の配列と値の配列を別々に取ります。** 回収が返すスロットは連続
@@ -816,6 +885,10 @@ module FaRuby
     def load_constant(name, sym_name, error_code)
       first, addr, _argc, kind = device_entry(operand(sym_name))
       return write_slot(operand(name), TT_CLASS, first) if kind == SYMBOL_KIND_CLASS
+      # 組み込みクラス (Array / Hash)。**番号を置くだけ**
+      if kind == SYMBOL_KIND_BUILTIN_CLASS
+        return write_slot(operand(name), TT_BUILTIN_CLASS, first)
+      end
       return copy_slot_into_reg(addr, operand(name)) if kind == SYMBOL_KIND_GLOBAL
 
       vm_error(error_code)
@@ -926,6 +999,11 @@ module FaRuby
       index = @em.read_s32(addr + MemoryLayout::FRAME_INDEX) + 1
       # loop は上限が無い。**break でしか終わらない**
       index = @em.read_s32(addr + MemoryLayout::FRAME_LIMIT) if kind == MemoryLayout::FRAME_KIND_LOOP
+      # **Array.new はブロックの値を要素へ書く。** 添字は増やす前のもの
+      if kind == MemoryLayout::FRAME_KIND_ARRAY_FILL
+        write_array_element(read_reg(0), index - 1,
+                            read_reg_tag(operand(name)), read_reg(operand(name)))
+      end
       # 述語が答えを出したら残りは見ない (R[0] には答えが入っている)
       return pop_frame if predicate_stops?(kind, name)
 
@@ -983,8 +1061,11 @@ module FaRuby
       when MemoryLayout::FRAME_KIND_LOOP
         # loop はブロックに何も渡さない。Ruby の loop { |i| } も i は nil
         @em.write_u16(layout.call_argc_addr, 0)
-      when MemoryLayout::FRAME_KIND_ITERATE
-        # times / upto は添字を渡す
+      when MemoryLayout::FRAME_KIND_ITERATE, MemoryLayout::FRAME_KIND_ARRAY_FILL
+        # times / upto / Array.new は添字を渡す
+        #
+        # **Array.new は R[0] が配列なので、種別で見分けないといけない。**
+        # 下のコレクションの枝に落ちると要素を渡してしまう
         write_slot(1, TT_INTEGER, index)
         @em.write_u16(layout.call_argc_addr, 1)
       else
@@ -1023,21 +1104,27 @@ module FaRuby
 
     # R[a].メソッド(R[a+1]..) { ブロック } (OP_SENDB)
     def send_block_method(name, sym_name, argc_name, unknown_code, type_code,
-                          block_code, depth_code)
+                          block_code, depth_code, heap_code)
       code, _id, argc, kind = device_entry(operand(sym_name))
       return vm_error(unknown_code) unless kind == SYMBOL_KIND_METHOD
       # ブロックを取るメソッドはレシーバの型で並んでいるため連続していない
       return vm_error(unknown_code) unless BLOCK_METHODS.include?(code)
-      return vm_error(unknown_code) unless operand(argc_name) == argc
+      # **new だけ引数の数を突き合わせません** (ブロック無しと同じ理由)
+      if code != METHOD_NEW && operand(argc_name) != argc
+        return vm_error(unknown_code)
+      end
 
       index = operand(name)
       return vm_error(type_code) unless receiver_type_ok?(code, read_reg_tag(index))
 
       # ブロックは引数の後ろ R[a + 引数の数 + 1] にある
-      block = index + argc + 1
+      #
+      # **渡された数で数えます。** 表の数ではありません — `new` だけは
+      # 表が 0 で実際は 1 なので、表の数だと大きさを載せた場所を見てしまう
+      block = index + operand(argc_name) + 1
       return vm_error(block_code) unless read_reg_tag(block) == TT_PROC
 
-      from, limit = iteration_range(code, index, argc)
+      from, limit = iteration_range(code, index, argc, heap_code)
       return vm_error(type_code) unless from
       # 1 回も回らないとき。each / times / upto はレシーバがそのまま値になる。
       # **述語だけは答えを書く** (空の any? は false、all? と none? は true)
@@ -1055,10 +1142,11 @@ module FaRuby
     end
 
     # 反復の範囲 [開始, 上限]。扱えない型なら nil
-    def iteration_range(code, index, _argc)
+    def iteration_range(code, index, _argc, heap_code = nil)
       # loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす
       return [0, 0] if code == METHOD_LOOP
       return [0, read_reg(index) - 1] if code == METHOD_TIMES
+      return array_fill_range(index, heap_code) if code == METHOD_NEW
       # **残りはコレクションの反復** (each / any? / all? / none?)
       unless code == METHOD_UPTO
         return [0, collection_length(index) - 1]
@@ -1068,6 +1156,41 @@ module FaRuby
       return nil unless read_reg_tag(limit) == TT_INTEGER
 
       [read_reg(index), read_reg(limit)]
+    end
+
+    # Array.new(n) { |i| } の準備。**先に配列を確保して R[a] に置く**
+    #
+    # R[0] (= 呼んだ側の R[a]) が反復の間ずっと配列を指すので、書き込む先を
+    # 毎回そこから引ける。尽きればそれがそのまま呼び出しの値になる。
+    #
+    # 受け手が Array でなければ nil を返す。呼ぶ側が型のエラーにする
+    # (`Counter.new { }` もここで落ちる)。
+    def array_fill_range(index, heap_code)
+      return nil unless read_reg_tag(index) == TT_BUILTIN_CLASS
+      return nil unless read_reg(index) == BUILTIN_CLASS_ARRAY
+      return nil unless read_reg_tag(index + 1) == TT_INTEGER
+
+      size = read_reg(index + 1)
+      return nil if size.negative?
+
+      # **容量と空きは heap_code で止める。** nil を返すと呼ぶ側が
+      # 型のエラー (4) にしてしまうので、ここで書いて 1 回も回らない範囲を返す
+      if size > layout.max_array_len
+        vm_error(heap_code)
+        return [1, 0]
+      end
+
+      slot = allocate_slot
+      unless slot
+        vm_error(heap_code)
+        return [1, 0]
+      end
+
+      set_array_length(slot, size)
+      size.times { |i| write_array_element(slot, i, TT_NIL, 0) }
+      write_slot(index, TT_ARRAY, slot)
+      commit_slot(slot)
+      [0, size - 1]
     end
 
     # 反復フレームを積み、ブロックの本体へ移る
@@ -1096,6 +1219,8 @@ module FaRuby
     # 種別が持つのは「ブロックの値をどう使うか」だけ。
     def iteration_frame_kind(code, tag)
       return MemoryLayout::FRAME_KIND_LOOP if code == METHOD_LOOP
+
+      return MemoryLayout::FRAME_KIND_ARRAY_FILL if code == METHOD_NEW
 
       predicate = MemoryLayout::PREDICATE_FRAME_KINDS[code]
       return predicate if predicate
@@ -1149,7 +1274,8 @@ module FaRuby
       return vm_error(unknown_code) if code != METHOD_NEW && given_argc != argc
       return vm_error(type_code) unless receiver_type_ok?(code, read_reg_tag(index))
 
-      apply_method(code, index, given_argc, type_code, zero_code, heap_code, depth_code)
+      apply_method(code, index, given_argc, unknown_code, type_code, zero_code,
+                   heap_code, depth_code)
     end
 
     # メソッド番号からレシーバに要求される型を検査する
@@ -1610,7 +1736,8 @@ module FaRuby
     # 組み込みメソッドの本体
     #
     # 生成コードは実数を単精度で扱うため、実数の結果は write_float で丸める。
-    def apply_method(code, index, argc, type_code, zero_code, heap_code, depth_code)
+    def apply_method(code, index, argc, unknown_code, type_code, zero_code,
+                     heap_code, depth_code)
       case code
       when METHOD_NE    then send_ne(index)
       when METHOD_NOT   then write_bool(index, read_reg_tag(index) <= TT_FALSY_MAX)
@@ -1635,7 +1762,8 @@ module FaRuby
       when METHOD_KEYS   then send_hash_column(index, 0, heap_code)
       when METHOD_VALUES then send_hash_column(index, 1, heap_code)
       when METHOD_SLICE  then send_slice(index, type_code, heap_code)
-      when METHOD_NEW    then new_object(index, argc, heap_code, depth_code)
+      when METHOD_NEW    then new_object(index, argc, unknown_code, type_code,
+                                         heap_code, depth_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
