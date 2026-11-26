@@ -1124,6 +1124,380 @@ class TestI8080Vm < Minitest::Test
     assert_equal 42, board[:board].reg_value(3)
   end
 
+  # --- ハッシュの each ---
+  #
+  # **ブロックには鍵と値の 2 つを渡します。** 配列の each と同じフレームの
+  # 数え方 (見出しの +1 が反復の回数) で、違うのは渡す値だけです。
+
+  def test_hash_each_keys_and_values
+    # 鍵と値をそれぞれ合計する
+    src = <<~RUBY
+      h = {1 => 10, 2 => 20}
+      ks = 0
+      vs = 0
+      h.each do |k, v|
+        ks = ks + k
+        vs = vs + v
+      end
+      a = ks
+      b = vs
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 3, board[:board].reg_value(4)
+    assert_equal 30, board[:board].reg_value(5)
+  end
+
+  def test_hash_each_empty
+    # 空ハッシュの each はブロックを実行しない
+    src = <<~RUBY
+      h = {}
+      n = 99
+      h.each do |k, v|
+        n = 0
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 99, board[:board].reg_value(2)
+  end
+
+  def test_hash_each_single
+    # ペア 1 つ。鍵と値が入れ違っていないこと
+    src = <<~RUBY
+      h = {7 => 42}
+      kk = 0
+      vv = 0
+      h.each do |k, v|
+        kk = k
+        vv = v
+      end
+      a = kk
+      b = vv
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 7, board[:board].reg_value(4)
+    assert_equal 42, board[:board].reg_value(5)
+  end
+
+  def test_hash_each_full
+    # 容量いっぱいの 4 ペア (COL_MAX_HASH_PAIRS)
+    src = <<~RUBY
+      h = {1 => 1, 2 => 2, 3 => 4, 4 => 8}
+      n = 0
+      h.each do |k, v|
+        n = n + v
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 15, board[:board].reg_value(2)
+  end
+
+  def test_hash_each_breaks
+    # break は反復を打ち切り、その値が呼び出しの値になる
+    src = <<~RUBY
+      h = {1 => 10, 2 => 20}
+      n = 0
+      h.each do |k, v|
+        n = v
+        break
+      end
+      a = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 10, board[:board].reg_value(2)
+  end
+
+  # **配列の each を壊していないこと。** 同じ枝を通るようにしたので、
+  # ハッシュを足したときに配列側が静かに変わっていないかを見ます
+  def test_hash_each_does_not_disturb_array_each
+    src = <<~RUBY
+      a = [1, 2, 3]
+      h = {4 => 5}
+      n = 0
+      a.each do |x|
+        n = n + x
+      end
+      h.each do |k, v|
+        n = n + k + v
+      end
+      b = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 15, board[:board].reg_value(3)
+  end
+
+  # --- any? / all? / none? ---
+  #
+  # **新しいのはブロックの戻り値を見ることだけです。** 渡す値は each と
+  # 同じで、配列かハッシュかはスロットの見出し (COL_TYPE_*) で決まります。
+  # 答えは R[0] (レシーバの位置) に書きます — 打ち切る瞬間はもう要素を
+  # 取り出さないので、レシーバを潰してよいためです。
+
+  def test_any_true
+    board = run_ruby("a = [1, 2, 3]\nb = a.any? { |x| x == 2 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_any_false
+    board = run_ruby("a = [1, 2, 3]\nb = a.any? { |x| x == 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_any_empty_is_false
+    board = run_ruby("a = []\nb = a.any? { |x| true }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  # 打ち切っていること。全部回ると 6 になる
+  def test_any_stops_at_the_first_hit
+    src = <<~RUBY
+      n = 0
+      a = [1, 2, 3]
+      a.any? do |x|
+        n = n + x
+        x == 2
+      end
+      b = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  def test_all_true
+    board = run_ruby("a = [2, 4]\nb = a.all? { |x| x > 1 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_all_false
+    board = run_ruby("a = [2, 0]\nb = a.all? { |x| x > 1 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_all_empty_is_true
+    board = run_ruby("a = []\nb = a.all? { |x| false }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_none_true
+    board = run_ruby("a = [1, 2]\nb = a.none? { |x| x == 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_none_false
+    board = run_ruby("a = [1, 2]\nb = a.none? { |x| x == 2 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  # **0 も真です。** nil と false だけが偽
+  def test_predicate_treats_zero_as_true
+    board = run_ruby("a = [1]\nb = a.any? { |x| 0 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_predicate_treats_nil_as_false
+    board = run_ruby("a = [1]\nb = a.any? { |x| nil }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_hash_any_sees_key_and_value
+    board = run_ruby("h = {1 => 10, 2 => 20}\nb = h.any? { |k, v| v == 20 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_hash_all_
+    board = run_ruby("h = {1 => 10, 2 => 0}\nb = h.all? { |k, v| v > 5 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_hash_none_
+    board = run_ruby("h = {1 => 10}\nb = h.none? { |k, v| k > 9 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  # 入れ子。内側の判定が外側に漏れないこと
+  def test_nested_any
+    src = <<~RUBY
+      a = [1, 2]
+      c = [8, 9]
+      b = a.any? do |x|
+        c.any? { |y| x + y == 11 }
+      end
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(3)
+  end
+
+  # --- Array.new / Hash.new ---
+  #
+  # **`Array` は組み込みクラスとして登録します。** 利用者の定数にすると
+  # 未代入のスロットになり、`.new` が型違いで止まります。型タグは
+  # `TT_BUILTIN_CLASS` で、`new` の中で作るものが違います。
+  #
+  # 容量は 1 スロット **8 要素**です (PLC は 12)。
+
+  # **`.nil?` は値として書けません。** 条件式の中なら mruby が畳みますが、
+  # 値にすると `OP_SEND :nil?` になり、組み込みに無いので止まります
+  def test_array_new_size_only
+    board = run_ruby("a = Array.new(3)\nb = a.length\nc = a[0] ? 1 : 2\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 3, board[:board].reg_value(2)
+    assert_equal 2, board[:board].reg_value(3)
+  end
+
+  def test_array_new_no_args
+    board = run_ruby("a = Array.new\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
+  def test_array_new_with_value
+    board = run_ruby("a = Array.new(3, 7)\nb = a[0]\nc = a[2]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 7, board[:board].reg_value(2)
+    assert_equal 7, board[:board].reg_value(3)
+  end
+
+  def test_array_new_with_true
+    board = run_ruby("a = Array.new(2, true)\nb = a[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_array_new_with_block
+    src = <<~RUBY
+      a = Array.new(3) { |i| i * 10 }
+      b = a[0]
+      c = a[1]
+      d = a[2]
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 0, board[:board].reg_value(2)
+    assert_equal 10, board[:board].reg_value(3)
+    assert_equal 20, board[:board].reg_value(4)
+  end
+
+  def test_array_new_block_zero_rounds
+    src = <<~RUBY
+      n = 99
+      a = Array.new(0) { n = 0 }
+      b = a.length
+      c = n
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].reg_value(3)
+    assert_equal 99, board[:board].reg_value(4)
+  end
+
+  # **break は打ち切って値をそのまま返す** (Ruby と同じ)
+  def test_array_new_block_break
+    board = run_ruby("r = Array.new(3) { break 5 }\n")
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(1)
+  end
+
+  def test_array_new_block_reads_outer
+    src = <<~RUBY
+      n = 0
+      a = Array.new(3) { |i| n = n + 1 }
+      b = a[2]
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 3, board[:board].reg_value(3)
+  end
+
+  # **8 要素が上限** (COL_MAX_ARRAY_ELEMS)
+  def test_array_new_at_capacity
+    board = run_ruby("a = Array.new(8, 1)\nb = a.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 8, board[:board].reg_value(2)
+  end
+
+  # **大きさは変数で渡します。** 定数で書くと書き込む前に止まり
+  # (`check_array_new_sizes`)、実行時の枝を通りません
+  def test_array_new_over_capacity_stops
+    board = run_ruby("n = 9\na = Array.new(n)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  def test_array_new_negative_stops
+    board = run_ruby("n = -1\na = Array.new(n)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  # 書き込む前に止まる側
+  def test_array_new_literal_over_capacity_is_refused
+    assert_raises(RuntimeError) { run_ruby("a = Array.new(9)\n") }
+  end
+
+  def test_hash_new_is_empty
+    board = run_ruby("h = Hash.new\nb = h.length\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal 0, board[:board].reg_value(2)
+  end
+
+  def test_hash_new_then_used
+    board = run_ruby("h = Hash.new\nh[1] = 5\nb = h[1]\n")
+    assert_equal :finished, board[:result]
+    assert_equal 5, board[:board].reg_value(2)
+  end
+
+  # **既定値は未対応** — 覚える場所が無い (見出しの空きが 2 バイト)
+  def test_hash_new_with_default_stops
+    board = run_ruby("h = Hash.new(0)\n")
+    refute_equal :finished, board[:result]
+  end
+
+  # 利用者のクラスの new を壊していないこと
+  def test_user_class_new_still_works
+    src = <<~RUBY
+      class Holder
+        def initialize(v)
+          @v = v
+        end
+
+        def v
+          @v
+        end
+      end
+      a = Holder.new(7).v
+    RUBY
+    board = run_ruby(src)
+    assert_equal :finished, board[:result]
+    assert_equal 7, board[:board].reg_value(1)
+  end
+
   # --- GC (コレクションプール回収) ---
 
   def test_gc_string_loop

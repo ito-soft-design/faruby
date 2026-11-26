@@ -41,6 +41,74 @@ class TestKvsGenerator < Minitest::Test
     text.lines.map(&:rstrip).reject { |l| l.strip.empty? || l.strip.start_with?("'") }
   end
 
+  # シンボル種別を読んでから比べるまでに Z1 を書き替えていないこと
+  #
+  # **実機で ERROR=3 になりました。** `OP_GETCONST` に定数の枝を足したとき、
+  # 種別を Z1 に読んだ直後に `reg_slot` がレジスタのアドレスを **同じ Z1**
+  # へ置き、比較が種別ではなくアドレスを見ていました。クラス参照
+  # (`Counter.new`) が全部落ちます。
+  #
+  # **シミュレータでは出ません。** Z を持たないので、どの Z に何が載って
+  # いるかという話が丸ごと存在しません。生成コードを読むまで分からない形
+  # なので、ここで読みます。アドレスが要るときは `global_reg_slot`
+  # (Z2 を使う) を呼びます。
+  # 隣り合う行で同じ Z を 2 回載せていないこと
+  #
+  # **実機が捕まえた不具合をここで捕まえます。** `slot_ref` の既定は
+  # `[:reg, :a]` 以外すべて Z2 なので、**鍵を分けても Z は分かれません。**
+  # `any?` でブロックの戻り値と答えの置き場を続けて載せたところ、後の方だけが
+  # 残り、レシーバの型タグを見ていました (配列はいつも真なので `any?` が常に
+  # 真)。シミュレータと三菱は添字で指すので出ません。
+  #
+  # **見るのは隣り合う 2 行だけです。** 枝をまたぐと「どちらか一方しか通らない」
+  # 形 (IF と ELSE で同じ Z に別の値を入れる) が大量に引っかかります。
+  # 自分を読んで書き直す形 (`Z7 = Z7 / 2`) も正しいので除きます。
+  def test_隣り合う行で同じ_z_を載せ直していない
+    lines = @source.lines.map(&:rstrip)
+    dead = []
+    lines.each_with_index do |line, i|
+      m = line.match(/\A\s*Z(\d) = (.*)\z/)
+      next unless m
+
+      z = m[1]
+      # 次の中身のある行 (コメントと空行は飛ばす)
+      j = ((i + 1)...lines.size).find { |k| !lines[k].strip.empty? && !lines[k].match?(/\A\s*'/) }
+      next unless j
+
+      nxt = lines[j].match(/\A\s*Z#{z} = (.*)\z/)
+      next unless nxt
+      # 自分を読んで書き直すのは正しい
+      next if nxt[1].match?(/\bZ#{z}\b/)
+
+      dead << "#{i + 1} 行目で載せた Z#{z} を #{j + 1} 行目が読まずに潰しています:\n" \
+              "  #{line.strip}\n  #{lines[j].strip}"
+    end
+
+    assert_empty dead, dead.join("\n")
+  end
+
+  def test_種別を読んでから比べるまでに_z1_を壊さない
+    lines = @source.lines.map(&:rstrip)
+    broken = []
+
+    lines.each_with_index do |line, i|
+      next unless line.match?(/Z1 = .*' シンボル種別/)
+
+      # 次に Z1 を見る比較が来るまでの間に Z1 への代入が無いこと
+      ((i + 1)...lines.size).each do |j|
+        break if lines[j].match?(/\bZ1\b/) && lines[j].match?(/IF|ELSE IF/)
+
+        if lines[j].match?(/^\s*Z1 = /)
+          broken << "#{i + 1} 行目で読んだ種別を #{j + 1} 行目が潰しています: " \
+                    "#{lines[j].strip}"
+          break
+        end
+      end
+    end
+
+    assert_empty broken
+  end
+
   # === コミット済みファイルとの一致 ===
 
   # 生成物は手で編集しない。編集された場合はここで検出する。

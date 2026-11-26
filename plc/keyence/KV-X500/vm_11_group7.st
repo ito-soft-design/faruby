@@ -1,5 +1,5 @@
 // =======================================
-// faRuby VM - オペコード 0x48 - 0x5F
+// faRuby VM - オペコード 0x46 - 0x5C
 // =======================================
 // 【自動生成】このファイルを直接編集しないでください。
 //   定義: tools/opcode_table.rb
@@ -10,9 +10,9 @@
 // 並び順と役割は vm_02_prologue.st の先頭にあります。
 
 // 担当外の番号はここで素通りする。**判定はループの外に置く。**
-// 見るのは上限だけ。72 未満は手前の群が実行して
+// 見るのは上限だけ。70 未満は手前の群が実行して
 // 65535 で潰しているので、ここには届かない
-IF EM54:Z9 <= 95 THEN
+IF EM54:Z9 <= 92 THEN
 
   // 後ろの群がもう一度実行しないように潰す。**本体より先に置く。**
   // 本体は途中で BREAK することがあり、後ろに置くと通らない
@@ -21,7 +21,255 @@ IF EM54:Z9 <= 95 THEN
   // BREAK の相手 (1 回だけ回る)。抜けるとこのスクリプトが終わる
   FOR EM20:Z9 := 1 TO 1 DO
 
-    IF EM6:Z9 = 72 THEN
+    IF EM6:Z9 = 70 THEN
+      // OP_GE (B): R[a] = (R[a] >= R[a+1]) ? true : false
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
+      IF EM0:Z1 = 5 THEN
+        IF EM0:Z2 = 5 THEN
+          IF EM1.F:Z1 >= EM1.F:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        ELSE
+          IF EM1.F:Z1 >= EM1.L:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        END_IF;
+      ELSE
+        IF EM0:Z2 = 5 THEN
+          IF EM1.L:Z1 >= EM1.F:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        ELSE
+          IF EM1.L:Z1 >= EM1.L:Z2 THEN
+            EM1.L:Z1 := 1;
+            EM0:Z1 := 3;
+          ELSE
+            EM1.L:Z1 := 0;
+            EM0:Z1 := 2;
+          END_IF;
+        END_IF;
+      END_IF;
+
+    ELSIF EM6:Z9 = 71 THEN
+      // OP_ARRAY (BB): R[a] = [R[a] .. R[a+b-1]]
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM7:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      Z1 := EM0:Z9 + EM33:Z9;
+      EM8:Z9 := ZF98304:Z1;
+      EM0:Z9 := EM0:Z9 + 1;
+      // プールの空きスロットを決める
+      IF EM39:Z9 >= 32 THEN
+        // 順に渡すぶんは尽きた。回収して空きを探す
+        // --- 回収 (使い切ったときだけ走る) ---
+        // アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う
+        EM3677:Z9 := Z6;
+        EM3678:Z9 := Z7;
+        // 印と走査済みを消す
+        FOR EM3672:Z9 := 0 TO 31 DO
+          Z6 := EM3672:Z9 * 52 + 2008 + Z9;
+          EM1:Z6 := 0;
+          EM2:Z6 := 0;
+        END_FOR;
+        // ルート。レジスタ全 80 個と汎用グローバル 300 個
+        // **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている
+        FOR EM3672:Z9 := 0 TO 379 DO
+          IF EM3672:Z9 < 80 THEN
+            Z7 := EM3672:Z9 * 4 + 72 + Z9;
+          ELSE
+            Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
+          END_IF;
+          EM3674:Z9 := EM0:Z7;
+          IF EM3674:Z9 >= 7 THEN
+            IF EM3674:Z9 <= 10 THEN
+              IF EM3674:Z9 = 9 THEN
+                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 := 8;
+                  EM3676:Z9 := 1;
+                END_IF;
+                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 := 8;
+                  EM3676:Z9 := 1;
+                END_IF;
+              ELSIF EM3674:Z9 = 10 THEN
+                // **値は スロット + 1。** 0 は main でスロットを持たない
+                IF EM1:Z7 > 0 THEN
+                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
+                  IF EM1:Z6 = 0 THEN
+                    EM1:Z6 := 10;
+                    EM3676:Z9 := 1;
+                  END_IF;
+                END_IF;
+              ELSE
+                // 文字列と配列。値がそのままスロット番号
+                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 := EM3674:Z9;
+                  EM3676:Z9 := 1;
+                END_IF;
+              END_IF;
+            END_IF;
+          END_IF;
+        END_FOR;
+        // 確保してレジスタへ書くまでのスロット。**まだどこからも届かない**
+        // 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し
+        IF EM3675:Z9 > 0 THEN
+          Z6 := (EM3675:Z9 - 1) * 52 + 2008 + Z9;
+          IF EM1:Z6 = 0 THEN
+            EM1:Z6 := 8;
+            EM3676:Z9 := 1;
+          END_IF;
+        END_IF;
+        // 到達性を伝播する。印の付いたスロットの中身も辿る
+        // **印が増えなくなったら空回りします。** 最悪 32 周
+        // **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を
+        // 抜けるだけですが、エラーの BREAK と見分けが付かなくなります
+        // ルート走査で印が付いているので 1 周は回す
+        EM3676:Z9 := 1;
+        FOR EM3679:Z9 := 0 TO 31 DO
+          IF EM3676:Z9 <> 0 THEN
+            EM3676:Z9 := 0;
+            FOR EM3672:Z9 := 0 TO 31 DO
+              Z6 := EM3672:Z9 * 52 + 2008 + Z9;
+              // 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる
+              EM3680:Z9 := Z6;
+              EM3674:Z9 := EM1:Z6;
+              IF EM3674:Z9 <> 0 THEN
+                IF EM2:Z6 = 0 THEN
+                  EM2:Z6 := 1;
+                  // 文字列の中身はバイト列。辿らない
+                  IF EM3674:Z9 <> 7 THEN
+                    IF EM3674:Z9 = 10 THEN
+                      // インスタンス変数は容量いっぱい使う
+                      EM3682:Z9 := 12;
+                    ELSE
+                      // 配列は要素数まで
+                      EM3682:Z9 := EM0:Z6;
+                    END_IF;
+                    // **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと
+                    // して読むと、前に入っていた文字列のバイト列が型タグに見え、
+                    // プールの外へ印を書きに行くことがある
+                    // 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける
+                    IF EM3682:Z9 > 0 THEN
+                      EM3682:Z9 := EM3682:Z9 - 1;
+                      // 要素は値スロットの並び。ルートと同じ手で印を付ける
+                      FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
+                        Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
+                        EM3674:Z9 := EM0:Z7;
+                        IF EM3674:Z9 >= 7 THEN
+                          IF EM3674:Z9 <= 10 THEN
+                            IF EM3674:Z9 = 9 THEN
+                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 := 8;
+                                EM3676:Z9 := 1;
+                              END_IF;
+                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 := 8;
+                                EM3676:Z9 := 1;
+                              END_IF;
+                            ELSIF EM3674:Z9 = 10 THEN
+                              // **値は スロット + 1。** 0 は main でスロットを持たない
+                              IF EM1:Z7 > 0 THEN
+                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
+                                IF EM1:Z6 = 0 THEN
+                                  EM1:Z6 := 10;
+                                  EM3676:Z9 := 1;
+                                END_IF;
+                              END_IF;
+                            ELSE
+                              // 文字列と配列。値がそのままスロット番号
+                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 := EM3674:Z9;
+                                EM3676:Z9 := 1;
+                              END_IF;
+                            END_IF;
+                          END_IF;
+                        END_IF;
+                      END_FOR;
+                    END_IF;
+                  END_IF;
+                END_IF;
+              END_IF;
+            END_FOR;
+          END_IF;
+        END_FOR;
+        // 印の付かなかったスロットを探す。32 なら見つからなかった印
+        EM3673:Z9 := 32;
+        FOR EM3672:Z9 := 0 TO 31 DO
+          IF EM3673:Z9 >= 32 THEN
+            Z6 := EM3672:Z9 * 52 + 2008 + Z9;
+            IF EM1:Z6 = 0 THEN
+              EM3673:Z9 := EM3672:Z9;
+            END_IF;
+          END_IF;
+        END_FOR;
+        // 借りた Z を返す
+        Z6 := EM3677:Z9;
+        Z7 := EM3678:Z9;
+        IF EM3673:Z9 >= 32 THEN
+          // 全スロットが生きている。回収しても足りない
+          EM1:Z9 := 3;
+          EM2:Z9 := 10;
+          EXIT;
+        END_IF;
+      ELSE
+        // まだ順に渡せる
+        EM3673:Z9 := EM39:Z9;
+      END_IF;
+      IF EM8:Z9 > 12 THEN
+        // 1 スロットの容量を超える要素数
+        EM1:Z9 := 3;
+        EM2:Z9 := 10;
+        EXIT;
+      END_IF;
+      // スロットの見出し
+      Z2 := EM3673:Z9 * 52 + 2008 + Z9;
+      EM0:Z2 := EM8:Z9;
+      // 要素を写す。要素数 0 (空配列) では引き算もしない
+      // EM は16ビット符号なしのため、0 - 1 は 65535 になり得る
+      IF EM8:Z9 > 0 THEN
+        Z3 := EM8:Z9 - 1;
+        FOR Z4 := 0 TO Z3 DO
+          Z5 := (EM7:Z9 + Z4) * 4 + EM32:Z9 + Z9;
+          Z6 := Z4 * 4 + Z2 + 4;
+          EM1.L:Z6 := EM1.L:Z5;
+          EM0:Z6 := EM0:Z5;
+        END_FOR;
+      END_IF;
+      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
+      EM1.L:Z1 := EM3673:Z9;   // スロット番号
+      EM0:Z1 := 8;
+      // 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない
+      IF EM3673:Z9 = EM39:Z9 THEN
+        EM39:Z9 := EM39:Z9 + 1;
+      END_IF;
+
+    ELSIF EM6:Z9 = 72 THEN
       // OP_ARRAY2 (BBB): R[a] = [R[b] .. R[b+c-1]]
       Z1 := EM0:Z9 + EM33:Z9;
       EM7:Z9 := ZF98304:Z1;
@@ -969,115 +1217,6 @@ IF EM54:Z9 <= 95 THEN
       Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
       EM1.L:Z1 := Z5;   // クラス番号
       EM0:Z1 := 13;
-
-    ELSIF EM6:Z9 = 94 THEN
-      // OP_EXEC (BB): クラス本体 (子 irep b) を R[a] を self として実行
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      // 実行中の irep の最初の子の番号に、親から見た子の番号を足す
-      Z3 := EM30:Z9 * 8 + EM38:Z9;
-      Z4 := Z3 + 5;
-      EM16:Z9 := ZF98304:Z4 + EM8:Z9;
-      IF EM16:Z9 >= EM36:Z9 THEN
-        // 指す先の irep が無い
-        EM1:Z9 := 3;
-        EM2:Z9 := 7;
-        EXIT;
-      END_IF;
-      Z5 := EM16:Z9;   // クラス本体の irep
-      IF EM31:Z9 >= 16 THEN
-        // 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
-        EM1:Z9 := 3;
-        EM2:Z9 := 5;
-        EXIT;
-      END_IF;
-      // 戻り先を積む
-      Z3 := EM31:Z9 * 10 + 392 + Z9;
-      EM0:Z3 := EM0:Z9;
-      EM1:Z3 := EM30:Z9;
-      EM2:Z3 := EM32:Z9;
-      EM4:Z3 := 65535;
-      EM5:Z3 := 0;
-      // レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
-      EM32:Z9 := EM32:Z9 + EM7:Z9 * 4;
-      EM3:Z3 := EM32:Z9;   // このフレームの窓 (OP_GETUPVAR が見る)
-      EM31:Z9 := EM31:Z9 + 1;
-      EM37:Z9 := 0;
-      EM30:Z9 := Z5;
-      // IREP テーブルから実行中の irep の情報を写す
-      Z1 := Z5 * 8 + EM38:Z9;
-      EM33:Z9 := ZF98304:Z1;
-      EM10:Z9 := ZF98305:Z1;
-      EM34:Z9 := ZF98306:Z1;
-      EM35:Z9 := ZF98307:Z1;
-      EM11:Z9 := ZF98308:Z1;
-      // レジスタ窓が領域からはみ出さないこと
-      EM16:Z9 := EM32:Z9 + EM11:Z9 * 4;
-      IF EM16:Z9 > 392 THEN
-        EM1:Z9 := 3;
-        EM2:Z9 := 5;
-        EXIT;
-      END_IF;
-      EM0:Z9 := 0;
-
-    ELSIF EM6:Z9 = 95 THEN
-      // OP_DEF (BB): メソッド表に symbols[b] = R[a+1] を登録
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM7:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      Z1 := EM0:Z9 + EM33:Z9;
-      EM8:Z9 := ZF98304:Z1;
-      EM0:Z9 := EM0:Z9 + 1;
-      // シンボル表参照 (4ワード/エントリ)
-      Z3 := EM8:Z9 * 4 + EM35:Z9;
-      Z5 := ZF98304:Z3;   // メソッド番号
-      Z7 := Z3 + 2;
-      Z8 := ZF98304:Z7;   // 引数の数
-      Z7 := Z3 + 3;
-      Z4 := ZF98304:Z7;   // シンボル種別
-      IF Z4 <> 2 THEN
-        EM1:Z9 := 3;
-        EM2:Z9 := 3;
-        EXIT;
-      END_IF;
-      Z3 := Z3 + 1;
-      Z5 := ZF98304:Z3;   // ユーザー定義メソッドID
-      IF Z5 = 0 THEN
-        // 組み込みと同じ名前は再定義できない
-        EM1:Z9 := 3;
-        EM2:Z9 := 3;
-        EXIT;
-      END_IF;
-      Z2 := (EM7:Z9 + 1) * 4 + EM32:Z9 + Z9;
-      IF EM0:Z2 <> 12 THEN
-        EM1:Z9 := 3;
-        EM2:Z9 := 3;
-        EXIT;
-      END_IF;
-      // メソッド表 (クラス × 名前 => 本体の irep 番号)
-      Z1 := EM7:Z9 * 4 + EM32:Z9 + Z9;
-      // 探索の行。レシーバのクラス (main は 0 行目)
-      Z6 := 0;
-      IF EM0:Z1 = 13 THEN
-        Z6 := EM1:Z1;
-      END_IF;
-      IF EM0:Z1 = 10 THEN
-        // オブジェクトは見出しのクラス番号。値は スロット + 1 (0 は main)
-        IF EM1:Z1 <> 0 THEN
-          Z6 := (EM1:Z1 - 1) * 52 + 2008 + Z9;
-          Z6 := EM0:Z6;
-        END_IF;
-      END_IF;
-      Z6 := Z6 * 32;
-      Z3 := Z6 + Z5 + 552 + Z9;
-      EM0:Z3 := EM1:Z2;
-      // OP_DEF の戻り値はメソッド名の Symbol。トップレベルでは捨てられる
-      EM1.L:Z1 := EM8:Z9;
-      EM0:Z1 := 6;
 
     ELSE
       // 未知のオペコード: エラー

@@ -180,6 +180,7 @@ module FaRuby
         "TT_OBJECT"  => TT_OBJECT,
         "TT_PROC"    => TT_PROC,
         "TT_CLASS"   => TT_CLASS,
+        "TT_BUILTIN_CLASS" => TT_BUILTIN_CLASS,
         "TT_FALSY_MAX" => TT_FALSY_MAX,
       }.each do |name, value|
         lines << equ(name, value)
@@ -219,6 +220,9 @@ module FaRuby
       lines << equ("SYM_KIND_USER_METHOD", layout::SYM_KIND_USER_METHOD, comment: "ユーザー定義メソッド")
       lines << equ("SYM_KIND_CLASS",       layout::SYM_KIND_CLASS,       comment: "クラス名")
       lines << equ("SYM_KIND_IVAR",        layout::SYM_KIND_IVAR,        comment: "インスタンス変数")
+      lines << equ("SYM_KIND_BUILTIN_CLASS", layout::SYM_KIND_BUILTIN_CLASS, comment: "Array / Hash")
+      lines << equ("BUILTIN_CLASS_ARRAY", layout::BUILTIN_CLASS_ARRAY, comment: "Array.new")
+      lines << equ("BUILTIN_CLASS_HASH",  layout::BUILTIN_CLASS_HASH,  comment: "Hash.new")
       lines << ""
       lines
     end
@@ -247,8 +251,13 @@ module FaRuby
       lines << equ("FRAME_KIND_CALL",    layout::FRAME_KIND_CALL)
       lines << equ("FRAME_KIND_ITERATE", layout::FRAME_KIND_ITERATE, comment: "times / upto")
       lines << equ("FRAME_KIND_EACH",    layout::FRAME_KIND_EACH,    comment: "each (配列要素反復)")
+      lines << equ("FRAME_KIND_HASH_EACH", layout::FRAME_KIND_HASH_EACH, comment: "each (ハッシュの鍵と値)")
       lines << equ("FRAME_KIND_LOOP",    layout::FRAME_KIND_LOOP,    comment: "loop (無限)")
       lines << equ("FRAME_KIND_NEW",     layout::FRAME_KIND_NEW,     comment: "Class#new → initialize")
+      lines << equ("FRAME_KIND_ANY",     layout::FRAME_KIND_ANY,     comment: "any?")
+      lines << equ("FRAME_KIND_ALL",     layout::FRAME_KIND_ALL,     comment: "all?")
+      lines << equ("FRAME_KIND_NONE",    layout::FRAME_KIND_NONE,    comment: "none?")
+      lines << equ("FRAME_KIND_ARRAY_FILL", layout::FRAME_KIND_ARRAY_FILL, comment: "Array.new(n) { }")
       lines << ""
       lines << "; 外側フレームなし (トップレベル)"
       lines << equ("FRAME_NONE", layout::FRAME_NONE)
@@ -279,6 +288,9 @@ module FaRuby
       lines << equ("METHOD_CONCAT",        layout::METHOD_CONCAT,         comment: "<< (文字列追記/配列追加)")
       lines << equ("METHOD_EACH",          layout::METHOD_EACH,           comment: "each (配列要素反復)")
       lines << equ("METHOD_PUSH",          layout::METHOD_PUSH,           comment: "push (配列追加)")
+      lines << equ("METHOD_ANY_P",         layout::METHOD_ANY_P,          comment: "any?")
+      lines << equ("METHOD_ALL_P",         layout::METHOD_ALL_P,          comment: "all?")
+      lines << equ("METHOD_NONE_P",        layout::METHOD_NONE_P,         comment: "none?")
       lines << equ("KEYIN1_ADDR",           layout::KEYIN1_ADDR,           width: 4, comment: "ND80Z モニタキー入力 (ブロッキング)")
       lines << equ("KEY_ADDR",              layout::KEY_ADDR,              width: 4, comment: "ND80Z キー 1 回スキャン (ノンブロッキング)")
       lines << ""

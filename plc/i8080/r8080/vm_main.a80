@@ -61,7 +61,7 @@ startup_stub:
 ; frame_sp == 0 → トップレベル: 表示して停止
 ; FRAME_KIND_CALL → メソッド復帰: R[a] を R[0] にコピー、pop_frame
 ; FRAME_KIND_NEW  → new 復帰: pop_frame のみ (R[a] をコピーしない)
-; FRAME_KIND_ITERATE/LOOP → ブロック内: advance_iteration
+; それ以外 (反復のフレーム) → ブロック内: advance_iteration
 ; ===============================================================
 do_op_return:
   call fetch_byte         ; A = a (戻り値のレジスタ)
@@ -81,7 +81,7 @@ do_op_return:
   jz return_call
   cpi FRAME_KIND_NEW
   jz return_new
-  ; ITERATE / LOOP → advance_iteration
+  ; 反復のフレーム (ITERATE / EACH / HASH_EACH / LOOP)
   jmp advance_iteration
 
 return_call:
@@ -116,7 +116,8 @@ return_reg_a: db 0
 ; ===============================================================
 ; advance_iteration — ブロックの 1 反復が終わった後の処理
 ;
-; ITERATE (times): index++ して limit と比較。超えたら pop_frame。
+; ITERATE (times / upto): index++ して limit と比較。超えたら pop_frame。
+; EACH / HASH_EACH: 同じ数え方で、ブロックに渡す値だけが違う。
 ; LOOP: 常に PC=0 で再実行 (無限ループ)。
 ; ===============================================================
 advance_iteration:
@@ -127,9 +128,17 @@ advance_iteration:
   mov a, m                ; A = kind
   cpi FRAME_KIND_LOOP
   jz adv_reenter          ; loop → 常に再実行
-  sta adv_kind            ; kind を退避 (ITERATE or EACH)
+  sta adv_kind            ; kind を退避
 
-  ; --- ITERATE / EACH 共通: index インクリメント + limit チェック ---
+  ; **Array.new はブロックの値をその回の要素へ書く**
+  call array_fill_element
+
+  ; **述語はここでブロックの値を見る。** 打ち切るなら R[0] に答えが入る
+  call predicate_decision
+  ora a
+  jnz adv_stopped
+
+  ; --- 反復に共通: index インクリメント + limit チェック ---
   call cur_frame_addr
   lxi d, FRAME_OFF_INDEX
   dad d
@@ -158,9 +167,15 @@ advance_iteration:
   jc adv_done             ; index > limit → 反復終了
 
   ; kind で R[1] の設定を分岐
+  ; 添字を渡すのは ITERATE (times / upto) と ARRAY_FILL。
+  ; **Array.new は R[0] が配列なので、種別で見分けないといけない** —
+  ; コレクションの枝に落ちると要素を渡してしまう
   lda adv_kind
-  cpi FRAME_KIND_EACH
-  jz adv_each_load
+  cpi FRAME_KIND_ITERATE
+  jz adv_index_load
+  cpi FRAME_KIND_ARRAY_FILL
+  jnz adv_each_load
+adv_index_load:
 
   ; --- ITERATE (times): R[1] = index ---
   mvi a, 1
@@ -168,32 +183,23 @@ advance_iteration:
   call set_slot_int16     ; R[1] = index (ブロック引数 |i|)
   jmp adv_reenter
 
-  ; --- EACH: R[1] = array[index] ---
+  ; --- EACH / HASH_EACH: ブロックの引数を入れ直す ---
+  ;
+  ; **値の出し方は sendb_each と同じものを呼びます。** 配列なら要素、
+  ; ハッシュなら鍵と値で、分けているのは each_block_args の中だけです。
 adv_each_load:
-  ; BC = index を退避 (cur_frame_addr が BC を破壊するため)
-  push b
+  ; BC = index のうち下位バイトだけ使う (配列 8 要素・ハッシュ 4 ペアまで)
+  mov a, c
+  sta each_index
+  lda adv_kind
+  sta each_arg_kind
   ; フレーム +11 からコレクションスロット番号を読む
-  call cur_frame_addr
+  call cur_frame_addr     ; BC を破壊するが、添字は退避済み
   lxi d, 11
   dad d
   mov a, m                ; A = col_slot
-  call col_slot_addr      ; HL = スロットアドレス
-  inx h                   ; skip type
-  inx h                   ; skip count → data
-  pop b                   ; BC = index (復帰)
-  ; data + index * 4 (C = index_lo, 配列は最大 8 要素)
-  mov a, c
-  add a                   ; ×2
-  add a                   ; ×4
-  mov e, a
-  mvi d, 0
-  dad d                   ; HL = &data[index*4] (source)
-  push h
-  mvi a, 1
-  call get_reg_addr       ; HL = R[1] (dest)
-  xchg                    ; DE = R[1]
-  pop h                   ; HL = source
-  call copy_slot          ; R[1] = array[index]
+  sta each_col_slot
+  call each_block_args
 
 adv_reenter:
   ; PC = 0 で再実行
@@ -203,10 +209,149 @@ adv_reenter:
 
 adv_done:
   ; 反復完了 → フレームを破棄して親に戻る
+  ; **述語だけは R[0] を答えに書き換える** (止まったときの逆)
+  call predicate_exhausted
+adv_stopped:
+  ; 打ち切り。R[0] には predicate_decision が答えを書いてある
   call pop_frame
   jmp vm_loop
 
 adv_kind: db 0
+
+; ===============================================================
+; array_fill_element — ブロックの値をその回の要素へ書く
+;
+;   入力: adv_kind / return_reg_a / フレーム (+11 = col_slot, INDEX = 添字)
+;
+; **添字は増やす前のもの。** いま終わった回の位置に書く。
+; Array.new 以外では何もしない。
+; ===============================================================
+array_fill_element:
+  lda adv_kind
+  cpi FRAME_KIND_ARRAY_FILL
+  rnz
+
+  ; 書き先 = スロットのデータ領域 + 添字 * 4
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  mov a, m              ; A = col_slot
+  call col_slot_addr
+  inx h                 ; skip type
+  inx h                 ; skip count → データ領域
+  shld afe_data
+  call cur_frame_addr
+  lxi d, FRAME_OFF_INDEX
+  dad d
+  mov a, m              ; A = 添字 (下位バイト。8 要素までなので足りる)
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  lhld afe_data
+  dad d                 ; HL = 書き先
+  xchg                  ; DE = 書き先
+
+  ; ブロックの戻り値を写す
+  lda return_reg_a
+  call get_reg_addr     ; HL = R[a]
+  call copy_slot
+  ret
+
+afe_data: dw 0
+
+; ===============================================================
+; predicate_decision — ブロックの値を見て打ち切るか決める
+;
+;   入力: adv_kind (フレーム種別) / return_reg_a (ブロックの戻り値)
+;   出力: A = 1 なら打ち切った (R[0] に答えを書いた)、0 なら続ける
+;
+; **R[0] を潰してよい。** もう要素を取り出さないので、レシーバの場所が
+; そのまま答えの置き場になる (呼んだ側の R[a] と同じ場所)。
+;
+;   any?  真で止まって true、尽きたら false
+;   all?  偽で止まって false、尽きたら true
+;   none? 真で止まって false、尽きたら true
+; ===============================================================
+predicate_decision:
+  lda adv_kind
+  cpi FRAME_KIND_ANY
+  jc pd_continue          ; ANY 未満 → 述語ではない
+  ; **上限も見る。** ARRAY_FILL は ANY より上だがブロックの値の使い方が
+  ; 違う。上限を見ないと none? として扱われ、1 回目で打ち切ってしまう
+  cpi FRAME_KIND_NONE + 1
+  jnc pd_continue
+
+  ; ブロックの戻り値の型タグ。TT_FALSE 以下が偽 (nil / false)
+  lda return_reg_a
+  call get_reg_addr       ; HL = R[a]
+  mov a, m                ; A = 型タグ
+  cpi TT_FALSE + 1
+  jc pd_falsy
+
+  ; --- 真だった ---
+  lda adv_kind
+  cpi FRAME_KIND_ALL
+  jz pd_continue          ; all? は真では止まらない
+  cpi FRAME_KIND_ANY
+  jz pd_stop_true         ; any? → true
+  jmp pd_stop_false       ; none? → false
+
+  ; --- 偽だった ---
+pd_falsy:
+  lda adv_kind
+  cpi FRAME_KIND_ALL
+  jnz pd_continue         ; any? / none? は偽では止まらない
+  jmp pd_stop_false       ; all? → false
+
+pd_stop_true:
+  mvi a, TT_TRUE
+  jmp pd_write
+pd_stop_false:
+  mvi a, TT_FALSE
+pd_write:
+  sta pd_tag
+  mvi a, 0
+  call get_reg_addr       ; HL = R[0]
+  lda pd_tag
+  call set_slot_special
+  mvi a, 1                ; 打ち切った
+  ret
+
+pd_continue:
+  xra a
+  ret
+
+pd_tag: db 0
+
+; ===============================================================
+; predicate_exhausted — 最後まで打ち切られなかったときの答え
+;
+; **止まったときの逆**です。any? は false、all? と none? は true。
+; 述語でなければ何もしません (R[0] のレシーバがそのまま値になる)。
+; ===============================================================
+predicate_exhausted:
+  lda adv_kind
+  cpi FRAME_KIND_ANY
+  jc pe_ret               ; 述語ではない
+  cpi FRAME_KIND_NONE + 1
+  jnc pe_ret              ; ARRAY_FILL は答えを書かない (R[0] は配列)
+  cpi FRAME_KIND_ANY
+  jz pe_false             ; any? → 尽きたら false
+  mvi a, TT_TRUE          ; all? / none? → 尽きたら true
+  jmp pe_write
+pe_false:
+  mvi a, TT_FALSE
+pe_write:
+  sta pe_tag
+  mvi a, 0
+  call get_reg_addr       ; HL = R[0]
+  lda pe_tag
+  call set_slot_special
+pe_ret:
+  ret
+
+pe_tag: db 0
 
 ; ===============================================================
 ; OP_STOP (Z): VM 停止
@@ -364,10 +509,10 @@ dispatch_table:
   dw 0000h            ; 18 OP_SETSV
   dw do_op_getgv      ; 19 OP_GETIV (= OP_GETGV)
   dw do_op_setgv      ; 1A OP_SETIV (= OP_SETGV)
-  dw 0000h            ; 1B OP_GETCV
-  dw 0000h            ; 1C OP_SETCV
+  dw do_op_getgv      ; 1B OP_GETCV (= OP_GETGV)
+  dw do_op_setgv      ; 1C OP_SETCV (= OP_SETGV)
   dw do_op_getconst   ; 1D OP_GETCONST
-  dw 0000h            ; 1E OP_SETCONST
+  dw do_op_setgv      ; 1E OP_SETCONST (= OP_SETGV)
   dw 0000h            ; 1F OP_GETMCNST
   dw 0000h            ; 20 OP_SETMCNST
   dw do_op_getupvar   ; 21 OP_GETUPVAR

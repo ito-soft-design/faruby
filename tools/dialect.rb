@@ -355,10 +355,14 @@ module FaRuby
     #
     # `OP_TCLASS` と `OP_LOADSYM` と `OP_DEF` は `def` の出力に混ざります。
     # `OP_GETUPVAR` / `OP_SETUPVAR` はブロックの外側の変数を触ります。
+    # `OP_GETCV` / `OP_SETCV` はクラス変数です。**クラスが無いと意味が
+    # 無い**のでここに置きます。中身は持たず `OP_GETGV` / `OP_SETGV` の
+    # 枝へ落ちるだけです (`OP_GETIV` と同じ形)。
     STAGE2 = %i[
       OP_SSEND OP_SSENDB OP_SEND OP_SENDB OP_ENTER OP_BREAK
       OP_BLOCK OP_METHOD OP_DEF OP_TCLASS OP_LOADSYM
       OP_CLASS OP_GETCONST OP_EXEC
+      OP_GETCV OP_SETCV
       OP_GETUPVAR OP_SETUPVAR
     ].freeze
 

@@ -8,6 +8,7 @@ require_relative "vm_constants"
 require_relative "memory_layout"
 require_relative "device_syntax"
 require_relative "disasm"
+require_relative "array_new_check"
 require_relative "features"
 require "set"
 require "plc_access"
@@ -75,6 +76,8 @@ module FaRuby
       check_undefined_methods(list)
       check_read_only_variables(list)
       check_features(list)
+      check_scoped_constants
+      check_array_new_sizes
       # メソッド表は ID で引くため、名前の数だけ枠が要る。溢れると表の外を
       # 読み書きしてしまうので、転送する前にここで止める
       check_limit("名前の数", method_ids.size, layout.max_methods)
@@ -125,6 +128,37 @@ end
 # **実機で「未知のオペコード」にはしません。** 転送してから止まるのでは
 # 気づくのが遅すぎます。機能を外した機種 (MELSEC Q など) に、その機能を
 # 使ったプログラムを送ろうとしたら、ここで止めます。
+    # `C::LIMIT` の形は未対応
+    #
+    # **実行時の「未知のオペコード 31」で気づくのは遅すぎます。** 入れ子の
+    # 定数は `OP_GETMCNST` / `OP_SETMCNST` になり、どちらも実装していません。
+    # 名前を 1 つの空間で扱っているので、`C::LIMIT` と書かず `LIMIT` と
+    # 書けばそのまま通ります。
+    # `Array.new(20)` のように大きさが書いてあれば、転送する前に止める
+    #
+    # **実行時にも止まります** (`ERROR=10`)。ここで見るのは、定数なら
+    # PLC へ送る前に分かるからです。**変数の大きさは見えません。**
+    def check_array_new_sizes
+      ArrayNewSizes.scan(irep_entries.map { |entry| entry[:irep] }).each do |found|
+        next if found[:size] >= 0 && found[:size] <= layout.max_array_len
+
+        form = found[:block] ? "Array.new(#{found[:size]}) { }" : "Array.new(#{found[:size]})"
+        raise CodegenError,
+              "#{form} は 1 スロットに収まりません。" \
+              "この機種の上限は #{layout.max_array_len} 要素です"
+      end
+    end
+
+    def check_scoped_constants
+      names = symbol_operands_of(%i[OP_GETMCNST OP_SETMCNST]).uniq
+      return if names.empty?
+
+      raise CodegenError,
+            "#{names.join(' / ')} を `クラス::定数` の形では読めません。" \
+            "faRuby の定数は名前を 1 つの空間で分け合うので、" \
+            "`#{names.first}` と書いてください (doc/roadmap.md)"
+    end
+
 def check_features(ireps)
   parts = unsupported_features(ireps)
   return if parts.empty?
@@ -164,29 +198,57 @@ end
     CALL_OPCODES = %i[OP_SEND OP_SSEND OP_SENDB OP_SSENDB].freeze
 
     # 定数 (クラス) を指す命令。どれもオペランド b がクラス名
-    CLASS_OPCODES = %i[OP_CLASS OP_GETCONST].freeze
+    # **クラス名は `OP_CLASS` だけから集めます。**
+    #
+    # 以前は `OP_GETCONST` も見ていました。定数の読みも `OP_GETCONST` なので、
+    # **`FOO = 7` の `FOO` がクラスとして登録され、`$DM0 = FOO` が 7 ではなく
+    # クラス番号の 1 を書いていました** (エラーも出ません)。
+    #
+    # faRuby にクラスを外から持ち込む経路はなく、クラスは必ず同じプログラムの
+    # `class X` で定義されるので、定義の命令だけ見れば足ります。
+    CLASS_OPCODES = %i[OP_CLASS].freeze
+
+    # 定数が出てくる命令
+    CONST_OPCODES = %i[OP_GETCONST OP_SETCONST].freeze
 
     # プログラムに出てくるクラス名 => クラス番号
     #
-    # **クラスはコンパイル時に分かります。** `OP_CLASS` / `OP_GETCONST` の
-    # オペランドから名前を集め、出てきた順に 1 から番号を振ります。
+    # **クラスはコンパイル時に分かります。** `OP_CLASS` のオペランドから名前を
+    # 集め、出てきた順に 1 から番号を振ります。
     # **0 番はトップレベル (`main`)** で、上位の `def` もそこに入ります。
-    #
-    # 名前だけでは定数と区別が付きません (`Counter` はメソッド名にも
-    # なり得る) ので、バイトコードを見て決めます。
     def class_numbers
-      @class_numbers ||= begin
-        numbers = {}
-        irep_entries.each do |entry|
-          Disassembler.new(entry[:irep]).disassemble.each do |inst|
-            next unless CLASS_OPCODES.include?(inst[:name])
-
-            name = entry[:irep].symbols[inst[:operands][1].to_i]
-            numbers[name] ||= numbers.size + 1 if name
-          end
-        end
-        numbers
+      @class_numbers ||= symbol_operands_of(CLASS_OPCODES).each_with_object({}) do |name, acc|
+        acc[name] ||= acc.size + 1
       end
+    end
+
+    # 利用者の定数の名前
+    #
+    # **クラス名を引いた残りです。** `OP_GETCONST` はクラスの参照にも定数の
+    # 読みにも出るので、`class X` で定義された名前を除いて分けます。
+    # `FARUBY_` で始まるものは設定なので別扱いです。
+    #
+    # **入れ子は見ません。** `C::LIMIT` (`OP_GETMCNST`) は未対応で、
+    # 名前は 1 つの空間を分け合います。2 つのクラスが同じ名前の定数を
+    # 持つと同じ枠になります (doc/roadmap.md)。
+    # **組み込みクラスの名前は外します** (`Array` / `Hash`)。外さないと
+    # 未代入の値スロットになり、`Array.new` が型違いで止まります
+    def constant_names
+      @constant_names ||=
+        (symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys -
+         BUILTIN_CLASSES.keys)
+        .reject { |name| name.start_with?(SETTING_PREFIX) }
+    end
+
+    # その命令のシンボルオペランドを全 irep から集める
+    def symbol_operands_of(opcodes)
+      irep_entries.flat_map { |entry|
+        Disassembler.new(entry[:irep]).disassemble.filter_map do |inst|
+          next unless opcodes.include?(inst[:name])
+
+          entry[:irep].symbols[inst[:operands][1].to_i]
+        end
+      }.compact
     end
 
     # 呼んでいるのに `def` がどこにも無いメソッド
@@ -493,6 +555,13 @@ end
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_BUILTIN_CLASS
+          image[m[:table_addr]]     = m[:builtin_class]
+          image[m[:table_addr] + 1] = 0
+          image[m[:table_addr] + 2] = 0
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_SETTING
           image[m[:table_addr]]     = m[:setting]
           image[m[:table_addr] + 1] = 0
@@ -685,15 +754,23 @@ end
           access_type: parsed[:access_type], bit: parsed[:bit],
           family: parsed[:family] || false }
       elsif sym.start_with?("@@")
-        # **クラス変数は未対応です。** `@` の枠に入れると `@c` と区別が付かず、
-        # 命令 (`OP_SETCV`) が無いままシンボルだけが枠を取ります。
+        # **クラス変数はクラスごとに 1 枠です。** `@@n` の場所は名前ではなく
+        # 「どのクラスの `@@n` か」で決まるので、クラス番号を付けた名前で枠を
+        # 取ります。`C` の `@@n` と `D` の `@@n` は別の変数です。
         #
-        # Ruby もトップレベルの `@@` を許していません (3.0 以降 RuntimeError)。
-        # 通すと faRuby でしか動かないプログラムが書けてしまいます。
-        # クラスを入れるときに、クラスの表と一緒に考えます (doc/instance_vars.md)
-        raise CodegenError,
-              "#{sym} はクラス変数です。faRuby には未対応です " \
-              "(#{sym.sub('@@', '@')} のように 1 つにしてください)"
+        # **継承が無いので遡る探索は要りません。** 命令も `OP_GETGV` /
+        # `OP_SETGV` の枝に落ちるだけで、VM に足すものはありません。
+        #
+        # **トップレベルの `@@n` は止めます。** Ruby は 3.0 以降エラーに
+        # しますが mruby は通すので、ここで弾かないと **faRuby でだけ動く
+        # プログラム**が書けてしまいます。
+        if owner == CLASS_MAIN
+          raise CodegenError,
+                "#{sym} をトップレベルでは使えません " \
+                "(Ruby もエラーにします)。クラスの中でなら使えます"
+        end
+
+        general_global_entry(sym, "#{owner}:#{sym}", table_addr, idx, slots)
       elsif sym.start_with?("@") || sym.start_with?("$")
         # **`$FARUBY_` で始まる名前は faRuby の予約です。** 表に無いものは
         # 書き間違いなので、ここで止めます。通してしまうと普通のグローバル
@@ -720,12 +797,7 @@ end
           return next_entry
         end
 
-        slot_addr = (slots[sym] ||= layout.general_global_slot_addr(slots.size))
-        { symbol: sym, index: idx, table_addr: table_addr, general: true,
-          kind: SYMBOL_KIND_GLOBAL,
-          device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
-          address: slot_addr.to_s, z_offset: slot_addr,
-          access_type: ACCESS_L, bit: false }
+        general_global_entry(sym, sym, table_addr, idx, slots)
       elsif sym.start_with?(SETTING_PREFIX)
         # faRuby の設定定数。OP_SETCONST が VM 状態へ書く
         #
@@ -737,13 +809,28 @@ end
                 "(#{SETTING_NAMES.keys.join(', ')})"
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: SYMBOL_KIND_SETTING, setting: setting }
+      elsif BUILTIN_CLASSES.key?(sym)
+        # 組み込みクラス (`Array` / `Hash`)。**番号を置くだけです**
+        #
+        # 利用者のクラスと別のタグにするので、メソッド表の行も持ちません。
+        # `new` の中で作るものが違うだけです
+        { symbol: sym, index: idx, table_addr: table_addr, general: false,
+          kind: SYMBOL_KIND_BUILTIN_CLASS,
+          builtin_class: BUILTIN_CLASSES[sym] }
       elsif class_numbers.key?(sym)
         # クラス名。**実行時に作らないので番号を置くだけです**
         #
-        # 名前だけではメソッド名と区別が付かないため、`OP_CLASS` /
-        # `OP_GETCONST` のオペランドに出てきたかどうかで決めています。
+        # 名前だけではメソッド名とも定数とも区別が付かないため、
+        # **`OP_CLASS` のオペランドに出てきたか**で決めています。
         { symbol: sym, index: idx, table_addr: table_addr, general: false,
           kind: SYMBOL_KIND_CLASS, class_number: class_numbers[sym] }
+      elsif constant_names.include?(sym)
+        # 利用者の定数。**汎用グローバルと同じ値スロットです**
+        #
+        # `OP_GETCONST` / `OP_SETCONST` が種別で振り分けるので、置き場は
+        # `$foo` と同じで足ります。**枠も `$foo` や `@foo` と同じ 300 個**を
+        # 分け合います (`memory.max_globals`)。
+        general_global_entry(sym, sym, table_addr, idx, slots)
       else
         code, argc = BUILTIN_METHODS.fetch(sym, [METHOD_NONE, 0])
         # **すべての名前**に 1 から通し番号を振る。シンボル表は irep ごとに
@@ -760,6 +847,20 @@ end
     end
 
     private
+
+    # 汎用グローバルの枠を 1 つ取る
+    #
+    # **名前と枠の鍵を分けています。** `$foo` と定数は名前そのままですが、
+    # クラス変数は `0:@@n` のようにクラス番号を付けた鍵で取ります。
+    # シンボル表に載るのは `symbol` の方 (表示と突き合わせのため) です。
+    def general_global_entry(sym, key, table_addr, idx, slots)
+      slot_addr = (slots[key] ||= layout.general_global_slot_addr(slots.size))
+      { symbol: sym, index: idx, table_addr: table_addr, general: true,
+        kind: SYMBOL_KIND_GLOBAL,
+        device_type: DEVICE_TYPE_EM, device_name: layout.device_name,
+        address: slot_addr.to_s, z_offset: slot_addr,
+        access_type: ACCESS_L, bit: false }
+    end
 
     def check_limit(label, actual, limit)
       return if actual <= limit
@@ -951,6 +1052,11 @@ end
           next
         end
 
+        if m[:kind] == SYMBOL_KIND_BUILTIN_CLASS
+          lines.concat(builtin_class_table_lines(m))
+          next
+        end
+
         if m[:kind] == SYMBOL_KIND_IVAR
           lines.concat(ivar_table_lines(m))
           next
@@ -995,6 +1101,19 @@ end
         "#{layout.fixed_device(addr + 2)} = 0",
         "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = #{SYMBOL_KIND_CLASS}    " \
         "' #{mapping[:symbol]} クラス名",
+      ]
+    end
+
+    # 組み込みクラスのエントリ。1 ワード目が BUILTIN_CLASS_*
+    def builtin_class_table_lines(mapping)
+      addr = mapping[:table_addr]
+      [
+        "#{layout.fixed_device(addr)} = #{mapping[:builtin_class]}    " \
+        "' #{mapping[:symbol]} 組み込みクラス番号",
+        "#{layout.fixed_device(addr + 1)} = 0",
+        "#{layout.fixed_device(addr + 2)} = 0",
+        "#{layout.fixed_device(addr + DEVICE_TABLE_KIND_OFFSET)} = " \
+        "#{SYMBOL_KIND_BUILTIN_CLASS}    ' #{mapping[:symbol]} 組み込みクラス",
       ]
     end
 

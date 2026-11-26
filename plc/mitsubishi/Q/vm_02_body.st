@@ -147,6 +147,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
     VMCURRENTOPCODE := 22;
   END_IF;
 
+  (* OP_GETCV: R[a] = @@名前 (OP_GETGV の枝へ) *)
+  IF VMCURRENTOPCODE = 27 THEN
+    VMCURRENTOPCODE := 21;
+  END_IF;
+
+  (* OP_SETCV: @@名前 = R[a] (OP_SETGV の枝へ) *)
+  IF VMCURRENTOPCODE = 28 THEN
+    VMCURRENTOPCODE := 22;
+  END_IF;
+
   (* OP_SSEND: self をレシーバ位置に置いて OP_SEND へ *)
   IF VMCURRENTOPCODE = 45 THEN
     (* オペランド a を覗く。枝の中で読み直すので PC は進めない *)
@@ -1177,44 +1187,73 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       EXIT;
 
     END_IF;
-  ELSIF VMCURRENTOPCODE <= 37 THEN
-    (* オペコード 0x1A - 0x25 *)
+  ELSIF VMCURRENTOPCODE <= 35 THEN
+    (* オペコード 0x1A - 0x23 *)
     IF VMCURRENTOPCODE = 29 THEN
-      (* OP_GETCONST (BB): R[a] = 定数 symbols[b] (クラス) *)
+      (* OP_GETCONST (BB): R[a] = 定数 symbols[b] (クラス名か利用者の定数) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       VMOPERANDB := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       (* シンボル表参照 (4ワード/エントリ) *)
       Z3 := VMOPERANDB * 4 + VMCURSYMBOLS;
-      Z5 := ZR0Z3;   (* メソッド番号 *)
+      Z4 := Z3 + 1;
+      Z5 := ZR0Z3;
+      Z6 := ZR0Z4;
       Z7 := Z3 + 2;
-      Z8 := ZR0Z7;   (* 引数の数 *)
+      Z8 := ZR0Z7;
       Z7 := Z3 + 3;
-      Z4 := ZR0Z7;   (* シンボル種別 *)
-      IF Z4 <> 6 THEN
-        (* クラス名でないシンボルを定数として読もうとした *)
-        VMSTATUS := 3;
-        VMERROR := 3;
-        EXIT;
+      Z1 := ZR0Z7;   (* シンボル種別 *)
+      IF Z1 = 6 THEN
+        (* クラス名。実行時に作らないので番号を置くだけ *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* クラス番号 *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 13;
+      ELSE
+        IF Z1 = 8 THEN
+          (* 組み込みクラス (Array / Hash)。番号を置くだけ *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* 組み込みクラス番号 *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 14;
+        ELSE
+          IF Z1 = 5 THEN
+            (* 定数は値スロット。型タグごと写す *)
+            Z3 := Z6;
+            VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := VMSLOT[(Z3 - 4000) / 4].SLNUM;
+            VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := VMSLOT[(Z3 - 4000) / 4].SLTAG;
+          ELSE
+            (* クラスでも定数でもないシンボルを定数として読もうとした *)
+            VMSTATUS := 3;
+            VMERROR := 3;
+            EXIT;
+          END_IF;
+        END_IF;
       END_IF;
-      VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* クラス番号 *)
-      VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 13;
 
     ELSIF VMCURRENTOPCODE = 30 THEN
-      (* OP_SETCONST (BB): FARUBY_ の設定なら VM 状態へ書く *)
+      (* OP_SETCONST (BB): 定数 symbols[b] = R[a] (設定なら VM 状態へ) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
       VMOPERANDB := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
+      (* シンボル表参照 (4ワード/エントリ) *)
       Z3 := VMOPERANDB * 4 + VMCURSYMBOLS;
-      Z4 := Z3 + 3;
-      Z5 := ZR0Z4;   (* シンボル種別 *)
-      IF Z5 = 3 THEN
-        Z6 := ZR0Z3;   (* 設定番号 *)
-        IF Z6 = 1 THEN
+      Z4 := Z3 + 1;
+      Z5 := ZR0Z3;
+      Z6 := ZR0Z4;
+      Z7 := Z3 + 2;
+      Z8 := ZR0Z7;
+      Z7 := Z3 + 3;
+      Z1 := ZR0Z7;   (* シンボル種別 *)
+      IF Z1 = 3 THEN
+        IF Z5 = 1 THEN
           (* 固定長でデバイスへ書いたときの余りを埋めるバイト *)
           VMSTRFILL := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM));
+        END_IF;
+      ELSE
+        IF Z1 = 5 THEN
+          (* 利用者の定数は値スロット。型タグごと写す *)
+          Z3 := Z6;
+          VMSLOT[(Z3 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+          VMSLOT[(Z3 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG;
         END_IF;
       END_IF;
 
@@ -1686,7 +1725,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         EXIT;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 36 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 47 THEN
+    (* オペコード 0x24 - 0x2F *)
+    IF VMCURRENTOPCODE = 36 THEN
       (* OP_SETIDX (B): R[a][R[a+1]] = R[a+2] (デバイス・配列) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -1926,16 +1974,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMOPERANDA := Z3 * 256 + Z4;
       VMPC := VMPC + VMOPERANDA;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 52 THEN
-    (* オペコード 0x26 - 0x34 *)
-    IF VMCURRENTOPCODE = 38 THEN
+    ELSIF VMCURRENTOPCODE = 38 THEN
       (* OP_JMPIF (BS): if R[a] が真 then PC += signed16(b) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -2093,9 +2132,26 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMERROR := 4;
               EXIT;
             END_IF;
+          ELSIF Z5 <= 28 THEN
+            (* クラス (タグ 13-14) *)
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
           ELSE
-            (* クラス (タグ 13) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 13 THEN
+            (* 配列・ハッシュ (タグ 8-9) *)
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
+              VMSTATUS := 3;
+              VMERROR := 4;
+              EXIT;
+            END_IF;
+            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
@@ -3042,229 +3098,817 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
         ELSIF Z5 = 28 THEN
           (* new *)
-          (* クラス番号を控える。R[a] はオブジェクトで上書きする *)
-          Z8 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
-          (* プールの空きスロットを決める *)
-          IF VMARRAYSP >= 32 THEN
-            (* 順に渡すぶんは尽きた。回収して空きを探す *)
-            (* --- 回収 (使い切ったときだけ走る) --- *)
-            (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
-            VMW3677 := Z6;
-            VMW3678 := Z7;
-            (* 印と走査済みを消す *)
-            FOR VMW3672 := 0 TO 31 DO
-              Z6 := VMW3672 * 52 + 6008;
-              D1Z6 := 0;
-              D2Z6 := 0;
-            END_FOR;
-            (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
-            (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
-            FOR VMW3672 := 0 TO 379 DO
-              IF VMW3672 < 80 THEN
-                Z7 := VMW3672 * 4 + 4072;
-              ELSE
-                Z7 := (VMW3672 - 80) * 4 + 4808;
+          (* **組み込みクラスは作るものが違う。** メソッド表の行も持たない *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 14 THEN
+            IF VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 = 2 THEN
+              (* **Hash.new は引数を取れません。** 既定値 (Hash.new(0)) を *)
+              (* 覚える場所が無いためです (見出しの空きが 1 ワードしかない) *)
+              IF VMOPERANDC <> 0 THEN
+                VMSTATUS := 3;
+                VMERROR := 3;
+                EXIT;
               END_IF;
-              VMW3674 := D0Z7;
-              IF VMW3674 >= 7 THEN
-                IF VMW3674 <= 10 THEN
-                  IF VMW3674 = 9 THEN
-                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                    Z6 := (D1Z7) * 52 + 6008;
-                    IF D1Z6 = 0 THEN
-                      D1Z6 := 8;
-                      VMW3676 := 1;
-                    END_IF;
-                    Z6 := (D2Z7) * 52 + 6008;
-                    IF D1Z6 = 0 THEN
-                      D1Z6 := 8;
-                      VMW3676 := 1;
-                    END_IF;
-                  ELSIF VMW3674 = 10 THEN
-                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                    IF D1Z7 > 0 THEN
-                      Z6 := (D1Z7 - 1) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := 10;
-                        VMW3676 := 1;
-                      END_IF;
-                    END_IF;
-                  ELSE
-                    (* 文字列と配列。値がそのままスロット番号 *)
-                    Z6 := (D1Z7) * 52 + 6008;
-                    IF D1Z6 = 0 THEN
-                      D1Z6 := VMW3674;
-                      VMW3676 := 1;
-                    END_IF;
-                  END_IF;
-                END_IF;
-              END_IF;
-            END_FOR;
-            (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
-            (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
-            IF VMW3675 > 0 THEN
-              Z6 := (VMW3675 - 1) * 52 + 6008;
-              IF D1Z6 = 0 THEN
-                D1Z6 := 8;
-                VMW3676 := 1;
-              END_IF;
-            END_IF;
-            (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
-            (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
-            (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
-            (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
-            (* ルート走査で印が付いているので 1 周は回す *)
-            VMW3676 := 1;
-            FOR VMW3679 := 0 TO 31 DO
-              IF VMW3676 <> 0 THEN
-                VMW3676 := 0;
+              (* ハッシュは配列 2 本。**別々に取る。** 回収が返すスロットは連続しない *)
+              (* プールの空きスロットを決める *)
+              IF VMARRAYSP >= 32 THEN
+                (* 順に渡すぶんは尽きた。回収して空きを探す *)
+                (* --- 回収 (使い切ったときだけ走る) --- *)
+                (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
+                VMW3677 := Z6;
+                VMW3678 := Z7;
+                (* 印と走査済みを消す *)
                 FOR VMW3672 := 0 TO 31 DO
                   Z6 := VMW3672 * 52 + 6008;
-                  (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
-                  VMW3680 := Z6;
-                  VMW3674 := D1Z6;
-                  IF VMW3674 <> 0 THEN
-                    IF D2Z6 = 0 THEN
-                      D2Z6 := 1;
-                      (* 文字列の中身はバイト列。辿らない *)
-                      IF VMW3674 <> 7 THEN
-                        IF VMW3674 = 10 THEN
-                          (* インスタンス変数は容量いっぱい使う *)
-                          VMW3682 := 12;
-                        ELSE
-                          (* 配列は要素数まで *)
-                          VMW3682 := D0Z6;
+                  D1Z6 := 0;
+                  D2Z6 := 0;
+                END_FOR;
+                (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
+                (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
+                FOR VMW3672 := 0 TO 379 DO
+                  IF VMW3672 < 80 THEN
+                    Z7 := VMW3672 * 4 + 4072;
+                  ELSE
+                    Z7 := (VMW3672 - 80) * 4 + 4808;
+                  END_IF;
+                  VMW3674 := D0Z7;
+                  IF VMW3674 >= 7 THEN
+                    IF VMW3674 <= 10 THEN
+                      IF VMW3674 = 9 THEN
+                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
                         END_IF;
-                        (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
-                        (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
-                        (* プールの外へ印を書きに行くことがある *)
-                        (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
-                        IF VMW3682 > 0 THEN
-                          VMW3682 := VMW3682 - 1;
-                          (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
-                          FOR VMW3681 := 0 TO VMW3682 DO
-                            Z7 := VMW3680 + 4 + VMW3681 * 4;
-                            VMW3674 := D0Z7;
-                            IF VMW3674 >= 7 THEN
-                              IF VMW3674 <= 10 THEN
-                                IF VMW3674 = 9 THEN
-                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                  Z6 := (D1Z7) * 52 + 6008;
-                                  IF D1Z6 = 0 THEN
-                                    D1Z6 := 8;
-                                    VMW3676 := 1;
-                                  END_IF;
-                                  Z6 := (D2Z7) * 52 + 6008;
-                                  IF D1Z6 = 0 THEN
-                                    D1Z6 := 8;
-                                    VMW3676 := 1;
-                                  END_IF;
-                                ELSIF VMW3674 = 10 THEN
-                                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                  IF D1Z7 > 0 THEN
-                                    Z6 := (D1Z7 - 1) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := 10;
-                                      VMW3676 := 1;
-                                    END_IF;
-                                  END_IF;
-                                ELSE
-                                  (* 文字列と配列。値がそのままスロット番号 *)
-                                  Z6 := (D1Z7) * 52 + 6008;
-                                  IF D1Z6 = 0 THEN
-                                    D1Z6 := VMW3674;
-                                    VMW3676 := 1;
-                                  END_IF;
-                                END_IF;
-                              END_IF;
-                            END_IF;
-                          END_FOR;
+                        Z6 := (D2Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
+                        END_IF;
+                      ELSIF VMW3674 = 10 THEN
+                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                        IF D1Z7 > 0 THEN
+                          Z6 := (D1Z7 - 1) * 52 + 6008;
+                          IF D1Z6 = 0 THEN
+                            D1Z6 := 10;
+                            VMW3676 := 1;
+                          END_IF;
+                        END_IF;
+                      ELSE
+                        (* 文字列と配列。値がそのままスロット番号 *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := VMW3674;
+                          VMW3676 := 1;
                         END_IF;
                       END_IF;
                     END_IF;
                   END_IF;
                 END_FOR;
-              END_IF;
-            END_FOR;
-            (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
-            VMW3673 := 32;
-            FOR VMW3672 := 0 TO 31 DO
-              IF VMW3673 >= 32 THEN
-                Z6 := VMW3672 * 52 + 6008;
-                IF D1Z6 = 0 THEN
-                  VMW3673 := VMW3672;
+                (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
+                (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
+                IF VMW3675 > 0 THEN
+                  Z6 := (VMW3675 - 1) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := 8;
+                    VMW3676 := 1;
+                  END_IF;
                 END_IF;
+                (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
+                (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
+                (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
+                (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
+                (* ルート走査で印が付いているので 1 周は回す *)
+                VMW3676 := 1;
+                FOR VMW3679 := 0 TO 31 DO
+                  IF VMW3676 <> 0 THEN
+                    VMW3676 := 0;
+                    FOR VMW3672 := 0 TO 31 DO
+                      Z6 := VMW3672 * 52 + 6008;
+                      (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
+                      VMW3680 := Z6;
+                      VMW3674 := D1Z6;
+                      IF VMW3674 <> 0 THEN
+                        IF D2Z6 = 0 THEN
+                          D2Z6 := 1;
+                          (* 文字列の中身はバイト列。辿らない *)
+                          IF VMW3674 <> 7 THEN
+                            IF VMW3674 = 10 THEN
+                              (* インスタンス変数は容量いっぱい使う *)
+                              VMW3682 := 12;
+                            ELSE
+                              (* 配列は要素数まで *)
+                              VMW3682 := D0Z6;
+                            END_IF;
+                            (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
+                            (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
+                            (* プールの外へ印を書きに行くことがある *)
+                            (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
+                            IF VMW3682 > 0 THEN
+                              VMW3682 := VMW3682 - 1;
+                              (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
+                              FOR VMW3681 := 0 TO VMW3682 DO
+                                Z7 := VMW3680 + 4 + VMW3681 * 4;
+                                VMW3674 := D0Z7;
+                                IF VMW3674 >= 7 THEN
+                                  IF VMW3674 <= 10 THEN
+                                    IF VMW3674 = 9 THEN
+                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                      Z6 := (D2Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    ELSIF VMW3674 = 10 THEN
+                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                      IF D1Z7 > 0 THEN
+                                        Z6 := (D1Z7 - 1) * 52 + 6008;
+                                        IF D1Z6 = 0 THEN
+                                          D1Z6 := 10;
+                                          VMW3676 := 1;
+                                        END_IF;
+                                      END_IF;
+                                    ELSE
+                                      (* 文字列と配列。値がそのままスロット番号 *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := VMW3674;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    END_IF;
+                                  END_IF;
+                                END_IF;
+                              END_FOR;
+                            END_IF;
+                          END_IF;
+                        END_IF;
+                      END_IF;
+                    END_FOR;
+                  END_IF;
+                END_FOR;
+                (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
+                VMW3673 := 32;
+                FOR VMW3672 := 0 TO 31 DO
+                  IF VMW3673 >= 32 THEN
+                    Z6 := VMW3672 * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      VMW3673 := VMW3672;
+                    END_IF;
+                  END_IF;
+                END_FOR;
+                (* 借りた Z を返す *)
+                Z6 := VMW3677;
+                Z7 := VMW3678;
+                IF VMW3673 >= 32 THEN
+                  (* 全スロットが生きている。回収しても足りない *)
+                  VMSTATUS := 3;
+                  VMERROR := 10;
+                  EXIT;
+                END_IF;
+              ELSE
+                (* まだ順に渡せる *)
+                VMW3673 := VMARRAYSP;
               END_IF;
-            END_FOR;
-            (* 借りた Z を返す *)
-            Z6 := VMW3677;
-            Z7 := VMW3678;
-            IF VMW3673 >= 32 THEN
-              (* 全スロットが生きている。回収しても足りない *)
-              VMSTATUS := 3;
-              VMERROR := 10;
-              EXIT;
+              Z2 := VMW3673 * 52 + 6008;
+              D0Z2 := 0;
+              (* **レジスタへ書くまで守る。** 2 本目の確保が回収を起こしたとき、 *)
+              (* 1 本目はまだどのレジスタからも届かない *)
+              VMW3675 := VMW3673 + 1;
+              (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
+              IF VMW3673 = VMARRAYSP THEN
+                VMARRAYSP := VMARRAYSP + 1;
+              END_IF;
+              (* プールの空きスロットを決める *)
+              IF VMARRAYSP >= 32 THEN
+                (* 順に渡すぶんは尽きた。回収して空きを探す *)
+                (* --- 回収 (使い切ったときだけ走る) --- *)
+                (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
+                VMW3677 := Z6;
+                VMW3678 := Z7;
+                (* 印と走査済みを消す *)
+                FOR VMW3672 := 0 TO 31 DO
+                  Z6 := VMW3672 * 52 + 6008;
+                  D1Z6 := 0;
+                  D2Z6 := 0;
+                END_FOR;
+                (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
+                (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
+                FOR VMW3672 := 0 TO 379 DO
+                  IF VMW3672 < 80 THEN
+                    Z7 := VMW3672 * 4 + 4072;
+                  ELSE
+                    Z7 := (VMW3672 - 80) * 4 + 4808;
+                  END_IF;
+                  VMW3674 := D0Z7;
+                  IF VMW3674 >= 7 THEN
+                    IF VMW3674 <= 10 THEN
+                      IF VMW3674 = 9 THEN
+                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
+                        END_IF;
+                        Z6 := (D2Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
+                        END_IF;
+                      ELSIF VMW3674 = 10 THEN
+                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                        IF D1Z7 > 0 THEN
+                          Z6 := (D1Z7 - 1) * 52 + 6008;
+                          IF D1Z6 = 0 THEN
+                            D1Z6 := 10;
+                            VMW3676 := 1;
+                          END_IF;
+                        END_IF;
+                      ELSE
+                        (* 文字列と配列。値がそのままスロット番号 *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := VMW3674;
+                          VMW3676 := 1;
+                        END_IF;
+                      END_IF;
+                    END_IF;
+                  END_IF;
+                END_FOR;
+                (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
+                (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
+                IF VMW3675 > 0 THEN
+                  Z6 := (VMW3675 - 1) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := 8;
+                    VMW3676 := 1;
+                  END_IF;
+                END_IF;
+                (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
+                (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
+                (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
+                (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
+                (* ルート走査で印が付いているので 1 周は回す *)
+                VMW3676 := 1;
+                FOR VMW3679 := 0 TO 31 DO
+                  IF VMW3676 <> 0 THEN
+                    VMW3676 := 0;
+                    FOR VMW3672 := 0 TO 31 DO
+                      Z6 := VMW3672 * 52 + 6008;
+                      (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
+                      VMW3680 := Z6;
+                      VMW3674 := D1Z6;
+                      IF VMW3674 <> 0 THEN
+                        IF D2Z6 = 0 THEN
+                          D2Z6 := 1;
+                          (* 文字列の中身はバイト列。辿らない *)
+                          IF VMW3674 <> 7 THEN
+                            IF VMW3674 = 10 THEN
+                              (* インスタンス変数は容量いっぱい使う *)
+                              VMW3682 := 12;
+                            ELSE
+                              (* 配列は要素数まで *)
+                              VMW3682 := D0Z6;
+                            END_IF;
+                            (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
+                            (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
+                            (* プールの外へ印を書きに行くことがある *)
+                            (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
+                            IF VMW3682 > 0 THEN
+                              VMW3682 := VMW3682 - 1;
+                              (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
+                              FOR VMW3681 := 0 TO VMW3682 DO
+                                Z7 := VMW3680 + 4 + VMW3681 * 4;
+                                VMW3674 := D0Z7;
+                                IF VMW3674 >= 7 THEN
+                                  IF VMW3674 <= 10 THEN
+                                    IF VMW3674 = 9 THEN
+                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                      Z6 := (D2Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    ELSIF VMW3674 = 10 THEN
+                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                      IF D1Z7 > 0 THEN
+                                        Z6 := (D1Z7 - 1) * 52 + 6008;
+                                        IF D1Z6 = 0 THEN
+                                          D1Z6 := 10;
+                                          VMW3676 := 1;
+                                        END_IF;
+                                      END_IF;
+                                    ELSE
+                                      (* 文字列と配列。値がそのままスロット番号 *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := VMW3674;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    END_IF;
+                                  END_IF;
+                                END_IF;
+                              END_FOR;
+                            END_IF;
+                          END_IF;
+                        END_IF;
+                      END_IF;
+                    END_FOR;
+                  END_IF;
+                END_FOR;
+                (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
+                VMW3673 := 32;
+                FOR VMW3672 := 0 TO 31 DO
+                  IF VMW3673 >= 32 THEN
+                    Z6 := VMW3672 * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      VMW3673 := VMW3672;
+                    END_IF;
+                  END_IF;
+                END_FOR;
+                (* 借りた Z を返す *)
+                Z6 := VMW3677;
+                Z7 := VMW3678;
+                IF VMW3673 >= 32 THEN
+                  (* 全スロットが生きている。回収しても足りない *)
+                  VMSTATUS := 3;
+                  VMERROR := 10;
+                  EXIT;
+                END_IF;
+              ELSE
+                (* まだ順に渡せる *)
+                VMW3673 := VMARRAYSP;
+              END_IF;
+              Z3 := VMW3673 * 52 + 6008;
+              D0Z3 := 0;
+              (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
+              IF VMW3673 = VMARRAYSP THEN
+                VMARRAYSP := VMARRAYSP + 1;
+              END_IF;
+              VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 := VMW3675 - 1;   (* 鍵の配列 *)
+              VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 := VMW3673;   (* 値の配列 *)
+              VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 9;
+              (* レジスタから届くようになったので守りを解く *)
+              VMW3675 := 0;
+            ELSE
+              IF VMOPERANDC > 2 THEN
+                (* Array.new が取るのは 0-2 個 *)
+                VMSTATUS := 3;
+                VMERROR := 3;
+                EXIT;
+              END_IF;
+              (* **大きさは R[a+1] (枝の外で載せてある rhs)。** ここで載せ直すと *)
+              (* 「別の枝でアドレスを載せた」で生成器が止まります *)
+              (* 埋める値は R[a+2]。`[]` が使う鍵とは別にします (同じ理由) *)
+              Z5 := 0;   (* 要素数。引数なしは空配列 *)
+              IF VMOPERANDC > 0 THEN
+                IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
+                  VMSTATUS := 3;
+                  VMERROR := 4;
+                  EXIT;
+                END_IF;
+                IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM < 0 THEN
+                  VMSTATUS := 3;
+                  VMERROR := 4;
+                  EXIT;
+                END_IF;
+                IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM > 12 THEN
+                  (* 1 スロットに収まらない大きさ *)
+                  VMSTATUS := 3;
+                  VMERROR := 10;
+                  EXIT;
+                END_IF;
+                Z5 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));
+              END_IF;
+              (* プールの空きスロットを決める *)
+              IF VMARRAYSP >= 32 THEN
+                (* 順に渡すぶんは尽きた。回収して空きを探す *)
+                (* --- 回収 (使い切ったときだけ走る) --- *)
+                (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
+                VMW3677 := Z6;
+                VMW3678 := Z7;
+                (* 印と走査済みを消す *)
+                FOR VMW3672 := 0 TO 31 DO
+                  Z6 := VMW3672 * 52 + 6008;
+                  D1Z6 := 0;
+                  D2Z6 := 0;
+                END_FOR;
+                (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
+                (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
+                FOR VMW3672 := 0 TO 379 DO
+                  IF VMW3672 < 80 THEN
+                    Z7 := VMW3672 * 4 + 4072;
+                  ELSE
+                    Z7 := (VMW3672 - 80) * 4 + 4808;
+                  END_IF;
+                  VMW3674 := D0Z7;
+                  IF VMW3674 >= 7 THEN
+                    IF VMW3674 <= 10 THEN
+                      IF VMW3674 = 9 THEN
+                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
+                        END_IF;
+                        Z6 := (D2Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 8;
+                          VMW3676 := 1;
+                        END_IF;
+                      ELSIF VMW3674 = 10 THEN
+                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                        IF D1Z7 > 0 THEN
+                          Z6 := (D1Z7 - 1) * 52 + 6008;
+                          IF D1Z6 = 0 THEN
+                            D1Z6 := 10;
+                            VMW3676 := 1;
+                          END_IF;
+                        END_IF;
+                      ELSE
+                        (* 文字列と配列。値がそのままスロット番号 *)
+                        Z6 := (D1Z7) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := VMW3674;
+                          VMW3676 := 1;
+                        END_IF;
+                      END_IF;
+                    END_IF;
+                  END_IF;
+                END_FOR;
+                (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
+                (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
+                IF VMW3675 > 0 THEN
+                  Z6 := (VMW3675 - 1) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := 8;
+                    VMW3676 := 1;
+                  END_IF;
+                END_IF;
+                (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
+                (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
+                (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
+                (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
+                (* ルート走査で印が付いているので 1 周は回す *)
+                VMW3676 := 1;
+                FOR VMW3679 := 0 TO 31 DO
+                  IF VMW3676 <> 0 THEN
+                    VMW3676 := 0;
+                    FOR VMW3672 := 0 TO 31 DO
+                      Z6 := VMW3672 * 52 + 6008;
+                      (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
+                      VMW3680 := Z6;
+                      VMW3674 := D1Z6;
+                      IF VMW3674 <> 0 THEN
+                        IF D2Z6 = 0 THEN
+                          D2Z6 := 1;
+                          (* 文字列の中身はバイト列。辿らない *)
+                          IF VMW3674 <> 7 THEN
+                            IF VMW3674 = 10 THEN
+                              (* インスタンス変数は容量いっぱい使う *)
+                              VMW3682 := 12;
+                            ELSE
+                              (* 配列は要素数まで *)
+                              VMW3682 := D0Z6;
+                            END_IF;
+                            (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
+                            (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
+                            (* プールの外へ印を書きに行くことがある *)
+                            (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
+                            IF VMW3682 > 0 THEN
+                              VMW3682 := VMW3682 - 1;
+                              (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
+                              FOR VMW3681 := 0 TO VMW3682 DO
+                                Z7 := VMW3680 + 4 + VMW3681 * 4;
+                                VMW3674 := D0Z7;
+                                IF VMW3674 >= 7 THEN
+                                  IF VMW3674 <= 10 THEN
+                                    IF VMW3674 = 9 THEN
+                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                      Z6 := (D2Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 8;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    ELSIF VMW3674 = 10 THEN
+                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                      IF D1Z7 > 0 THEN
+                                        Z6 := (D1Z7 - 1) * 52 + 6008;
+                                        IF D1Z6 = 0 THEN
+                                          D1Z6 := 10;
+                                          VMW3676 := 1;
+                                        END_IF;
+                                      END_IF;
+                                    ELSE
+                                      (* 文字列と配列。値がそのままスロット番号 *)
+                                      Z6 := (D1Z7) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := VMW3674;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    END_IF;
+                                  END_IF;
+                                END_IF;
+                              END_FOR;
+                            END_IF;
+                          END_IF;
+                        END_IF;
+                      END_IF;
+                    END_FOR;
+                  END_IF;
+                END_FOR;
+                (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
+                VMW3673 := 32;
+                FOR VMW3672 := 0 TO 31 DO
+                  IF VMW3673 >= 32 THEN
+                    Z6 := VMW3672 * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      VMW3673 := VMW3672;
+                    END_IF;
+                  END_IF;
+                END_FOR;
+                (* 借りた Z を返す *)
+                Z6 := VMW3677;
+                Z7 := VMW3678;
+                IF VMW3673 >= 32 THEN
+                  (* 全スロットが生きている。回収しても足りない *)
+                  VMSTATUS := 3;
+                  VMERROR := 10;
+                  EXIT;
+                END_IF;
+              ELSE
+                (* まだ順に渡せる *)
+                VMW3673 := VMARRAYSP;
+              END_IF;
+              Z4 := VMW3673 * 52 + 6008;
+              D0Z4 := Z5;
+              (* 要素を埋める。引数が 2 つなら R[a+2]、1 つなら nil *)
+              (* 要素数 0 では 1 つも見ない (0 - 1 が 65535 になるのも避ける) *)
+              IF Z5 > 0 THEN
+                Z6 := Z5 - 1;
+                FOR Z7 := 0 TO Z6 DO
+                  Z8 := Z7 * 4 + Z4 + 4;
+                  IF VMOPERANDC = 2 THEN
+                    VMSLOT[(Z8 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA + 2].SLNUM;
+                    VMSLOT[(Z8 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA + 2].SLTAG;
+                  ELSE
+                    VMSLOT[(Z8 - 4000) / 4].SLNUM := 0;
+                    VMSLOT[(Z8 - 4000) / 4].SLTAG := 1;
+                  END_IF;
+                END_FOR;
+              END_IF;
+              VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMW3673);   (* スロット番号 *)
+              VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 8;
+              (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
+              IF VMW3673 = VMARRAYSP THEN
+                VMARRAYSP := VMARRAYSP + 1;
+              END_IF;
             END_IF;
           ELSE
-            (* まだ順に渡せる *)
-            VMW3673 := VMARRAYSP;
-          END_IF;
-          Z3 := VMW3673 * 52 + 6008;
-          D0Z3 := Z8;   (* クラス番号 *)
-          (* インスタンス変数は未代入 (TT_EMPTY) から始める *)
-          Z4 := Z3 + 4;
-          Z5 := Z4 + 47;
-          FOR Z6 := Z4 TO Z5 DO
-            D0Z6 := 0;
-          END_FOR;
-          (* **値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない *)
-          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMW3673) + 1;   (* スロット番号 + 1 *)
-          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 10;
-          (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
-          IF VMW3673 = VMARRAYSP THEN
-            VMARRAYSP := VMARRAYSP + 1;
-          END_IF;
-          (* initialize があれば呼ぶ。名前の ID はホストが load で書いている *)
-          IF VMINITMETHODID <> 0 THEN
-            Z3 := Z8 * 32 + VMINITMETHODID + 552 + Z9;
-            Z5 := D0Z3;   (* initialize の irep *)
-            IF Z5 <> 0 THEN
-              IF VMFRAMESP >= 16 THEN
-                (* 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない *)
+            (* クラス番号を控える。R[a] はオブジェクトで上書きする *)
+            Z8 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0;
+            (* プールの空きスロットを決める *)
+            IF VMARRAYSP >= 32 THEN
+              (* 順に渡すぶんは尽きた。回収して空きを探す *)
+              (* --- 回収 (使い切ったときだけ走る) --- *)
+              (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
+              VMW3677 := Z6;
+              VMW3678 := Z7;
+              (* 印と走査済みを消す *)
+              FOR VMW3672 := 0 TO 31 DO
+                Z6 := VMW3672 * 52 + 6008;
+                D1Z6 := 0;
+                D2Z6 := 0;
+              END_FOR;
+              (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
+              (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
+              FOR VMW3672 := 0 TO 379 DO
+                IF VMW3672 < 80 THEN
+                  Z7 := VMW3672 * 4 + 4072;
+                ELSE
+                  Z7 := (VMW3672 - 80) * 4 + 4808;
+                END_IF;
+                VMW3674 := D0Z7;
+                IF VMW3674 >= 7 THEN
+                  IF VMW3674 <= 10 THEN
+                    IF VMW3674 = 9 THEN
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                      Z6 := (D2Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                    ELSIF VMW3674 = 10 THEN
+                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                      IF D1Z7 > 0 THEN
+                        Z6 := (D1Z7 - 1) * 52 + 6008;
+                        IF D1Z6 = 0 THEN
+                          D1Z6 := 10;
+                          VMW3676 := 1;
+                        END_IF;
+                      END_IF;
+                    ELSE
+                      (* 文字列と配列。値がそのままスロット番号 *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := VMW3674;
+                        VMW3676 := 1;
+                      END_IF;
+                    END_IF;
+                  END_IF;
+                END_IF;
+              END_FOR;
+              (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
+              (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
+              IF VMW3675 > 0 THEN
+                Z6 := (VMW3675 - 1) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := 8;
+                  VMW3676 := 1;
+                END_IF;
+              END_IF;
+              (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
+              (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
+              (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
+              (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
+              (* ルート走査で印が付いているので 1 周は回す *)
+              VMW3676 := 1;
+              FOR VMW3679 := 0 TO 31 DO
+                IF VMW3676 <> 0 THEN
+                  VMW3676 := 0;
+                  FOR VMW3672 := 0 TO 31 DO
+                    Z6 := VMW3672 * 52 + 6008;
+                    (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
+                    VMW3680 := Z6;
+                    VMW3674 := D1Z6;
+                    IF VMW3674 <> 0 THEN
+                      IF D2Z6 = 0 THEN
+                        D2Z6 := 1;
+                        (* 文字列の中身はバイト列。辿らない *)
+                        IF VMW3674 <> 7 THEN
+                          IF VMW3674 = 10 THEN
+                            (* インスタンス変数は容量いっぱい使う *)
+                            VMW3682 := 12;
+                          ELSE
+                            (* 配列は要素数まで *)
+                            VMW3682 := D0Z6;
+                          END_IF;
+                          (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
+                          (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
+                          (* プールの外へ印を書きに行くことがある *)
+                          (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
+                          IF VMW3682 > 0 THEN
+                            VMW3682 := VMW3682 - 1;
+                            (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
+                            FOR VMW3681 := 0 TO VMW3682 DO
+                              Z7 := VMW3680 + 4 + VMW3681 * 4;
+                              VMW3674 := D0Z7;
+                              IF VMW3674 >= 7 THEN
+                                IF VMW3674 <= 10 THEN
+                                  IF VMW3674 = 9 THEN
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                    Z6 := (D2Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                  ELSIF VMW3674 = 10 THEN
+                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                    IF D1Z7 > 0 THEN
+                                      Z6 := (D1Z7 - 1) * 52 + 6008;
+                                      IF D1Z6 = 0 THEN
+                                        D1Z6 := 10;
+                                        VMW3676 := 1;
+                                      END_IF;
+                                    END_IF;
+                                  ELSE
+                                    (* 文字列と配列。値がそのままスロット番号 *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := VMW3674;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                  END_IF;
+                                END_IF;
+                              END_IF;
+                            END_FOR;
+                          END_IF;
+                        END_IF;
+                      END_IF;
+                    END_IF;
+                  END_FOR;
+                END_IF;
+              END_FOR;
+              (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
+              VMW3673 := 32;
+              FOR VMW3672 := 0 TO 31 DO
+                IF VMW3673 >= 32 THEN
+                  Z6 := VMW3672 * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    VMW3673 := VMW3672;
+                  END_IF;
+                END_IF;
+              END_FOR;
+              (* 借りた Z を返す *)
+              Z6 := VMW3677;
+              Z7 := VMW3678;
+              IF VMW3673 >= 32 THEN
+                (* 全スロットが生きている。回収しても足りない *)
                 VMSTATUS := 3;
-                VMERROR := 5;
+                VMERROR := 10;
                 EXIT;
               END_IF;
-              (* 戻り先を積む *)
-              Z3 := VMFRAMESP * 10 + 392 + Z9;
-              D0Z3 := VMPC;
-              D1Z3 := VMCURIREP;
-              D2Z3 := VMREGBASE;
-              D4Z3 := -1;
-              D5Z3 := 5;
-              (* レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a] *)
-              VMREGBASE := VMREGBASE + VMOPERANDA * 4;
-              D3Z3 := VMREGBASE;   (* このフレームの窓 (OP_GETUPVAR が見る) *)
-              VMFRAMESP := VMFRAMESP + 1;
-              VMCALLARGC := VMOPERANDC;
-              VMCURIREP := Z5;
-              (* IREP テーブルから実行中の irep の情報を写す *)
-              Z1 := Z5 * 8 + VMIREPTABLE;
-              VMCURBYTECODE := ZR0Z1;
-              VMBYTECODELEN := ZR1Z1;
-              VMCURPOOL := ZR2Z1;
-              VMCURSYMBOLS := ZR3Z1;
-              VMNREGS := ZR4Z1;
-              (* レジスタ窓が領域からはみ出さないこと *)
-              VMTEMP32 := VMREGBASE + VMNREGS * 4;
-              IF VMTEMP32 > 392 THEN
-                VMSTATUS := 3;
-                VMERROR := 5;
-                EXIT;
+            ELSE
+              (* まだ順に渡せる *)
+              VMW3673 := VMARRAYSP;
+            END_IF;
+            Z3 := VMW3673 * 52 + 6008;
+            D0Z3 := Z8;   (* クラス番号 *)
+            (* インスタンス変数は未代入 (TT_EMPTY) から始める *)
+            Z4 := Z3 + 4;
+            Z5 := Z4 + 47;
+            FOR Z6 := Z4 TO Z5 DO
+              D0Z6 := 0;
+            END_FOR;
+            (* **値は スロット + 1。** 0 は main なのでスロット 0 と区別が付かない *)
+            VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMW3673) + 1;   (* スロット番号 + 1 *)
+            VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 10;
+            (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
+            IF VMW3673 = VMARRAYSP THEN
+              VMARRAYSP := VMARRAYSP + 1;
+            END_IF;
+            (* initialize があれば呼ぶ。名前の ID はホストが load で書いている *)
+            IF VMINITMETHODID <> 0 THEN
+              Z3 := Z8 * 32 + VMINITMETHODID + 552 + Z9;
+              Z5 := D0Z3;   (* initialize の irep *)
+              IF Z5 <> 0 THEN
+                IF VMFRAMESP >= 16 THEN
+                  (* 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない *)
+                  VMSTATUS := 3;
+                  VMERROR := 5;
+                  EXIT;
+                END_IF;
+                (* 戻り先を積む *)
+                Z3 := VMFRAMESP * 10 + 392 + Z9;
+                D0Z3 := VMPC;
+                D1Z3 := VMCURIREP;
+                D2Z3 := VMREGBASE;
+                D4Z3 := -1;
+                D5Z3 := 5;
+                (* レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a] *)
+                VMREGBASE := VMREGBASE + VMOPERANDA * 4;
+                D3Z3 := VMREGBASE;   (* このフレームの窓 (OP_GETUPVAR が見る) *)
+                VMFRAMESP := VMFRAMESP + 1;
+                VMCALLARGC := VMOPERANDC;
+                VMCURIREP := Z5;
+                (* IREP テーブルから実行中の irep の情報を写す *)
+                Z1 := Z5 * 8 + VMIREPTABLE;
+                VMCURBYTECODE := ZR0Z1;
+                VMBYTECODELEN := ZR1Z1;
+                VMCURPOOL := ZR2Z1;
+                VMCURSYMBOLS := ZR3Z1;
+                VMNREGS := ZR4Z1;
+                (* レジスタ窓が領域からはみ出さないこと *)
+                VMTEMP32 := VMREGBASE + VMNREGS * 4;
+                IF VMTEMP32 > 392 THEN
+                  VMSTATUS := 3;
+                  VMERROR := 5;
+                  EXIT;
+                END_IF;
+                VMPC := 0;
               END_IF;
-              VMPC := 0;
             END_IF;
           END_IF;
         ELSE
@@ -3337,7 +3981,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMPC := 0;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 48 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 63 THEN
+    (* オペコード 0x30 - 0x3F *)
+    IF VMCURRENTOPCODE = 48 THEN
       (* OP_SENDB (BBB): R[a].symbols[b](R[a+1]..) { ブロック } *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -3368,16 +4021,31 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z5 = 27 THEN
         Z6 := 1;
       END_IF;
+      IF Z5 = 29 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 30 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 31 THEN
+        Z6 := 1;
+      END_IF;
+      IF Z5 = 28 THEN
+        Z6 := 1;
+      END_IF;
       IF Z6 = 0 THEN
         (* ブロックを取らないメソッドにブロックを渡した *)
         VMSTATUS := 3;
         VMERROR := 3;
         EXIT;
       END_IF;
-      IF VMOPERANDC <> Z8 THEN
-        VMSTATUS := 3;
-        VMERROR := 3;
-        EXIT;
+      (* **new だけ引数の数を突き合わせません** (ブロック無しと同じ理由) *)
+      IF Z5 <> 28 THEN
+        IF VMOPERANDC <> Z8 THEN
+          VMSTATUS := 3;
+          VMERROR := 3;
+          EXIT;
+        END_IF;
       END_IF;
       (* メソッド番号の区分ごとにレシーバのタグの範囲を見る (METHOD_RECEIVER_GROUPS) *)
       (* 3 未満 (!= と !) はどの型でも呼べる *)
@@ -3458,9 +4126,26 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             VMERROR := 4;
             EXIT;
           END_IF;
+        ELSIF Z5 <= 28 THEN
+          (* クラス (タグ 13-14) *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
         ELSE
-          (* クラス (タグ 13) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 13 THEN
+          (* 配列・ハッシュ (タグ 8-9) *)
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
+            VMSTATUS := 3;
+            VMERROR := 4;
+            EXIT;
+          END_IF;
+          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
@@ -3481,8 +4166,240 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         (* n.times は 0 から n-1 まで *)
         VMTEMP32L := 0;
         VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM - 1;
-      ELSIF Z5 = 21 THEN
-        (* a.each / h.each は 0 から要素数-1 まで *)
+      ELSIF Z5 = 28 THEN
+        IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <> 14 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        IF VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0 <> 1 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        (* **鍵は upto と分けます。** 同じ鍵だと「別の枝でアドレスを載せた」 *)
+        (* で生成器が止まります (どちらも R[a+1] を見る別の枝) *)
+        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM < 0 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM > 12 THEN
+          (* 1 スロットに収まらない大きさ *)
+          VMSTATUS := 3;
+          VMERROR := 10;
+          EXIT;
+        END_IF;
+        (* **要素数は Z8 に置きます。** Z5 はメソッド番号で、 *)
+        (* この後の enter_iteration が種別を決めるのに読みます *)
+        Z8 := WORD_TO_INT(DINT_TO_WORD(VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM));   (* 要素数 *)
+        (* プールの空きスロットを決める *)
+        IF VMARRAYSP >= 32 THEN
+          (* 順に渡すぶんは尽きた。回収して空きを探す *)
+          (* --- 回収 (使い切ったときだけ走る) --- *)
+          (* アドレスを載せる Z を 2 本借りる。確保の場所ごとに空きが違う *)
+          VMW3677 := Z6;
+          VMW3678 := Z7;
+          (* 印と走査済みを消す *)
+          FOR VMW3672 := 0 TO 31 DO
+            Z6 := VMW3672 * 52 + 6008;
+            D1Z6 := 0;
+            D2Z6 := 0;
+          END_FOR;
+          (* ルート。レジスタ全 80 個と汎用グローバル 300 個 *)
+          (* **窓ではなく物理的な全レジスタ。** 外側のフレームの値も生きている *)
+          FOR VMW3672 := 0 TO 379 DO
+            IF VMW3672 < 80 THEN
+              Z7 := VMW3672 * 4 + 4072;
+            ELSE
+              Z7 := (VMW3672 - 80) * 4 + 4808;
+            END_IF;
+            VMW3674 := D0Z7;
+            IF VMW3674 >= 7 THEN
+              IF VMW3674 <= 10 THEN
+                IF VMW3674 = 9 THEN
+                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                  Z6 := (D1Z7) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := 8;
+                    VMW3676 := 1;
+                  END_IF;
+                  Z6 := (D2Z7) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := 8;
+                    VMW3676 := 1;
+                  END_IF;
+                ELSIF VMW3674 = 10 THEN
+                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                  IF D1Z7 > 0 THEN
+                    Z6 := (D1Z7 - 1) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 10;
+                      VMW3676 := 1;
+                    END_IF;
+                  END_IF;
+                ELSE
+                  (* 文字列と配列。値がそのままスロット番号 *)
+                  Z6 := (D1Z7) * 52 + 6008;
+                  IF D1Z6 = 0 THEN
+                    D1Z6 := VMW3674;
+                    VMW3676 := 1;
+                  END_IF;
+                END_IF;
+              END_IF;
+            END_IF;
+          END_FOR;
+          (* 確保してレジスタへ書くまでのスロット。**まだどこからも届かない** *)
+          (* 1 つの命令で 2 つ取るところ (ハッシュ) で要る。0 なら無し *)
+          IF VMW3675 > 0 THEN
+            Z6 := (VMW3675 - 1) * 52 + 6008;
+            IF D1Z6 = 0 THEN
+              D1Z6 := 8;
+              VMW3676 := 1;
+            END_IF;
+          END_IF;
+          (* 到達性を伝播する。印の付いたスロットの中身も辿る *)
+          (* **印が増えなくなったら空回りします。** 最悪 32 周 *)
+          (* **BREAK は使いません。** 命令ループの BREAK と違って内側の FOR を *)
+          (* 抜けるだけですが、エラーの BREAK と見分けが付かなくなります *)
+          (* ルート走査で印が付いているので 1 周は回す *)
+          VMW3676 := 1;
+          FOR VMW3679 := 0 TO 31 DO
+            IF VMW3676 <> 0 THEN
+              VMW3676 := 0;
+              FOR VMW3672 := 0 TO 31 DO
+                Z6 := VMW3672 * 52 + 6008;
+                (* 見出しのアドレスを覚える。印を付けるときに Z6 が壊れる *)
+                VMW3680 := Z6;
+                VMW3674 := D1Z6;
+                IF VMW3674 <> 0 THEN
+                  IF D2Z6 = 0 THEN
+                    D2Z6 := 1;
+                    (* 文字列の中身はバイト列。辿らない *)
+                    IF VMW3674 <> 7 THEN
+                      IF VMW3674 = 10 THEN
+                        (* インスタンス変数は容量いっぱい使う *)
+                        VMW3682 := 12;
+                      ELSE
+                        (* 配列は要素数まで *)
+                        VMW3682 := D0Z6;
+                      END_IF;
+                      (* **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットと *)
+                      (* して読むと、前に入っていた文字列のバイト列が型タグに見え、 *)
+                      (* プールの外へ印を書きに行くことがある *)
+                      (* 符号なしなので 0 - 1 が 65535 になるのも同じ理由で避ける *)
+                      IF VMW3682 > 0 THEN
+                        VMW3682 := VMW3682 - 1;
+                        (* 要素は値スロットの並び。ルートと同じ手で印を付ける *)
+                        FOR VMW3681 := 0 TO VMW3682 DO
+                          Z7 := VMW3680 + 4 + VMW3681 * 4;
+                          VMW3674 := D0Z7;
+                          IF VMW3674 >= 7 THEN
+                            IF VMW3674 <= 10 THEN
+                              IF VMW3674 = 9 THEN
+                                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                Z6 := (D1Z7) * 52 + 6008;
+                                IF D1Z6 = 0 THEN
+                                  D1Z6 := 8;
+                                  VMW3676 := 1;
+                                END_IF;
+                                Z6 := (D2Z7) * 52 + 6008;
+                                IF D1Z6 = 0 THEN
+                                  D1Z6 := 8;
+                                  VMW3676 := 1;
+                                END_IF;
+                              ELSIF VMW3674 = 10 THEN
+                                (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                IF D1Z7 > 0 THEN
+                                  Z6 := (D1Z7 - 1) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 10;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                END_IF;
+                              ELSE
+                                (* 文字列と配列。値がそのままスロット番号 *)
+                                Z6 := (D1Z7) * 52 + 6008;
+                                IF D1Z6 = 0 THEN
+                                  D1Z6 := VMW3674;
+                                  VMW3676 := 1;
+                                END_IF;
+                              END_IF;
+                            END_IF;
+                          END_IF;
+                        END_FOR;
+                      END_IF;
+                    END_IF;
+                  END_IF;
+                END_IF;
+              END_FOR;
+            END_IF;
+          END_FOR;
+          (* 印の付かなかったスロットを探す。32 なら見つからなかった印 *)
+          VMW3673 := 32;
+          FOR VMW3672 := 0 TO 31 DO
+            IF VMW3673 >= 32 THEN
+              Z6 := VMW3672 * 52 + 6008;
+              IF D1Z6 = 0 THEN
+                VMW3673 := VMW3672;
+              END_IF;
+            END_IF;
+          END_FOR;
+          (* 借りた Z を返す *)
+          Z6 := VMW3677;
+          Z7 := VMW3678;
+          IF VMW3673 >= 32 THEN
+            (* 全スロットが生きている。回収しても足りない *)
+            VMSTATUS := 3;
+            VMERROR := 10;
+            EXIT;
+          END_IF;
+        ELSE
+          (* まだ順に渡せる *)
+          VMW3673 := VMARRAYSP;
+        END_IF;
+        Z4 := VMW3673 * 52 + 6008;
+        D0Z4 := Z8;
+        (* **先に nil で埋めます。** ブロックが途中で break しても、 *)
+        (* 書いていない要素を値スロットとして読まれないようにするため *)
+        IF Z8 > 0 THEN
+          Z6 := Z8 - 1;
+          FOR Z7 := 0 TO Z6 DO
+            Z1 := Z7 * 4 + Z4 + 4;
+            VMSLOT[(Z1 - 4000) / 4].SLNUM := 0;
+            VMSLOT[(Z1 - 4000) / 4].SLTAG := 1;
+          END_FOR;
+        END_IF;
+        (* **R[a] を配列で潰します。** これが呼び出しの値になり、 *)
+        (* 反復の間は R[0] として書き込む先を引くのにも使います *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(VMW3673);   (* スロット番号 *)
+        VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 8;
+        (* 順に渡したぶんだけ進める。回収で返ってきたスロットでは進めない *)
+        IF VMW3673 = VMARRAYSP THEN
+          VMARRAYSP := VMARRAYSP + 1;
+        END_IF;
+        (* 0 から 要素数-1 まで。0 個なら 1 回も回らない *)
+        VMTEMP32L := 0;
+        VMTEMP32BL := INT_TO_DINT(Z8) - 1;
+      ELSIF Z5 = 12 THEN
+        (* a.upto(b) は a から b まで *)
+        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
+          VMSTATUS := 3;
+          VMERROR := 4;
+          EXIT;
+        END_IF;
+        VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+        VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
+      ELSE
+        (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+        (* 0 から要素数-1 まで回り、数え方はどれも同じ *)
         (* ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む *)
         IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG = 9 THEN
           (* 鍵の配列の見出し。R[a] を書き換える前に読む *)
@@ -3497,15 +4414,6 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
         VMTEMP32L := 0;
         VMTEMP32BL := VMTEMP32BL - 1;
-      ELSE
-        (* a.upto(b) は a から b まで *)
-        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <> 4 THEN
-          VMSTATUS := 3;
-          VMERROR := 4;
-          EXIT;
-        END_IF;
-        VMTEMP32L := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
-        VMTEMP32BL := VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
       END_IF;
       IF VMTEMP32L <= VMTEMP32BL THEN
         IF VMFRAMESP >= 16 THEN
@@ -3539,6 +4447,21 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* loop は上限が無く、ブロックに渡す値も無い *)
           D5Z3 := 4;
         END_IF;
+        (* **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、 *)
+        (* 種別が持つのは「ブロックの値をどう使うか」だけです *)
+        IF Z5 = 29 THEN
+          D5Z3 := 6;
+        END_IF;
+        IF Z5 = 30 THEN
+          D5Z3 := 7;
+        END_IF;
+        IF Z5 = 31 THEN
+          D5Z3 := 8;
+        END_IF;
+        IF Z5 = 28 THEN
+          (* Array.new はブロックの値を要素へ書く。渡すのは添字 *)
+          D5Z3 := 9;
+        END_IF;
         (* 窓をずらした後、ブロックは R[引数の数 + 1] にある *)
         Z2 := (VMOPERANDC + 1) * 4 + VMREGBASE + 4000;
         Z6 := D1Z2;   (* 本体の irep *)
@@ -3555,42 +4478,54 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
           (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
           VMCALLARGC := 0;
-        ELSIF D5Z3 = 3 THEN
-          (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
-          Z4 := 0 + VMREGBASE + 4000;
-          Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
-          Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          VMCALLARGC := 2;
-        ELSIF D5Z3 = 2 THEN
-          (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
-          Z4 := 0 + VMREGBASE + 4000;
-          (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
-          (* 載っていて、これから要素の位置を出すのに使う *)
-          VMTEMP32B := D1Z4;
-          VMTEMP32BHI := D2Z4;
-          Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-          Z7 := Z7 * 52 + 6008;
-          Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          Z5 := Z5 * 4 + Z7 + 4;
-          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-          VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-          VMCALLARGC := 1;
-        ELSE
+        ELSIF D5Z3 = 1 THEN
           (* times / upto は添字を渡す *)
           VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
           VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
           VMCALLARGC := 1;
+        ELSIF D5Z3 = 9 THEN
+          (* **Array.new も添字です。** R[0] が配列なので、下のコレクションの *)
+          (* 枝に落ちると要素を渡してしまいます。種別で見分けます *)
+          (* **旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が *)
+          (* 載っていて、空いている Z が無いためです (3 行なので分けた方が安い) *)
+          VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
+          VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
+          VMCALLARGC := 1;
+        ELSE
+          (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+          (* 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。 *)
+          (* 述語は配列とハッシュで種別を分けていないためです *)
+          Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] がレシーバ *)
+          IF VMSLOT[(Z4 - 4000) / 4].SLTAG = 9 THEN
+            (* ハッシュは鍵と値を渡す *)
+            Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
+            Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            VMCALLARGC := 2;
+          ELSE
+            (* 配列はその位置の要素を渡す *)
+            (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+            (* 載っていて、これから要素の位置を出すのに使う *)
+            VMTEMP32B := D1Z4;
+            VMTEMP32BHI := D2Z4;
+            Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
+            Z7 := Z7 * 52 + 6008;
+            Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+            Z5 := Z5 * 4 + Z7 + 4;
+            VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+            VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+            VMCALLARGC := 1;
+          END_IF;
         END_IF;
         VMCURIREP := Z6;
         (* IREP テーブルから実行中の irep の情報を写す *)
@@ -3608,8 +4543,26 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           EXIT;
         END_IF;
         VMPC := 0;
+      ELSE
+        (* 1 回も回らないとき。each / times / upto はレシーバがそのまま値になる *)
+        (* **述語だけは答えを書きます。** 空の any? は false、all? と none? は *)
+        (* true で、1 回も回らないのでフレームを積まずにここで決まります *)
+        IF Z5 = 29 THEN
+          (* any?: 空なら false *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 0;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 2;
+        END_IF;
+        IF Z5 = 30 THEN
+          (* all?: 空なら true *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 1;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 3;
+        END_IF;
+        IF Z5 = 31 THEN
+          (* none?: 空なら true *)
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := 1;
+          VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 3;
+        END_IF;
       END_IF;
-      (* 1 回も回らないときはレシーバがそのまま呼び出しの値になる *)
 
     ELSIF VMCURRENTOPCODE = 52 THEN
       (* OP_ENTER (W): 引数の数を検査し、残りのレジスタを空にする *)
@@ -3664,16 +4617,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_FOR;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 65 THEN
-    (* オペコード 0x35 - 0x41 *)
-    IF VMCURRENTOPCODE = 56 THEN
+    ELSIF VMCURRENTOPCODE = 56 THEN
       (* OP_RETURN (B): R[b] を返して呼び出し元へ (トップレベルでは VM 停止) *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -3702,6 +4646,49 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           VMNREGS := ZR4Z1;
         ELSE
           IF D5Z3 >= 1 THEN
+            IF D5Z3 = 9 THEN
+              Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] が配列 *)
+              VMTEMP32B := D1Z4;
+              VMTEMP32BHI := D2Z4;
+              Z2 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL)) * 52 + 6008;
+              VMTEMP32 := D6Z3;
+              VMTEMP32HI := D7Z3;
+              Z2 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L)) * 4 + Z2 + 4;
+              VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM;
+              VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG;
+            END_IF;
+            VMPREDSTOP := 0;
+            IF D5Z3 >= 6 THEN
+              (* **鍵と Z の両方を分けます。** 鍵が同じだと「別の枝でアドレスを *)
+              (* 載せた」で生成器が止まり (ふつうの return も同じ場所を使う)、 *)
+              (* **Z が同じだと黙って後の方だけが残ります。** 既定は [:reg, :a] *)
+              (* 以外すべて Z2 なので、ここは Z1 を名指しします。Z1 はこの時点で *)
+              (* 命令の取り出しを終えていて空いています (Z3 はフレーム) *)
+              IF D5Z3 = 6 THEN
+                (* any?: ブロックの値が真なら打ち切って true を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+              IF D5Z3 = 7 THEN
+                (* all?: ブロックの値が偽なら打ち切って false を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+              IF D5Z3 = 8 THEN
+                (* none?: ブロックの値が真なら打ち切って false を返す *)
+                IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 2 THEN
+                  VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                  VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  VMPREDSTOP := 1;
+                END_IF;
+              END_IF;
+            END_IF;
             VMTEMP32 := D6Z3;
             VMTEMP32HI := D7Z3;
             VMTEMP32L := VMTEMP32L + 1;
@@ -3711,6 +4698,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               VMTEMP32B := D8Z3;
               VMTEMP32BHI := D9Z3;
               VMTEMP32L := VMTEMP32BL;
+            END_IF;
+            IF VMPREDSTOP <> 0 THEN
+              (* 述語が答えを出した。残りは見ずに終わらせる *)
+              VMTEMP32B := D8Z3;
+              VMTEMP32BHI := D9Z3;
+              VMTEMP32L := VMTEMP32BL + 1;
             END_IF;
             VMTEMP32B := D8Z3;
             VMTEMP32BHI := D9Z3;
@@ -3724,46 +4717,79 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                 (* loop はブロックに何も渡さない。**引数の数だけ書く。** *)
                 (* Ruby の loop { |i| } も i は nil で、ここでは未代入のまま *)
                 VMCALLARGC := 0;
-              ELSIF D5Z3 = 3 THEN
-                (* h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている *)
-                Z4 := 0 + VMREGBASE + 4000;
-                Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
-                Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                VMCALLARGC := 2;
-              ELSIF D5Z3 = 2 THEN
-                (* a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている *)
-                Z4 := 0 + VMREGBASE + 4000;
-                (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
-                (* 載っていて、これから要素の位置を出すのに使う *)
-                VMTEMP32B := D1Z4;
-                VMTEMP32BHI := D2Z4;
-                Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
-                Z7 := Z7 * 52 + 6008;
-                Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-                Z5 := Z5 * 4 + Z7 + 4;
-                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
-                VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
-                VMCALLARGC := 1;
-              ELSE
+              ELSIF D5Z3 = 1 THEN
                 (* times / upto は添字を渡す *)
                 VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
                 VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
                 VMCALLARGC := 1;
+              ELSIF D5Z3 = 9 THEN
+                (* **Array.new も添字です。** R[0] が配列なので、下のコレクションの *)
+                (* 枝に落ちると要素を渡してしまいます。種別で見分けます *)
+                (* **旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が *)
+                (* 載っていて、空いている Z が無いためです (3 行なので分けた方が安い) *)
+                VMSLOT[(Z2 - 4000) / 4].SLNUM := VMTEMP32L;
+                VMSLOT[(Z2 - 4000) / 4].SLTAG := 4;
+                VMCALLARGC := 1;
+              ELSE
+                (* **残りはコレクションの反復です** (each / any? / all? / none?)。 *)
+                (* 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。 *)
+                (* 述語は配列とハッシュで種別を分けていないためです *)
+                Z4 := 0 + VMREGBASE + 4000;   (* 窓をずらした後の R[0] がレシーバ *)
+                IF VMSLOT[(Z4 - 4000) / 4].SLTAG = 9 THEN
+                  (* ハッシュは鍵と値を渡す *)
+                  Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW0;   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  Z2 := 2 * 4 + VMREGBASE + 4000;   (* R[2] に値 *)
+                  Z7 := VMSLOTW[(Z4 - 4000) / 4].SLW1;   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  VMCALLARGC := 2;
+                ELSE
+                  (* 配列はその位置の要素を渡す *)
+                  (* **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が *)
+                  (* 載っていて、これから要素の位置を出すのに使う *)
+                  VMTEMP32B := D1Z4;
+                  VMTEMP32BHI := D2Z4;
+                  Z7 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32BL));   (* スロット番号 *)
+                  Z7 := Z7 * 52 + 6008;
+                  Z5 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
+                  Z5 := Z5 * 4 + Z7 + 4;
+                  VMSLOT[(Z2 - 4000) / 4].SLNUM := VMSLOT[(Z5 - 4000) / 4].SLNUM;
+                  VMSLOT[(Z2 - 4000) / 4].SLTAG := VMSLOT[(Z5 - 4000) / 4].SLTAG;
+                  VMCALLARGC := 1;
+                END_IF;
               END_IF;
               VMPC := 0;
             ELSE
               (* 反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる *)
+              (* **述語だけは R[0] を答えに書き換えます。** 打ち切ったときは *)
+              (* predicate_decision が書いてあるので、尽きたときだけここで書く *)
+              IF VMPREDSTOP = 0 THEN
+                IF D5Z3 >= 6 THEN
+                  IF D5Z3 = 6 THEN
+                    (* any?: 尽きたら false *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 0;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 2;
+                  END_IF;
+                  IF D5Z3 = 7 THEN
+                    (* all?: 尽きたら true *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  END_IF;
+                  IF D5Z3 = 8 THEN
+                    (* none?: 尽きたら true *)
+                    VMSLOT[VMREGSLOT + 0].SLNUM := 1;
+                    VMSLOT[VMREGSLOT + 0].SLTAG := 3;
+                  END_IF;
+                END_IF;
+              END_IF;
               VMFRAMESP := VMFRAMESP - 1;
               (* 外した段がそのまま戻り先。減らした後なので top_frame_expr ではない *)
               Z3 := VMFRAMESP * 10 + 392 + Z9;
@@ -4169,7 +5195,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 4;
       END_IF;
 
-    ELSIF VMCURRENTOPCODE = 64 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 87 THEN
+    (* オペコード 0x40 - 0x57 *)
+    IF VMCURRENTOPCODE = 64 THEN
       (* OP_MUL (B): R[a] = R[a] * R[a+1] *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -4285,16 +5320,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         END_IF;
       END_IF;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 92 THEN
-    (* オペコード 0x42 - 0x5C *)
-    IF VMCURRENTOPCODE = 66 THEN
+    ELSIF VMCURRENTOPCODE = 66 THEN
       (* OP_EQ (B): R[a] = (R[a] == R[a+1]) ? true : false *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -4588,7 +5614,16 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 := Z4;   (* 定義元のフレーム *)
       VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 12;
 
-    ELSIF VMCURRENTOPCODE = 88 THEN
+    ELSE
+      (* 未知のオペコード: エラー *)
+      VMSTATUS := 3;
+      VMERROR := VMCURRENTOPCODE;
+      EXIT;
+
+    END_IF;
+  ELSIF VMCURRENTOPCODE <= 105 THEN
+    (* オペコード 0x58 - 0x69 *)
+    IF VMCURRENTOPCODE = 88 THEN
       (* OP_METHOD (BB): R[a] = 子 irep b への参照 *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;
@@ -4630,16 +5665,7 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       VMSLOT[VMREGSLOT + VMOPERANDA].SLNUM := INT_TO_DINT(Z5);   (* クラス番号 *)
       VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG := 13;
 
-    ELSE
-      (* 未知のオペコード: エラー *)
-      VMSTATUS := 3;
-      VMERROR := VMCURRENTOPCODE;
-      EXIT;
-
-    END_IF;
-  ELSIF VMCURRENTOPCODE <= 105 THEN
-    (* オペコード 0x5D - 0x69 *)
-    IF VMCURRENTOPCODE = 94 THEN
+    ELSIF VMCURRENTOPCODE = 94 THEN
       (* OP_EXEC (BB): クラス本体 (子 irep b) を R[a] を self として実行 *)
       VMOPERANDA := VMCODE[VMPC + VMCURBYTECODE];
       VMPC := VMPC + 1;

@@ -318,6 +318,17 @@ module FaRuby
       defs << OpcodeDef.new(0x19, "R[a] = @名前 (OP_GETGV の枝へ)", enters: 0x15)
       defs << OpcodeDef.new(0x1A, "@名前 = R[a] (OP_SETGV の枝へ)", enters: 0x16)
 
+      # クラス変数も同じ手です。
+      #
+      # **`@@n` はクラスごとに 1 枠。** 名前ではなく「どのクラスの `@@n` か」で
+      # 場所が決まるので、ホスト側がクラス番号を付けた名前で汎用グローバルの枠を
+      # 取ります (tools/plc_codegen.rb)。`C` の `@@n` と `D` の `@@n` は別です。
+      #
+      # **継承が無いので遡る必要がありません。** 親まで探すところが要らない
+      # ぶん、インスタンス変数より簡単で、VM には足すものがありません。
+      defs << OpcodeDef.new(0x1B, "R[a] = @@名前 (OP_GETGV の枝へ)", enters: 0x15)
+      defs << OpcodeDef.new(0x1C, "@@名前 = R[a] (OP_SETGV の枝へ)", enters: 0x16)
+
       # 添字アクセス。デバイス族 ($DM[100 + i])・配列 (a[0])・ハッシュ・
       # 文字列 (s[0]) が通る。OP_GETIDX / OP_SETIDX は専用命令なので
       # メソッド呼び出しは要らない。
@@ -359,7 +370,7 @@ module FaRuby
 
       # faRuby の設定 (FARUBY_ で始まる定数) だけを見る。
       # それ以外の定数は利用者のものなので何もしない。
-      defs << OpcodeDef.new(0x1E, "FARUBY_ の設定なら VM 状態へ書く") do |vm|
+      defs << OpcodeDef.new(0x1E, "定数 symbols[b] = R[a] (設定なら VM 状態へ)") do |vm|
         vm.set_constant(:a, :b)
       end
 
@@ -403,8 +414,8 @@ module FaRuby
         vm.load_class(:a, :b, UNKNOWN_METHOD_ERROR)
       end
 
-      defs << OpcodeDef.new(0x1D, "R[a] = 定数 symbols[b] (クラス)") do |vm|
-        vm.load_class(:a, :b, UNKNOWN_METHOD_ERROR)
+      defs << OpcodeDef.new(0x1D, "R[a] = 定数 symbols[b] (クラス名か利用者の定数)") do |vm|
+        vm.load_constant(:a, :b, UNKNOWN_METHOD_ERROR)
       end
 
       # クラス本体を R[a] を self として実行する
@@ -453,7 +464,7 @@ module FaRuby
       # VM は再帰できないため、反復はフレームの状態として持つ。
       defs << OpcodeDef.new(0x30, "R[a].symbols[b](R[a+1]..) { ブロック }") do |vm|
         vm.send_block_method(:a, :b, :c, UNKNOWN_METHOD_ERROR, METHOD_TYPE_ERROR,
-                             BLOCK_ERROR, CALL_DEPTH_ERROR)
+                             BLOCK_ERROR, CALL_DEPTH_ERROR, HEAP_ERROR)
       end
 
       # ブロックの中の break。反復を打ち切り、値を呼び出し全体の値にする

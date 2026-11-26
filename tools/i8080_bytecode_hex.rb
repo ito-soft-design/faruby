@@ -14,6 +14,7 @@ require_relative "mrb_parser"
 require_relative "vm_constants"
 require_relative "i8080_memory_layout"
 require_relative "disasm"
+require_relative "array_new_check"
 
 module FaRuby
   class I8080BytecodeHex
@@ -22,7 +23,14 @@ module FaRuby
     Layout = I8080MemoryLayout
 
     # クラス発見対象のオペコード
-    CLASS_OPCODES = %i[OP_CLASS OP_GETCONST].freeze
+    #
+    # **`OP_CLASS` だけです。** 定数の読みも `OP_GETCONST` なので、以前は
+    # `FOO = 7` の `FOO` がクラスとして登録され、読むとクラス番号が返って
+    # いました (PLC 側と同じ不具合。doc/opcodes.md)。
+    CLASS_OPCODES = %i[OP_CLASS].freeze
+
+    # 定数が出てくるオペコード
+    CONST_OPCODES = %i[OP_GETCONST OP_SETCONST].freeze
 
     # メソッド呼び出しオペコード (ユーザーメソッド発見用)
     CALL_OPCODES = %i[OP_SEND OP_SSEND].freeze
@@ -50,6 +58,9 @@ module FaRuby
       "<<"      => Layout::METHOD_CONCAT,
       "each"    => Layout::METHOD_EACH,
       "push"    => Layout::METHOD_PUSH,
+      "any?"    => Layout::METHOD_ANY_P,
+      "all?"    => Layout::METHOD_ALL_P,
+      "none?"   => Layout::METHOD_NONE_P,
       "[]"      => Layout::METHOD_SLICE,
     }.freeze
 
@@ -77,7 +88,22 @@ module FaRuby
     # vm_hex_path が指定されていれば VM コードのレコードも含める。
     # bank_init が事前に拡張 RAM モードに切り替え済みのため、
     # 0x0000-0x7FFF のデータは直接拡張 RAM に書き込まれる。
+    # `Array.new(20)` のように大きさが書いてあれば、書き込む前に止める
+    #
+    # **実行時にも止まります。** ここで見るのは、定数なら ND8080 へ送る前に
+    # 分かるからです。**上限は 8 要素** (PLC は 12)。
+    def check_array_new_sizes
+      ArrayNewSizes.scan(@all_ireps).each do |found|
+        next if found[:size] >= 0 && found[:size] <= Layout::COL_MAX_ARRAY_ELEMS
+
+        form = found[:block] ? "Array.new(#{found[:size]}) { }" : "Array.new(#{found[:size]})"
+        raise "#{form} は 1 スロットに収まりません " \
+              "(i8080 の上限は #{Layout::COL_MAX_ARRAY_ELEMS} 要素)"
+      end
+    end
+
     def generate_hex(vm_hex_path: nil)
+      check_array_new_sizes
       # VM コードの HEX をメモリイメージに読み込む
       vm_mem = vm_hex_path ? parse_hex_file(vm_hex_path) : {}
 
@@ -159,18 +185,28 @@ module FaRuby
     # OP_CLASS / OP_GETCONST のオペランドからクラス名を集め、
     # 出てきた順に 1 から番号を振る。0 番はトップレベル (main)。
     def class_numbers
-      @class_numbers ||= begin
-        numbers = {}
-        @all_ireps.each do |ir|
-          Disassembler.new(ir).disassemble.each do |inst|
-            next unless CLASS_OPCODES.include?(inst[:name])
-
-            name = ir.symbols[inst[:operands][1].to_i]
-            numbers[name] ||= numbers.size + 1 if name
-          end
-        end
-        numbers
+      @class_numbers ||= symbol_operands_of(CLASS_OPCODES).each_with_object({}) do |name, acc|
+        acc[name] ||= acc.size + 1
       end
+    end
+
+    # 利用者の定数の名前 (クラス名を引いた残り)
+    # **組み込みクラスの名前は外します** (`Array` / `Hash`)。外さないと
+    # 未代入の値スロットになり、`Array.new` が型違いで止まります
+    def constant_names
+      @constant_names ||=
+        (symbol_operands_of(CONST_OPCODES).uniq - class_numbers.keys -
+         BUILTIN_CLASSES.keys)
+    end
+
+    def symbol_operands_of(opcodes)
+      @all_ireps.flat_map { |ir|
+        Disassembler.new(ir).disassemble.filter_map do |inst|
+          next unless opcodes.include?(inst[:name])
+
+          ir.symbols[inst[:operands][1].to_i]
+        end
+      }.compact
     end
 
     # --- irep 番号 => そのクラスの番号 ---
@@ -189,6 +225,8 @@ module FaRuby
 
             case inst[:name]
             when :OP_CLASS, :OP_GETCONST
+              # **定数の読みもここへ来ます。** クラスとして登録された名前の
+              # ときだけレジスタにクラス番号を覚えます (OP_EXEC が使う)
               name = ir.symbols[b]
               in_register[a] = class_numbers[name] if name && class_numbers.key?(name)
             when :OP_EXEC
@@ -435,7 +473,16 @@ module FaRuby
 
             mem[tbl_addr]     = slot_addr & 0xFF
             mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
-          elsif sym.start_with?("@") && !sym.start_with?("@@")
+          elsif sym.start_with?("@@")
+            # **クラス変数はクラスごとに 1 枠。** 名前ではなく「どのクラスの
+            # `@@n` か」で場所が決まるので、クラス番号を付けた鍵で取ります。
+            # 命令は OP_GETGV / OP_SETGV の枝に落ちるだけです
+            slot_addr = resolve_global(mem, "#{owner}:#{sym}", globals_map, globals_count)
+            globals_count = globals_map.size
+
+            mem[tbl_addr]     = slot_addr & 0xFF
+            mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+          elsif sym.start_with?("@")
             # @ シンボル: クラスのメソッド内 → IVAR、それ以外 → グローバル
             ivar_idx = ivar_index(sym, owner)
             if ivar_idx
@@ -449,6 +496,17 @@ module FaRuby
               mem[tbl_addr]     = slot_addr & 0xFF
               mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
             end
+          elsif constant_names.include?(sym)
+            # 利用者の定数。**グローバルと同じ値スロット**
+            slot_addr = resolve_global(mem, sym, globals_map, globals_count)
+            globals_count = globals_map.size
+
+            mem[tbl_addr]     = slot_addr & 0xFF
+            mem[tbl_addr + 1] = (slot_addr >> 8) & 0xFF
+          elsif BUILTIN_CLASSES.key?(sym)
+            # 組み込みクラス (`Array` / `Hash`)
+            mem[tbl_addr]     = BUILTIN_CLASSES[sym]
+            mem[tbl_addr + 1] = Layout::SYM_KIND_BUILTIN_CLASS
           elsif class_numbers.key?(sym)
             # クラス名
             mem[tbl_addr]     = class_numbers[sym]

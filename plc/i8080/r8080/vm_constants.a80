@@ -71,6 +71,7 @@ TT_HASH                  EQU  09h
 TT_OBJECT                EQU  0Ah
 TT_PROC                  EQU  0Ch
 TT_CLASS                 EQU  0Dh
+TT_BUILTIN_CLASS         EQU  0Eh
 TT_FALSY_MAX             EQU  02h
 
 ; --- VM 実行状態 ---
@@ -90,6 +91,9 @@ MAX_GLOBALS              EQU  40h  ; グローバル変数の数
 SYM_KIND_USER_METHOD     EQU  01h  ; ユーザー定義メソッド
 SYM_KIND_CLASS           EQU  02h  ; クラス名
 SYM_KIND_IVAR            EQU  03h  ; インスタンス変数
+SYM_KIND_BUILTIN_CLASS   EQU  04h  ; Array / Hash
+BUILTIN_CLASS_ARRAY      EQU  01h  ; Array.new
+BUILTIN_CLASS_HASH       EQU  02h  ; Hash.new
 
 ; --- フレームスタック ---
 
@@ -110,8 +114,13 @@ FRAME_OFF_OUTER          EQU  0Ah  ; 1B
 FRAME_KIND_CALL          EQU  00h
 FRAME_KIND_ITERATE       EQU  01h  ; times / upto
 FRAME_KIND_EACH          EQU  02h  ; each (配列要素反復)
+FRAME_KIND_HASH_EACH     EQU  03h  ; each (ハッシュの鍵と値)
 FRAME_KIND_LOOP          EQU  04h  ; loop (無限)
 FRAME_KIND_NEW           EQU  05h  ; Class#new → initialize
+FRAME_KIND_ANY           EQU  06h  ; any?
+FRAME_KIND_ALL           EQU  07h  ; all?
+FRAME_KIND_NONE          EQU  08h  ; none?
+FRAME_KIND_ARRAY_FILL    EQU  09h  ; Array.new(n) { }
 
 ; 外側フレームなし (トップレベル)
 FRAME_NONE               EQU  0FFh
@@ -134,6 +143,9 @@ METHOD_LENGTH            EQU  12h  ; length / size
 METHOD_CONCAT            EQU  14h  ; << (文字列追記/配列追加)
 METHOD_EACH              EQU  15h  ; each (配列要素反復)
 METHOD_PUSH              EQU  16h  ; push (配列追加)
+METHOD_ANY_P             EQU  23h  ; any?
+METHOD_ALL_P             EQU  24h  ; all?
+METHOD_NONE_P            EQU  25h  ; none?
 KEYIN1_ADDR              EQU  0616h  ; ND80Z モニタキー入力 (ブロッキング)
 KEY_ADDR                 EQU  0647h  ; ND80Z キー 1 回スキャン (ノンブロッキング)
 

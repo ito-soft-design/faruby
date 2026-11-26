@@ -149,6 +149,57 @@ module FaRuby
     # 置けません。** 1 比較で済ませている並びを崩さないため、反復の後ろに
     # 置いて「反復かつ上限なし」の経路から外す判定を 1 つ足しています。
     FRAME_KIND_NEW      = 5
+    # any? / all? / none? の反復
+    #
+    # **渡す値は each と同じ**で、レシーバが配列なら要素、ハッシュなら鍵と値
+    # です。種別を見ずに **R[0] (レシーバ) の型タグで決めます** — 反復の間
+    # R[0] にはレシーバが残っているので、新しい場所を要りません。
+    #
+    # 種別が持っているのは「ブロックの値をどう使うか」だけです。
+    #   ANY   真で止まって true、尽きたら false
+    #   ALL   偽で止まって false、尽きたら true
+    #   NONE  真で止まって false、尽きたら true
+    #
+    # **FRAME_KIND_ANY 以上が「ブロックの値を見る反復」**です。判定を
+    # 1 比較で済ませているので、間に別の種別を挟まないでください。
+    FRAME_KIND_ANY      = 6
+    FRAME_KIND_ALL      = 7
+    FRAME_KIND_NONE     = 8
+    # `Array.new(8) { |i| }`。**ブロックの値を要素へ書く反復**
+    #
+    # **渡すのは添字です** (times と同じ)。R[0] には確保した配列が入って
+    # いて、それがそのまま呼び出しの値になります。
+    #
+    # **述語の判定は ANY-NONE の範囲で見ます。** この種別もブロックの値を
+    # 見ますが使い方が違うので、「ANY 以上」だけでは `none?` と同じ扱いに
+    # なります (i8080 で実際にそうなり、1 回目で打ち切りました)。
+    # 渡す値の方は「添字か要素か」を種別で見分けます。
+    FRAME_KIND_ARRAY_FILL = 9
+
+    # メソッド番号 => 反復フレームの種別
+    PREDICATE_FRAME_KINDS = {
+      METHOD_ANY_P  => FRAME_KIND_ANY,
+      METHOD_ALL_P  => FRAME_KIND_ALL,
+      METHOD_NONE_P => FRAME_KIND_NONE,
+    }.freeze
+
+    # 種別 => 生成コードのコメントに使う名前
+    FRAME_KIND_NAMES = {
+      FRAME_KIND_ANY  => "any?",
+      FRAME_KIND_ALL  => "all?",
+      FRAME_KIND_NONE => "none?",
+    }.freeze
+
+    # 種別 => [真で止めるか, 止まったときの値]
+    #
+    # **尽きたときの値はその逆**です。3 つとも「止まったときの値」と
+    # 「尽きたときの値」が反対なので、片方だけ持てば足ります。
+    # 生成コードもシミュレータも i8080 のテストもこの表から作ります。
+    PREDICATE_RULES = {
+      FRAME_KIND_ANY  => [true,  true],
+      FRAME_KIND_ALL  => [false, false],
+      FRAME_KIND_NONE => [true,  false],
+    }.freeze
 
     # 配列プール 1 スロットの見出し
     #
@@ -391,6 +442,16 @@ module FaRuby
     # クロックパルスの前回の状態。立ち上がりだけを数えるために要ります
     OFFSET_TICK_PREV        = 58
 
+    # any? / all? / none? で反復を打ち切るかどうかの旗 (0 = 続ける)
+    #
+    # **1 つの命令の中でしか生きません。** OP_RETURN が書いてその場で読み、
+    # 次の命令へは持ち越しません。入れ子の `any?` でも 1 ワードで足ります。
+    #
+    # 置き場が +59 なのは、**ここに値スロットを置けない**からです (後ろの
+    # クロックが SLOT_WORDS の倍数に揃っていないといけない)。1 ワードの
+    # 旗ならちょうど収まります。
+    OFFSET_PRED_STOP        = 59
+
     # クロックパルスそのものを持つ値スロット (1 つ 4 ワード)
     #
     # **真偽値として読めるように、値スロットの形で置きます。** 生成スクリプトが
@@ -405,7 +466,8 @@ module FaRuby
     # `VMSLOT[添字]` の配列で指し、添字を「ワード数 / SLOT_WORDS」で求めます。
     # ずれていると手前のスロットを読み、タグが別のワードになります。+59 に
     # 置いたときは 10ms の値ワードをタグとして読み、常に偽になりました
-    # (実機で確認)。+59 は空けたままにします。
+    # (実機で確認)。**+59 は値スロットを置けないので 1 ワードの旗に使います**
+    # (PRED_STOP)。
     OFFSET_CLOCK_10MS       = 60  # 値スロット (60-63)
     OFFSET_CLOCK_100MS      = 64  # 値スロット (64-67)
     OFFSET_CLOCK_1S         = 68  # 値スロット (68-71)
@@ -710,6 +772,7 @@ module FaRuby
 
     # 振り分け用のオペコード番号 (インスタンスごと)
     def dispatch_addr = vm_state_base + OFFSET_DISPATCH
+    def pred_stop_addr = vm_state_base + OFFSET_PRED_STOP
 
     # --- ブロック内オフセット ---
 

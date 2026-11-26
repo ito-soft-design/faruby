@@ -92,13 +92,16 @@ class TestMethods < Minitest::Test
     "empty?" => [TT_STRING, TT_HASH],
     "<<" => [TT_INTEGER, TT_ARRAY],
     "each" => [TT_ARRAY, TT_HASH],
+    "any?" => [TT_ARRAY, TT_HASH], "all?" => [TT_ARRAY, TT_HASH],
+    "none?" => [TT_ARRAY, TT_HASH],
     "push" => [TT_ARRAY, TT_ARRAY],
     "key?" => [TT_HASH, TT_HASH], "keys" => [TT_HASH, TT_HASH],
     "values" => [TT_HASH, TT_HASH],
     "[]" => [TT_DEVICE, TT_DEVICE],
     # レシーバは self (トップレベルの main)
     "loop" => [TT_OBJECT, TT_OBJECT],
-    "new" => [TT_CLASS, TT_CLASS],
+    # **`Array` / `Hash` も `new` を受けます** (TT_BUILTIN_CLASS)
+    "new" => [TT_CLASS, TT_BUILTIN_CLASS],
   }.freeze
 
   def test_methods_sort_by_receiver_type

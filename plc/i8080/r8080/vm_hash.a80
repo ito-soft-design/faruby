@@ -828,24 +828,49 @@ gc_changed: db 0
 gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
 
 ; ===============================================================
-; sendb_each — Array#each: 配列要素を反復
+; sendb_each — Array#each / Hash#each
 ;
-;   R[a] = TT_ARRAY (レシーバ)
+;   R[a] = TT_ARRAY か TT_HASH (レシーバ)
 ;   R[a+argc+1] = TT_PROC (ブロック)
-;   各反復で R[1] = array[index]
+;   配列: 各反復で R[1] = array[index]
+;   ハッシュ: 各反復で R[1] = 鍵, R[2] = 値
 ;
-; FRAME_KIND_EACH フレームを使い、フレーム +11 (reserved) に
-; コレクションスロット番号を格納する。
+; FRAME_KIND_EACH / FRAME_KIND_HASH_EACH を使い、フレーム +11
+; (reserved) にコレクションスロット番号を格納する。
+;
+; **見出しの +1 (count) はどちらも「反復の回数」です。** 配列なら要素数、
+; ハッシュならペア数なので、上限の出し方を分ける必要がありません。
+; 違うのはブロックへ渡す値だけで、そこは each_block_args に出しています。
 ; ===============================================================
 sendb_each:
-  ; R[a] が TT_ARRAY か確認
+  ; each はレシーバの型でフレーム種別を決める
+  ; (述語は sendb_pred が種別を書いてから合流する)
   lda sendb_reg_a
   call get_reg_addr     ; HL = R[a]
   mov a, m
   cpi TT_ARRAY
+  jz each_kind_array
+  cpi TT_HASH
   jnz vm_error
+  mvi a, FRAME_KIND_HASH_EACH
+  jmp each_kind_set
+each_kind_array:
+  mvi a, FRAME_KIND_EACH
+each_kind_set:
+  sta each_arg_kind
 
-  ; コレクションスロット番号を取得
+sendb_each_join:
+  ; レシーバが配列かハッシュであること (述語もここを通る)
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_ARRAY
+  jz each_recv_ok
+  cpi TT_HASH
+  jnz vm_error
+each_recv_ok:
+
+  ; コレクションスロット番号を取得 (配列・ハッシュとも val_lo = slot + 1)
   lda sendb_reg_a
   call get_reg_addr
   call slot_to_value    ; HL = 値先頭
@@ -853,14 +878,14 @@ sendb_each:
   dcr a                 ; slot number (0-based)
   sta each_col_slot
 
-  ; 要素数を読む
+  ; 反復の回数を読む (配列なら要素数、ハッシュならペア数)
   lda each_col_slot
   call col_slot_addr    ; HL = スロットアドレス
   inx h                 ; +1: count
   mov a, m
   sta each_count
   ora a
-  jz vm_loop            ; 空配列 → ブロック実行しない
+  jz each_empty         ; 空 → ブロック実行しない
 
   ; ブロック (TT_PROC) の情報を読む
   lda sendb_argc
@@ -876,9 +901,9 @@ sendb_each:
   mov a, m              ; outer
   sta sendb_block_outer
 
-  ; push_frame(a, FRAME_KIND_EACH, outer)
-  lda sendb_reg_a
-  mvi b, FRAME_KIND_EACH
+  ; push_frame(a, kind, outer)
+  lda each_arg_kind
+  mov b, a
   lda sendb_block_outer
   mov c, a
   lda sendb_reg_a
@@ -901,18 +926,10 @@ sendb_each:
   lda each_col_slot
   mov m, a
 
-  ; R[1] = array[0] (最初の要素)
-  lda each_col_slot
-  call col_slot_addr    ; HL = スロットアドレス
-  inx h                 ; skip type
-  inx h                 ; skip count → data[0]
-  ; data[0] を R[1] にコピー (4 バイト)
-  push h                ; source 退避
-  mvi a, 1
-  call get_reg_addr     ; HL = R[1]
-  xchg                  ; DE = R[1] (dest)
-  pop h                 ; HL = data[0] (source)
-  call copy_slot
+  ; 最初の回のブロック引数 (index = 0)
+  xra a
+  sta each_index
+  call each_block_args
 
   ; 子 irep に切り替え
   lda sendb_block_irep
@@ -923,6 +940,253 @@ sendb_each:
   shld VM_STATE_BASE + OFF_PC
   jmp vm_loop
 
+; ===============================================================
+; each_empty — 1 回も回らないとき
+;
+; each はレシーバがそのまま呼び出しの値になるので何もしません。
+; **述語だけは答えを書きます** (空の any? は false、all? と none? は true)。
+; フレームを積まないので、ここで決まります。
+; ===============================================================
+each_empty:
+  lda each_arg_kind
+  cpi FRAME_KIND_ANY
+  jc vm_loop            ; 述語ではない → レシーバのまま
+  cpi FRAME_KIND_ANY
+  jz each_empty_false   ; any? → false
+  mvi a, TT_TRUE        ; all? / none? → true
+  jmp each_empty_write
+each_empty_false:
+  mvi a, TT_FALSE
+each_empty_write:
+  sta each_empty_tag
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a] (呼び出しの値になる場所)
+  lda each_empty_tag
+  call set_slot_special
+  jmp vm_loop
+
+each_empty_tag: db 0
+
+; ===============================================================
+; sendb_array_new — Array.new(n) { |i| }
+;
+; **先に配列を確保して R[a] に置く。** 窓をずらすと R[0] が配列になり、
+; 反復の間ずっとそこから書き込む先を引ける。尽きればそれが呼び出しの値。
+;
+; 渡すのは添字 (times と同じ)。ブロックの値は advance_iteration が
+; その回の要素へ書く。**先に nil で埋めておく** — break で途中で抜けても、
+; 書いていない要素を値スロットとして読まれないようにするため。
+; ===============================================================
+sendb_array_new:
+  ; レシーバが Array であること
+  lda sendb_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_BUILTIN_CLASS
+  jnz vm_error
+  lda sendb_reg_a
+  call get_reg_addr
+  call slot_to_value
+  mov a, m
+  cpi BUILTIN_CLASS_ARRAY
+  jnz vm_error
+
+  ; 大きさは R[a+1]
+  lda sendb_reg_a
+  inr a
+  call get_reg_addr     ; HL = R[a+1]
+  mov a, m
+  cpi TT_INTEGER
+  jnz vm_error
+  inx h
+  inx h                 ; +2: val_lo
+  mov c, m
+  inx h
+  mov a, m              ; 上位バイト
+  ora a
+  jnz vm_error          ; 負か大きすぎる
+  mov a, c
+  cpi COL_MAX_ARRAY_ELEMS + 1
+  jnc vm_error
+  sta san_count
+
+  ; スロットを確保して nil で埋める
+  call col_alloc        ; A = slot_number, HL = スロットアドレス
+  sta san_slot
+  mvi m, COL_TYPE_ARRAY
+  inx h
+  lda san_count
+  mov m, a              ; +1: count
+  inx h                 ; HL → データ領域
+  shld san_data
+  lda san_count
+  ora a
+  jz san_no_fill
+  sta san_left
+san_fill_loop:
+  lhld san_data
+  mvi m, TT_NIL
+  inx h
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+  mvi m, 0
+  inx h
+  shld san_data
+  lxi h, san_left
+  dcr m
+  jnz san_fill_loop
+
+san_no_fill:
+  ; R[a] = TT_ARRAY, val_lo = slot+1。**これが呼び出しの値になる**
+  lda sendb_reg_a
+  call get_reg_addr
+  mvi m, TT_ARRAY
+  inx h
+  mvi m, 0
+  inx h
+  lda san_slot
+  inr a
+  mov m, a
+  inx h
+  mvi m, 0
+
+  ; 0 個ならブロックを 1 回も回さない (配列はもう R[a] にある)
+  lda san_count
+  ora a
+  jz vm_loop
+
+  ; ブロック (TT_PROC) の情報を読む
+  lda sendb_argc
+  inr a
+  mov b, a
+  lda sendb_reg_a
+  add b                 ; A = a + argc + 1
+  call get_reg_addr
+  call slot_to_value
+  mov a, m
+  sta sendb_block_irep
+  inx h
+  mov a, m
+  sta sendb_block_outer
+
+  ; push_frame(a, FRAME_KIND_ARRAY_FILL, outer)
+  mvi b, FRAME_KIND_ARRAY_FILL
+  lda sendb_block_outer
+  mov c, a
+  lda sendb_reg_a
+  call push_frame
+
+  ; limit = count - 1
+  call cur_frame_addr
+  lxi d, FRAME_OFF_LIMIT
+  dad d
+  lda san_count
+  dcr a
+  mov m, a
+  inx h
+  mvi m, 0
+
+  ; フレーム +11 にコレクションスロット番号 (書き込む先を引くのに使う)
+  call cur_frame_addr
+  lxi d, 11
+  dad d
+  lda san_slot
+  mov m, a
+
+  ; ブロック引数 R[1] = 0 (添字)
+  mvi a, 1
+  call get_reg_addr
+  mvi b, 0
+  mvi c, 0
+  call set_slot_int16
+
+  ; 子 irep に切り替えて PC = 0
+  lda sendb_block_irep
+  call switch_irep
+  lxi h, 0
+  shld VM_STATE_BASE + OFF_PC
+  jmp vm_loop
+
+san_count: db 0
+san_slot:  db 0
+san_left:  db 0
+san_data:  dw 0
+
+; ===============================================================
+; each_block_args — 反復のその回の値をブロックの引数へ
+;
+;   入力: each_arg_kind / each_col_slot / each_index
+;   出力: R[1] (配列なら要素、ハッシュなら鍵)
+;         ハッシュなら R[2] にも値
+;
+; **sendb_each と advance_iteration の両方から呼びます。** 最初の回と
+; 2 回目以降で同じ場所の出し方をするためで、以前は 1 回目を sendb_each に
+; 書き写していました。
+;
+; **添字は下位バイトだけ見ます。** 配列は 8 要素、ハッシュは 4 ペアまでで、
+; 上限がバイトに収まります。
+; ===============================================================
+each_block_args:
+  lda each_col_slot
+  call col_slot_addr    ; HL = スロットアドレス
+  mov a, m              ; +0: 見出しの種別 (COL_TYPE_*)
+  sta eba_col_type
+  inx h                 ; skip type
+  inx h                 ; skip count → data
+  ; **渡す値はスロットの見出しで決めます。** フレームの種別ではありません —
+  ; 述語は配列とハッシュで種別を分けていないためです
+  lda eba_col_type
+  cpi COL_TYPE_HASH
+  jz eba_hash
+
+  ; --- 配列: data + index * 4 ---
+  lda each_index
+  add a                 ; ×2
+  add a                 ; ×4
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = &data[index*4]
+  push h
+  mvi a, 1
+  call get_reg_addr     ; HL = R[1]
+  xchg                  ; DE = R[1] (コピー先)
+  pop h                 ; HL = コピー元
+  call copy_slot        ; R[1] = array[index]
+  ret
+
+  ; --- ハッシュ: data + index * 8 が鍵、その +4 が値 ---
+eba_hash:
+  lda each_index
+  add a                 ; ×2
+  add a                 ; ×4
+  add a                 ; ×8
+  mov e, a
+  mvi d, 0
+  dad d                 ; HL = &pair
+  shld eba_pair         ; copy_slot が HL を進めるので退避
+  push h
+  mvi a, 1
+  call get_reg_addr     ; HL = R[1]
+  xchg                  ; DE = R[1]
+  pop h                 ; HL = &鍵
+  call copy_slot        ; R[1] = 鍵
+  lhld eba_pair
+  lxi d, 4
+  dad d                 ; HL = &値
+  push h
+  mvi a, 2
+  call get_reg_addr     ; HL = R[2]
+  xchg                  ; DE = R[2]
+  pop h                 ; HL = &値
+  call copy_slot        ; R[2] = 値
+  ret
+
 ; --- sendb_each データ ---
 each_col_slot: db 0
 each_count:    db 0
+each_arg_kind: db 0
+each_index:    db 0
+eba_pair:      dw 0
+eba_col_type:  db 0

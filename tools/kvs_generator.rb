@@ -1107,6 +1107,45 @@ module FaRuby
       line "#{dest.tag} = #{TT_CLASS}"
     end
 
+    # R[a] = 定数 (OP_GETCONST)
+    #
+    # **クラス名と利用者の定数が同じ命令で来ます。** `Counter.new` の
+    # `Counter` も `LIMIT` も `OP_GETCONST` なので、シンボルの種別で分けます。
+    # ホスト側は `OP_CLASS` に出てきた名前だけをクラスとして登録するので、
+    # 残りは定数です (tools/plc_codegen.rb)。
+    #
+    # **定数は汎用グローバルのスロットに置いてあります。** 読み方は `$foo` と
+    # 同じで、VM に新しい置き場は要りません。
+    # **アドレスは `global_reg_slot` で取ります。** `reg_slot` はレジスタの
+    # アドレスを Z1 に置くので、`device_table_lookup` が Z1 に入れた**種別を
+    # 潰します。** 実機で ERROR=3 になりました — シミュレータは Z を持たない
+    # ので、この形は生成コードを読むまで分かりません
+    # (test_kvs_generator.rb が見ています)。
+    def load_constant(name, sym_name, error_code)
+      device_table_lookup(sym_name)
+      dest = global_reg_slot(name)
+      if_else_block("Z1 = #{SYMBOL_KIND_CLASS}") do
+        note "クラス名。実行時に作らないので番号を置くだけ"
+        line "#{dest.value} = Z5   ' クラス番号"
+        line "#{dest.tag} = #{TT_CLASS}"
+      end
+      if_else_block("Z1 = #{SYMBOL_KIND_BUILTIN_CLASS}") do
+        note "組み込みクラス (Array / Hash)。番号を置くだけ"
+        line "#{dest.value} = Z5   ' 組み込みクラス番号"
+        line "#{dest.tag} = #{TT_BUILTIN_CLASS}"
+      end
+      if_else_block("Z1 = #{SYMBOL_KIND_GLOBAL}") do
+        note "定数は値スロット。型タグごと写す"
+        line "Z3 = Z6"
+        copy_slot(from: slot_on(3), to: dest)
+      end
+      note "クラスでも定数でもないシンボルを定数として読もうとした"
+      vm_error(error_code)
+      end_block
+      end_block
+      end_block
+    end
+
     # クラス本体を R[a] を self として実行する (OP_EXEC)
     #
     # **メソッド呼び出しと同じ経路です。** 窓を R[a] までずらすので、本体から
@@ -1952,21 +1991,28 @@ module FaRuby
 
     # 定数への代入 (OP_SETCONST)
     #
-    # faRuby の設定 (FARUBY_ で始まる名前) だけを VM 状態へ書きます。
-    # それ以外の定数は利用者のものなので放っておきます。読む手段
-    # (OP_GETCONST) が無いため、使おうとすれば未知のオペコードで止まります。
+    # 行き先は 2 つです。faRuby の設定 (`FARUBY_` で始まる名前) は VM 状態へ、
+    # 利用者の定数は汎用グローバルのスロットへ書きます。
+    #
+    # **再代入も通します。** Ruby は警告しますが、ここで見分けるには「もう
+    # 書いたか」を覚える場所が要り、定数 1 つにつき 1 ワード増えます。
+    # 警告を出せないので、止めるか通すかのどちらかで、通す方を採りました。
+    # 読みと同じ理由で `global_reg_slot` を使います (Z1 は種別)
     def set_constant(name, sym_name)
-      line "Z3 = #{operand(sym_name)} * #{DEVICE_TABLE_STRIDE} + #{symbols_offset}"
-      line "Z4 = Z3 + #{DEVICE_TABLE_KIND_OFFSET}"
-      line "Z5 = #{fixed_at(4, 0)}   ' シンボル種別"
-      if_("Z5 = #{SYMBOL_KIND_SETTING}") do
-        line "Z6 = #{fixed_at(3, 0)}   ' 設定番号"
-        src = reg_slot(name)
-        if_("Z6 = #{SETTING_STR_FILL}") do
+      device_table_lookup(sym_name)
+      src = global_reg_slot(name)
+      if_else_block("Z1 = #{SYMBOL_KIND_SETTING}") do
+        if_("Z5 = #{SETTING_STR_FILL}") do
           note "固定長でデバイスへ書いたときの余りを埋めるバイト"
           line "#{state(layout.str_fill_addr)} = #{src.value}"
         end
       end
+      if_("Z1 = #{SYMBOL_KIND_GLOBAL}") do
+        note "利用者の定数は値スロット。型タグごと写す"
+        line "Z3 = Z6"
+        copy_slot(from: src, to: slot_on(3))
+      end
+      end_block
     end
 
     # --- ハッシュ ---
@@ -2314,7 +2360,7 @@ module FaRuby
       end
       if_else_block("#{word_at(3, MemoryLayout::FRAME_KIND)} >= " \
                     "#{MemoryLayout::FRAME_KIND_ITERATE}") do
-        advance_iteration
+        advance_iteration(name)
       end
       note "R[a] を R[0] へ写す。R[0] は呼んだ側の R[a] と同じ場所なので"
       note "これで戻り値が呼び出し元から見える位置に入る"
@@ -2329,12 +2375,21 @@ module FaRuby
     end
 
     # 反復のフレーム。次の回があれば入り直し、無ければ抜ける
-    def advance_iteration
+    #
+    # **any? / all? / none? はここでブロックの値を見ます。** ほかの反復は
+    # ブロックの値を捨てますが、述語は毎回それが答えになりうるためです。
+    def advance_iteration(name)
+      array_fill_element(name)
+      predicate_decision(name)
       line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_INDEX)} + 1"
       if_("#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}") do
         note "loop は上限が無い。**break でしか終わらない。**"
         note "上限に合わせて必ず次の回へ入れる (添字は数えないので 0 のまま)"
         line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}"
+      end
+      if_("#{state(layout.pred_stop_addr)} <> 0") do
+        note "述語が答えを出した。残りは見ずに終わらせる"
+        line "#{scratch32} = #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)} + 1"
       end
       if_else_block("#{scratch32} <= #{long_at(3, MemoryLayout::FRAME_LIMIT, secondary: true)}") do
         note "次の回。PC を 0 に戻し、ブロックの引数を更新するだけ"
@@ -2344,8 +2399,80 @@ module FaRuby
         line "#{pc} = 0"
       end
       note "反復の終わり。R[0] にはレシーバが残っており、それが呼び出しの値になる"
+      note "**述語だけは R[0] を答えに書き換えます。** 打ち切ったときは"
+      note "predicate_decision が書いてあるので、尽きたときだけここで書く"
+      if_("#{state(layout.pred_stop_addr)} = 0") { predicate_exhausted }
       pop_frame
       end_block
+    end
+
+    # ブロックの値をその回の要素へ書く (Array.new(n) { |i| })
+    #
+    # **添字は増やす前のものです。** いま終わった回の位置に書きます。
+    # 配列は R[0] (= 呼んだ側の R[a]) にあり、反復の間ずっとそこにいます。
+    def array_fill_element(name)
+      if_("#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}") do
+        value = devices.reg_slot([:fill_value, name], operand(name), z: Z_PRIMARY)
+        line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] が配列"
+        line "Z2 = #{long_at(4, SLOT_VALUE_OFFSET, secondary: true)} * " \
+             "#{layout.array_slot_words} + #{block_offset(layout.array_pool_base)}"
+        line "Z2 = #{long_at(3, MemoryLayout::FRAME_INDEX)} * #{SLOT_WORDS} + Z2 + " \
+             "#{MemoryLayout::ARRAY_HEADER_WORDS}"
+        copy_slot(from: value, to: slot_on(2))
+      end
+    end
+
+    # ブロックの値を見て、打ち切るかどうかを決める (any? / all? / none?)
+    #
+    # **旗は 1 つの命令の中でしか生きません。** ここで書いて
+    # advance_iteration がその場で読みます。
+    #
+    # 打ち切るときに R[0] (レシーバの位置) を答えで潰します。**もう要素を
+    # 取り出さないので潰してよい**のが、ここで場所を増やさずに済む理由です。
+    def predicate_decision(name)
+      line "#{state(layout.pred_stop_addr)} = 0"
+      if_("#{frame_kind} >= #{MemoryLayout::FRAME_KIND_ANY}") do
+        note "**鍵と Z の両方を分けます。** 鍵が同じだと「別の枝でアドレスを"
+        note "載せた」で生成器が止まり (ふつうの return も同じ場所を使う)、"
+        note "**Z が同じだと黙って後の方だけが残ります。** 既定は [:reg, :a]"
+        note "以外すべて Z2 なので、ここは Z1 を名指しします。Z1 はこの時点で"
+        note "命令の取り出しを終えていて空いています (Z3 はフレーム)"
+        value = devices.reg_slot([:pred_value, name], operand(name), z: Z_PRIMARY)
+        result = devices.reg_slot([:pred_result, name], "0", z: Z_SECONDARY)
+        MemoryLayout::PREDICATE_RULES.each do |kind, (stop_on_true, stopped)|
+          if_("#{frame_kind} = #{kind}") do
+            note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: " \
+                 "ブロックの値が#{stop_on_true ? '真' : '偽'}なら打ち切って " \
+                 "#{stopped} を返す"
+            comparison = stop_on_true ? "> #{TT_FALSE}" : "<= #{TT_FALSE}"
+            if_("#{value.tag} #{comparison}") do
+              assign_bool(result, stopped)
+              line "#{state(layout.pred_stop_addr)} = 1"
+            end
+          end
+        end
+      end
+    end
+
+    # 最後まで打ち切られなかったときの答え。**止まったときの逆**
+    def predicate_exhausted
+      if_("#{frame_kind} >= #{MemoryLayout::FRAME_KIND_ANY}") do
+        result = devices.reg_slot([:pred_done], "0", z: Z_SECONDARY)
+        MemoryLayout::PREDICATE_RULES.each do |kind, (_stop_on_true, stopped)|
+          if_("#{frame_kind} = #{kind}") do
+            note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: " \
+                 "尽きたら #{!stopped}"
+            assign_bool(result, !stopped)
+          end
+        end
+      end
+    end
+
+    # 添字をブロックの引数へ (times / upto / Array.new)
+    def pass_index_to_block(argument)
+      line "#{argument.value} = #{scratch32}"
+      line "#{argument.tag} = #{TT_INTEGER}"
+      line "#{state(layout.call_argc_addr)} = 1"
     end
 
     # ブロックに渡す値と引数の数を書く
@@ -2370,10 +2497,28 @@ module FaRuby
       note "Ruby の loop { |i| } も i は nil で、ここでは未代入のまま"
       line "#{state(layout.call_argc_addr)} = 0"
       dedent
-      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}")
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ITERATE}")
       indent
-      note "h.each は鍵と値を渡す。レシーバのハッシュは R[0] に残っている"
-      line "Z4 = 0 + #{reg_offset}"
+      note "times / upto は添字を渡す"
+      pass_index_to_block(argument)
+      dedent
+      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}")
+      indent
+      note "**Array.new も添字です。** R[0] が配列なので、下のコレクションの"
+      note "枝に落ちると要素を渡してしまいます。種別で見分けます"
+      note "**旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が"
+      note "載っていて、空いている Z が無いためです (3 行なので分けた方が安い)"
+      pass_index_to_block(argument)
+      dedent
+      line "ELSE"
+      indent
+      note "**残りはコレクションの反復です** (each / any? / all? / none?)。"
+      note "渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。"
+      note "述語は配列とハッシュで種別を分けていないためです"
+      line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
+      chain_head(true, "#{slot_on(4).tag} = #{TT_HASH}")
+      indent
+      note "ハッシュは鍵と値を渡す"
       receiver = slot_on(4)
       pool_element_into_z(receiver.word(0))
       line "#{argument.value} = #{element.value}"
@@ -2384,10 +2529,9 @@ module FaRuby
       line "#{argument.tag} = #{element.tag}"
       line "#{state(layout.call_argc_addr)} = 2"
       dedent
-      chain_head(false, "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}")
+      line "ELSE"
       indent
-      note "a.each はその位置の要素を渡す。レシーバの配列は R[0] に残っている"
-      line "Z4 = 0 + #{reg_offset}"
+      note "配列はその位置の要素を渡す"
       note "**スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が"
       note "載っていて、これから要素の位置を出すのに使う"
       pool_element_into_z(long_at(4, SLOT_VALUE_OFFSET, secondary: true))
@@ -2395,12 +2539,7 @@ module FaRuby
       line "#{argument.tag} = #{element.tag}"
       line "#{state(layout.call_argc_addr)} = 1"
       dedent
-      line "ELSE"
-      indent
-      note "times / upto は添字を渡す"
-      line "#{argument.value} = #{scratch32}"
-      line "#{argument.tag} = #{TT_INTEGER}"
-      line "#{state(layout.call_argc_addr)} = 1"
+      line "END IF"
       dedent
       line "END IF"
     end
@@ -2462,7 +2601,7 @@ module FaRuby
     # の側です。VM は再帰できないため、反復フレームに「今何回目か」と「上限」を
     # 持たせ、ブロックの OP_RETURN で次の回に入り直します。
     def send_block_method(name, sym_name, argc_name, unknown_code, type_code,
-                          block_code, depth_code)
+                          block_code, depth_code, heap_code)
       method_table_lookup(sym_name)
       if_("Z4 <> #{SYMBOL_KIND_METHOD}") { vm_error(unknown_code) }
       note "ブロックを取るメソッドはレシーバの型で並んでいるため連続していない"
@@ -2472,7 +2611,10 @@ module FaRuby
         note "ブロックを取らないメソッドにブロックを渡した"
         vm_error(unknown_code)
       end
-      if_("#{operand(argc_name)} <> Z8") { vm_error(unknown_code) }
+      note "**new だけ引数の数を突き合わせません** (ブロック無しと同じ理由)"
+      if_("Z5 <> #{METHOD_NEW}") do
+        if_("#{operand(argc_name)} <> Z8") { vm_error(unknown_code) }
+      end
 
       recv = reg_slot(name)
       check_receiver_type(recv, type_code)
@@ -2482,15 +2624,25 @@ module FaRuby
                                    "#{operand(name)} + #{operand(argc_name)} + 1", z: Z_VALUE)
       if_("#{block.tag} <> #{TT_PROC}") { vm_error(block_code) }
 
-      iteration_range(name, recv, type_code)
-      if_("#{scratch32} <= #{scratch32_b}") do
+      iteration_range(name, recv, type_code, heap_code)
+      if_else_block("#{scratch32} <= #{scratch32_b}") do
         enter_iteration(name, argc_name, depth_code)
       end
-      note "1 回も回らないときはレシーバがそのまま呼び出しの値になる"
+      note "1 回も回らないとき。each / times / upto はレシーバがそのまま値になる"
+      note "**述語だけは答えを書きます。** 空の any? は false、all? と none? は"
+      note "true で、1 回も回らないのでフレームを積まずにここで決まります"
+      MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+        stopped = MemoryLayout::PREDICATE_RULES.fetch(kind)[1]
+        if_("Z5 = #{code}") do
+          note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: 空なら #{!stopped}"
+          assign_bool(recv, !stopped)
+        end
+      end
+      end_block
     end
 
     # 反復の範囲を scratch32 (現在値) と scratch32_b (上限) に置く
-    def iteration_range(name, recv, type_code)
+    def iteration_range(name, recv, type_code, heap_code)
       line "IF Z5 = #{METHOD_LOOP} THEN"
       indent
       note "loop は上限が無い。どちらも 0 にしておき、比較は種別で飛ばす"
@@ -2503,24 +2655,77 @@ module FaRuby
       line "#{scratch32} = 0"
       line "#{scratch32_b} = #{recv.value} - 1"
       dedent
-      line "ELSE IF Z5 = #{METHOD_EACH} THEN"
+      line "ELSE IF Z5 = #{METHOD_NEW} THEN"
       indent
-      note "a.each / h.each は 0 から要素数-1 まで"
-      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
-      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
-      array_slot_into_z(recv)
-      end_block
-      line "#{scratch32} = 0"
-      line "#{scratch32_b} = #{scratch32_b} - 1"
+      array_fill_range(name, recv, type_code, heap_code)
       dedent
-      line "ELSE"
+      line "ELSE IF Z5 = #{METHOD_UPTO} THEN"
       indent
       note "a.upto(b) は a から b まで"
       limit = reg_next_slot(name)
       if_("#{limit.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
       line "#{scratch32} = #{recv.value}"
       line "#{scratch32_b} = #{limit.value}"
+      dedent
+      line "ELSE"
+      indent
+      note "**残りはコレクションの反復です** (each / any? / all? / none?)。"
+      note "0 から要素数-1 まで回り、数え方はどれも同じ"
+      note "ハッシュは組の数。どちらも Z5 (メソッド番号) を壊さない方で読む"
+      if_else_block("#{recv.tag} = #{TT_HASH}") { hash_keys_into_z(recv) }
+      array_slot_into_z(recv)
       end_block
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{scratch32_b} - 1"
+      end_block
+    end
+
+    # Array.new(n) { |i| } の準備。**先に配列を確保して R[a] に置きます**
+    #
+    # R[0] (= 呼んだ側の R[a]) が反復の間ずっと配列を指すので、書き込む先を
+    # 毎回そこから引けます。尽きればそれがそのまま呼び出しの値になります。
+    #
+    # **Array 以外は型のエラーにします。** `Counter.new { }` もここで落ちます
+    # (利用者のクラスにブロックを渡す形は未対応)。
+    def array_fill_range(name, recv, type_code, heap_code)
+      if_("#{recv.tag} <> #{TT_BUILTIN_CLASS}") { vm_error(type_code) }
+      if_("#{recv.word(0)} <> #{BUILTIN_CLASS_ARRAY}") { vm_error(type_code) }
+      note "**鍵は upto と分けます。** 同じ鍵だと「別の枝でアドレスを載せた」"
+      note "で生成器が止まります (どちらも R[a+1] を見る別の枝)"
+      size = devices.reg_slot([:new_size, name], "#{operand(name)} + 1",
+                              z: Z_SECONDARY)
+      if_("#{size.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+      if_("#{size.value} < 0") { vm_error(type_code) }
+      if_("#{size.value} > #{layout.max_array_len}") do
+        note "1 スロットに収まらない大きさ"
+        vm_error(heap_code)
+      end
+      note "**要素数は Z8 に置きます。** Z5 はメソッド番号で、"
+      note "この後の enter_iteration が種別を決めるのに読みます"
+      line "Z8 = #{size.value}   ' 要素数"
+      alloc_check(heap_code)
+      alloc_header_into(4)
+      line "#{word_at(4, MemoryLayout::ARRAY_LENGTH)} = Z8"
+      note "**先に nil で埋めます。** ブロックが途中で break しても、"
+      note "書いていない要素を値スロットとして読まれないようにするため"
+      if_("Z8 > 0") do
+        line "Z6 = Z8 - 1"
+        line "FOR Z7 = 0 TO Z6"
+        indent
+        line "Z1 = Z7 * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        element = slot_on(1)
+        line "#{element.value} = 0"
+        line "#{element.tag} = #{TT_NIL}"
+        dedent
+        line "NEXT"
+      end
+      note "**R[a] を配列で潰します。** これが呼び出しの値になり、"
+      note "反復の間は R[0] として書き込む先を引くのにも使います"
+      dest = devices.reg_slot([:new_dest, name], operand(name), z: Z_VALUE)
+      alloc_commit(dest, TT_ARRAY)
+      note "0 から 要素数-1 まで。0 個なら 1 回も回らない"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = Z8 - 1"
     end
 
     # 反復フレームを積み、ブロックの本体へ移る
@@ -2541,6 +2746,15 @@ module FaRuby
       if_("Z5 = #{METHOD_LOOP}") do
         note "loop は上限が無く、ブロックに渡す値も無い"
         line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
+      end
+      note "**述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、"
+      note "種別が持つのは「ブロックの値をどう使うか」だけです"
+      MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+        if_("Z5 = #{code}") { line "#{frame_kind} = #{kind}" }
+      end
+      if_("Z5 = #{METHOD_NEW}") do
+        note "Array.new はブロックの値を要素へ書く。渡すのは添字"
+        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}"
       end
       note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
       line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
@@ -2641,7 +2855,7 @@ module FaRuby
         indent
         note METHOD_NAMES.fetch(code)
         method_body(code, name, dest, rhs, type_code, zero_code, heap_code,
-                    argc_name, depth_code)
+                    argc_name, depth_code, unknown_code)
         dedent
       end
       line "ELSE"
@@ -2924,8 +3138,13 @@ module FaRuby
     #
     # **`initialize` があれば呼びます。** 戻り値で上書きされないよう、
     # 専用のフレーム種別 (`FRAME_KIND_NEW`) を積みます。
-    def new_object(name, argc_name, heap_code, depth_code)
+    def new_object(name, rhs, argc_name, unknown_code, type_code, heap_code,
+                   depth_code)
       dest = reg_slot(name)
+      note "**組み込みクラスは作るものが違う。** メソッド表の行も持たない"
+      if_else_block("#{dest.tag} = #{TT_BUILTIN_CLASS}") do
+        new_builtin(name, dest, rhs, argc_name, unknown_code, type_code, heap_code)
+      end
       note "クラス番号を控える。R[a] はオブジェクトで上書きする"
       line "Z8 = #{dest.word(0)}"
       alloc_check(heap_code)
@@ -2956,7 +3175,94 @@ module FaRuby
       line "#{pc} = 0"
     end
   end
+  end_block
 end
+
+    # Array.new / Hash.new
+    #
+    # **引数の数はここで見ます。** `new` は表と突き合わせません
+    # (クラスごとに違うため) ので、組み込みは自分で数えます。
+    #
+    # **Z の割り当て**: Z1 = R[a] (レシーバ)、Z2 = R[a+1] (大きさ)、
+    # Z3 = R[a+2] (埋める値)、Z4 = 見出し、Z5 = 要素数、Z6-Z8 = 写す用。
+    # 回収は Z6 / Z7 を借りて返すので、Z5 は生き残ります。
+    def new_builtin(name, dest, rhs, argc_name, unknown_code, type_code, heap_code)
+      if_else_block("#{dest.word(0)} = #{BUILTIN_CLASS_HASH}") do
+        note "**Hash.new は引数を取れません。** 既定値 (Hash.new(0)) を"
+        note "覚える場所が無いためです (見出しの空きが 1 ワードしかない)"
+        if_("#{operand(argc_name)} <> 0") { vm_error(unknown_code) }
+        new_empty_hash(dest, heap_code)
+      end
+      new_filled_array(name, dest, rhs, argc_name, unknown_code, type_code,
+                       heap_code)
+      end_block
+    end
+
+    # Array.new / Array.new(n) / Array.new(n, v)
+    def new_filled_array(name, dest, rhs, argc_name, unknown_code, type_code,
+                         heap_code)
+      if_("#{operand(argc_name)} > 2") do
+        note "Array.new が取るのは 0-2 個"
+        vm_error(unknown_code)
+      end
+      note "**大きさは R[a+1] (枝の外で載せてある rhs)。** ここで載せ直すと"
+      note "「別の枝でアドレスを載せた」で生成器が止まります"
+      size = rhs
+      note "埋める値は R[a+2]。`[]` が使う鍵とは別にします (同じ理由)"
+      fill = devices.reg_slot([:new_fill, name], "#{operand(name)} + 2", z: Z_VALUE)
+      line "Z5 = 0   ' 要素数。引数なしは空配列"
+      if_("#{operand(argc_name)} > 0") do
+        if_("#{size.tag} <> #{TT_INTEGER}") { vm_error(type_code) }
+        if_("#{size.value} < 0") { vm_error(type_code) }
+        if_("#{size.value} > #{layout.max_array_len}") do
+          note "1 スロットに収まらない大きさ"
+          vm_error(heap_code)
+        end
+        line "Z5 = #{size.value}"
+      end
+      alloc_check(heap_code)
+      alloc_header_into(4)
+      line "#{word_at(4, MemoryLayout::ARRAY_LENGTH)} = Z5"
+      note "要素を埋める。引数が 2 つなら R[a+2]、1 つなら nil"
+      note "要素数 0 では 1 つも見ない (0 - 1 が 65535 になるのも避ける)"
+      if_("Z5 > 0") do
+        line "Z6 = Z5 - 1"
+        line "FOR Z7 = 0 TO Z6"
+        indent
+        line "Z8 = Z7 * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
+        element = slot_on(8)
+        if_else_block("#{operand(argc_name)} = 2") do
+          copy_slot(from: fill, to: element)
+        end
+        line "#{element.value} = 0"
+        line "#{element.tag} = #{TT_NIL}"
+        end_block
+        dedent
+        line "NEXT"
+      end
+      alloc_commit(dest, TT_ARRAY)
+    end
+
+    # Hash.new。**配列 2 本を組の数 0 で取ります** (`{}` と同じ形)
+    def new_empty_hash(dest, heap_code)
+      note "ハッシュは配列 2 本。**別々に取る。** 回収が返すスロットは連続しない"
+      alloc_check(heap_code)
+      alloc_header_into(2)
+      line "#{word_at(2, MemoryLayout::ARRAY_LENGTH)} = 0"
+      note "**レジスタへ書くまで守る。** 2 本目の確保が回収を起こしたとき、"
+      note "1 本目はまだどのレジスタからも届かない"
+      line "#{gc_pinned} = #{gc_found} + 1"
+      alloc_bump
+      alloc_check(heap_code)
+      alloc_header_into(3)
+      line "#{word_at(3, MemoryLayout::ARRAY_LENGTH)} = 0"
+      alloc_bump
+      line "#{dest.word(0)} = #{gc_pinned} - 1   ' 鍵の配列"
+      line "#{dest.word(1)} = #{gc_found}   ' 値の配列"
+      line "#{dest.tag} = #{TT_HASH}"
+      note "レジスタから届くようになったので守りを解く"
+      line "#{gc_pinned} = 0"
+    end
 
     # 探索の行をクラス番号から求めて Z<z> に置く
 #
@@ -2996,7 +3302,7 @@ end
     end
 
     def method_body(code, name, dest, rhs, type_code, zero_code, heap_code,
-                    argc_name = nil, depth_code = nil)
+                    argc_name = nil, depth_code = nil, unknown_code = nil)
       case code
       when METHOD_NE    then eq_into(dest, rhs, negate: true)
       when METHOD_NOT   then not_into(dest)
@@ -3021,7 +3327,8 @@ end
       when METHOD_KEYS   then hash_column_into(dest, Z_HASH_KEYS, heap_code)
       when METHOD_VALUES then hash_column_into(dest, Z_HASH_VALUES, heap_code)
       when METHOD_SLICE  then slice_into(dest, rhs, reg_third_slot(name), type_code, heap_code)
-      when METHOD_NEW    then new_object(name, argc_name, heap_code, depth_code)
+      when METHOD_NEW    then new_object(name, rhs, argc_name, unknown_code,
+                                         type_code, heap_code, depth_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end

@@ -141,9 +141,20 @@ module FaRuby
     FRAME_KIND_CALL    = 0   # メソッド呼び出し / クラス本体 (OP_EXEC)
     FRAME_KIND_ITERATE = 1   # times / upto
     FRAME_KIND_EACH    = 2   # each (配列要素反復, +11 に col_slot 格納)
+    # each (ハッシュ。ブロックに鍵と値を渡す。+11 に col_slot 格納)
+    # **番号は PLC 版と揃えています** (MemoryLayout::FRAME_KIND_HASH_EACH)
+    FRAME_KIND_HASH_EACH = 3
     FRAME_KIND_LOOP    = 4   # loop (無限ループ)
     FRAME_KIND_NEW     = 5   # Class#new → initialize 呼び出し
                               # 戻り値を R[0] に写さない (オブジェクトを保持)
+    # any? / all? / none?。**番号は PLC 版と揃えています**
+    # 渡す値は each と同じ (R[0] の型タグで決める)。種別が持っているのは
+    # 「ブロックの値をどう使うか」だけです
+    FRAME_KIND_ANY     = 6
+    FRAME_KIND_ALL     = 7
+    FRAME_KIND_NONE    = 8
+    # Array.new(8) { |i| }。ブロックの値を要素へ書く (渡すのは添字)
+    FRAME_KIND_ARRAY_FILL = 9
 
     # 「外側フレームなし」を表す値 (トップレベル)
     FRAME_NONE = 0xFF
@@ -203,6 +214,11 @@ module FaRuby
     SYM_KIND_USER_METHOD = 0x01   # ユーザー定義メソッド (下位 = method_id)
     SYM_KIND_CLASS       = 0x02   # クラス名 (下位 = class_number)
     SYM_KIND_IVAR        = 0x03   # インスタンス変数 (下位 = ivar_index)
+    # 組み込みクラス (`Array` / `Hash`)。下位 = BUILTIN_CLASS_*
+    #
+    # **PLC 側とは番号が違います** (あちらは 8)。種別の空間がバックエンドごと
+    # に別で、ここは 1-3 しか使っていないためです
+    SYM_KIND_BUILTIN_CLASS = 0x04
 
     # INIT_METHOD_ID の格納アドレス
     #
@@ -213,6 +229,10 @@ module FaRuby
 
     # トップレベル (main) のクラス番号
     CLASS_MAIN = 0
+
+    # 組み込みクラスの番号。**PLC 側と同じ値です** (VmConstants)
+    BUILTIN_CLASS_ARRAY = 1
+    BUILTIN_CLASS_HASH  = 2
 
     # Class#new の組み込みメソッドコード
     METHOD_NEW = 28
@@ -230,6 +250,16 @@ module FaRuby
     METHOD_SETSEG  = 32   # setseg(pos, pattern): 7 セグに任意パターンを設定
     METHOD_RAND    = 33   # rand(n): 0〜n-1 の擬似乱数を返す
     METHOD_SLICE   = 34   # [](offset, length): 文字列スライス
+
+    # any? / all? / none?。ブロックを取る
+    #
+    # **PLC 側とは番号が違います。** 29-31 は i8080 だけのメソッド
+    # (display / getkey / puts) が使っているためです。`[]` も同じ事情で
+    # 番号が違います (PLC は 26、ここは 34)。名前から番号への対応は
+    # バックエンドごとに持っているので、揃っていなくても困りません。
+    METHOD_ANY_P   = 35   # any?
+    METHOD_ALL_P   = 36   # all?
+    METHOD_NONE_P  = 37   # none?
 
     # --- バンク切り替え (ND8080 拡張 RAM) ---
     PORT_9C          = 0x9C    # I/O ポート 9C
