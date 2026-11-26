@@ -122,6 +122,17 @@ mrbc:
   path: C:/path/to/mruby/build/host/bin/mrbc.exe
 ```
 
+**フォルダでも書けます。** 入れ方で名前が変わる (`mrbc.exe` / `mrbc.bat` /
+`mrbc`) ので、フォルダなら `mrbc.exe` → `mrbc.bat` → `mrbc` の順に探します。
+
+```yaml
+mrbc:
+  path: C:/mruby-build/mruby/bin
+```
+
+**PATH は見ません。** mruby を入れただけでは通っていないことが多いためです。
+書いた場所に mrbc が無ければその場で止まります (自動探索には落ちません)。
+
 設定は 2 層になっています。`faruby.yml` に書いた項目だけが `faruby_default.yml`
 の既定値を上書きし、書かなかった項目は既定値のまま残ります。既定値の一覧と
 説明は [faruby_default.yml](faruby_default.yml) にあります。

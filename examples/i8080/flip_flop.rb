@@ -22,6 +22,9 @@
 # 実行:
 #   rake i8080:upload SRC=examples/i8080/flip_flop.rb
 
+KEY_WR    = 0x15
+KYE_ADSET = 0x12
+
 @states = []
 @patterns = []
 
@@ -54,8 +57,8 @@ end
 
 loop do
   # 連動パターンと初期状態を生成 (全桁点灯)
-  @patterns = []
-  @states = []
+  @patterns = Array.new(8) { rand(8) }
+  @states =   Array.new(8, true)
   8.times do
     @patterns << rand(8)
     @states << true
@@ -73,8 +76,8 @@ loop do
     until set
       k = getkey 1000
       num = k - 1 if k && 1 <= k && k <= 8
-      set = true if num && k == 0x15  # WRITE INC
-      if k == 0x12                    # ADRS SET
+      set = true if num && k == KEY_WR
+      if k == KYE_ADSET
         num = nil
         break
       end

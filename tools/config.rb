@@ -84,7 +84,7 @@ module FaRuby
 
     attr_reader :connection, :connections, :model,
                 :plc_protocol, :plc_host, :plc_port,
-                :mrbc_path, :steps_per_cycle, :layout, :features,
+                :steps_per_cycle, :layout, :features,
                 :config_path, :default_path
 
     # config_path: 利用者設定のパス (nil なら自動探索)
@@ -117,7 +117,7 @@ module FaRuby
       @plc_protocol    = merged.dig("plc", "protocol")
       @plc_host        = merged.dig("plc", "host")
       @plc_port        = merged.dig("plc", "port")
-      @mrbc_path       = merged.dig("mrbc", "path") || find_mrbc
+      @mrbc_setting    = merged.dig("mrbc", "path")
       @steps_per_cycle = merged.dig("vm", "steps_per_cycle")
       @layout          = MemoryLayout.from_config(merged["memory"] || {})
       # **容量が足りない機種は機能を外せます** (tools/features.rb)。
@@ -154,7 +154,34 @@ module FaRuby
       self
     end
 
+    # mrbc の場所。**フォルダでも実行ファイルでも書けます** (faruby.yml)。
+    #
+    # 入れ方で名前が変わるためです (`mrbc.exe` / `mrbc.bat` / `mrbc`)。
+    # `mruby/bin` に置かれる `.bat` は `build/host/bin` の実行ファイルを
+    # 呼ぶ中継で、`system` からそのまま動きます。
+    #
+    # **使うときに解決します。** 構築時に解決すると、mrbc を要らない
+    # `rake transfer` のような仕事まで設定の誤りで止まります。
+    def mrbc_path
+      @mrbc_path ||=
+        if @mrbc_setting.nil? || @mrbc_setting.to_s.strip.empty?
+          find_mrbc
+        else
+          resolve_mrbc(@mrbc_setting) ||
+            raise(ConfigError,
+                  "mrbc が見つかりません: #{@mrbc_setting}\n" \
+                  "#{USER_FILENAME} の mrbc.path を直してください " \
+                  "(フォルダでも実行ファイルでも書けます)")
+        end
+    end
+
     private
+
+    # mrbc の実体の名前。**実行ファイルを中継より先に見ます** (1 段短い)
+    MRBC_NAMES = %w[mrbc.exe mrbc.bat mrbc].freeze
+
+    # 拡張子なしで書かれたときに補うもの。空は「そのまま」
+    EXECUTABLE_SUFFIXES = [".exe", ".bat", ".cmd", ""].freeze
 
     # 共通・機種ごと・接続先を重ねる。順はファイル冒頭のとおり
     def merge_for_model(defaults, user, entry)
@@ -221,6 +248,34 @@ module FaRuby
       [Dir.pwd, PROJECT_ROOT]
         .map { |dir| File.join(dir, USER_FILENAME) }
         .find { |path| File.exist?(path) }
+    end
+
+    # 書かれた場所から実行ファイルを決める。見つからなければ nil
+    #
+    # 3 通りの書き方を受けます。
+    #
+    #   C:/mruby-build/mruby/bin           フォルダ
+    #   C:/mruby-build/mruby/bin/mrbc      拡張子なし
+    #   C:/mruby-build/mruby/bin/mrbc.bat  そのまま
+    #
+    # **拡張子なしを補うのが要ります。** README が `/path/to/mrbc` と
+    # 書いていて、Windows の実体は `mrbc.exe` か `mrbc.bat` だからです。
+    # `.bat` は `mruby/bin` に置かれる中継で、`system` からそのまま動きます。
+    #
+    # **黙って自動探索に落ちません。** 書いたはずの場所と違うものが動くと、
+    # なぜその結果になったのかを辿れなくなります
+    def resolve_mrbc(setting)
+      path = File.expand_path(setting.to_s.strip)
+      return path if File.file?(path)
+
+      candidates =
+        if File.directory?(path)
+          MRBC_NAMES.map { |name| File.join(path, name) }
+        else
+          # 拡張子を補う。付いているものが無かった場合もここに来る
+          EXECUTABLE_SUFFIXES.map { |suffix| "#{path}#{suffix}" }
+        end
+      candidates.find { |candidate| File.file?(candidate) }
     end
 
     def find_mrbc

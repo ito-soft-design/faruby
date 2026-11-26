@@ -238,6 +238,14 @@ namespace :i8080 do
   vm_hex   = "#{asm_dir}/vm_main.hex"
   vm_main  = "#{asm_dir}/vm_main.a80"
 
+  # **mrbc は faruby.yml の設定から取ります** (`mrbc.path`)。
+  # PATH を頼ると、入れ方によって通っていない環境で落ちます。
+  # PLC 側 (`rake hw` / `rake bench` / コンソール) は前からこの値です
+  mrbc = lambda do
+    require_relative "tools/config"
+    FaRuby::Config.new.mrbc_path
+  end
+
   desc "Regenerate vm_constants.a80 from Ruby definitions"
   task :constants do
     require_relative "tools/i8080_constants_gen"
@@ -280,7 +288,7 @@ namespace :i8080 do
     # mrbc でコンパイル
     mrb = Tempfile.new(["faruby", ".mrb"])
     mrb.close
-    sh "mrbc -o #{mrb.path} #{src}"
+    sh mrbc.call, "-o", mrb.path, src
 
     # 結合 HEX を生成
     mrb_data = File.binread(mrb.path)
@@ -316,7 +324,7 @@ namespace :i8080 do
 
     mrb = Tempfile.new(["faruby", ".mrb"])
     mrb.close
-    sh "mrbc -o #{mrb.path} #{src}"
+    sh mrbc.call, "-o", mrb.path, src
 
     mrb_data = File.binread(mrb.path)
     hex_gen = FaRuby::I8080BytecodeHex.new(mrb_data)
@@ -346,7 +354,7 @@ namespace :i8080 do
     # mrbc でコンパイル
     mrb = Tempfile.new(["faruby", ".mrb"])
     mrb.close
-    sh "mrbc -o #{mrb.path} #{src}"
+    sh mrbc.call, "-o", mrb.path, src
 
     # 結合 HEX を生成
     mrb_data = File.binread(mrb.path)

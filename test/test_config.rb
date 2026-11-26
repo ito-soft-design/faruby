@@ -317,4 +317,84 @@ class TestConfig < Minitest::Test
       assert_operator config.layout.base, :>, 0, "#{model} のメモリ配置"
     end
   end
+
+  # === mrbc の場所 ===
+  #
+  # **フォルダでも実行ファイルでも書けます。** mruby の入れ方で名前が
+  # 変わる (`mrbc.exe` / `mrbc.bat` / `mrbc`) ので、フォルダを書いて
+  # 済むようにしてあります。`rake i8080:upload` が PATH の mrbc を呼んで
+  # いて、通っていない環境で落ちていたのが見つかった発端です。
+
+  def test_mrbc_can_be_an_executable
+    Dir.mktmpdir do |dir|
+      exe = File.join(dir, "mrbc.exe")
+      File.write(exe, "")
+      with_config("mrbc:\n  path: #{exe}\n") do |path|
+        assert_equal File.expand_path(exe), FaRuby::Config.new(path).mrbc_path
+      end
+    end
+  end
+
+  def test_mrbc_can_be_a_folder
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "mrbc.bat"), "")
+      with_config("mrbc:\n  path: #{dir}\n") do |path|
+        assert_equal File.expand_path(File.join(dir, "mrbc.bat")),
+                     FaRuby::Config.new(path).mrbc_path
+      end
+    end
+  end
+
+  # **拡張子は省けます。** README が `/path/to/mrbc` と書いていて、
+  # Windows の実体は `mrbc.exe` か `mrbc.bat` だからです。実際に
+  # `…/bin/mrbc` と書かれていて、146 本が黙ってスキップしました
+  def test_mrbc_can_omit_the_extension
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "mrbc.bat"), "")
+      with_config("mrbc:\n  path: #{File.join(dir, 'mrbc')}\n") do |path|
+        assert_equal File.expand_path(File.join(dir, "mrbc.bat")),
+                     FaRuby::Config.new(path).mrbc_path
+      end
+    end
+  end
+
+  # **実行ファイルを優先します。** 中継の .bat より 1 段短いので
+  def test_an_executable_wins_over_the_relay
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, "mrbc.bat"), "")
+      File.write(File.join(dir, "mrbc.exe"), "")
+      with_config("mrbc:\n  path: #{dir}\n") do |path|
+        assert_equal File.expand_path(File.join(dir, "mrbc.exe")),
+                     FaRuby::Config.new(path).mrbc_path
+      end
+    end
+  end
+
+  # **黙って自動探索に落ちません。** 書いたはずの場所と違うものが動くと、
+  # なぜその結果になったのかを辿れなくなります
+  def test_a_folder_without_mrbc_is_refused
+    Dir.mktmpdir do |dir|
+      with_config("mrbc:\n  path: #{dir}\n") do |path|
+        e = assert_raises(FaRuby::ConfigError) { FaRuby::Config.new(path).mrbc_path }
+        assert_includes e.message, dir
+      end
+    end
+  end
+
+  # **読むまで解決しません。** mrbc を要らない仕事を設定の誤りで
+  # 止めないため (`rake transfer` など)
+  def test_a_bad_setting_does_not_stop_the_rest
+    with_config("mrbc:\n  path: /nowhere/at/all\n") do |path|
+      config = FaRuby::Config.new(path)
+
+      assert_equal "KV-5000", config.model
+      assert_raises(FaRuby::ConfigError) { config.mrbc_path }
+    end
+  end
+
+  def test_no_setting_falls_back_to_the_search
+    with_config("plc:\n  host: 10.0.0.1\n") do |path|
+      assert_match(/mrbc/, FaRuby::Config.new(path).mrbc_path)
+    end
+  end
 end
