@@ -57,9 +57,13 @@ module FaRuby
     #
     # **`length` と `empty?` と `<<` は 3 つの型で共有します。** どれか 1 つ
     # でも残っていれば枝は要るので、全部外れたときだけ落とせます。
+    #
+    # **述語 (`any?` / `all?` / `none?`) は配列とハッシュの両方に書きます。**
+    # レシーバになれるのがこの 2 つだけなので、**両方外れた機種では 1 行も
+    # 通りません** (今は Q だけ。182 行落ちます)。どちらかが有効なら残ります。
     METHODS = {
-      arrays:  %i[push each length size empty? <<],
-      hashes:  %i[key? keys values each length size empty?],
+      arrays:  %i[push each length size empty? << any? all? none?],
+      hashes:  %i[key? keys values each length size empty? any? all? none?],
       strings: %i[length size empty? <<],
     }.freeze
 
