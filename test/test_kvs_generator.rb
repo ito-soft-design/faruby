@@ -821,6 +821,36 @@ class TestKvsGenerator < Minitest::Test
                     "#{largest.first} が上限の 95% を超えた。DISPATCH_GROUPS を増やすころ合い"
   end
 
+  # 述語 3 つを 1 つの枝で受けていること
+  #
+  # **番号ごとに枝を開くと同じ 180 行が 3 つ並びます。** 中身は Z5 を見て
+  # 答えを分ける同じコードなので、分ける意味がありません (まとめる前の
+  # vm_09_group5 は 4302 行、まとめた後は 3910 行)。
+  def test_述語は_1_つの枝で受ける
+    source = FaRuby::KvsGenerator.new.generate.values.join
+
+    assert_equal 1, source.scan(/ELSE IF Z5 >= #{FaRuby::VmConstants::METHOD_ANY_P} THEN/).size,
+                 "述語の枝は 1 つだけ"
+    FaRuby::VmConstants::PREDICATE_METHODS.each do |code|
+      refute_match(/ELSE IF Z5 = #{code} THEN/, source,
+                   "述語 #{code} が自分の枝を持っている (まとめ忘れ)")
+    end
+  end
+
+  # `Z5 >= 29` が成り立つ前提。**述語は番号の末尾に 3 つ並んでいる**
+  #
+  # KV スクリプトに AND が無いため範囲は書けず、下限だけで受けています。
+  # 番号を増やして末尾でなくなると、その番号が述語として扱われます。
+  # 生成器も同じ前提を見て止まりますが、気付くのはここの方が早い。
+  def test_述語の番号は末尾に_3_つ並んでいる
+    codes = FaRuby::VmConstants::PREDICATE_METHODS
+
+    assert_equal 3, codes.size
+    assert_equal codes.min..codes.max, Range.new(*codes.minmax), "連続していること"
+    assert_equal codes.max, FaRuby::VmConstants::METHOD_NAMES.keys.max,
+                 "述語より大きいメソッド番号を作ってはいけない"
+  end
+
   private
 
   # 指定オペコードの分岐本体を切り出す

@@ -2733,28 +2733,34 @@ module FaRuby
       push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
                  outer: MemoryLayout::FRAME_NONE,
                  kind: MemoryLayout::FRAME_KIND_ITERATE)
-      if_("Z5 = #{METHOD_EACH}") do
-        note "each はブロックに添字ではなく要素を渡す"
-        note "ハッシュは鍵と値の 2 つを渡すので種別を分ける"
-        line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
-        if_else_block("#{slot_on(4).tag} = #{TT_HASH}") do
-          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}"
+      # **恒等ブロックの道では述語しか来ません。** Z5 は 29-31 のどれかなので、
+      # each / loop / new の判定は 1 度も真になりません (18 行ぶん)
+      unless identity
+        if_("Z5 = #{METHOD_EACH}") do
+          note "each はブロックに添字ではなく要素を渡す"
+          note "ハッシュは鍵と値の 2 つを渡すので種別を分ける"
+          line "Z4 = 0 + #{reg_offset}   ' 窓をずらした後の R[0] がレシーバ"
+          if_else_block("#{slot_on(4).tag} = #{TT_HASH}") do
+            line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_HASH_EACH}"
+          end
+          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
+          end_block
         end
-        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_EACH}"
-        end_block
-      end
-      if_("Z5 = #{METHOD_LOOP}") do
-        note "loop は上限が無く、ブロックに渡す値も無い"
-        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
+        if_("Z5 = #{METHOD_LOOP}") do
+          note "loop は上限が無く、ブロックに渡す値も無い"
+          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_LOOP}"
+        end
       end
       note "**述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、"
       note "種別が持つのは「ブロックの値をどう使うか」だけです"
       MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
         if_("Z5 = #{code}") { line "#{frame_kind} = #{kind}" }
       end
-      if_("Z5 = #{METHOD_NEW}") do
-        note "Array.new はブロックの値を要素へ書く。渡すのは添字"
-        line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}"
+      unless identity
+        if_("Z5 = #{METHOD_NEW}") do
+          note "Array.new はブロックの値を要素へ書く。渡すのは添字"
+          line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}"
+        end
       end
       if identity
         note "**恒等ブロックは最後の irep です。** 中身は `OP_RETURN R[1]` の"
@@ -2857,12 +2863,12 @@ module FaRuby
       check_receiver_type(dest, type_code)
 
       first = true
-      plain_methods.each_key do |code|
-        chain_head(first, "Z5 = #{code}")
+      dispatch_branches.each do |codes, cond|
+        chain_head(first, cond)
         first = false
         indent
-        note METHOD_NAMES.fetch(code)
-        method_body(code, name, dest, rhs, type_code, zero_code, heap_code,
+        note codes.map { |code| METHOD_NAMES.fetch(code) }.join(" / ")
+        method_body(codes.first, name, dest, rhs, type_code, zero_code, heap_code,
                     argc_name, depth_code, unknown_code)
         dedent
       end
@@ -2872,6 +2878,30 @@ module FaRuby
       vm_error(unknown_code)
       dedent
       line "END IF"
+    end
+
+    # 組み込みメソッドの振り分けの枝。[[メソッド番号...], 条件] の並び
+    #
+    # **述語 3 つは 1 つの枝です。** 中身は `blockless_predicate` が Z5 を見て
+    # 答えを分ける同じコードなので、番号ごとに並べると**同じ 180 行が 3 つ**
+    # 並びます (まとめる前の vm_09_group5 はこれで 370 行ふくらんでいました)。
+    #
+    # **条件は `Z5 >= 29` の 1 つだけ**です。KV スクリプトに AND が無く範囲は
+    # 書けませんが、述語の番号は連続していて**しかも末尾**なので下限で足ります。
+    # その前提が崩れたらここで止めます (番号を増やすときに気付けるように)。
+    def dispatch_branches
+      codes = plain_methods.keys
+      predicates = codes & PREDICATE_METHODS
+      branches = (codes - PREDICATE_METHODS).map { |code| [[code], "Z5 = #{code}"] }
+      return branches if predicates.empty?
+
+      unless predicates == PREDICATE_METHODS && predicates.max == METHOD_NAMES.keys.max
+        raise ArgumentError,
+              "述語は番号の末尾に 3 つ揃っている前提です " \
+              "(#{predicates.inspect} / 最大 #{METHOD_NAMES.keys.max})"
+      end
+
+      branches << [predicates, "Z5 >= #{predicates.min}"]
     end
 
     # メソッド番号からレシーバに要求される型を検査する
