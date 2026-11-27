@@ -22,16 +22,18 @@
 # 実行:
 #   rake i8080:upload SRC=examples/i8080/flip_flop.rb
 
-KEY_WR    = 0x15
-KYE_ADSET = 0x12
+KEY_WR            = 0x15
+KEY_ADSET         = 0x12
+BLINK_INTERVAL    = 250
+POLLING_INTERVAL  = 2
 
 @states = []
 @patterns = []
 
 puts "Push key"
-while getkey 10; end  # キー離し待ち (RUN キーが押されたままの場合がある)
+while getkey POLLING_INTERVAL; end  # キー離し待ち (RUN キーが押されたままの場合がある)
 getkey                # キー入力待ち (待機中に乱数が回る)
-while getkey 10; end  # キー離し待ち
+while getkey POLLING_INTERVAL; end  # キー離し待ち
 
 # 現在の状態を 7 セグに表示
 def print_digits
@@ -59,10 +61,6 @@ loop do
   # 連動パターンと初期状態を生成 (全桁点灯)
   @patterns = Array.new(8) { rand(8) }
   @states =   Array.new(8, true)
-  8.times do
-    @patterns << rand(8)
-    @states << true
-  end
 
   finished = false
   64.times do
@@ -74,10 +72,10 @@ loop do
     num = nil
     blink = false
     until set
-      k = getkey 1000
+      k = getkey BLINK_INTERVAL
       num = k - 1 if k && 1 <= k && k <= 8
       set = true if num && k == KEY_WR
-      if k == KYE_ADSET
+      if k == KEY_ADSET
         num = nil
         break
       end
@@ -85,7 +83,7 @@ loop do
       print_digits_and_blink blink, num
       blink = !blink
     end
-    while getkey 10; end              # キー離し待ち
+    while getkey POLLING_INTERVAL; end              # キー離し待ち
 
     break unless num    # 桁未選択ならギブアップ
 
@@ -96,12 +94,8 @@ loop do
     end
     print_digits
 
-    # 全桁消灯ならクリア
-    on_any = false
-    @states.each do |f|
-      on_any ||= f
-    end
-    finished = true unless on_any
+    # 全桁消灯でクリア。**真が 1 つも無いこと**を見る
+    finished = @states.none?
     if finished
       break
     end

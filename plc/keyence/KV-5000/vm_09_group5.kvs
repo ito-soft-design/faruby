@@ -1693,6 +1693,567 @@ IF EM54:Z9 <= 60 THEN
               EM39:Z9 = EM39:Z9 + 1
             END IF
           END IF
+        ELSE IF Z5 = 29 THEN
+          ' any?
+          IF EM0:Z1 = 9 THEN
+            ' 鍵の配列の見出し。R[a] を書き換える前に読む
+            Z4 = EM1:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 組の数
+            ' 組は常に真。打ち切る値が真の側だけ、空かどうかで分かれる
+            IF Z5 = 29 THEN
+              ' any?: 1 組でもあれば true、空なら false
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              ELSE
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+            IF Z5 = 30 THEN
+              ' all?: 組は真なので打ち切らない。常に true
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            END IF
+            IF Z5 = 31 THEN
+              ' none?: 1 組でもあれば false、空なら true
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              ELSE
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+            END IF
+          ELSE
+            ' 配列は中身を 1 つずつ見ます。**恒等ブロックを渡したものとして**
+            ' 反復に入れるので、フレームも判定もブロック付きと同じ道です
+            ' スロットの見出し。R[a] を書き換える前に読む
+            Z4 = EM1.L:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 要素数
+            ' 0 から 要素数-1 まで (iteration_range のコレクションの枝と同じ)
+            EM16.L:Z9 = 0
+            EM18.L:Z9 = EM18.L:Z9 - 1
+            IF EM16.L:Z9 <= EM18.L:Z9 THEN
+              IF EM31:Z9 >= 16 THEN
+                ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              ' 戻り先を積む
+              Z3 = EM31:Z9 * 10 + 392 + Z9
+              EM0:Z3 = EM0:Z9
+              EM1:Z3 = EM30:Z9
+              EM2:Z3 = EM32:Z9
+              EM4:Z3 = 65535
+              EM5:Z3 = 1
+              ' レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+              EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+              EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
+              EM31:Z9 = EM31:Z9 + 1
+              IF Z5 = 21 THEN
+                ' each はブロックに添字ではなく要素を渡す
+                ' ハッシュは鍵と値の 2 つを渡すので種別を分ける
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  EM5:Z3 = 3
+                ELSE
+                  EM5:Z3 = 2
+                END IF
+              END IF
+              IF Z5 = 27 THEN
+                ' loop は上限が無く、ブロックに渡す値も無い
+                EM5:Z3 = 4
+              END IF
+              ' **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、
+              ' 種別が持つのは「ブロックの値をどう使うか」だけです
+              IF Z5 = 29 THEN
+                EM5:Z3 = 6
+              END IF
+              IF Z5 = 30 THEN
+                EM5:Z3 = 7
+              END IF
+              IF Z5 = 31 THEN
+                EM5:Z3 = 8
+              END IF
+              IF Z5 = 28 THEN
+                ' Array.new はブロックの値を要素へ書く。渡すのは添字
+                EM5:Z3 = 9
+              END IF
+              ' **恒等ブロックは最後の irep です。** 中身は `OP_RETURN R[1]` の
+              ' 2 バイトだけで、ホストがブロック無しの述語を見つけたときだけ
+              ' 足します (irep を 1 枠使うので、使わないプログラムでは出ません)
+              Z6 = EM36:Z9 - 1   ' 本体の irep
+              Z7 = 65535   ' 定義元は無い
+              ' 反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)
+              EM4:Z3 = Z7
+              EM6.L:Z3 = EM16.L:Z9
+              EM8.L:Z3 = EM18.L:Z9
+              ' 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く
+              Z2 = 4 + EM32:Z9 + Z9
+              IF EM5:Z3 = 4 THEN
+                ' loop はブロックに何も渡さない。**引数の数だけ書く。**
+                ' Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
+                EM37:Z9 = 0
+              ELSE IF EM5:Z3 = 1 THEN
+                ' times / upto は添字を渡す
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE IF EM5:Z3 = 9 THEN
+                ' **Array.new も添字です。** R[0] が配列なので、下のコレクションの
+                ' 枝に落ちると要素を渡してしまいます。種別で見分けます
+                ' **旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が
+                ' 載っていて、空いている Z が無いためです (3 行なので分けた方が安い)
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE
+                ' **残りはコレクションの反復です** (each / any? / all? / none?)。
+                ' 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。
+                ' 述語は配列とハッシュで種別を分けていないためです
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  ' ハッシュは鍵と値を渡す
+                  Z7 = EM1:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
+                  Z7 = EM2:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 2
+                ELSE
+                  ' 配列はその位置の要素を渡す
+                  ' **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
+                  ' 載っていて、これから要素の位置を出すのに使う
+                  Z7 = EM1.L:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 1
+                END IF
+              END IF
+              EM30:Z9 = Z6
+              ' IREP テーブルから実行中の irep の情報を写す
+              Z1 = Z6 * 8 + EM38:Z9
+              EM33:Z9 = ZF98304:Z1
+              EM10:Z9 = ZF98305:Z1
+              EM34:Z9 = ZF98306:Z1
+              EM35:Z9 = ZF98307:Z1
+              EM11:Z9 = ZF98308:Z1
+              ' レジスタ窓が領域からはみ出さないこと
+              EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+              IF EM16:Z9 > 392 THEN
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              EM0:Z9 = 0
+            ELSE
+              ' 空の配列。1 回も回らないのでここで答えが決まる
+              IF Z5 = 29 THEN
+                ' any?: 空なら false
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+              IF Z5 = 30 THEN
+                ' all?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+              IF Z5 = 31 THEN
+                ' none?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+          END IF
+        ELSE IF Z5 = 30 THEN
+          ' all?
+          IF EM0:Z1 = 9 THEN
+            ' 鍵の配列の見出し。R[a] を書き換える前に読む
+            Z4 = EM1:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 組の数
+            ' 組は常に真。打ち切る値が真の側だけ、空かどうかで分かれる
+            IF Z5 = 29 THEN
+              ' any?: 1 組でもあれば true、空なら false
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              ELSE
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+            IF Z5 = 30 THEN
+              ' all?: 組は真なので打ち切らない。常に true
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            END IF
+            IF Z5 = 31 THEN
+              ' none?: 1 組でもあれば false、空なら true
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              ELSE
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+            END IF
+          ELSE
+            ' 配列は中身を 1 つずつ見ます。**恒等ブロックを渡したものとして**
+            ' 反復に入れるので、フレームも判定もブロック付きと同じ道です
+            ' スロットの見出し。R[a] を書き換える前に読む
+            Z4 = EM1.L:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 要素数
+            ' 0 から 要素数-1 まで (iteration_range のコレクションの枝と同じ)
+            EM16.L:Z9 = 0
+            EM18.L:Z9 = EM18.L:Z9 - 1
+            IF EM16.L:Z9 <= EM18.L:Z9 THEN
+              IF EM31:Z9 >= 16 THEN
+                ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              ' 戻り先を積む
+              Z3 = EM31:Z9 * 10 + 392 + Z9
+              EM0:Z3 = EM0:Z9
+              EM1:Z3 = EM30:Z9
+              EM2:Z3 = EM32:Z9
+              EM4:Z3 = 65535
+              EM5:Z3 = 1
+              ' レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+              EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+              EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
+              EM31:Z9 = EM31:Z9 + 1
+              IF Z5 = 21 THEN
+                ' each はブロックに添字ではなく要素を渡す
+                ' ハッシュは鍵と値の 2 つを渡すので種別を分ける
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  EM5:Z3 = 3
+                ELSE
+                  EM5:Z3 = 2
+                END IF
+              END IF
+              IF Z5 = 27 THEN
+                ' loop は上限が無く、ブロックに渡す値も無い
+                EM5:Z3 = 4
+              END IF
+              ' **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、
+              ' 種別が持つのは「ブロックの値をどう使うか」だけです
+              IF Z5 = 29 THEN
+                EM5:Z3 = 6
+              END IF
+              IF Z5 = 30 THEN
+                EM5:Z3 = 7
+              END IF
+              IF Z5 = 31 THEN
+                EM5:Z3 = 8
+              END IF
+              IF Z5 = 28 THEN
+                ' Array.new はブロックの値を要素へ書く。渡すのは添字
+                EM5:Z3 = 9
+              END IF
+              ' **恒等ブロックは最後の irep です。** 中身は `OP_RETURN R[1]` の
+              ' 2 バイトだけで、ホストがブロック無しの述語を見つけたときだけ
+              ' 足します (irep を 1 枠使うので、使わないプログラムでは出ません)
+              Z6 = EM36:Z9 - 1   ' 本体の irep
+              Z7 = 65535   ' 定義元は無い
+              ' 反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)
+              EM4:Z3 = Z7
+              EM6.L:Z3 = EM16.L:Z9
+              EM8.L:Z3 = EM18.L:Z9
+              ' 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く
+              Z2 = 4 + EM32:Z9 + Z9
+              IF EM5:Z3 = 4 THEN
+                ' loop はブロックに何も渡さない。**引数の数だけ書く。**
+                ' Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
+                EM37:Z9 = 0
+              ELSE IF EM5:Z3 = 1 THEN
+                ' times / upto は添字を渡す
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE IF EM5:Z3 = 9 THEN
+                ' **Array.new も添字です。** R[0] が配列なので、下のコレクションの
+                ' 枝に落ちると要素を渡してしまいます。種別で見分けます
+                ' **旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が
+                ' 載っていて、空いている Z が無いためです (3 行なので分けた方が安い)
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE
+                ' **残りはコレクションの反復です** (each / any? / all? / none?)。
+                ' 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。
+                ' 述語は配列とハッシュで種別を分けていないためです
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  ' ハッシュは鍵と値を渡す
+                  Z7 = EM1:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
+                  Z7 = EM2:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 2
+                ELSE
+                  ' 配列はその位置の要素を渡す
+                  ' **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
+                  ' 載っていて、これから要素の位置を出すのに使う
+                  Z7 = EM1.L:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 1
+                END IF
+              END IF
+              EM30:Z9 = Z6
+              ' IREP テーブルから実行中の irep の情報を写す
+              Z1 = Z6 * 8 + EM38:Z9
+              EM33:Z9 = ZF98304:Z1
+              EM10:Z9 = ZF98305:Z1
+              EM34:Z9 = ZF98306:Z1
+              EM35:Z9 = ZF98307:Z1
+              EM11:Z9 = ZF98308:Z1
+              ' レジスタ窓が領域からはみ出さないこと
+              EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+              IF EM16:Z9 > 392 THEN
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              EM0:Z9 = 0
+            ELSE
+              ' 空の配列。1 回も回らないのでここで答えが決まる
+              IF Z5 = 29 THEN
+                ' any?: 空なら false
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+              IF Z5 = 30 THEN
+                ' all?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+              IF Z5 = 31 THEN
+                ' none?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+          END IF
+        ELSE IF Z5 = 31 THEN
+          ' none?
+          IF EM0:Z1 = 9 THEN
+            ' 鍵の配列の見出し。R[a] を書き換える前に読む
+            Z4 = EM1:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 組の数
+            ' 組は常に真。打ち切る値が真の側だけ、空かどうかで分かれる
+            IF Z5 = 29 THEN
+              ' any?: 1 組でもあれば true、空なら false
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              ELSE
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+            IF Z5 = 30 THEN
+              ' all?: 組は真なので打ち切らない。常に true
+              EM1.L:Z1 = 1
+              EM0:Z1 = 3
+            END IF
+            IF Z5 = 31 THEN
+              ' none?: 1 組でもあれば false、空なら true
+              IF EM18.L:Z9 = 0 THEN
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              ELSE
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+            END IF
+          ELSE
+            ' 配列は中身を 1 つずつ見ます。**恒等ブロックを渡したものとして**
+            ' 反復に入れるので、フレームも判定もブロック付きと同じ道です
+            ' スロットの見出し。R[a] を書き換える前に読む
+            Z4 = EM1.L:Z1
+            Z4 = Z4 * 52 + 2008 + Z9
+            EM18.L:Z9 = EM0:Z4   ' 要素数
+            ' 0 から 要素数-1 まで (iteration_range のコレクションの枝と同じ)
+            EM16.L:Z9 = 0
+            EM18.L:Z9 = EM18.L:Z9 - 1
+            IF EM16.L:Z9 <= EM18.L:Z9 THEN
+              IF EM31:Z9 >= 16 THEN
+                ' 呼び出しが深すぎる。PLC はメモリ固定なので上限で止めるしかない
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              ' 戻り先を積む
+              Z3 = EM31:Z9 * 10 + 392 + Z9
+              EM0:Z3 = EM0:Z9
+              EM1:Z3 = EM30:Z9
+              EM2:Z3 = EM32:Z9
+              EM4:Z3 = 65535
+              EM5:Z3 = 1
+              ' レジスタ窓をずらす。呼ばれた側の R[0] が呼んだ側の R[a]
+              EM32:Z9 = EM32:Z9 + EM7:Z9 * 4
+              EM3:Z3 = EM32:Z9   ' このフレームの窓 (OP_GETUPVAR が見る)
+              EM31:Z9 = EM31:Z9 + 1
+              IF Z5 = 21 THEN
+                ' each はブロックに添字ではなく要素を渡す
+                ' ハッシュは鍵と値の 2 つを渡すので種別を分ける
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  EM5:Z3 = 3
+                ELSE
+                  EM5:Z3 = 2
+                END IF
+              END IF
+              IF Z5 = 27 THEN
+                ' loop は上限が無く、ブロックに渡す値も無い
+                EM5:Z3 = 4
+              END IF
+              ' **述語は渡す値を種別で分けません。** R[0] の型タグで決まるので、
+              ' 種別が持つのは「ブロックの値をどう使うか」だけです
+              IF Z5 = 29 THEN
+                EM5:Z3 = 6
+              END IF
+              IF Z5 = 30 THEN
+                EM5:Z3 = 7
+              END IF
+              IF Z5 = 31 THEN
+                EM5:Z3 = 8
+              END IF
+              IF Z5 = 28 THEN
+                ' Array.new はブロックの値を要素へ書く。渡すのは添字
+                EM5:Z3 = 9
+              END IF
+              ' **恒等ブロックは最後の irep です。** 中身は `OP_RETURN R[1]` の
+              ' 2 バイトだけで、ホストがブロック無しの述語を見つけたときだけ
+              ' 足します (irep を 1 枠使うので、使わないプログラムでは出ません)
+              Z6 = EM36:Z9 - 1   ' 本体の irep
+              Z7 = 65535   ' 定義元は無い
+              ' 反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)
+              EM4:Z3 = Z7
+              EM6.L:Z3 = EM16.L:Z9
+              EM8.L:Z3 = EM18.L:Z9
+              ' 渡す値と引数の数はどちらもフレームの種別で決まる。まとめて書く
+              Z2 = 4 + EM32:Z9 + Z9
+              IF EM5:Z3 = 4 THEN
+                ' loop はブロックに何も渡さない。**引数の数だけ書く。**
+                ' Ruby の loop { |i| } も i は nil で、ここでは未代入のまま
+                EM37:Z9 = 0
+              ELSE IF EM5:Z3 = 1 THEN
+                ' times / upto は添字を渡す
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE IF EM5:Z3 = 9 THEN
+                ' **Array.new も添字です。** R[0] が配列なので、下のコレクションの
+                ' 枝に落ちると要素を渡してしまいます。種別で見分けます
+                ' **旗を立てて 1 つの枝にまとめられません。** Z6 には移り先の irep が
+                ' 載っていて、空いている Z が無いためです (3 行なので分けた方が安い)
+                EM1.L:Z2 = EM16.L:Z9
+                EM0:Z2 = 4
+                EM37:Z9 = 1
+              ELSE
+                ' **残りはコレクションの反復です** (each / any? / all? / none?)。
+                ' 渡す値は種別ではなく **R[0] (レシーバ) の型タグ**で決まります。
+                ' 述語は配列とハッシュで種別を分けていないためです
+                Z4 = 0 + EM32:Z9 + Z9   ' 窓をずらした後の R[0] がレシーバ
+                IF EM0:Z4 = 9 THEN
+                  ' ハッシュは鍵と値を渡す
+                  Z7 = EM1:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  Z2 = 2 * 4 + EM32:Z9 + Z9   ' R[2] に値
+                  Z7 = EM2:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 2
+                ELSE
+                  ' 配列はその位置の要素を渡す
+                  ' **スロット番号は 2 つ目のスクラッチへ。** 1 つ目には反復の添字が
+                  ' 載っていて、これから要素の位置を出すのに使う
+                  Z7 = EM1.L:Z4   ' スロット番号
+                  Z7 = Z7 * 52 + 2008 + Z9
+                  Z5 = EM16.L:Z9
+                  Z5 = Z5 * 4 + Z7 + 4
+                  EM1.L:Z2 = EM1.L:Z5
+                  EM0:Z2 = EM0:Z5
+                  EM37:Z9 = 1
+                END IF
+              END IF
+              EM30:Z9 = Z6
+              ' IREP テーブルから実行中の irep の情報を写す
+              Z1 = Z6 * 8 + EM38:Z9
+              EM33:Z9 = ZF98304:Z1
+              EM10:Z9 = ZF98305:Z1
+              EM34:Z9 = ZF98306:Z1
+              EM35:Z9 = ZF98307:Z1
+              EM11:Z9 = ZF98308:Z1
+              ' レジスタ窓が領域からはみ出さないこと
+              EM16:Z9 = EM32:Z9 + EM11:Z9 * 4
+              IF EM16:Z9 > 392 THEN
+                EM1:Z9 = 3
+                EM2:Z9 = 5
+                BREAK
+              END IF
+              EM0:Z9 = 0
+            ELSE
+              ' 空の配列。1 回も回らないのでここで答えが決まる
+              IF Z5 = 29 THEN
+                ' any?: 空なら false
+                EM1.L:Z1 = 0
+                EM0:Z1 = 2
+              END IF
+              IF Z5 = 30 THEN
+                ' all?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+              IF Z5 = 31 THEN
+                ' none?: 空なら true
+                EM1.L:Z1 = 1
+                EM0:Z1 = 3
+              END IF
+            END IF
+          END IF
         ELSE IF Z5 = 28 THEN
           ' new
           ' **組み込みクラスは作るものが違う。** メソッド表の行も持たない

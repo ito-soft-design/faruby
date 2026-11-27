@@ -263,7 +263,7 @@ shash_append:
   ; 容量チェック
   lda shash_pair_cnt
   cpi COL_MAX_HASH_PAIRS
-  jnc vm_error          ; Hash 満杯
+  jnc vm_fail          ; Hash 満杯
 
   ; count++ を書き込み
   inr a
@@ -381,7 +381,7 @@ send_slice:
   call get_reg_addr     ; HL = R[a]
   mov a, m              ; A = 型タグ
   cpi TT_STRING
-  jnz vm_error
+  jnz vm_fail
 
   ; ソース文字列のコレクションスロットを取得
   lda send_reg_a
@@ -513,7 +513,7 @@ slice_new_slot:  db 0
 ;   なるまで繰り返す。**文字列の中身はバイト列なので辿らない。**
 ;
 ;   出力: A = スロット番号, HL = スロットアドレス
-;   エラー: 全スロット生きている → vm_error
+;   エラー: 全スロット生きている → vm_fail
 ; ===============================================================
 col_gc_alloc:
   ; **前の走査で作った印がまだ使えるなら、走査せずに空きを配る。**
@@ -605,7 +605,7 @@ gc_root_ivar:
   ; **走査した直後なのでここで無ければ本当に満杯。**
   call gc_scan_free
   cpi 0FFh
-  jz vm_error           ; 全スロット使用中
+  jz vm_fail           ; 全スロット使用中
 
 gc_found_free:
   ; A = 空きスロット番号
@@ -911,7 +911,7 @@ sendb_each:
   cpi TT_ARRAY
   jz each_kind_array
   cpi TT_HASH
-  jnz vm_error
+  jnz vm_fail
   mvi a, FRAME_KIND_HASH_EACH
   jmp each_kind_set
 each_kind_array:
@@ -927,7 +927,7 @@ sendb_each_join:
   cpi TT_ARRAY
   jz each_recv_ok
   cpi TT_HASH
-  jnz vm_error
+  jnz vm_fail
 each_recv_ok:
 
   ; コレクションスロット番号を取得 (配列・ハッシュとも val_lo = slot + 1)
@@ -948,6 +948,13 @@ each_recv_ok:
   jz each_empty         ; 空 → ブロック実行しない
 
   ; ブロック (TT_PROC) の情報を読む
+  ;
+  ; **ブロック無しの述語は R[a+1] を見ない。** 恒等ブロックは最後の
+  ; irep で、中身は `OP_RETURN R[1]` の 2 バイトだけ。ホストが
+  ; ブロック無しの述語を見つけたときだけ足す
+  lda pred_identity
+  ora a
+  jnz each_block_identity
   lda sendb_argc
   inr a                 ; argc + 1
   mov b, a
@@ -960,6 +967,13 @@ each_recv_ok:
   inx h
   mov a, m              ; outer
   sta sendb_block_outer
+  jmp each_block_ready
+each_block_identity:
+  lda IDENTITY_IREP_STORE
+  sta sendb_block_irep
+  mvi a, FRAME_NONE
+  sta sendb_block_outer
+each_block_ready:
 
   ; push_frame(a, kind, outer)
   lda each_arg_kind
@@ -1027,6 +1041,74 @@ each_empty_write:
 
 each_empty_tag: db 0
 
+; **ブロックが恒等か。** 0 = R[a+argc+1] のブロックを使う
+pred_identity: db 0
+
+; ===============================================================
+; send_pred — ブロック無しの述語 (a.any? / a.all? / a.none?)
+;
+; **`a.all?` は `a.all? { |x| x }` と同じです。** 中身をそのまま返す
+; ブロックを渡したものとして each の道に入れるので、反復もフレームも
+; 判定もブロック付きと同じ経路を通ります。規則を書き直しません。
+;
+; **ハッシュは反復しません。** Ruby はブロック無しのとき [鍵, 値] の
+; 配列を見るので、中身がどうであれ常に真です。鍵をそのまま渡すと
+; `{nil => 1}.all?` が偽になってしまいます。組の数だけで決まります。
+; ===============================================================
+send_pred_any:
+  mvi a, FRAME_KIND_ANY
+  jmp send_pred
+send_pred_all:
+  mvi a, FRAME_KIND_ALL
+  jmp send_pred
+send_pred_none:
+  mvi a, FRAME_KIND_NONE
+send_pred:
+  sta each_arg_kind
+  ; ブロック付きと同じ変数へ移して合流する
+  lda send_reg_a
+  sta sendb_reg_a
+  xra a
+  sta sendb_argc        ; 述語は引数を取らない
+  ; レシーバがハッシュなら反復しない
+  lda send_reg_a
+  call get_reg_addr     ; HL = R[a]
+  mov a, m
+  cpi TT_HASH
+  jz send_pred_hash
+  mvi a, 1
+  sta pred_identity
+  jmp sendb_each_join
+
+; --- ハッシュ。組の数だけで決まる ---
+send_pred_hash:
+  lda send_reg_a
+  call get_reg_addr
+  call col_from_reg     ; HL = 鍵の配列のスロット
+  inx h                 ; +1: 組の数
+  mov a, m
+  ora a                 ; Z=1 なら空
+  mvi b, TT_TRUE
+  jz send_pred_hash_empty
+  ; 空でない: any? と all? は true、none? は false
+  lda each_arg_kind
+  cpi FRAME_KIND_NONE
+  jnz send_pred_hash_write
+  mvi b, TT_FALSE
+  jmp send_pred_hash_write
+send_pred_hash_empty:
+  ; 空: any? は false、all? と none? は true
+  lda each_arg_kind
+  cpi FRAME_KIND_ANY
+  jnz send_pred_hash_write
+  mvi b, TT_FALSE
+send_pred_hash_write:
+  lda send_reg_a
+  call get_reg_addr
+  mov a, b
+  call set_slot_special
+  jmp vm_loop
+
 ; ===============================================================
 ; sendb_array_new — Array.new(n) { |i| }
 ;
@@ -1043,13 +1125,13 @@ sendb_array_new:
   call get_reg_addr     ; HL = R[a]
   mov a, m
   cpi TT_BUILTIN_CLASS
-  jnz vm_error
+  jnz vm_fail
   lda sendb_reg_a
   call get_reg_addr
   call slot_to_value
   mov a, m
   cpi BUILTIN_CLASS_ARRAY
-  jnz vm_error
+  jnz vm_fail
 
   ; 大きさは R[a+1]
   lda sendb_reg_a
@@ -1057,17 +1139,17 @@ sendb_array_new:
   call get_reg_addr     ; HL = R[a+1]
   mov a, m
   cpi TT_INTEGER
-  jnz vm_error
+  jnz vm_fail
   inx h
   inx h                 ; +2: val_lo
   mov c, m
   inx h
   mov a, m              ; 上位バイト
   ora a
-  jnz vm_error          ; 負か大きすぎる
+  jnz vm_fail          ; 負か大きすぎる
   mov a, c
   cpi COL_MAX_ARRAY_ELEMS + 1
-  jnc vm_error
+  jnc vm_fail
   sta san_count
 
   ; スロットを確保して nil で埋める

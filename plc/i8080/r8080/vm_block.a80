@@ -103,6 +103,9 @@ do_op_ssendb:
 ; シンボルテーブルからメソッド ID を取得し、振り分ける。
 ; ---------------------------------------------------------------
 do_op_sendb:
+  ; **ブロックを渡された。** 恒等ブロックの旗を下ろす
+  xra a
+  sta pred_identity
   call fetch_byte       ; A = a
   sta sendb_reg_a
   call fetch_byte       ; A = b (シンボル番号)
@@ -139,7 +142,7 @@ sendb_dispatch:
   cpi METHOD_NEW
   jz sendb_array_new
   ; 未対応のブロックメソッド
-  jmp vm_error
+  jmp vm_fail
 
 ; --- any? / all? / none? ---
 ;

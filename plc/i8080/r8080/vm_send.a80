@@ -59,13 +59,13 @@ send_dispatch:
   cpi SYM_KIND_USER_METHOD
   jz send_user_method   ; D=0x01 → ユーザー定義メソッド
   ; D >= 0x80 or other → エラー
-  jmp vm_error
+  jmp vm_fail
 
 send_builtin:
   ; E = メソッド ID (0 = 未対応)
   mov a, e
   ora a
-  jz vm_error
+  jz vm_fail
   ; 組み込みメソッドディスパッチ
   cpi 1
   jz send_ne            ; != (不等号)
@@ -115,7 +115,7 @@ send_user_method:
   dad d                 ; HL = メソッド表エントリ
   mov a, m              ; A = irep 番号
   ora a
-  jz vm_error           ; 0 = 未定義
+  jz vm_fail           ; 0 = 未定義
   sta sum_irep
 
   ; push_frame(a, FRAME_KIND_CALL, FRAME_NONE)
@@ -154,7 +154,7 @@ send_new:
   ; OBJ_SP < MAX_OBJECTS を確認
   lda VM_STATE_BASE + OFF_OBJ_SP
   cpi MAX_OBJECTS
-  jnc vm_error          ; オブジェクトプール満杯
+  jnc vm_fail          ; オブジェクトプール満杯
 
   ; R[a] (TT_CLASS) から class_number を取得
   sta sn_slot           ; OBJ_SP = slot 番号
@@ -258,7 +258,7 @@ send_new_builtin:
   ; --- Array.new ---
   lda send_argc
   cpi 3
-  jnc vm_error          ; 取るのは 0-2 個
+  jnc vm_fail          ; 取るのは 0-2 個
   ora a
   jz snb_empty          ; 引数なし → 空配列
 
@@ -268,17 +268,17 @@ send_new_builtin:
   call get_reg_addr     ; HL = R[a+1]
   mov a, m              ; A = 型タグ
   cpi TT_INTEGER
-  jnz vm_error
+  jnz vm_fail
   inx h                 ; +1: 予約
   inx h                 ; +2: val_lo
   mov c, m              ; C = 下位バイト
   inx h
   mov a, m              ; A = 上位バイト
   ora a
-  jnz vm_error          ; 上位があれば負か大きすぎる (負は FFh)
+  jnz vm_fail          ; 上位があれば負か大きすぎる (負は FFh)
   mov a, c
   cpi COL_MAX_ARRAY_ELEMS + 1
-  jnc vm_error          ; 1 スロットに収まらない
+  jnc vm_fail          ; 1 スロットに収まらない
   sta snb_count
   ora a
   jz snb_empty          ; 0 個 → 空配列
@@ -372,7 +372,7 @@ snb_empty:
 send_new_hash:
   lda send_argc
   ora a
-  jnz vm_error
+  jnz vm_fail
   call col_alloc
   sta snb_slot
   mvi m, COL_TYPE_HASH
@@ -476,7 +476,7 @@ send_mod:
   ora e
   jnz send_mod_ok
   pop psw
-  jmp vm_error          ; ゼロ除算
+  jmp vm_fail          ; ゼロ除算
 send_mod_ok:
   pop psw
   call get_reg_addr

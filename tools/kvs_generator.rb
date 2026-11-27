@@ -2729,7 +2729,7 @@ module FaRuby
     end
 
     # 反復フレームを積み、ブロックの本体へ移る
-    def enter_iteration(name, argc_name, depth_code)
+    def enter_iteration(name, argc_name, depth_code, identity: false)
       push_frame(depth_code, "#{operand(name)} * #{SLOT_WORDS}",
                  outer: MemoryLayout::FRAME_NONE,
                  kind: MemoryLayout::FRAME_KIND_ITERATE)
@@ -2756,10 +2756,18 @@ module FaRuby
         note "Array.new はブロックの値を要素へ書く。渡すのは添字"
         line "#{frame_kind} = #{MemoryLayout::FRAME_KIND_ARRAY_FILL}"
       end
-      note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
-      line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
-      line "Z6 = #{word_at(2, SLOT_VALUE_OFFSET)}       ' 本体の irep"
-      line "Z7 = #{word_at(2, SLOT_VALUE_OFFSET + 1)}   ' 定義元のフレーム"
+      if identity
+        note "**恒等ブロックは最後の irep です。** 中身は `OP_RETURN R[1]` の"
+        note "2 バイトだけで、ホストがブロック無しの述語を見つけたときだけ"
+        note "足します (irep を 1 枠使うので、使わないプログラムでは出ません)"
+        line "Z6 = #{state(layout.num_ireps_addr)} - 1   ' 本体の irep"
+        line "Z7 = #{MemoryLayout::FRAME_NONE}   ' 定義元は無い"
+      else
+        note "窓をずらした後、ブロックは R[引数の数 + 1] にある"
+        line "Z2 = (#{operand(argc_name)} + 1) * #{SLOT_WORDS} + #{reg_offset}"
+        line "Z6 = #{word_at(2, SLOT_VALUE_OFFSET)}       ' 本体の irep"
+        line "Z7 = #{word_at(2, SLOT_VALUE_OFFSET + 1)}   ' 定義元のフレーム"
+      end
       note "反復の状態と定義元をフレームに書く (Z3 は push_frame が指したまま)"
       line "#{word_at(3, MemoryLayout::FRAME_OUTER)} = Z7"
       write_long_at(3, MemoryLayout::FRAME_INDEX, scratch_source)
@@ -3329,6 +3337,8 @@ end
       when METHOD_SLICE  then slice_into(dest, rhs, reg_third_slot(name), type_code, heap_code)
       when METHOD_NEW    then new_object(name, rhs, argc_name, unknown_code,
                                          type_code, heap_code, depth_code)
+      when *PREDICATE_METHODS
+        blockless_predicate(name, dest, argc_name, depth_code)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
@@ -3364,6 +3374,57 @@ end
       end_block
       if_else_block("#{scratch32_b} = 0") { assign_bool(dest, true) }
       assign_bool(dest, false)
+      end_block
+    end
+
+    # ブロック無しの述語 (`a.any?` / `a.all?` / `a.none?`)
+    #
+    # **`a.all?` は `a.all? { |x| x }` と同じ意味です。** 中身をそのまま返す
+    # ブロックを渡したものとして回すので、**判定はブロック付きと同じ
+    # `predicate_decision` が受け持ちます** — ここで規則を書き直しません。
+    #
+    # **ハッシュは反復しません。** Ruby はブロック無しのとき `[鍵, 値]` の
+    # 配列を見るので、中身がどうであれ常に真です。組の数だけ真が並んで
+    # いるのと同じで、`any?` は空でないか、`all?` は常に真、`none?` は空か
+    # になります。**鍵をそのまま渡すと `{nil => 1}.all?` が偽になります。**
+    def blockless_predicate(name, dest, argc_name, depth_code)
+      if_else_block("#{dest.tag} = #{TT_HASH}") do
+        hash_keys_into_z(dest)
+        note "組は常に真。打ち切る値が真の側だけ、空かどうかで分かれる"
+        MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+          stop_on_true, stopped = MemoryLayout::PREDICATE_RULES.fetch(kind)
+          kind_name = MemoryLayout::FRAME_KIND_NAMES.fetch(kind)
+          if_("Z5 = #{code}") do
+            unless stop_on_true
+              note "#{kind_name}: 組は真なので打ち切らない。常に #{!stopped}"
+              next assign_bool(dest, !stopped)
+            end
+            note "#{kind_name}: 1 組でもあれば #{stopped}、空なら #{!stopped}"
+            if_else_block("#{scratch32_b} = 0") { assign_bool(dest, !stopped) }
+            assign_bool(dest, stopped)
+            end_block
+          end
+        end
+      end
+
+      note "配列は中身を 1 つずつ見ます。**恒等ブロックを渡したものとして**"
+      note "反復に入れるので、フレームも判定もブロック付きと同じ道です"
+      array_slot_into_z(dest)
+      note "0 から 要素数-1 まで (iteration_range のコレクションの枝と同じ)"
+      line "#{scratch32} = 0"
+      line "#{scratch32_b} = #{scratch32_b} - 1"
+      if_else_block("#{scratch32} <= #{scratch32_b}") do
+        enter_iteration(name, argc_name, depth_code, identity: true)
+      end
+      note "空の配列。1 回も回らないのでここで答えが決まる"
+      MemoryLayout::PREDICATE_FRAME_KINDS.each do |code, kind|
+        stopped = MemoryLayout::PREDICATE_RULES.fetch(kind)[1]
+        if_("Z5 = #{code}") do
+          note "#{MemoryLayout::FRAME_KIND_NAMES.fetch(kind)}: 空なら #{!stopped}"
+          assign_bool(dest, !stopped)
+        end
+      end
+      end_block
       end_block
     end
 

@@ -479,13 +479,24 @@ module FaRuby
       names[code] ||= name
     end.freeze
 
-    # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
+    # 述語。ブロック付きでもブロック無しでも呼べる
+    PREDICATE_METHODS = [METHOD_ANY_P, METHOD_ALL_P, METHOD_NONE_P].freeze
+
+    # ブロック付きとブロック無しの両方で呼べるもの
     #
-    # **`new` は両方に入ります。** `Array.new(8)` はブロック無し、
-    # `Array.new(8) { |i| }` はブロック付きで、どちらも呼べる唯一のメソッドです。
+    # **`new` は引数の数が違います。** `Array.new(8)` と `Array.new(8) { }`
+    # で表の数と合わないため、突き合わせを飛ばす枝が要ります。
+    #
+    # **述語は引数を取りません。** 表も 0 なので、ブロック無しの呼び出しは
+    # そのまま数が合います。`a.all?` は `a.all? { |x| x }` と同じ意味で、
+    # **中身をそのまま返すブロック**を渡したものとして回します
+    # (doc/roadmap.md「ブロック無しの述語」)。
+    BLOCK_AND_PLAIN_METHODS = [METHOD_NEW, *PREDICATE_METHODS].freeze
+
+    # ブロックを取らないメソッド。OP_SEND / OP_SSEND の振り分けはこれだけを並べる
     BUILTIN_PLAIN_METHODS =
       METHOD_NAMES.reject { |code, _|
-        BLOCK_METHODS.include?(code) && code != METHOD_NEW
+        BLOCK_METHODS.include?(code) && !BLOCK_AND_PLAIN_METHODS.include?(code)
       }.freeze
 
     # --- ユーザー定義メソッド ---

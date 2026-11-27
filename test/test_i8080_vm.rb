@@ -1241,6 +1241,123 @@ class TestI8080Vm < Minitest::Test
   # 答えは R[0] (レシーバの位置) に書きます — 打ち切る瞬間はもう要素を
   # 取り出さないので、レシーバを潰してよいためです。
 
+  # --- ブロック無し ---
+  #
+  # **`a.all?` は `a.all? { |x| x }` と同じです。** 中身をそのまま返す
+  # ブロック (恒等ブロック) を渡したものとして each の道に入れるので、
+  # 反復もフレームも判定もブロック付きと同じ経路です。恒等ブロックは
+  # `OP_RETURN R[1]` の 2 バイトで、**ホストがブロック無しの述語を
+  # 見つけたときだけ**最後の irep として足します (番号は
+  # IDENTITY_IREP_STORE)。
+  #
+  # **ハッシュは反復しません。** Ruby はブロック無しのとき `[鍵, 値]` の
+  # 配列を見るので中身によらず常に真で、組の数だけで決まります。
+
+  def test_blockless_all_true
+    board = run_ruby("a = [1, 2]\nb = a.all?\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_all_false
+    board = run_ruby("a = [1, nil]\nb = a.all?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_any_true
+    board = run_ruby("a = [nil, 1]\nb = a.any?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_any_false
+    board = run_ruby("a = [nil, false]\nb = a.any?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_none_true
+    board = run_ruby("a = [nil, false]\nb = a.none?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_none_false
+    board = run_ruby("a = [nil, 1]\nb = a.none?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  # 0 は Ruby では真
+  def test_blockless_any_treats_zero_as_true
+    board = run_ruby("a = [0]\nb = a.any?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  # 空は 1 回も回らないので、フレームを積まずに答えが決まる
+  def test_blockless_on_empty_array
+    board = run_ruby("a = Array.new(0)\nb = a.all?\nc = a.any?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+    assert_equal TT_FALSE, board[:board].reg_type(3)
+  end
+
+  # ハッシュは [鍵, 値] を見るので、鍵が偽でも all? は真
+  def test_blockless_hash_all_is_always_true
+    board = run_ruby("h = Hash.new\nh[1] = 5\nb = h.all?\n")
+    assert_equal :finished, board[:result]
+    assert_equal 0, board[:board].vm_error_code
+    assert_equal TT_TRUE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_hash_none_is_false_when_filled
+    board = run_ruby("h = Hash.new\nh[1] = 5\nb = h.none?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+  end
+
+  def test_blockless_empty_hash
+    board = run_ruby("h = Hash.new\nb = h.any?\nc = h.none?\n")
+    assert_equal :finished, board[:result]
+    assert_equal TT_FALSE, board[:board].reg_type(2)
+    assert_equal TT_TRUE, board[:board].reg_type(3)
+  end
+
+  # **恒等ブロックは最後の irep。** 使っているときだけ足す
+  def test_identity_block_is_the_last_irep
+    gen = compile_to_hex_gen("a = [1]\nb = a.all?\n")
+    ireps = gen.all_ireps
+
+    assert_equal [56, 1], ireps.last.instructions.bytes, "OP_RETURN R[1]"
+    assert_equal ireps.size - 1,
+                 gen.build_memory[FaRuby::I8080MemoryLayout::IDENTITY_IREP_STORE],
+                 "箱に入っている番号が最後の irep"
+  end
+
+  def test_identity_block_is_absent_without_a_blockless_call
+    gen = compile_to_hex_gen("a = [1]\nb = a.all? { |x| x }\n")
+
+    refute_equal [56, 1], gen.all_ireps.last.instructions.bytes,
+                 "ブロック付きに恒等ブロックを足してはいけない"
+    assert_equal 0, gen.build_memory[FaRuby::I8080MemoryLayout::IDENTITY_IREP_STORE],
+                 "0 は「恒等ブロックは無い」"
+  end
+
+  def compile_to_hex_gen(source)
+    rb = Tempfile.new(["ib", ".rb"])
+    rb.write(source)
+    rb.close
+    mrb = rb.path.sub(/\.rb$/, ".mrb")
+    system(@mrbc, "-o", mrb, rb.path) or raise "mrbc 失敗"
+    FaRuby::I8080BytecodeHex.new(File.binread(mrb))
+  ensure
+    rb.unlink
+    File.delete(mrb) if mrb && File.exist?(mrb)
+  end
+
   def test_any_true
     board = run_ruby("a = [1, 2, 3]\nb = a.any? { |x| x == 2 }\n")
     assert_equal :finished, board[:result]

@@ -209,7 +209,22 @@ end
     CLASS_OPCODES = %i[OP_CLASS].freeze
 
     # 定数が出てくる命令
-    CONST_OPCODES = %i[OP_GETCONST OP_SETCONST].freeze
+CONST_OPCODES = %i[OP_GETCONST OP_SETCONST].freeze
+
+# ブロックを渡さない呼び出し。恒等ブロックが要るかを探すのに使う
+PLAIN_SEND_OPCODES = %i[OP_SEND OP_SSEND].freeze
+
+# ブロック無しで呼べる述語の名前
+PREDICATE_NAMES =
+  BUILTIN_METHODS.select { |_, (code, _)| PREDICATE_METHODS.include?(code) }
+                 .keys.freeze
+
+# 恒等ブロックのレジスタ数。R[0] (レシーバ) と R[1] (要素) で足りる
+IDENTITY_BLOCK_NREGS = 2
+
+# `OP_RETURN` のオペコード。恒等ブロックの中身を組み立てるのに使う
+OP_RETURN_CODE =
+  OpcodeTable::MRUBY_OPCODES.find { |_, (name, _)| name == :OP_RETURN }.first
 
     # プログラムに出てくるクラス名 => クラス番号
     #
@@ -878,6 +893,12 @@ end
         index += 1
       end
 
+      # **恒等ブロックは最後に足します。** VM は `num_ireps - 1` で引くので、
+      # 位置が約束です (test_constants.rb が最後であることを確かめています)
+      if blockless_predicate?
+        entries << { irep: identity_block_irep, first_child: entries.size + 1 }
+      end
+
       bytecode = pool = symbols = 0
       entries.each_with_index do |entry, i|
         entry[:index]         = i
@@ -889,6 +910,34 @@ end
         symbols  += entry[:irep].symbols.size
       end
       entries
+    end
+
+    # ブロック無しの述語 (`a.all?`) を呼んでいるか
+    #
+    # **ブロック付き (`OP_SENDB`) は数えません。** 恒等ブロックが要るのは
+    # ブロックを書かなかったときだけです。irep を 1 枠使うので、使って
+    # いないプログラムには出しません (`max_ireps` は 16)。
+    def blockless_predicate?(irep = @irep)
+      found = Disassembler.new(irep).disassemble.any? do |inst|
+        next false unless PLAIN_SEND_OPCODES.include?(inst[:name])
+
+        PREDICATE_NAMES.include?(irep.symbols[inst[:operands][1].to_i])
+      end
+      found || irep.children.any? { |child| blockless_predicate?(child) }
+    end
+
+    # 中身をそのまま返すブロック。`a.all?` を `a.all? { |x| x }` にする
+    #
+    # **`OP_RETURN R[1]` の 2 バイトだけです。** 反復は窓をずらした後の
+    # R[1] に要素を置くので、それを返せばブロックの値になります。判定は
+    # ブロック付きと同じ `predicate_decision` が受け持ちます。
+    def identity_block_irep
+      irep = Irep.new
+      irep.nlocals = IDENTITY_BLOCK_NREGS
+      irep.nregs   = IDENTITY_BLOCK_NREGS
+      irep.ilen    = 2
+      irep.instructions = [OP_RETURN_CODE, 1].pack("C*")
+      irep
     end
 
     # プールエントリの型タグを返す

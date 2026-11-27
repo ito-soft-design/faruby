@@ -17,6 +17,7 @@ STACK_TOP                EQU  0FDFFh
 DISPLAY_BASE             EQU  0FFF8h
 DISPLAY_SIZE             EQU  08h
 INIT_METHOD_ID_STORE     EQU  82FEh  ; initialize の method_id 格納アドレス
+IDENTITY_IREP_STORE      EQU  82FFh  ; 恒等ブロックの irep 番号 (0 = 無し)
 
 ; --- バリュースロット ---
 

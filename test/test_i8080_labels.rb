@@ -45,6 +45,16 @@ class TestI8080Labels < Minitest::Test
     end
   end
 
+  # EQU の定義位置。衝突を知らせるときに両方の場所を出す
+  def equate_places
+    @equate_places ||= sources.each_with_object({}) do |path, acc|
+      File.readlines(path, encoding: "UTF-8").each_with_index do |line, i|
+        m = line.match(/^([A-Za-z_][A-Za-z0-9_]*)\s+EQU\s/i) or next
+        acc[m[1].downcase] ||= "#{File.basename(path)}:#{i + 1}"
+      end
+    end
+  end
+
   def jump_targets
     @jump_targets ||= sources.flat_map do |path|
       File.readlines(path, encoding: "UTF-8").each_with_index.filter_map do |line, i|
@@ -97,5 +107,30 @@ class TestI8080Labels < Minitest::Test
     end
 
     assert_empty dups, "同じラベルを 2 度定義しています"
+  end
+
+  # ラベルと EQU が同じ名前を取り合っていないこと
+  #
+  # **asm80 は大文字小文字を区別しません。** `vm_error:` というラベルと
+  # `VM_ERROR EQU 03h` という定数があると、`jmp vm_error` は**定数の方を
+  # 採って 3 番地へのジャンプ**になります。アセンブルは通り、警告も
+  # 出ません。
+  #
+  # **実際に 47 箇所の `jmp vm_error` が全部 3 番地へ飛んでいました。**
+  # i8080 の VM は 2 か月のあいだ一度もエラーを報告しておらず、
+  # STATUS も ERROR も書かないまま黙ってモニタへ戻っていました。
+  # 未対応のメソッドを踏むと「クラッシュ」に見えるのはこれが原因で、
+  # ラベルを `vm_fail` に改名して直しました (doc/roadmap.md)。
+  #
+  # **飛び先が解決するかどうかでは捕まりません** — どちらも実在する
+  # 名前なので、上の検査は通ってしまいます。
+  def test_ラベルと_equ_が同じ名前を取り合っていない
+    collisions = (labels.keys & equate_places.keys).sort.map do |key|
+      "#{key} (ラベル #{labels[key]} / EQU #{equate_places[key]})"
+    end
+
+    assert_empty collisions,
+                 "ラベルと EQU が同じ名前です。asm80 は大文字小文字を " \
+                 "区別しないので、飛び先が定数の値になります"
   end
 end

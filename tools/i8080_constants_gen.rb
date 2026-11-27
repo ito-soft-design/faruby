@@ -94,6 +94,7 @@ module FaRuby
       lines << equ("DISPLAY_BASE",   layout::DISPLAY_BASE,   width: 4)
       lines << equ("DISPLAY_SIZE",   layout::DISPLAY_SIZE)
       lines << equ("INIT_METHOD_ID_STORE", layout::INIT_METHOD_ID_STORE, width: 4, comment: "initialize の method_id 格納アドレス")
+      lines << equ("IDENTITY_IREP_STORE", layout::IDENTITY_IREP_STORE, width: 4, comment: "恒等ブロックの irep 番号 (0 = 無し)")
       lines << ""
       lines
     end

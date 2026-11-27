@@ -37,7 +37,7 @@ do_op_getgv:
   ora e
   jnz getgv_ok
   pop psw
-  jmp vm_error
+  jmp vm_fail
 getgv_ok:
   pop psw               ; A = a
   push d                ; グローバルアドレスを退避
@@ -86,7 +86,7 @@ do_op_setgv:
   ora e
   jnz setgv_ok
   pop psw
-  jmp vm_error
+  jmp vm_fail
 setgv_ok:
   pop psw               ; A = a
   call get_reg_addr     ; HL = R[a] (コピー元)

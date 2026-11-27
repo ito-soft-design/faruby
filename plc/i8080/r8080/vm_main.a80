@@ -372,7 +372,7 @@ do_op_stop:
 ; 未対応のオペコードを踏んだとき。
 ; 現在のオペコードをエラーコードとして保存する。
 ; ===============================================================
-vm_error:
+vm_fail:
   lda VM_STATE_BASE + OFF_CURRENT_OPCODE
   sta VM_STATE_BASE + OFF_ERROR
   mvi a, VM_ERROR
@@ -429,7 +429,7 @@ vm_loop:
   sub l
   mov a, d
   sbb h                     ; DE - HL (PC - len)
-  jnc vm_error               ; PC >= len → エラー
+  jnc vm_fail               ; PC >= len → エラー
 
   ; --- オペコードフェッチ ---
   call fetch_byte           ; A = opcode
@@ -452,7 +452,7 @@ vm_dispatch:
   lda VM_STATE_BASE + OFF_CURRENT_OPCODE
   ; オペコード × 2 でジャンプテーブルのオフセットを求める
   add a                     ; A = opcode * 2 (テーブルエントリは 2 バイト)
-  jc vm_error               ; オーバーフロー → 未対応
+  jc vm_fail               ; オーバーフロー → 未対応
   mov e, a
   mvi d, 0                  ; DE = opcode * 2
   lxi h, dispatch_table
@@ -463,7 +463,7 @@ vm_dispatch:
   sub l
   mov a, d
   sbb h                     ; DE - HL → dispatch_table_end - 現在位置
-  jc vm_error               ; テーブル範囲外
+  jc vm_fail               ; テーブル範囲外
   ; アドレスを読んでジャンプ
   mov e, m                  ; E = 下位バイト
   inx h
@@ -472,14 +472,14 @@ vm_dispatch:
   ; 0000h ならエラー (未実装マーカー)
   mov a, h
   ora l
-  jz vm_error
+  jz vm_fail
   pchl                      ; ハンドラへジャンプ
 
 ; ===============================================================
 ; ディスパッチテーブル
 ;
 ; オペコード番号順に 2 バイトのアドレスを並べる。
-; 未実装のオペコードは 0000h (vm_error で捕捉)。
+; 未実装のオペコードは 0000h (vm_fail で捕捉)。
 ; ===============================================================
 dispatch_table:
   dw do_op_nop        ; 00 OP_NOP
@@ -865,7 +865,14 @@ send_builtin_ext:
   jz concat_array       ; push は concat_array と同じ
   cpi METHOD_SLICE
   jz send_slice
-  jmp vm_error          ; 未対応メソッド
+  ; **ブロック無しの述語。** `a.all?` は `a.all? { |x| x }` と同じ
+  cpi METHOD_ANY_P
+  jz send_pred_any
+  cpi METHOD_ALL_P
+  jz send_pred_all
+  cpi METHOD_NONE_P
+  jz send_pred_none
+  jmp vm_fail          ; 未対応メソッド
 
 ; ===============================================================
 ; send_puts — puts(value): 文字列を 7 セグに表示
@@ -892,7 +899,7 @@ send_puts:
   jz puts_string
   ; TT_INTEGER: 従来のパック ASCII 処理
   cpi TT_INTEGER
-  jnz vm_error
+  jnz vm_fail
 
   ; --- 整数パス (2 文字スクロール表示) ---
   lda send_reg_a
@@ -999,7 +1006,7 @@ send_setseg:
   call slot_to_value
   mov a, m               ; A = 桁位置 (val_lo)
   cpi DISPLAY_SIZE
-  jnc vm_error           ; 桁位置 >= 8 → エラー
+  jnc vm_fail           ; 桁位置 >= 8 → エラー
   sta ss_pos
 
   ; パターンを取得
@@ -1267,7 +1274,7 @@ col_slot_addr:
 ;   入力: なし
 ;   出力: A = スロット番号 (0-based), HL = スロットアドレス
 ;   破壊: DE
-;   エラー: プール満杯かつ GC で回収不可 → vm_error
+;   エラー: プール満杯かつ GC で回収不可 → vm_fail
 ; ---------------------------------------------------------------
 col_alloc:
   lda VM_STATE_BASE + OFF_COL_SP
@@ -1313,7 +1320,7 @@ do_op_getidx:
   jz gidx_array
   cpi TT_HASH
   jz gidx_hash
-  jmp vm_error
+  jmp vm_fail
 
 gidx_string:
   ; R[a] のコレクションスロットを取得
@@ -1333,7 +1340,7 @@ gidx_string:
   mov a, m              ; A = index (val_lo)
   ; 範囲チェック: index < 文字列長
   cmp b
-  jnc vm_error          ; index >= 長さ → エラー
+  jnc vm_fail          ; index >= 長さ → エラー
   ; データ先頭 + index で 1 文字を取得
   mov e, a
   mvi d, 0
@@ -1384,7 +1391,7 @@ gidx_array:
   mov a, m              ; A = index (val_lo)
   ; 範囲チェック: index < 要素数
   cmp b
-  jnc vm_error
+  jnc vm_fail
   ; data + index * 4 で要素スロットの先頭を求める
   add a                 ; ×2
   add a                 ; ×4
@@ -1429,7 +1436,7 @@ do_op_setidx:
   jz sidx_array
   cpi TT_HASH
   jz sidx_hash
-  jmp vm_error
+  jmp vm_fail
 
 sidx_string:
   ; R[a] のコレクションスロットを取得
@@ -1448,7 +1455,7 @@ sidx_string:
   call slot_to_value
   mov a, m              ; A = index
   cmp b
-  jnc vm_error          ; index >= 長さ
+  jnc vm_fail          ; index >= 長さ
 
   ; data[index] に R[a+2] の文字を書き込む
   mov e, a
@@ -1507,7 +1514,7 @@ sidx_array:
   call slot_to_value
   mov a, m              ; A = index
   cmp b
-  jnc vm_error
+  jnc vm_fail
 
   ; data[index * 4] に R[a+2] をコピー
   add a                 ; ×2
@@ -1553,7 +1560,7 @@ oa2_join:               ; OP_ARRAY2 からの合流点
 
   ; 要素数チェック
   cpi COL_MAX_ARRAY_ELEMS + 1
-  jnc vm_error          ; 要素数 > 7
+  jnc vm_fail          ; 要素数 > 7
 
   ; コレクションスロットを確保
   call col_alloc        ; A = slot_number, HL = スロットアドレス
@@ -1649,7 +1656,7 @@ do_op_arypush:
   lda apush_cur_count
   add b
   cpi COL_MAX_ARRAY_ELEMS + 1
-  jnc vm_error          ; オーバーフロー
+  jnc vm_fail          ; オーバーフロー
 
   ; 書き込み先: data + count * 4
   lda apush_cur_count
@@ -1833,7 +1840,7 @@ send_concat:
   jz concat_string
   cpi TT_ARRAY
   jz concat_array
-  jmp vm_error
+  jmp vm_fail
 
 concat_string:
   ; R[a+1] の型を確認
@@ -1845,7 +1852,7 @@ concat_string:
   jz concat_str_str
   cpi TT_INTEGER
   jz concat_str_int
-  jmp vm_error
+  jmp vm_fail
 
 concat_str_str:
   ; R[a+1] のコレクションスロット (ソース)
@@ -1953,7 +1960,7 @@ concat_array:
   inx h                 ; +1: count
   mov a, m
   cpi COL_MAX_ARRAY_ELEMS
-  jnc vm_error          ; 満杯
+  jnc vm_fail          ; 満杯
   sta cc_ary_count
   inr m                 ; count++
 

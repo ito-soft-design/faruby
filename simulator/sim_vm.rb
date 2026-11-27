@@ -1764,6 +1764,7 @@ module FaRuby
       when METHOD_SLICE  then send_slice(index, type_code, heap_code)
       when METHOD_NEW    then new_object(index, argc, unknown_code, type_code,
                                          heap_code, depth_code)
+      when *PREDICATE_METHODS then blockless_predicate(code, index)
       else raise ArgumentError, "組み込みメソッドの本体がありません (#{code})"
       end
     end
@@ -1777,6 +1778,38 @@ module FaRuby
       return scan_string_characters(read_reg(index), nil).first if read_reg_tag(index) == TT_STRING
 
       array_length(read_reg(index))
+    end
+
+    # ブロック無しの述語 (`a.any?` / `a.all?` / `a.none?`)
+    #
+    # **`a.all?` は `a.all? { |x| x }` と同じ意味です。** 中身をそのまま
+    # 返すブロックを渡したものと見なし、**判定の規則はブロック付きと
+    # 同じ `PREDICATE_RULES`** を使います。
+    #
+    # **ハッシュは反復しません。** Ruby はブロック無しのとき `[鍵, 値]` の
+    # 配列を見るので、中身がどうであれ**常に真**です。組の数だけ真が
+    # 並んでいるのと同じことになります (`any?` は空でないか、`all?` は
+    # 常に真、`none?` は空か)。
+    def blockless_predicate(code, index)
+      kind = MemoryLayout::PREDICATE_FRAME_KINDS.fetch(code)
+      stop_on_true, stopped = MemoryLayout::PREDICATE_RULES.fetch(kind)
+
+      values =
+        if read_reg_tag(index) == TT_HASH
+          Array.new(array_length(hash_slots(index).first), true)
+        else
+          slot = read_reg(index)
+          Array.new(array_length(slot)) { |i| element_truthy?(slot, i) }
+        end
+
+      # 打ち切る値が 1 つでもあればその答え。無ければ尽きた側の答え
+      write_bool(index, values.include?(stop_on_true) ? stopped : !stopped)
+    end
+
+    # 配列の position 番目の要素が真か
+    def element_truthy?(slot, position)
+      addr = layout.array_element_addr(slot, position)
+      @em.read_u16(addr + SLOT_TYPE_OFFSET) > TT_FALSY_MAX
     end
 
     # R[a].empty?

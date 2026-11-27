@@ -227,6 +227,17 @@ module FaRuby
     # vm_start の VM 状態クリアで消されないようにするため。
     INIT_METHOD_ID_STORE = IREP_TABLE_BASE + 0xFE  # 0x82FE
 
+    # 恒等ブロックの irep 番号を置く場所 (0x82FF)
+    #
+    # **VM 状態には置けません。** vm_start が起動時にゼロクリアするので、
+    # HEX で書いた値が消えます (INIT_METHOD_ID と同じ事情)。IREP テーブルの
+    # 領域の末尾で、表は #{IREP_ENTRY_BYTES} バイト × #{MAX_IREPS} しか
+    # 使わないため空いています。
+    #
+    # **0 は「無い」です。** ブロック無しの述語を呼んでいないプログラムでは
+    # 恒等ブロックを出しません (irep を 1 枠使うため)。
+    IDENTITY_IREP_STORE = IREP_TABLE_BASE + 0xFF  # 0x82FF
+
     # トップレベル (main) のクラス番号
     CLASS_MAIN = 0
 

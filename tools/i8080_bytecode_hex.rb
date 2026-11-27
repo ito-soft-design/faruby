@@ -80,6 +80,7 @@ module FaRuby
       place_all_symbol_tables(mem)
       place_all_irep_entries(mem)
       place_init_method_id(mem)
+      place_identity_irep(mem)
       mem
     end
 
@@ -143,10 +144,54 @@ module FaRuby
     end
 
     # --- すべての irep をフラット化 (DFS 前順) ---
+    # ブロック無しで呼べる述語の名前
+    PREDICATE_NAMES = %w[any? all? none?].freeze
+
+    # ブロックを渡さない呼び出し
+    PLAIN_SEND_OPCODES = %i[OP_SEND OP_SSEND].freeze
+
+    # 恒等ブロックのレジスタ数。R[0] (レシーバ) と R[1] (要素) で足りる
+    IDENTITY_BLOCK_NREGS = 2
+
     def flatten_ireps
       @all_ireps = []
       collect_ireps_dfs(irep)
+      # **恒等ブロックは最後に足す。** VM は NUM_IREPS - 1 で引くので
+      # 位置が約束 (test_i8080_vm.rb が最後であることを確かめている)
+      @all_ireps << identity_block_irep if blockless_predicate?
     end
+
+    # ブロック無しの述語 (`a.all?`) を呼んでいるか
+    #
+    # **ブロック付き (`OP_SENDB`) は数えない。** 恒等ブロックが要るのは
+    # ブロックを書かなかったときだけで、irep を 1 枠使うため。
+    def blockless_predicate?
+      @all_ireps.any? do |ir|
+        Disassembler.new(ir).disassemble.any? do |inst|
+          next false unless PLAIN_SEND_OPCODES.include?(inst[:name])
+
+          PREDICATE_NAMES.include?(ir.symbols[inst[:operands][1].to_i])
+        end
+      end
+    end
+
+    # 中身をそのまま返すブロック。`a.all?` を `a.all? { |x| x }` にする
+    #
+    # **`OP_RETURN R[1]` の 2 バイトだけ。** 反復は窓をずらした後の R[1] に
+    # 要素を置くので、それを返せばブロックの値になる。判定はブロック付きと
+    # 同じ predicate_decision が受け持つ。
+    def identity_block_irep
+      ir = Irep.new
+      ir.nlocals = IDENTITY_BLOCK_NREGS
+      ir.nregs   = IDENTITY_BLOCK_NREGS
+      ir.ilen    = 2
+      ir.instructions = [OP_RETURN_CODE, 1].pack("C*")
+      ir
+    end
+
+    # `OP_RETURN` のオペコード
+    OP_RETURN_CODE =
+      OpcodeTable::MRUBY_OPCODES.find { |_, (name, _)| name == :OP_RETURN }.first
 
     def collect_ireps_dfs(irep_node)
       @all_ireps << irep_node
@@ -560,6 +605,15 @@ module FaRuby
     # vm_start が VM 状態をゼロクリアした後にここから読み出す。
     def place_init_method_id(mem)
       mem[Layout::INIT_METHOD_ID_STORE] = init_method_id & 0xFF
+    end
+
+    # --- 恒等ブロックの irep 番号を格納する ---
+    #
+    # **最後の irep です** (flatten_ireps が足しています)。0 は「無い」で、
+    # ブロック無しの述語を呼んでいないプログラムでは出しません。
+    def place_identity_irep(mem)
+      mem[Layout::IDENTITY_IREP_STORE] =
+        blockless_predicate? ? (@all_ireps.size - 1) & 0xFF : 0
     end
 
     # --- Intel HEX レコード生成 ---

@@ -142,7 +142,7 @@ do_op_div:
   ora e
   jnz do_div_nonzero
   pop psw
-  jmp vm_error
+  jmp vm_fail
 do_div_nonzero:
   pop psw               ; A = a
   call get_reg_addr

@@ -292,4 +292,156 @@ class TestPredicates < Minitest::Test
     assert_equal [false, false], rules[FaRuby::MemoryLayout::FRAME_KIND_ALL]
     assert_equal [true, false], rules[FaRuby::MemoryLayout::FRAME_KIND_NONE]
   end
+
+  # --- ブロック無し ---
+  #
+  # **`a.all?` は `a.all? { |x| x }` と同じです。** 中身をそのまま返す
+  # ブロック (恒等ブロック) を渡したものとして回すので、判定の規則は
+  # ブロック付きと同じ 1 か所です。
+  #
+  # **ハッシュだけは反復しません。** Ruby はブロック無しのとき
+  # `[鍵, 値]` の配列を見るので、中身がどうであれ常に真です。鍵をそのまま
+  # 渡すと `{nil => 1}.all?` が偽になってしまいます。
+
+  def test_ブロック無しの_all_は全部真なら真
+    assert_predicate_result(<<~RUBY, 1)
+      r = [1, 2].all?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_all_は偽が混ざれば偽
+    assert_predicate_result(<<~RUBY, 0)
+      r = [1, nil, 2].all?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_all_は_false_も偽として見る
+    assert_predicate_result(<<~RUBY, 0)
+      a = [true, false]
+      r = a.all?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_any_は真が1つでもあれば真
+    assert_predicate_result(<<~RUBY, 1)
+      a = [nil, false, 1]
+      r = a.any?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_any_は全部偽なら偽
+    assert_predicate_result(<<~RUBY, 0)
+      a = [nil, false]
+      r = a.any?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_none_は全部偽なら真
+    assert_predicate_result(<<~RUBY, 1)
+      a = [nil, false]
+      r = a.none?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ブロック無しの_none_は真があれば偽
+    assert_predicate_result(<<~RUBY, 0)
+      a = [nil, 1]
+      r = a.none?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  # 0 は Ruby では真。整数の中身で判定していないこと
+  def test_ブロック無しの_any_は_0_を真として見る
+    assert_predicate_result(<<~RUBY, 1)
+      a = [0]
+      r = a.any?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_空の配列はブロック無しでも同じ答え
+    assert_predicate_result(<<~RUBY, 1)
+      a = []
+      r = a.all? && a.none? && !a.any?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  # --- ブロック無し (ハッシュ) ---
+
+  def test_ハッシュのブロック無しの_all_は常に真
+    assert_predicate_result(<<~RUBY, 1)
+      h = { a: nil }
+      r = h.all?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ハッシュのブロック無しの_any_は空でなければ真
+    assert_predicate_result(<<~RUBY, 1)
+      h = { a: nil }
+      r = h.any?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_ハッシュのブロック無しの_none_は空でなければ偽
+    assert_predicate_result(<<~RUBY, 0)
+      h = { a: 1 }
+      r = h.none?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  def test_空のハッシュはブロック無しで_any_が偽
+    assert_predicate_result(<<~RUBY, 1)
+      h = {}
+      r = !h.any? && h.all? && h.none?
+      $DM0 = r ? 1 : 0
+    RUBY
+  end
+
+  # --- 恒等ブロックの置き場 ---
+
+  # **使っているときだけ足します。** irep を 1 枠使うので (max_ireps は 16)
+  #
+  # ブロック付きも irep が 1 つ増えますが、それは**利用者のブロック**です。
+  # 中身で見分けます (恒等ブロックは `OP_RETURN R[1]` の 2 バイト)。
+  def test_ブロック無しのときだけ恒等ブロックが増える
+    plain      = ireps_of("$DM0 = [1].length\n")
+    blockless  = ireps_of("$DM0 = [1].all? ? 1 : 0\n")
+    with_block = ireps_of("$DM0 = [1].all? { |x| x } ? 1 : 0\n")
+
+    assert_equal 1, plain.size, "述語を呼んでいないので足さない"
+    assert_equal 2, blockless.size, "恒等ブロックが 1 つ増える"
+    assert_equal [56, 1], blockless.last.instructions.bytes
+
+    assert_equal 2, with_block.size, "利用者のブロックだけ。恒等は足さない"
+    refute_equal [56, 1], with_block.last.instructions.bytes,
+                 "ブロック付きに恒等ブロックを足してはいけない"
+  end
+
+  # **最後に置くのが約束です。** VM は num_ireps - 1 で引きます
+  def test_恒等ブロックは最後の_irep
+    codegen = codegen_for("$DM0 = [1].all? ? 1 : 0\n")
+    last = codegen.send(:irep_entries).last[:irep]
+
+    assert_equal 2, last.ilen, "OP_RETURN R[1] の 2 バイト"
+    assert_equal [56, 1], last.instructions.bytes, "OP_RETURN R[1]"
+  end
+
+  def codegen_for(source)
+    FaRuby::PlcCodegen.new(compile(source), layout: layout)
+  end
+
+  def ireps_of(source)
+    codegen_for(source).send(:irep_entries).map { |entry| entry[:irep] }
+  end
 end
