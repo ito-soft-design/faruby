@@ -24,7 +24,7 @@
 
 KEY_WR            = 0x15
 KEY_ADSET         = 0x12
-BLINK_INTERVAL    = 250
+BLINK_INTERVAL    = 800
 POLLING_INTERVAL  = 2
 
 @states = []
