@@ -248,6 +248,19 @@ module FaRuby
       line "END IF"
     end
 
+    # 範囲に入っているか / 外れているか
+    #
+    # **比較は `AND` / `OR` でつなげます。括弧が要るだけ**で、どちらの
+    # 演算子も比較より優先度が高いためです。KV スクリプトも ST も同じ書き方で
+    # 通ります (ST では比較が BOOL になるので論理演算になります)。
+    #
+    # **2026-11-27 まで入れ子の IF で書いていました。** 「KV スクリプトに AND が
+    # 無い」という 2026-09-06 のコメントを確かめずに信じていたためです。
+    # 1 か所 2 行 (内側の IF と END IF) 浮きます。
+    def in_range(expr, min, max) = "(#{expr} >= #{min}) AND (#{expr} <= #{max})"
+
+    def out_of_range(expr, min, max) = "(#{expr} < #{min}) OR (#{expr} > #{max})"
+
     # --- 値 (KV スクリプトの式文字列を返す) ---
 
     # オペランド a / b / c の格納先デバイス
@@ -1498,32 +1511,33 @@ module FaRuby
     # Z7 の値スロットが指しているスロットに印を付ける
     #
     # **プールを指す型タグは TT_STRING から TT_OBJECT まで連続しています。**
-    # 範囲の比較 2 回で振り分けられます (真偽判定と同じ手)。
+    # 範囲に入っているかを 1 つの条件で見ます (`in_range`)。
+    #
+    # **ここが回収の中でいちばん数の多い場所です。** 確保のたびに展開されるので、
+    # 入れ子をほどいた 2 行が 1 ファイルに何十回も効きます。
     def gc_mark_from_slot
       line "#{gc_tag} = #{word_at(7, SLOT_TYPE_OFFSET)}"
-      if_("#{gc_tag} >= #{TT_STRING}") do
-        if_("#{gc_tag} <= #{TT_OBJECT}") do
-          chain_head(true, "#{gc_tag} = #{TT_HASH}")
-          indent
-          note "鍵と値で 2 本。**どちらも配列として印を付ける。**"
-          note "中身が値スロットの並びで、読み方はふつうの配列と同じ"
-          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), TT_ARRAY)
-          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET + 1), TT_ARRAY)
-          dedent
-          chain_head(false, "#{gc_tag} = #{TT_OBJECT}")
-          indent
-          note "**値は スロット + 1。** 0 は main でスロットを持たない"
-          if_("#{word_at(7, SLOT_VALUE_OFFSET)} > 0") do
-            gc_mark_slot("#{word_at(7, SLOT_VALUE_OFFSET)} - 1", TT_OBJECT)
-          end
-          dedent
-          line "ELSE"
-          indent
-          note "文字列と配列。値がそのままスロット番号"
-          gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), gc_tag)
-          dedent
-          line "END IF"
+      if_(in_range(gc_tag, TT_STRING, TT_OBJECT)) do
+        chain_head(true, "#{gc_tag} = #{TT_HASH}")
+        indent
+        note "鍵と値で 2 本。**どちらも配列として印を付ける。**"
+        note "中身が値スロットの並びで、読み方はふつうの配列と同じ"
+        gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), TT_ARRAY)
+        gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET + 1), TT_ARRAY)
+        dedent
+        chain_head(false, "#{gc_tag} = #{TT_OBJECT}")
+        indent
+        note "**値は スロット + 1。** 0 は main でスロットを持たない"
+        if_("#{word_at(7, SLOT_VALUE_OFFSET)} > 0") do
+          gc_mark_slot("#{word_at(7, SLOT_VALUE_OFFSET)} - 1", TT_OBJECT)
         end
+        dedent
+        line "ELSE"
+        indent
+        note "文字列と配列。値がそのままスロット番号"
+        gc_mark_slot(word_at(7, SLOT_VALUE_OFFSET), gc_tag)
+        dedent
+        line "END IF"
       end
     end
 
@@ -1723,7 +1737,7 @@ module FaRuby
         line "IF #{state(layout.str_encoding_addr)} = #{ENCODING_UTF8} THEN"
         indent
         note "継続バイト (10xxxxxx) は文字の途中"
-        if_("Z7 >= 128") { if_("Z7 < 192") { line "#{str_flag} = 0" } }
+        if_("(Z7 >= 128) AND (Z7 < 192)") { line "#{str_flag} = 0" }
         dedent
         line "ELSE IF #{state(layout.str_encoding_addr)} = #{ENCODING_SJIS} THEN"
         indent
@@ -1733,8 +1747,8 @@ module FaRuby
           line "#{str_skip} = 0"
         end
         note "先導バイト (0x81-0x9F, 0xE0-0xEF) なら次のバイトは後続"
-        if_("Z7 >= 129") { if_("Z7 <= 159") { line "#{str_skip} = 1" } }
-        if_("Z7 >= 224") { if_("Z7 <= 239") { line "#{str_skip} = 1" } }
+        if_(in_range("Z7", 129, 159)) { line "#{str_skip} = 1" }
+        if_(in_range("Z7", 224, 239)) { line "#{str_skip} = 1" }
         end_block
         dedent
         line "END IF"
@@ -1959,9 +1973,7 @@ module FaRuby
         line "Z3 = #{str_index} * #{SLOT_WORDS} + Z4 + #{MemoryLayout::ARRAY_HEADER_WORDS}"
         element = slot_on(3)
         line "#{str_count} = 0"
-        if_("#{element.tag} >= #{TT_INTEGER}") do
-          if_("#{element.tag} <= #{TT_FLOAT}") { line "#{str_count} = 1" }
-        end
+        if_(in_range(element.tag, TT_INTEGER, TT_FLOAT)) { line "#{str_count} = 1" }
         if_else_block("#{str_count} = 0") { line "#{str_flag} = 1" }
         line "Z6 = #{str_index} * #{str_limit} + #{str_temp}"
         prepare_write_scratches(element)
@@ -2922,11 +2934,12 @@ module FaRuby
           first = false
           indent
           note "#{label} (タグ #{tag_min}#{tag_min == tag_max ? '' : "-#{tag_max}"})"
+          # **外れていたら 1 つの IF で弾きます。** 上と下を別々の IF で
+          # 見ていたので、区分ごとに 5 行ぶん余っていました (`OR` でつなげる)
           if tag_min == tag_max
             if_("#{recv.tag} <> #{tag_min}") { vm_error(type_code) }
           else
-            if_("#{recv.tag} < #{tag_min}") { vm_error(type_code) }
-            if_("#{recv.tag} > #{tag_max}") { vm_error(type_code) }
+            if_(out_of_range(recv.tag, tag_min, tag_max)) { vm_error(type_code) }
           end
           dedent
         end
@@ -3040,12 +3053,9 @@ module FaRuby
       line "Z8 = #{ref.word(1)} / #{DEVICE_REF_ACCESS_SCALE}   ' アクセス幅"
       line "Z5 = #{ref.word(1)} - Z8 * #{DEVICE_REF_ACCESS_SCALE}   ' デバイス種別"
       note "アドレス = ベース + 添字。範囲外は黙って別の場所を読み書きしてしまうため弾く"
+      note "**上も下も同じエラーなので 1 つの条件で見ます** (`in_range`)"
       line "#{scratch32} = #{ref.word(0)} + #{index_value}"
-      if_else_block("#{scratch32} >= 0") do
-        if_else_block("#{scratch32} <= 65535") { line "Z6 = #{scratch32}" }
-        vm_error(error_code)
-        end_block
-      end
+      if_else_block(in_range(scratch32, 0, 65_535)) { line "Z6 = #{scratch32}" }
       vm_error(error_code)
       end_block
     end
@@ -3119,9 +3129,7 @@ module FaRuby
     # まとめれば 1 か所 2 行短くなります (生成物に 50 か所)。
     def numeric_flag_into(z, tag)
       line "Z#{z} = 0"
-      if_("#{tag} >= #{TT_INTEGER}") do
-        if_("#{tag} <= #{TT_FLOAT}") { line "Z#{z} = 1" }
-      end
+      if_(in_range(tag, TT_INTEGER, TT_FLOAT)) { line "Z#{z} = 1" }
       "Z#{z} = 1"
     end
 

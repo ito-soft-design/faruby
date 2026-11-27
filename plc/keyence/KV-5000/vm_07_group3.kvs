@@ -352,37 +352,35 @@ IF EM54:Z9 <= 28 THEN
               Z7 = (EM3672:Z9 - 80) * 4 + 808 + Z9
             END IF
             EM3674:Z9 = EM0:Z7
-            IF EM3674:Z9 >= 7 THEN
-              IF EM3674:Z9 <= 10 THEN
-                IF EM3674:Z9 = 9 THEN
-                  ' 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                  ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
+            IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+              IF EM3674:Z9 = 9 THEN
+                ' 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 = 8
+                  EM3676:Z9 = 1
+                END IF
+                Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 = 8
+                  EM3676:Z9 = 1
+                END IF
+              ELSE IF EM3674:Z9 = 10 THEN
+                ' **値は スロット + 1。** 0 は main でスロットを持たない
+                IF EM1:Z7 > 0 THEN
+                  Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
                   IF EM1:Z6 = 0 THEN
-                    EM1:Z6 = 8
+                    EM1:Z6 = 10
                     EM3676:Z9 = 1
                   END IF
-                  Z6 = (EM2:Z7) * 52 + 2008 + Z9
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 = 8
-                    EM3676:Z9 = 1
-                  END IF
-                ELSE IF EM3674:Z9 = 10 THEN
-                  ' **値は スロット + 1。** 0 は main でスロットを持たない
-                  IF EM1:Z7 > 0 THEN
-                    Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
-                    IF EM1:Z6 = 0 THEN
-                      EM1:Z6 = 10
-                      EM3676:Z9 = 1
-                    END IF
-                  END IF
-                ELSE
-                  ' 文字列と配列。値がそのままスロット番号
-                  Z6 = (EM1:Z7) * 52 + 2008 + Z9
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 = EM3674:Z9
-                    EM3676:Z9 = 1
-                  END IF
+                END IF
+              ELSE
+                ' 文字列と配列。値がそのままスロット番号
+                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                IF EM1:Z6 = 0 THEN
+                  EM1:Z6 = EM3674:Z9
+                  EM3676:Z9 = 1
                 END IF
               END IF
             END IF
@@ -432,37 +430,35 @@ IF EM54:Z9 <= 28 THEN
                         FOR EM3681:Z9 = 0 TO EM3682:Z9
                           Z7 = EM3680:Z9 + 4 + EM3681:Z9 * 4
                           EM3674:Z9 = EM0:Z7
-                          IF EM3674:Z9 >= 7 THEN
-                            IF EM3674:Z9 <= 10 THEN
-                              IF EM3674:Z9 = 9 THEN
-                                ' 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                                ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                            IF EM3674:Z9 = 9 THEN
+                              ' 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                              ' 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                              Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 = 8
+                                EM3676:Z9 = 1
+                              END IF
+                              Z6 = (EM2:Z7) * 52 + 2008 + Z9
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 = 8
+                                EM3676:Z9 = 1
+                              END IF
+                            ELSE IF EM3674:Z9 = 10 THEN
+                              ' **値は スロット + 1。** 0 は main でスロットを持たない
+                              IF EM1:Z7 > 0 THEN
+                                Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
                                 IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 = 8
+                                  EM1:Z6 = 10
                                   EM3676:Z9 = 1
                                 END IF
-                                Z6 = (EM2:Z7) * 52 + 2008 + Z9
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 = 8
-                                  EM3676:Z9 = 1
-                                END IF
-                              ELSE IF EM3674:Z9 = 10 THEN
-                                ' **値は スロット + 1。** 0 は main でスロットを持たない
-                                IF EM1:Z7 > 0 THEN
-                                  Z6 = (EM1:Z7 - 1) * 52 + 2008 + Z9
-                                  IF EM1:Z6 = 0 THEN
-                                    EM1:Z6 = 10
-                                    EM3676:Z9 = 1
-                                  END IF
-                                END IF
-                              ELSE
-                                ' 文字列と配列。値がそのままスロット番号
-                                Z6 = (EM1:Z7) * 52 + 2008 + Z9
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 = EM3674:Z9
-                                  EM3676:Z9 = 1
-                                END IF
+                              END IF
+                            ELSE
+                              ' 文字列と配列。値がそのままスロット番号
+                              Z6 = (EM1:Z7) * 52 + 2008 + Z9
+                              IF EM1:Z6 = 0 THEN
+                                EM1:Z6 = EM3674:Z9
+                                EM3676:Z9 = 1
                               END IF
                             END IF
                           END IF
@@ -713,10 +709,8 @@ IF EM54:Z9 <= 28 THEN
           FOR EM42:Z9 = 0 TO Z7
             Z3 = EM42:Z9 * 4 + Z4 + 4
             EM47:Z9 = 0
-            IF EM0:Z3 >= 4 THEN
-              IF EM0:Z3 <= 5 THEN
-                EM47:Z9 = 1
-              END IF
+            IF (EM0:Z3 >= 4) AND (EM0:Z3 <= 5) THEN
+              EM47:Z9 = 1
             END IF
             IF EM47:Z9 = 0 THEN
               EM43:Z9 = 1

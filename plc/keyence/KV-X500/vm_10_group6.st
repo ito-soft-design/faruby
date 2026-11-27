@@ -216,16 +216,12 @@ IF EM54:Z9 <= 69 THEN
       // シンボルや配列のタグは 4 より大きいので、上限も見ないと
       // 番号やスロット番号が数値として比べられてしまう
       Z3 := 0;
-      IF EM0:Z1 >= 4 THEN
-        IF EM0:Z1 <= 5 THEN
-          Z3 := 1;
-        END_IF;
+      IF (EM0:Z1 >= 4) AND (EM0:Z1 <= 5) THEN
+        Z3 := 1;
       END_IF;
       Z4 := 0;
-      IF EM0:Z2 >= 4 THEN
-        IF EM0:Z2 <= 5 THEN
-          Z4 := 1;
-        END_IF;
+      IF (EM0:Z2 >= 4) AND (EM0:Z2 <= 5) THEN
+        Z4 := 1;
       END_IF;
       IF Z3 = 1 THEN
         IF Z4 = 1 THEN

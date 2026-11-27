@@ -319,12 +319,18 @@ class TestMethods < Minitest::Test
 
   # 生成コードの数値判定に上限が無いと、シミュレータとだけ食い違って
   # 実機で `:foo == 1` が真になる (実際に踏んだ)
+  #
+  # **上限が「ある」ことだけを見ます。書き方は見ません。** 2026-11-27 まで
+  # 内側の `IF tag <= 5 THEN` を名指ししていましたが、`(tag >= 4) AND
+  # (tag <= 5)` の 1 つの条件にまとめたので形が変わりました。
   def test_generated_code_checks_both_ends_of_the_numeric_range
     source = FaRuby::KvsGenerator.new.source
     emitter = FaRuby::KvsEmitter.new(layout: layout)
     tag = emitter.reg_slot(:a).tag
 
-    assert_includes source, "IF #{tag} <= #{TT_FLOAT} THEN",
+    assert_includes source, "#{tag} >= #{TT_INTEGER}",
+                    "数値判定に下限が無い"
+    assert_includes source, "#{tag} <= #{TT_FLOAT}",
                     "数値判定が下限だけになっている"
   end
 

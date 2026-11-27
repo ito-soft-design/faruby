@@ -96,37 +96,35 @@ IF EM54:Z9 <= 92 THEN
             Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
           END_IF;
           EM3674:Z9 := EM0:Z7;
-          IF EM3674:Z9 >= 7 THEN
-            IF EM3674:Z9 <= 10 THEN
-              IF EM3674:Z9 = 9 THEN
-                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+            IF EM3674:Z9 = 9 THEN
+              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+            ELSIF EM3674:Z9 = 10 THEN
+              // **値は スロット + 1。** 0 は main でスロットを持たない
+              IF EM1:Z7 > 0 THEN
+                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                 IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
+                  EM1:Z6 := 10;
                   EM3676:Z9 := 1;
                 END_IF;
-                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
-                  EM3676:Z9 := 1;
-                END_IF;
-              ELSIF EM3674:Z9 = 10 THEN
-                // **値は スロット + 1。** 0 は main でスロットを持たない
-                IF EM1:Z7 > 0 THEN
-                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 := 10;
-                    EM3676:Z9 := 1;
-                  END_IF;
-                END_IF;
-              ELSE
-                // 文字列と配列。値がそのままスロット番号
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := EM3674:Z9;
-                  EM3676:Z9 := 1;
-                END_IF;
+              END_IF;
+            ELSE
+              // 文字列と配列。値がそのままスロット番号
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := EM3674:Z9;
+                EM3676:Z9 := 1;
               END_IF;
             END_IF;
           END_IF;
@@ -176,37 +174,35 @@ IF EM54:Z9 <= 92 THEN
                       FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
                         Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
                         EM3674:Z9 := EM0:Z7;
-                        IF EM3674:Z9 >= 7 THEN
-                          IF EM3674:Z9 <= 10 THEN
-                            IF EM3674:Z9 = 9 THEN
-                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                        IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                          IF EM3674:Z9 = 9 THEN
+                            // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                            // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                            Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                          ELSIF EM3674:Z9 = 10 THEN
+                            // **値は スロット + 1。** 0 は main でスロットを持たない
+                            IF EM1:Z7 > 0 THEN
+                              Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                               IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
+                                EM1:Z6 := 10;
                                 EM3676:Z9 := 1;
                               END_IF;
-                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
-                                EM3676:Z9 := 1;
-                              END_IF;
-                            ELSIF EM3674:Z9 = 10 THEN
-                              // **値は スロット + 1。** 0 は main でスロットを持たない
-                              IF EM1:Z7 > 0 THEN
-                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 := 10;
-                                  EM3676:Z9 := 1;
-                                END_IF;
-                              END_IF;
-                            ELSE
-                              // 文字列と配列。値がそのままスロット番号
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := EM3674:Z9;
-                                EM3676:Z9 := 1;
-                              END_IF;
+                            END_IF;
+                          ELSE
+                            // 文字列と配列。値がそのままスロット番号
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := EM3674:Z9;
+                              EM3676:Z9 := 1;
                             END_IF;
                           END_IF;
                         END_IF;
@@ -302,37 +298,35 @@ IF EM54:Z9 <= 92 THEN
             Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
           END_IF;
           EM3674:Z9 := EM0:Z7;
-          IF EM3674:Z9 >= 7 THEN
-            IF EM3674:Z9 <= 10 THEN
-              IF EM3674:Z9 = 9 THEN
-                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+            IF EM3674:Z9 = 9 THEN
+              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+            ELSIF EM3674:Z9 = 10 THEN
+              // **値は スロット + 1。** 0 は main でスロットを持たない
+              IF EM1:Z7 > 0 THEN
+                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                 IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
+                  EM1:Z6 := 10;
                   EM3676:Z9 := 1;
                 END_IF;
-                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
-                  EM3676:Z9 := 1;
-                END_IF;
-              ELSIF EM3674:Z9 = 10 THEN
-                // **値は スロット + 1。** 0 は main でスロットを持たない
-                IF EM1:Z7 > 0 THEN
-                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 := 10;
-                    EM3676:Z9 := 1;
-                  END_IF;
-                END_IF;
-              ELSE
-                // 文字列と配列。値がそのままスロット番号
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := EM3674:Z9;
-                  EM3676:Z9 := 1;
-                END_IF;
+              END_IF;
+            ELSE
+              // 文字列と配列。値がそのままスロット番号
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := EM3674:Z9;
+                EM3676:Z9 := 1;
               END_IF;
             END_IF;
           END_IF;
@@ -382,37 +376,35 @@ IF EM54:Z9 <= 92 THEN
                       FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
                         Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
                         EM3674:Z9 := EM0:Z7;
-                        IF EM3674:Z9 >= 7 THEN
-                          IF EM3674:Z9 <= 10 THEN
-                            IF EM3674:Z9 = 9 THEN
-                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                        IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                          IF EM3674:Z9 = 9 THEN
+                            // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                            // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                            Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                          ELSIF EM3674:Z9 = 10 THEN
+                            // **値は スロット + 1。** 0 は main でスロットを持たない
+                            IF EM1:Z7 > 0 THEN
+                              Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                               IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
+                                EM1:Z6 := 10;
                                 EM3676:Z9 := 1;
                               END_IF;
-                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
-                                EM3676:Z9 := 1;
-                              END_IF;
-                            ELSIF EM3674:Z9 = 10 THEN
-                              // **値は スロット + 1。** 0 は main でスロットを持たない
-                              IF EM1:Z7 > 0 THEN
-                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 := 10;
-                                  EM3676:Z9 := 1;
-                                END_IF;
-                              END_IF;
-                            ELSE
-                              // 文字列と配列。値がそのままスロット番号
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := EM3674:Z9;
-                                EM3676:Z9 := 1;
-                              END_IF;
+                            END_IF;
+                          ELSE
+                            // 文字列と配列。値がそのままスロット番号
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := EM3674:Z9;
+                              EM3676:Z9 := 1;
                             END_IF;
                           END_IF;
                         END_IF;
@@ -509,37 +501,35 @@ IF EM54:Z9 <= 92 THEN
             Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
           END_IF;
           EM3674:Z9 := EM0:Z7;
-          IF EM3674:Z9 >= 7 THEN
-            IF EM3674:Z9 <= 10 THEN
-              IF EM3674:Z9 = 9 THEN
-                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+            IF EM3674:Z9 = 9 THEN
+              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+            ELSIF EM3674:Z9 = 10 THEN
+              // **値は スロット + 1。** 0 は main でスロットを持たない
+              IF EM1:Z7 > 0 THEN
+                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                 IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
+                  EM1:Z6 := 10;
                   EM3676:Z9 := 1;
                 END_IF;
-                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
-                  EM3676:Z9 := 1;
-                END_IF;
-              ELSIF EM3674:Z9 = 10 THEN
-                // **値は スロット + 1。** 0 は main でスロットを持たない
-                IF EM1:Z7 > 0 THEN
-                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 := 10;
-                    EM3676:Z9 := 1;
-                  END_IF;
-                END_IF;
-              ELSE
-                // 文字列と配列。値がそのままスロット番号
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := EM3674:Z9;
-                  EM3676:Z9 := 1;
-                END_IF;
+              END_IF;
+            ELSE
+              // 文字列と配列。値がそのままスロット番号
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := EM3674:Z9;
+                EM3676:Z9 := 1;
               END_IF;
             END_IF;
           END_IF;
@@ -589,37 +579,35 @@ IF EM54:Z9 <= 92 THEN
                       FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
                         Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
                         EM3674:Z9 := EM0:Z7;
-                        IF EM3674:Z9 >= 7 THEN
-                          IF EM3674:Z9 <= 10 THEN
-                            IF EM3674:Z9 = 9 THEN
-                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                        IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                          IF EM3674:Z9 = 9 THEN
+                            // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                            // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                            Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                          ELSIF EM3674:Z9 = 10 THEN
+                            // **値は スロット + 1。** 0 は main でスロットを持たない
+                            IF EM1:Z7 > 0 THEN
+                              Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                               IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
+                                EM1:Z6 := 10;
                                 EM3676:Z9 := 1;
                               END_IF;
-                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
-                                EM3676:Z9 := 1;
-                              END_IF;
-                            ELSIF EM3674:Z9 = 10 THEN
-                              // **値は スロット + 1。** 0 は main でスロットを持たない
-                              IF EM1:Z7 > 0 THEN
-                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 := 10;
-                                  EM3676:Z9 := 1;
-                                END_IF;
-                              END_IF;
-                            ELSE
-                              // 文字列と配列。値がそのままスロット番号
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := EM3674:Z9;
-                                EM3676:Z9 := 1;
-                              END_IF;
+                            END_IF;
+                          ELSE
+                            // 文字列と配列。値がそのままスロット番号
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := EM3674:Z9;
+                              EM3676:Z9 := 1;
                             END_IF;
                           END_IF;
                         END_IF;
@@ -782,37 +770,35 @@ IF EM54:Z9 <= 92 THEN
             Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
           END_IF;
           EM3674:Z9 := EM0:Z7;
-          IF EM3674:Z9 >= 7 THEN
-            IF EM3674:Z9 <= 10 THEN
-              IF EM3674:Z9 = 9 THEN
-                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+            IF EM3674:Z9 = 9 THEN
+              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+            ELSIF EM3674:Z9 = 10 THEN
+              // **値は スロット + 1。** 0 は main でスロットを持たない
+              IF EM1:Z7 > 0 THEN
+                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                 IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
+                  EM1:Z6 := 10;
                   EM3676:Z9 := 1;
                 END_IF;
-                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
-                  EM3676:Z9 := 1;
-                END_IF;
-              ELSIF EM3674:Z9 = 10 THEN
-                // **値は スロット + 1。** 0 は main でスロットを持たない
-                IF EM1:Z7 > 0 THEN
-                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 := 10;
-                    EM3676:Z9 := 1;
-                  END_IF;
-                END_IF;
-              ELSE
-                // 文字列と配列。値がそのままスロット番号
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := EM3674:Z9;
-                  EM3676:Z9 := 1;
-                END_IF;
+              END_IF;
+            ELSE
+              // 文字列と配列。値がそのままスロット番号
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := EM3674:Z9;
+                EM3676:Z9 := 1;
               END_IF;
             END_IF;
           END_IF;
@@ -862,37 +848,35 @@ IF EM54:Z9 <= 92 THEN
                       FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
                         Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
                         EM3674:Z9 := EM0:Z7;
-                        IF EM3674:Z9 >= 7 THEN
-                          IF EM3674:Z9 <= 10 THEN
-                            IF EM3674:Z9 = 9 THEN
-                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                        IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                          IF EM3674:Z9 = 9 THEN
+                            // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                            // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                            Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                          ELSIF EM3674:Z9 = 10 THEN
+                            // **値は スロット + 1。** 0 は main でスロットを持たない
+                            IF EM1:Z7 > 0 THEN
+                              Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                               IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
+                                EM1:Z6 := 10;
                                 EM3676:Z9 := 1;
                               END_IF;
-                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
-                                EM3676:Z9 := 1;
-                              END_IF;
-                            ELSIF EM3674:Z9 = 10 THEN
-                              // **値は スロット + 1。** 0 は main でスロットを持たない
-                              IF EM1:Z7 > 0 THEN
-                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 := 10;
-                                  EM3676:Z9 := 1;
-                                END_IF;
-                              END_IF;
-                            ELSE
-                              // 文字列と配列。値がそのままスロット番号
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := EM3674:Z9;
-                                EM3676:Z9 := 1;
-                              END_IF;
+                            END_IF;
+                          ELSE
+                            // 文字列と配列。値がそのままスロット番号
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := EM3674:Z9;
+                              EM3676:Z9 := 1;
                             END_IF;
                           END_IF;
                         END_IF;
@@ -967,37 +951,35 @@ IF EM54:Z9 <= 92 THEN
             Z7 := (EM3672:Z9 - 80) * 4 + 808 + Z9;
           END_IF;
           EM3674:Z9 := EM0:Z7;
-          IF EM3674:Z9 >= 7 THEN
-            IF EM3674:Z9 <= 10 THEN
-              IF EM3674:Z9 = 9 THEN
-                // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+          IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+            IF EM3674:Z9 = 9 THEN
+              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := 8;
+                EM3676:Z9 := 1;
+              END_IF;
+            ELSIF EM3674:Z9 = 10 THEN
+              // **値は スロット + 1。** 0 は main でスロットを持たない
+              IF EM1:Z7 > 0 THEN
+                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                 IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
+                  EM1:Z6 := 10;
                   EM3676:Z9 := 1;
                 END_IF;
-                Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := 8;
-                  EM3676:Z9 := 1;
-                END_IF;
-              ELSIF EM3674:Z9 = 10 THEN
-                // **値は スロット + 1。** 0 は main でスロットを持たない
-                IF EM1:Z7 > 0 THEN
-                  Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                  IF EM1:Z6 = 0 THEN
-                    EM1:Z6 := 10;
-                    EM3676:Z9 := 1;
-                  END_IF;
-                END_IF;
-              ELSE
-                // 文字列と配列。値がそのままスロット番号
-                Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                IF EM1:Z6 = 0 THEN
-                  EM1:Z6 := EM3674:Z9;
-                  EM3676:Z9 := 1;
-                END_IF;
+              END_IF;
+            ELSE
+              // 文字列と配列。値がそのままスロット番号
+              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+              IF EM1:Z6 = 0 THEN
+                EM1:Z6 := EM3674:Z9;
+                EM3676:Z9 := 1;
               END_IF;
             END_IF;
           END_IF;
@@ -1047,37 +1029,35 @@ IF EM54:Z9 <= 92 THEN
                       FOR EM3681:Z9 := 0 TO EM3682:Z9 DO
                         Z7 := EM3680:Z9 + 4 + EM3681:Z9 * 4;
                         EM3674:Z9 := EM0:Z7;
-                        IF EM3674:Z9 >= 7 THEN
-                          IF EM3674:Z9 <= 10 THEN
-                            IF EM3674:Z9 = 9 THEN
-                              // 鍵と値で 2 本。**どちらも配列として印を付ける。**
-                              // 中身が値スロットの並びで、読み方はふつうの配列と同じ
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                        IF (EM3674:Z9 >= 7) AND (EM3674:Z9 <= 10) THEN
+                          IF EM3674:Z9 = 9 THEN
+                            // 鍵と値で 2 本。**どちらも配列として印を付ける。**
+                            // 中身が値スロットの並びで、読み方はふつうの配列と同じ
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                            Z6 := (EM2:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := 8;
+                              EM3676:Z9 := 1;
+                            END_IF;
+                          ELSIF EM3674:Z9 = 10 THEN
+                            // **値は スロット + 1。** 0 は main でスロットを持たない
+                            IF EM1:Z7 > 0 THEN
+                              Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
                               IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
+                                EM1:Z6 := 10;
                                 EM3676:Z9 := 1;
                               END_IF;
-                              Z6 := (EM2:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := 8;
-                                EM3676:Z9 := 1;
-                              END_IF;
-                            ELSIF EM3674:Z9 = 10 THEN
-                              // **値は スロット + 1。** 0 は main でスロットを持たない
-                              IF EM1:Z7 > 0 THEN
-                                Z6 := (EM1:Z7 - 1) * 52 + 2008 + Z9;
-                                IF EM1:Z6 = 0 THEN
-                                  EM1:Z6 := 10;
-                                  EM3676:Z9 := 1;
-                                END_IF;
-                              END_IF;
-                            ELSE
-                              // 文字列と配列。値がそのままスロット番号
-                              Z6 := (EM1:Z7) * 52 + 2008 + Z9;
-                              IF EM1:Z6 = 0 THEN
-                                EM1:Z6 := EM3674:Z9;
-                                EM3676:Z9 := 1;
-                              END_IF;
+                            END_IF;
+                          ELSE
+                            // 文字列と配列。値がそのままスロット番号
+                            Z6 := (EM1:Z7) * 52 + 2008 + Z9;
+                            IF EM1:Z6 = 0 THEN
+                              EM1:Z6 := EM3674:Z9;
+                              EM3676:Z9 := 1;
                             END_IF;
                           END_IF;
                         END_IF;

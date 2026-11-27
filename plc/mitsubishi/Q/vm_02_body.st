@@ -751,37 +751,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               Z7 := (VMW3672 - 80) * 4 + 4808;
             END_IF;
             VMW3674 := D0Z7;
-            IF VMW3674 >= 7 THEN
-              IF VMW3674 <= 10 THEN
-                IF VMW3674 = 9 THEN
-                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                  Z6 := (D1Z7) * 52 + 6008;
+            IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+              IF VMW3674 = 9 THEN
+                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                Z6 := (D1Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := 8;
+                  VMW3676 := 1;
+                END_IF;
+                Z6 := (D2Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := 8;
+                  VMW3676 := 1;
+                END_IF;
+              ELSIF VMW3674 = 10 THEN
+                (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                IF D1Z7 > 0 THEN
+                  Z6 := (D1Z7 - 1) * 52 + 6008;
                   IF D1Z6 = 0 THEN
-                    D1Z6 := 8;
+                    D1Z6 := 10;
                     VMW3676 := 1;
                   END_IF;
-                  Z6 := (D2Z7) * 52 + 6008;
-                  IF D1Z6 = 0 THEN
-                    D1Z6 := 8;
-                    VMW3676 := 1;
-                  END_IF;
-                ELSIF VMW3674 = 10 THEN
-                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                  IF D1Z7 > 0 THEN
-                    Z6 := (D1Z7 - 1) * 52 + 6008;
-                    IF D1Z6 = 0 THEN
-                      D1Z6 := 10;
-                      VMW3676 := 1;
-                    END_IF;
-                  END_IF;
-                ELSE
-                  (* 文字列と配列。値がそのままスロット番号 *)
-                  Z6 := (D1Z7) * 52 + 6008;
-                  IF D1Z6 = 0 THEN
-                    D1Z6 := VMW3674;
-                    VMW3676 := 1;
-                  END_IF;
+                END_IF;
+              ELSE
+                (* 文字列と配列。値がそのままスロット番号 *)
+                Z6 := (D1Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := VMW3674;
+                  VMW3676 := 1;
                 END_IF;
               END_IF;
             END_IF;
@@ -831,37 +829,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                         FOR VMW3681 := 0 TO VMW3682 DO
                           Z7 := VMW3680 + 4 + VMW3681 * 4;
                           VMW3674 := D0Z7;
-                          IF VMW3674 >= 7 THEN
-                            IF VMW3674 <= 10 THEN
-                              IF VMW3674 = 9 THEN
-                                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                Z6 := (D1Z7) * 52 + 6008;
+                          IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                            IF VMW3674 = 9 THEN
+                              (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                              (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                              Z6 := (D1Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := 8;
+                                VMW3676 := 1;
+                              END_IF;
+                              Z6 := (D2Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := 8;
+                                VMW3676 := 1;
+                              END_IF;
+                            ELSIF VMW3674 = 10 THEN
+                              (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                              IF D1Z7 > 0 THEN
+                                Z6 := (D1Z7 - 1) * 52 + 6008;
                                 IF D1Z6 = 0 THEN
-                                  D1Z6 := 8;
+                                  D1Z6 := 10;
                                   VMW3676 := 1;
                                 END_IF;
-                                Z6 := (D2Z7) * 52 + 6008;
-                                IF D1Z6 = 0 THEN
-                                  D1Z6 := 8;
-                                  VMW3676 := 1;
-                                END_IF;
-                              ELSIF VMW3674 = 10 THEN
-                                (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                IF D1Z7 > 0 THEN
-                                  Z6 := (D1Z7 - 1) * 52 + 6008;
-                                  IF D1Z6 = 0 THEN
-                                    D1Z6 := 10;
-                                    VMW3676 := 1;
-                                  END_IF;
-                                END_IF;
-                              ELSE
-                                (* 文字列と配列。値がそのままスロット番号 *)
-                                Z6 := (D1Z7) * 52 + 6008;
-                                IF D1Z6 = 0 THEN
-                                  D1Z6 := VMW3674;
-                                  VMW3676 := 1;
-                                END_IF;
+                              END_IF;
+                            ELSE
+                              (* 文字列と配列。値がそのままスロット番号 *)
+                              Z6 := (D1Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := VMW3674;
+                                VMW3676 := 1;
                               END_IF;
                             END_IF;
                           END_IF;
@@ -1352,15 +1348,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         Z8 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 / 16;   (* アクセス幅 *)
         Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 - Z8 * 16;   (* デバイス種別 *)
         (* アドレス = ベース + 添字。範囲外は黙って別の場所を読み書きしてしまうため弾く *)
+        (* **上も下も同じエラーなので 1 つの条件で見ます** (`in_range`) *)
         VMTEMP32L := INT_TO_DINT(VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0) + VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
-        IF VMTEMP32L >= 0 THEN
-          IF VMTEMP32L <= 65535 THEN
-            Z6 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          ELSE
-            VMSTATUS := 3;
-            VMERROR := 2;
-            EXIT;
-          END_IF;
+        IF (VMTEMP32L >= 0) AND (VMTEMP32L <= 65535) THEN
+          Z6 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
         ELSE
           VMSTATUS := 3;
           VMERROR := 2;
@@ -1743,15 +1734,10 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         Z8 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 / 16;   (* アクセス幅 *)
         Z5 := VMSLOTW[VMREGSLOT + VMOPERANDA].SLW1 - Z8 * 16;   (* デバイス種別 *)
         (* アドレス = ベース + 添字。範囲外は黙って別の場所を読み書きしてしまうため弾く *)
+        (* **上も下も同じエラーなので 1 つの条件で見ます** (`in_range`) *)
         VMTEMP32L := INT_TO_DINT(VMSLOTW[VMREGSLOT + VMOPERANDA].SLW0) + VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLNUM;
-        IF VMTEMP32L >= 0 THEN
-          IF VMTEMP32L <= 65535 THEN
-            Z6 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
-          ELSE
-            VMSTATUS := 3;
-            VMERROR := 2;
-            EXIT;
-          END_IF;
+        IF (VMTEMP32L >= 0) AND (VMTEMP32L <= 65535) THEN
+          Z6 := WORD_TO_INT(DINT_TO_WORD(VMTEMP32L));
         ELSE
           VMSTATUS := 3;
           VMERROR := 2;
@@ -2058,48 +2044,28 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
         IF Z5 >= 3 THEN
           IF Z5 <= 17 THEN
             (* 数値 (タグ 4-5) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 5 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 5) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
             END_IF;
           ELSIF Z5 <= 19 THEN
             (* 文字列・配列・ハッシュ (タグ 7-9) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
             END_IF;
           ELSIF Z5 <= 20 THEN
             (* 整数・文字列・配列 (タグ 4-8) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 8 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 8) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
             END_IF;
           ELSIF Z5 <= 21 THEN
             (* 配列・ハッシュ (タグ 8-9) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
@@ -2134,24 +2100,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
             END_IF;
           ELSIF Z5 <= 28 THEN
             (* クラス (タグ 13-14) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
             END_IF;
           ELSE
             (* 配列・ハッシュ (タグ 8-9) *)
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
-              VMSTATUS := 3;
-              VMERROR := 4;
-              EXIT;
-            END_IF;
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+            IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
               VMSTATUS := 3;
               VMERROR := 4;
               EXIT;
@@ -2167,16 +2123,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           (* シンボルや配列のタグは 4 より大きいので、上限も見ないと *)
           (* 番号やスロット番号が数値として比べられてしまう *)
           Z3 := 0;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG >= 4 THEN
-            IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 5 THEN
-              Z3 := 1;
-            END_IF;
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG >= 4) AND (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 5) THEN
+            Z3 := 1;
           END_IF;
           Z4 := 0;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG >= 4 THEN
-            IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <= 5 THEN
-              Z4 := 1;
-            END_IF;
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG >= 4) AND (VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <= 5) THEN
+            Z4 := 1;
           END_IF;
           IF Z3 = 1 THEN
             IF Z4 = 1 THEN
@@ -2651,37 +2603,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   Z7 := (VMW3672 - 80) * 4 + 4808;
                 END_IF;
                 VMW3674 := D0Z7;
-                IF VMW3674 >= 7 THEN
-                  IF VMW3674 <= 10 THEN
-                    IF VMW3674 = 9 THEN
-                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                      Z6 := (D1Z7) * 52 + 6008;
+                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                  IF VMW3674 = 9 THEN
+                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                    Z6 := (D2Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                  ELSIF VMW3674 = 10 THEN
+                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                    IF D1Z7 > 0 THEN
+                      Z6 := (D1Z7 - 1) * 52 + 6008;
                       IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
+                        D1Z6 := 10;
                         VMW3676 := 1;
                       END_IF;
-                      Z6 := (D2Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
-                        VMW3676 := 1;
-                      END_IF;
-                    ELSIF VMW3674 = 10 THEN
-                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                      IF D1Z7 > 0 THEN
-                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 10;
-                          VMW3676 := 1;
-                        END_IF;
-                      END_IF;
-                    ELSE
-                      (* 文字列と配列。値がそのままスロット番号 *)
-                      Z6 := (D1Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := VMW3674;
-                        VMW3676 := 1;
-                      END_IF;
+                    END_IF;
+                  ELSE
+                    (* 文字列と配列。値がそのままスロット番号 *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := VMW3674;
+                      VMW3676 := 1;
                     END_IF;
                   END_IF;
                 END_IF;
@@ -2731,37 +2681,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                             FOR VMW3681 := 0 TO VMW3682 DO
                               Z7 := VMW3680 + 4 + VMW3681 * 4;
                               VMW3674 := D0Z7;
-                              IF VMW3674 >= 7 THEN
-                                IF VMW3674 <= 10 THEN
-                                  IF VMW3674 = 9 THEN
-                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                    Z6 := (D1Z7) * 52 + 6008;
+                              IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                IF VMW3674 = 9 THEN
+                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                  Z6 := (D2Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                ELSIF VMW3674 = 10 THEN
+                                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                  IF D1Z7 > 0 THEN
+                                    Z6 := (D1Z7 - 1) * 52 + 6008;
                                     IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
+                                      D1Z6 := 10;
                                       VMW3676 := 1;
                                     END_IF;
-                                    Z6 := (D2Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
-                                      VMW3676 := 1;
-                                    END_IF;
-                                  ELSIF VMW3674 = 10 THEN
-                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                    IF D1Z7 > 0 THEN
-                                      Z6 := (D1Z7 - 1) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 10;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    END_IF;
-                                  ELSE
-                                    (* 文字列と配列。値がそのままスロット番号 *)
-                                    Z6 := (D1Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := VMW3674;
-                                      VMW3676 := 1;
-                                    END_IF;
+                                  END_IF;
+                                ELSE
+                                  (* 文字列と配列。値がそのままスロット番号 *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := VMW3674;
+                                    VMW3676 := 1;
                                   END_IF;
                                 END_IF;
                               END_IF;
@@ -3131,37 +3079,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                     Z7 := (VMW3672 - 80) * 4 + 4808;
                   END_IF;
                   VMW3674 := D0Z7;
-                  IF VMW3674 >= 7 THEN
-                    IF VMW3674 <= 10 THEN
-                      IF VMW3674 = 9 THEN
-                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                        Z6 := (D1Z7) * 52 + 6008;
+                  IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                    IF VMW3674 = 9 THEN
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                      Z6 := (D2Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                    ELSIF VMW3674 = 10 THEN
+                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                      IF D1Z7 > 0 THEN
+                        Z6 := (D1Z7 - 1) * 52 + 6008;
                         IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
+                          D1Z6 := 10;
                           VMW3676 := 1;
                         END_IF;
-                        Z6 := (D2Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
-                          VMW3676 := 1;
-                        END_IF;
-                      ELSIF VMW3674 = 10 THEN
-                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                        IF D1Z7 > 0 THEN
-                          Z6 := (D1Z7 - 1) * 52 + 6008;
-                          IF D1Z6 = 0 THEN
-                            D1Z6 := 10;
-                            VMW3676 := 1;
-                          END_IF;
-                        END_IF;
-                      ELSE
-                        (* 文字列と配列。値がそのままスロット番号 *)
-                        Z6 := (D1Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := VMW3674;
-                          VMW3676 := 1;
-                        END_IF;
+                      END_IF;
+                    ELSE
+                      (* 文字列と配列。値がそのままスロット番号 *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := VMW3674;
+                        VMW3676 := 1;
                       END_IF;
                     END_IF;
                   END_IF;
@@ -3211,37 +3157,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                               FOR VMW3681 := 0 TO VMW3682 DO
                                 Z7 := VMW3680 + 4 + VMW3681 * 4;
                                 VMW3674 := D0Z7;
-                                IF VMW3674 >= 7 THEN
-                                  IF VMW3674 <= 10 THEN
-                                    IF VMW3674 = 9 THEN
-                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                      Z6 := (D1Z7) * 52 + 6008;
+                                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                  IF VMW3674 = 9 THEN
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                    Z6 := (D2Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                  ELSIF VMW3674 = 10 THEN
+                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                    IF D1Z7 > 0 THEN
+                                      Z6 := (D1Z7 - 1) * 52 + 6008;
                                       IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
+                                        D1Z6 := 10;
                                         VMW3676 := 1;
                                       END_IF;
-                                      Z6 := (D2Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    ELSIF VMW3674 = 10 THEN
-                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                      IF D1Z7 > 0 THEN
-                                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                                        IF D1Z6 = 0 THEN
-                                          D1Z6 := 10;
-                                          VMW3676 := 1;
-                                        END_IF;
-                                      END_IF;
-                                    ELSE
-                                      (* 文字列と配列。値がそのままスロット番号 *)
-                                      Z6 := (D1Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := VMW3674;
-                                        VMW3676 := 1;
-                                      END_IF;
+                                    END_IF;
+                                  ELSE
+                                    (* 文字列と配列。値がそのままスロット番号 *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := VMW3674;
+                                      VMW3676 := 1;
                                     END_IF;
                                   END_IF;
                                 END_IF;
@@ -3307,37 +3251,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                     Z7 := (VMW3672 - 80) * 4 + 4808;
                   END_IF;
                   VMW3674 := D0Z7;
-                  IF VMW3674 >= 7 THEN
-                    IF VMW3674 <= 10 THEN
-                      IF VMW3674 = 9 THEN
-                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                        Z6 := (D1Z7) * 52 + 6008;
+                  IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                    IF VMW3674 = 9 THEN
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                      Z6 := (D2Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                    ELSIF VMW3674 = 10 THEN
+                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                      IF D1Z7 > 0 THEN
+                        Z6 := (D1Z7 - 1) * 52 + 6008;
                         IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
+                          D1Z6 := 10;
                           VMW3676 := 1;
                         END_IF;
-                        Z6 := (D2Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
-                          VMW3676 := 1;
-                        END_IF;
-                      ELSIF VMW3674 = 10 THEN
-                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                        IF D1Z7 > 0 THEN
-                          Z6 := (D1Z7 - 1) * 52 + 6008;
-                          IF D1Z6 = 0 THEN
-                            D1Z6 := 10;
-                            VMW3676 := 1;
-                          END_IF;
-                        END_IF;
-                      ELSE
-                        (* 文字列と配列。値がそのままスロット番号 *)
-                        Z6 := (D1Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := VMW3674;
-                          VMW3676 := 1;
-                        END_IF;
+                      END_IF;
+                    ELSE
+                      (* 文字列と配列。値がそのままスロット番号 *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := VMW3674;
+                        VMW3676 := 1;
                       END_IF;
                     END_IF;
                   END_IF;
@@ -3387,37 +3329,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                               FOR VMW3681 := 0 TO VMW3682 DO
                                 Z7 := VMW3680 + 4 + VMW3681 * 4;
                                 VMW3674 := D0Z7;
-                                IF VMW3674 >= 7 THEN
-                                  IF VMW3674 <= 10 THEN
-                                    IF VMW3674 = 9 THEN
-                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                      Z6 := (D1Z7) * 52 + 6008;
+                                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                  IF VMW3674 = 9 THEN
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                    Z6 := (D2Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                  ELSIF VMW3674 = 10 THEN
+                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                    IF D1Z7 > 0 THEN
+                                      Z6 := (D1Z7 - 1) * 52 + 6008;
                                       IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
+                                        D1Z6 := 10;
                                         VMW3676 := 1;
                                       END_IF;
-                                      Z6 := (D2Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    ELSIF VMW3674 = 10 THEN
-                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                      IF D1Z7 > 0 THEN
-                                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                                        IF D1Z6 = 0 THEN
-                                          D1Z6 := 10;
-                                          VMW3676 := 1;
-                                        END_IF;
-                                      END_IF;
-                                    ELSE
-                                      (* 文字列と配列。値がそのままスロット番号 *)
-                                      Z6 := (D1Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := VMW3674;
-                                        VMW3676 := 1;
-                                      END_IF;
+                                    END_IF;
+                                  ELSE
+                                    (* 文字列と配列。値がそのままスロット番号 *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := VMW3674;
+                                      VMW3676 := 1;
                                     END_IF;
                                   END_IF;
                                 END_IF;
@@ -3515,37 +3455,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                     Z7 := (VMW3672 - 80) * 4 + 4808;
                   END_IF;
                   VMW3674 := D0Z7;
-                  IF VMW3674 >= 7 THEN
-                    IF VMW3674 <= 10 THEN
-                      IF VMW3674 = 9 THEN
-                        (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                        (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                        Z6 := (D1Z7) * 52 + 6008;
+                  IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                    IF VMW3674 = 9 THEN
+                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                      Z6 := (D2Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := 8;
+                        VMW3676 := 1;
+                      END_IF;
+                    ELSIF VMW3674 = 10 THEN
+                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                      IF D1Z7 > 0 THEN
+                        Z6 := (D1Z7 - 1) * 52 + 6008;
                         IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
+                          D1Z6 := 10;
                           VMW3676 := 1;
                         END_IF;
-                        Z6 := (D2Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 8;
-                          VMW3676 := 1;
-                        END_IF;
-                      ELSIF VMW3674 = 10 THEN
-                        (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                        IF D1Z7 > 0 THEN
-                          Z6 := (D1Z7 - 1) * 52 + 6008;
-                          IF D1Z6 = 0 THEN
-                            D1Z6 := 10;
-                            VMW3676 := 1;
-                          END_IF;
-                        END_IF;
-                      ELSE
-                        (* 文字列と配列。値がそのままスロット番号 *)
-                        Z6 := (D1Z7) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := VMW3674;
-                          VMW3676 := 1;
-                        END_IF;
+                      END_IF;
+                    ELSE
+                      (* 文字列と配列。値がそのままスロット番号 *)
+                      Z6 := (D1Z7) * 52 + 6008;
+                      IF D1Z6 = 0 THEN
+                        D1Z6 := VMW3674;
+                        VMW3676 := 1;
                       END_IF;
                     END_IF;
                   END_IF;
@@ -3595,37 +3533,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                               FOR VMW3681 := 0 TO VMW3682 DO
                                 Z7 := VMW3680 + 4 + VMW3681 * 4;
                                 VMW3674 := D0Z7;
-                                IF VMW3674 >= 7 THEN
-                                  IF VMW3674 <= 10 THEN
-                                    IF VMW3674 = 9 THEN
-                                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                      Z6 := (D1Z7) * 52 + 6008;
+                                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                  IF VMW3674 = 9 THEN
+                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                    Z6 := (D2Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := 8;
+                                      VMW3676 := 1;
+                                    END_IF;
+                                  ELSIF VMW3674 = 10 THEN
+                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                    IF D1Z7 > 0 THEN
+                                      Z6 := (D1Z7 - 1) * 52 + 6008;
                                       IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
+                                        D1Z6 := 10;
                                         VMW3676 := 1;
                                       END_IF;
-                                      Z6 := (D2Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 8;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    ELSIF VMW3674 = 10 THEN
-                                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                      IF D1Z7 > 0 THEN
-                                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                                        IF D1Z6 = 0 THEN
-                                          D1Z6 := 10;
-                                          VMW3676 := 1;
-                                        END_IF;
-                                      END_IF;
-                                    ELSE
-                                      (* 文字列と配列。値がそのままスロット番号 *)
-                                      Z6 := (D1Z7) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := VMW3674;
-                                        VMW3676 := 1;
-                                      END_IF;
+                                    END_IF;
+                                  ELSE
+                                    (* 文字列と配列。値がそのままスロット番号 *)
+                                    Z6 := (D1Z7) * 52 + 6008;
+                                    IF D1Z6 = 0 THEN
+                                      D1Z6 := VMW3674;
+                                      VMW3676 := 1;
                                     END_IF;
                                   END_IF;
                                 END_IF;
@@ -3709,37 +3645,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   Z7 := (VMW3672 - 80) * 4 + 4808;
                 END_IF;
                 VMW3674 := D0Z7;
-                IF VMW3674 >= 7 THEN
-                  IF VMW3674 <= 10 THEN
-                    IF VMW3674 = 9 THEN
-                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                      Z6 := (D1Z7) * 52 + 6008;
+                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                  IF VMW3674 = 9 THEN
+                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                    Z6 := (D2Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                  ELSIF VMW3674 = 10 THEN
+                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                    IF D1Z7 > 0 THEN
+                      Z6 := (D1Z7 - 1) * 52 + 6008;
                       IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
+                        D1Z6 := 10;
                         VMW3676 := 1;
                       END_IF;
-                      Z6 := (D2Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
-                        VMW3676 := 1;
-                      END_IF;
-                    ELSIF VMW3674 = 10 THEN
-                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                      IF D1Z7 > 0 THEN
-                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 10;
-                          VMW3676 := 1;
-                        END_IF;
-                      END_IF;
-                    ELSE
-                      (* 文字列と配列。値がそのままスロット番号 *)
-                      Z6 := (D1Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := VMW3674;
-                        VMW3676 := 1;
-                      END_IF;
+                    END_IF;
+                  ELSE
+                    (* 文字列と配列。値がそのままスロット番号 *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := VMW3674;
+                      VMW3676 := 1;
                     END_IF;
                   END_IF;
                 END_IF;
@@ -3789,37 +3723,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                             FOR VMW3681 := 0 TO VMW3682 DO
                               Z7 := VMW3680 + 4 + VMW3681 * 4;
                               VMW3674 := D0Z7;
-                              IF VMW3674 >= 7 THEN
-                                IF VMW3674 <= 10 THEN
-                                  IF VMW3674 = 9 THEN
-                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                    Z6 := (D1Z7) * 52 + 6008;
+                              IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                IF VMW3674 = 9 THEN
+                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                  Z6 := (D2Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                ELSIF VMW3674 = 10 THEN
+                                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                  IF D1Z7 > 0 THEN
+                                    Z6 := (D1Z7 - 1) * 52 + 6008;
                                     IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
+                                      D1Z6 := 10;
                                       VMW3676 := 1;
                                     END_IF;
-                                    Z6 := (D2Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
-                                      VMW3676 := 1;
-                                    END_IF;
-                                  ELSIF VMW3674 = 10 THEN
-                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                    IF D1Z7 > 0 THEN
-                                      Z6 := (D1Z7 - 1) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 10;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    END_IF;
-                                  ELSE
-                                    (* 文字列と配列。値がそのままスロット番号 *)
-                                    Z6 := (D1Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := VMW3674;
-                                      VMW3676 := 1;
-                                    END_IF;
+                                  END_IF;
+                                ELSE
+                                  (* 文字列と配列。値がそのままスロット番号 *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := VMW3674;
+                                    VMW3676 := 1;
                                   END_IF;
                                 END_IF;
                               END_IF;
@@ -4225,48 +4157,28 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       IF Z5 >= 3 THEN
         IF Z5 <= 17 THEN
           (* 数値 (タグ 4-5) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 5 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 5) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
           END_IF;
         ELSIF Z5 <= 19 THEN
           (* 文字列・配列・ハッシュ (タグ 7-9) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 7) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
           END_IF;
         ELSIF Z5 <= 20 THEN
           (* 整数・文字列・配列 (タグ 4-8) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 8 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 4) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 8) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
           END_IF;
         ELSIF Z5 <= 21 THEN
           (* 配列・ハッシュ (タグ 8-9) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
@@ -4301,24 +4213,14 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
           END_IF;
         ELSIF Z5 <= 28 THEN
           (* クラス (タグ 13-14) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 13) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 14) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
           END_IF;
         ELSE
           (* 配列・ハッシュ (タグ 8-9) *)
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8 THEN
-            VMSTATUS := 3;
-            VMERROR := 4;
-            EXIT;
-          END_IF;
-          IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9 THEN
+          IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG < 8) OR (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG > 9) THEN
             VMSTATUS := 3;
             VMERROR := 4;
             EXIT;
@@ -4393,37 +4295,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
               Z7 := (VMW3672 - 80) * 4 + 4808;
             END_IF;
             VMW3674 := D0Z7;
-            IF VMW3674 >= 7 THEN
-              IF VMW3674 <= 10 THEN
-                IF VMW3674 = 9 THEN
-                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                  Z6 := (D1Z7) * 52 + 6008;
+            IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+              IF VMW3674 = 9 THEN
+                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                Z6 := (D1Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := 8;
+                  VMW3676 := 1;
+                END_IF;
+                Z6 := (D2Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := 8;
+                  VMW3676 := 1;
+                END_IF;
+              ELSIF VMW3674 = 10 THEN
+                (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                IF D1Z7 > 0 THEN
+                  Z6 := (D1Z7 - 1) * 52 + 6008;
                   IF D1Z6 = 0 THEN
-                    D1Z6 := 8;
+                    D1Z6 := 10;
                     VMW3676 := 1;
                   END_IF;
-                  Z6 := (D2Z7) * 52 + 6008;
-                  IF D1Z6 = 0 THEN
-                    D1Z6 := 8;
-                    VMW3676 := 1;
-                  END_IF;
-                ELSIF VMW3674 = 10 THEN
-                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                  IF D1Z7 > 0 THEN
-                    Z6 := (D1Z7 - 1) * 52 + 6008;
-                    IF D1Z6 = 0 THEN
-                      D1Z6 := 10;
-                      VMW3676 := 1;
-                    END_IF;
-                  END_IF;
-                ELSE
-                  (* 文字列と配列。値がそのままスロット番号 *)
-                  Z6 := (D1Z7) * 52 + 6008;
-                  IF D1Z6 = 0 THEN
-                    D1Z6 := VMW3674;
-                    VMW3676 := 1;
-                  END_IF;
+                END_IF;
+              ELSE
+                (* 文字列と配列。値がそのままスロット番号 *)
+                Z6 := (D1Z7) * 52 + 6008;
+                IF D1Z6 = 0 THEN
+                  D1Z6 := VMW3674;
+                  VMW3676 := 1;
                 END_IF;
               END_IF;
             END_IF;
@@ -4473,37 +4373,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                         FOR VMW3681 := 0 TO VMW3682 DO
                           Z7 := VMW3680 + 4 + VMW3681 * 4;
                           VMW3674 := D0Z7;
-                          IF VMW3674 >= 7 THEN
-                            IF VMW3674 <= 10 THEN
-                              IF VMW3674 = 9 THEN
-                                (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                Z6 := (D1Z7) * 52 + 6008;
+                          IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                            IF VMW3674 = 9 THEN
+                              (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                              (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                              Z6 := (D1Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := 8;
+                                VMW3676 := 1;
+                              END_IF;
+                              Z6 := (D2Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := 8;
+                                VMW3676 := 1;
+                              END_IF;
+                            ELSIF VMW3674 = 10 THEN
+                              (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                              IF D1Z7 > 0 THEN
+                                Z6 := (D1Z7 - 1) * 52 + 6008;
                                 IF D1Z6 = 0 THEN
-                                  D1Z6 := 8;
+                                  D1Z6 := 10;
                                   VMW3676 := 1;
                                 END_IF;
-                                Z6 := (D2Z7) * 52 + 6008;
-                                IF D1Z6 = 0 THEN
-                                  D1Z6 := 8;
-                                  VMW3676 := 1;
-                                END_IF;
-                              ELSIF VMW3674 = 10 THEN
-                                (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                IF D1Z7 > 0 THEN
-                                  Z6 := (D1Z7 - 1) * 52 + 6008;
-                                  IF D1Z6 = 0 THEN
-                                    D1Z6 := 10;
-                                    VMW3676 := 1;
-                                  END_IF;
-                                END_IF;
-                              ELSE
-                                (* 文字列と配列。値がそのままスロット番号 *)
-                                Z6 := (D1Z7) * 52 + 6008;
-                                IF D1Z6 = 0 THEN
-                                  D1Z6 := VMW3674;
-                                  VMW3676 := 1;
-                                END_IF;
+                              END_IF;
+                            ELSE
+                              (* 文字列と配列。値がそのままスロット番号 *)
+                              Z6 := (D1Z7) * 52 + 6008;
+                              IF D1Z6 = 0 THEN
+                                D1Z6 := VMW3674;
+                                VMW3676 := 1;
                               END_IF;
                             END_IF;
                           END_IF;
@@ -5075,37 +4973,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                   Z7 := (VMW3672 - 80) * 4 + 4808;
                 END_IF;
                 VMW3674 := D0Z7;
-                IF VMW3674 >= 7 THEN
-                  IF VMW3674 <= 10 THEN
-                    IF VMW3674 = 9 THEN
-                      (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                      (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                      Z6 := (D1Z7) * 52 + 6008;
+                IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                  IF VMW3674 = 9 THEN
+                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                    Z6 := (D2Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := 8;
+                      VMW3676 := 1;
+                    END_IF;
+                  ELSIF VMW3674 = 10 THEN
+                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                    IF D1Z7 > 0 THEN
+                      Z6 := (D1Z7 - 1) * 52 + 6008;
                       IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
+                        D1Z6 := 10;
                         VMW3676 := 1;
                       END_IF;
-                      Z6 := (D2Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := 8;
-                        VMW3676 := 1;
-                      END_IF;
-                    ELSIF VMW3674 = 10 THEN
-                      (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                      IF D1Z7 > 0 THEN
-                        Z6 := (D1Z7 - 1) * 52 + 6008;
-                        IF D1Z6 = 0 THEN
-                          D1Z6 := 10;
-                          VMW3676 := 1;
-                        END_IF;
-                      END_IF;
-                    ELSE
-                      (* 文字列と配列。値がそのままスロット番号 *)
-                      Z6 := (D1Z7) * 52 + 6008;
-                      IF D1Z6 = 0 THEN
-                        D1Z6 := VMW3674;
-                        VMW3676 := 1;
-                      END_IF;
+                    END_IF;
+                  ELSE
+                    (* 文字列と配列。値がそのままスロット番号 *)
+                    Z6 := (D1Z7) * 52 + 6008;
+                    IF D1Z6 = 0 THEN
+                      D1Z6 := VMW3674;
+                      VMW3676 := 1;
                     END_IF;
                   END_IF;
                 END_IF;
@@ -5155,37 +5051,35 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
                             FOR VMW3681 := 0 TO VMW3682 DO
                               Z7 := VMW3680 + 4 + VMW3681 * 4;
                               VMW3674 := D0Z7;
-                              IF VMW3674 >= 7 THEN
-                                IF VMW3674 <= 10 THEN
-                                  IF VMW3674 = 9 THEN
-                                    (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
-                                    (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
-                                    Z6 := (D1Z7) * 52 + 6008;
+                              IF (VMW3674 >= 7) AND (VMW3674 <= 10) THEN
+                                IF VMW3674 = 9 THEN
+                                  (* 鍵と値で 2 本。**どちらも配列として印を付ける。** *)
+                                  (* 中身が値スロットの並びで、読み方はふつうの配列と同じ *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                  Z6 := (D2Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := 8;
+                                    VMW3676 := 1;
+                                  END_IF;
+                                ELSIF VMW3674 = 10 THEN
+                                  (* **値は スロット + 1。** 0 は main でスロットを持たない *)
+                                  IF D1Z7 > 0 THEN
+                                    Z6 := (D1Z7 - 1) * 52 + 6008;
                                     IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
+                                      D1Z6 := 10;
                                       VMW3676 := 1;
                                     END_IF;
-                                    Z6 := (D2Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := 8;
-                                      VMW3676 := 1;
-                                    END_IF;
-                                  ELSIF VMW3674 = 10 THEN
-                                    (* **値は スロット + 1。** 0 は main でスロットを持たない *)
-                                    IF D1Z7 > 0 THEN
-                                      Z6 := (D1Z7 - 1) * 52 + 6008;
-                                      IF D1Z6 = 0 THEN
-                                        D1Z6 := 10;
-                                        VMW3676 := 1;
-                                      END_IF;
-                                    END_IF;
-                                  ELSE
-                                    (* 文字列と配列。値がそのままスロット番号 *)
-                                    Z6 := (D1Z7) * 52 + 6008;
-                                    IF D1Z6 = 0 THEN
-                                      D1Z6 := VMW3674;
-                                      VMW3676 := 1;
-                                    END_IF;
+                                  END_IF;
+                                ELSE
+                                  (* 文字列と配列。値がそのままスロット番号 *)
+                                  Z6 := (D1Z7) * 52 + 6008;
+                                  IF D1Z6 = 0 THEN
+                                    D1Z6 := VMW3674;
+                                    VMW3676 := 1;
                                   END_IF;
                                 END_IF;
                               END_IF;
@@ -5504,16 +5398,12 @@ FOR VMLOOPCOUNTER := 1 TO VMSTEPSPERCYCLE DO
       (* シンボルや配列のタグは 4 より大きいので、上限も見ないと *)
       (* 番号やスロット番号が数値として比べられてしまう *)
       Z3 := 0;
-      IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG >= 4 THEN
-        IF VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 5 THEN
-          Z3 := 1;
-        END_IF;
+      IF (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG >= 4) AND (VMSLOT[VMREGSLOT + VMOPERANDA].SLTAG <= 5) THEN
+        Z3 := 1;
       END_IF;
       Z4 := 0;
-      IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG >= 4 THEN
-        IF VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <= 5 THEN
-          Z4 := 1;
-        END_IF;
+      IF (VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG >= 4) AND (VMSLOT[VMREGSLOT + VMOPERANDA + 1].SLTAG <= 5) THEN
+        Z4 := 1;
       END_IF;
       IF Z3 = 1 THEN
         IF Z4 = 1 THEN
