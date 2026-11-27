@@ -2390,7 +2390,7 @@
 18F8   FE 0B                  CPI   11   ; METHOD_TIMES
 18FA   CA 30 19               JZ   sendb_times   
 18FD   FE 15                  CPI   METHOD_EACH   
-18FF   CA 93 29               JZ   sendb_each   
+18FF   CA C6 29               JZ   sendb_each   
 1902   FE 1B                  CPI   27   ; METHOD_LOOP
 1904   CA 93 19               JZ   sendb_loop   
 1907                             ; any? / all? / none? は each と同じ反復。フレームの種別だけが違う
@@ -2401,7 +2401,7 @@
 1911   FE 25                  CPI   METHOD_NONE_P   
 1913   CA 28 19               JZ   sendb_none   
 1916   FE 1C                  CPI   METHOD_NEW   
-1918   CA 59 2A               JZ   sendb_array_new   
+1918   CA 8C 2A               JZ   sendb_array_new   
 191B                             ; 未対応のブロックメソッド
 191B   C3 03 00               JMP   vm_error   
 191E                             ; 
@@ -2419,8 +2419,8 @@
 1928                SENDB_NONE:      
 1928   3E 08                  MVI   a,FRAME_KIND_NONE   
 192A                SENDB_PRED:      
-192A   32 96 2B               STA   each_arg_kind   
-192D   C3 AE 29               JMP   sendb_each_join   
+192A   32 C9 2B               STA   each_arg_kind   
+192D   C3 E1 29               JMP   sendb_each_join   
 1930                             ; 
 1930                             ; --- times ---
 1930                SENDB_TIMES:      
@@ -3161,16 +3161,16 @@
 1C6A                ADV_EACH_LOAD:      
 1C6A                             ; BC = index のうち下位バイトだけ使う (配列 8 要素・ハッシュ 4 ペアまで)
 1C6A   79                     MOV   a,c   
-1C6B   32 97 2B               STA   each_index   
+1C6B   32 CA 2B               STA   each_index   
 1C6E   3A 94 1C               LDA   adv_kind   
-1C71   32 96 2B               STA   each_arg_kind   
+1C71   32 C9 2B               STA   each_arg_kind   
 1C74                             ; フレーム +11 からコレクションスロット番号を読む
 1C74   CD 95 17               CALL   cur_frame_addr   ; BC を破壊するが、添字は退避済み
 1C77   11 0B 00               LXI   d,11   
 1C7A   19                     DAD   d   
 1C7B   7E                     MOV   a,m   ; A = col_slot
-1C7C   32 94 2B               STA   each_col_slot   
-1C7F   CD 40 2B               CALL   each_block_args   
+1C7C   32 C7 2B               STA   each_col_slot   
+1C7F   CD 73 2B               CALL   each_block_args   
 1C82                             ; 
 1C82                ADV_REENTER:      
 1C82                             ; PC = 0 で再実行
@@ -5480,682 +5480,742 @@
 2811                             ;   エラー: 全スロット生きている → vm_error
 2811                             ; ===============================================================
 2811                COL_GC_ALLOC:      
-2811                             ; 印と走査済みを消す (64 スロット = 8 バイト × 2 枚)
-2811   AF                     XRA   a   
-2812   21 7A 29               LXI   h,gc_bitmap   
-2815   0E 10                  MVI   c,16   
-2817                GC_CLEAR_BM:      
-2817   77                     MOV   m,a   
-2818   23                     INX   h   
-2819   0D                     DCR   c   
-281A   C2 17 28               JNZ   gc_clear_bm   
-281D                             ; 
-281D                             ; --- ルート: レジスタファイル ---
-281D                             ; **窓ではなく全部。** 外側のフレームが持っている値も生きている
-281D   21 00 81               LXI   h,REG_FILE_BASE   
-2820   06 40                  MVI   b,MAX_REGS   
-2822                GC_ROOT_REG:      
-2822   CD FF 28               CALL   gc_mark_value   
-2825   23                     INX   h   
-2826   23                     INX   h   
-2827   23                     INX   h   
-2828   23                     INX   h   
-2829   05                     DCR   b   
-282A   C2 22 28               JNZ   gc_root_reg   
-282D                             ; 
-282D                             ; --- ルート: グローバル変数 ---
-282D   21 00 90               LXI   h,GLOBALS_BASE   
-2830   06 40                  MVI   b,MAX_GLOBALS   
-2832                GC_ROOT_GLOBAL:      
-2832   CD FF 28               CALL   gc_mark_value   
-2835   23                     INX   h   
-2836   23                     INX   h   
-2837   23                     INX   h   
+2811                             ; **前の走査で作った印がまだ使えるなら、走査せずに空きを配る。**
+2811                             ; 
+2811                             ; 走査 1 回は実機で 51 ms。印を捨てると確保のたびに払うことになり、
+2811                             ; 文字列を 9 個作る描画 1 回で 460 ms になっていた。印は走査のあと
+2811                             ; 「空き表」として使い回す — 配った枠には印を立てるので二度は出ない。
+2811                             ; 
+2811                             ; **走査のあとに死んだものは次の走査まで空かない。** 安全側に外すだけで、
+2811                             ; 生きているものを配ることはない。
+2811   3A BC 29               LDA   gc_have_free   
+2814   B7                     ORA   a   
+2815   CA 24 28               JZ   col_gc_sweep   
+2818   CD 8D 28               CALL   gc_scan_free   
+281B   FE FF                  CPI   0FFh   
+281D   C2 82 28               JNZ   gc_found_free   ; A = 空きスロット番号
+2820                             ; 印が古くて空きが無い。捨てて走査からやり直す
+2820   AF                     XRA   a   
+2821   32 BC 29               STA   gc_have_free   
+2824                             ; 
+2824                COL_GC_SWEEP:      
+2824                             ; 印と走査済みを消す (64 スロット = 8 バイト × 2 枚)
+2824   AF                     XRA   a   
+2825   21 AB 29               LXI   h,gc_bitmap   
+2828   0E 10                  MVI   c,16   
+282A                GC_CLEAR_BM:      
+282A   77                     MOV   m,a   
+282B   23                     INX   h   
+282C   0D                     DCR   c   
+282D   C2 2A 28               JNZ   gc_clear_bm   
+2830                             ; 
+2830                             ; --- ルート: レジスタファイル ---
+2830                             ; **窓ではなく全部。** 外側のフレームが持っている値も生きている
+2830   21 00 81               LXI   h,REG_FILE_BASE   
+2833   06 40                  MVI   b,MAX_REGS   
+2835                GC_ROOT_REG:      
+2835   CD 30 29               CALL   gc_mark_value   
 2838   23                     INX   h   
-2839   05                     DCR   b   
-283A   C2 32 28               JNZ   gc_root_global   
-283D                             ; 
-283D                             ; --- ルート: オブジェクトのインスタンス変数 ---
-283D   21 C4 92               LXI   h,OBJECT_POOL_BASE + OBJECT_HEADER_SIZE   
-2840   06 20                  MVI   b,MAX_OBJECTS   
-2842                GC_ROOT_OBJ:      
-2842   C5                     PUSH   b   
-2843   E5                     PUSH   h   
-2844   06 07                  MVI   b,MAX_IVARS   
-2846                GC_ROOT_IVAR:      
-2846   CD FF 28               CALL   gc_mark_value   
+2839   23                     INX   h   
+283A   23                     INX   h   
+283B   23                     INX   h   
+283C   05                     DCR   b   
+283D   C2 35 28               JNZ   gc_root_reg   
+2840                             ; 
+2840                             ; --- ルート: グローバル変数 ---
+2840   21 00 90               LXI   h,GLOBALS_BASE   
+2843   06 40                  MVI   b,MAX_GLOBALS   
+2845                GC_ROOT_GLOBAL:      
+2845   CD 30 29               CALL   gc_mark_value   
+2848   23                     INX   h   
 2849   23                     INX   h   
 284A   23                     INX   h   
 284B   23                     INX   h   
-284C   23                     INX   h   
-284D   05                     DCR   b   
-284E   C2 46 28               JNZ   gc_root_ivar   
-2851   E1                     POP   h   
-2852   11 20 00               LXI   d,OBJECT_SLOT_SIZE   
-2855   19                     DAD   d   ; 次のオブジェクトの ivar 先頭
-2856   C1                     POP   b   
-2857   05                     DCR   b   
-2858   C2 42 28               JNZ   gc_root_obj   
-285B                             ; 
-285B                             ; --- 到達性を伝播する ---
-285B   CD 78 28               CALL   gc_propagate   
-285E                             ; 
-285E                             ; --- 印の付かなかったスロットを探す ---
-285E                             ; B をカウンタに使う (gc_check_bit は B を壊さない)
-285E   06 00                  MVI   b,0   
-2860                GC_FIND_FREE:      
-2860   78                     MOV   a,b   ; A = 検査対象スロット番号
-2861   CD 55 29               CALL   gc_check_bit   ; Z=1: 空き (A は破壊される)
-2864   CA 71 28               JZ   gc_found_free   
-2867   04                     INR   b   
-2868   78                     MOV   a,b   
-2869   FE 40                  CPI   MAX_COL_SLOTS   
-286B   DA 60 28               JC   gc_find_free   
-286E   C3 03 00               JMP   vm_error   ; 全スロット使用中
+284C   05                     DCR   b   
+284D   C2 45 28               JNZ   gc_root_global   
+2850                             ; 
+2850                             ; --- ルート: オブジェクトのインスタンス変数 ---
+2850   21 C4 92               LXI   h,OBJECT_POOL_BASE + OBJECT_HEADER_SIZE   
+2853   06 20                  MVI   b,MAX_OBJECTS   
+2855                GC_ROOT_OBJ:      
+2855   C5                     PUSH   b   
+2856   E5                     PUSH   h   
+2857   06 07                  MVI   b,MAX_IVARS   
+2859                GC_ROOT_IVAR:      
+2859   CD 30 29               CALL   gc_mark_value   
+285C   23                     INX   h   
+285D   23                     INX   h   
+285E   23                     INX   h   
+285F   23                     INX   h   
+2860   05                     DCR   b   
+2861   C2 59 28               JNZ   gc_root_ivar   
+2864   E1                     POP   h   
+2865   11 20 00               LXI   d,OBJECT_SLOT_SIZE   
+2868   19                     DAD   d   ; 次のオブジェクトの ivar 先頭
+2869   C1                     POP   b   
+286A   05                     DCR   b   
+286B   C2 55 28               JNZ   gc_root_obj   
+286E                             ; 
+286E                             ; --- 到達性を伝播する ---
+286E   CD A9 28               CALL   gc_propagate   
 2871                             ; 
-2871                GC_FOUND_FREE:      
-2871   78                     MOV   a,b   ; A = 空きスロット番号 (B から復帰)
-2872   F5                     PUSH   psw   ; スロット番号を退避
-2873   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
-2876   F1                     POP   psw   ; A = スロット番号を復帰
-2877   C9                     RET      
-2878                             ; 
-2878                             ; ---------------------------------------------------------------
-2878                             ; gc_propagate — 印が増えなくなるまで中身を辿る
-2878                             ; 
-2878                             ; **印は増える一方なので必ず止まる。** 最悪 MAX_COL_SLOTS 周。
-2878                             ; 1 周で 1 つも走査しなければ終わり。
-2878                             ; ---------------------------------------------------------------
-2878                GC_PROPAGATE:      
-2878   AF                     XRA   a   
-2879   32 8A 29               STA   gc_changed   
-287C   06 00                  MVI   b,0   ; B = スロット番号
-287E                GC_PROP_SLOT:      
-287E   78                     MOV   a,b   
-287F   CD 55 29               CALL   gc_check_bit   ; 印が無ければ飛ばす
-2882   CA 9B 28               JZ   gc_prop_next   
-2885   78                     MOV   a,b   
-2886   CD 6E 29               CALL   gc_check_scanned   ; 走査済みなら飛ばす
-2889   C2 9B 28               JNZ   gc_prop_next   
-288C   78                     MOV   a,b   
-288D   CD 61 29               CALL   gc_set_scanned   
-2890   3E 01                  MVI   a,1   
-2892   32 8A 29               STA   gc_changed   
-2895   78                     MOV   a,b   
-2896   C5                     PUSH   b   
-2897   CD AA 28               CALL   gc_scan_slot   
-289A   C1                     POP   b   
-289B                GC_PROP_NEXT:      
-289B   04                     INR   b   
-289C   78                     MOV   a,b   
-289D   FE 40                  CPI   MAX_COL_SLOTS   
-289F   DA 7E 28               JC   gc_prop_slot   
-28A2   3A 8A 29               LDA   gc_changed   
-28A5   B7                     ORA   a   
-28A6   C2 78 28               JNZ   gc_propagate   ; 印が増えたのでもう 1 周
-28A9   C9                     RET      
-28AA                             ; 
-28AA                             ; ---------------------------------------------------------------
-28AA                             ; gc_scan_slot — A = スロット番号。中身が指す先に印を付ける
-28AA                             ; 
-28AA                             ; **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットとして
-28AA                             ; 読むと、前に入っていた文字列のバイトが型タグに見える。
-28AA                             ; 
-28AA                             ; **要素数は容量で頭を打たせる。** 同じ理由で、見出しのバイトがでたらめ
-28AA                             ; でも隣のスロットまで歩かないようにする。
-28AA                             ; ---------------------------------------------------------------
-28AA                GC_SCAN_SLOT:      
-28AA   C5                     PUSH   b   
-28AB   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス (A は残る)
-28AE   7E                     MOV   a,m   ; +0: 型
-28AF   23                     INX   h   
-28B0   46                     MOV   b,m   ; +1: 要素数 / 組の数
-28B1   23                     INX   h   ; HL = データ先頭
-28B2   FE 02                  CPI   COL_TYPE_ARRAY   
-28B4   CA BF 28               JZ   gc_scan_array   
-28B7   FE 03                  CPI   COL_TYPE_HASH   
-28B9   CA DC 28               JZ   gc_scan_hash   
-28BC   C3 FD 28               JMP   gc_scan_done   ; 文字列と空きは辿らない
-28BF                GC_SCAN_ARRAY:      
-28BF   78                     MOV   a,b   
-28C0   B7                     ORA   a   
-28C1   CA FD 28               JZ   gc_scan_done   ; 要素数 0
-28C4                             ; **即値に式を書かない。** アセンブラを持たない環境で直すことがあるので、
-28C4                             ; `+ 1` を足して 1 回で済ませるより、確実に通る形を選ぶ
-28C4   FE 08                  CPI   COL_MAX_ARRAY_ELEMS   
-28C6   DA CE 28               JC   gc_scan_aloop   ; 容量未満
-28C9   CA CE 28               JZ   gc_scan_aloop   ; ちょうど容量
-28CC   06 08                  MVI   b,COL_MAX_ARRAY_ELEMS   
-28CE                GC_SCAN_ALOOP:      
-28CE   CD FF 28               CALL   gc_mark_value   
-28D1   23                     INX   h   
-28D2   23                     INX   h   
-28D3   23                     INX   h   
-28D4   23                     INX   h   
-28D5   05                     DCR   b   
-28D6   C2 CE 28               JNZ   gc_scan_aloop   
-28D9   C3 FD 28               JMP   gc_scan_done   
-28DC                GC_SCAN_HASH:      
-28DC   78                     MOV   a,b   
-28DD   B7                     ORA   a   
-28DE   CA FD 28               JZ   gc_scan_done   ; 組の数 0
-28E1   FE 04                  CPI   COL_MAX_HASH_PAIRS   
-28E3   DA EB 28               JC   gc_scan_hloop   
-28E6   CA EB 28               JZ   gc_scan_hloop   
-28E9   06 04                  MVI   b,COL_MAX_HASH_PAIRS   
-28EB                GC_SCAN_HLOOP:      
-28EB   CD FF 28               CALL   gc_mark_value   ; 鍵
-28EE   23                     INX   h   
-28EF   23                     INX   h   
-28F0   23                     INX   h   
-28F1   23                     INX   h   
-28F2   CD FF 28               CALL   gc_mark_value   ; 値
-28F5   23                     INX   h   
-28F6   23                     INX   h   
-28F7   23                     INX   h   
-28F8   23                     INX   h   
-28F9   05                     DCR   b   
-28FA   C2 EB 28               JNZ   gc_scan_hloop   
-28FD                GC_SCAN_DONE:      
-28FD   C1                     POP   b   
-28FE   C9                     RET      
-28FF                             ; 
-28FF                             ; ---------------------------------------------------------------
-28FF                             ; gc_mark_value — HL = 値スロットのアドレス。指す先に印を付ける
-28FF                             ; 
-28FF                             ; 印を持つのは文字列・配列・ハッシュだけ。**オブジェクトは別のプール**
-28FF                             ; なのでここでは何もしない (中身はルート走査で辿る)。
-28FF                             ; 
-28FF                             ; **値は スロット + 1。** 0 は「無し」。
-28FF                             ; **上位バイトが 0 でないものと範囲外は捨てる。** 古いバイト列が型タグに
-28FF                             ; 見えたときに、8 バイトしかないビットマップの外を壊さないため。
-28FF                             ; 
-28FF                             ;   HL / DE / BC は保たれる
-28FF                             ; ---------------------------------------------------------------
-28FF                GC_MARK_VALUE:      
-28FF   E5                     PUSH   h   
-2900   D5                     PUSH   d   
-2901   C5                     PUSH   b   
-2902   7E                     MOV   a,m   ; A = 型タグ
-2903   FE 07                  CPI   TT_STRING   
-2905   CA 15 29               JZ   gc_mv_ref   
-2908   FE 08                  CPI   TT_ARRAY   
-290A   CA 15 29               JZ   gc_mv_ref   
-290D   FE 09                  CPI   TT_HASH   
-290F   CA 15 29               JZ   gc_mv_ref   
-2912   C3 2C 29               JMP   gc_mv_done   
-2915                GC_MV_REF:      
-2915   23                     INX   h   
-2916   23                     INX   h   
-2917   23                     INX   h   
-2918   7E                     MOV   a,m   ; +3: val_hi
-2919   B7                     ORA   a   
-291A   C2 2C 29               JNZ   gc_mv_done   ; 上位が 0 でなければスロット番号ではない
-291D   2B                     DCX   h   
-291E   7E                     MOV   a,m   ; +2: val_lo = スロット + 1
-291F   B7                     ORA   a   
-2920   CA 2C 29               JZ   gc_mv_done   ; 0 = 無し
-2923   3D                     DCR   a   ; A = スロット番号
-2924   FE 40                  CPI   MAX_COL_SLOTS   
-2926   D2 2C 29               JNC   gc_mv_done   ; 範囲外
-2929   CD 48 29               CALL   gc_set_bit   
-292C                GC_MV_DONE:      
-292C   C1                     POP   b   
-292D   D1                     POP   d   
-292E   E1                     POP   h   
+2871                             ; **ここから印は空き表になる。** 次の確保はこれを見るだけで済む
+2871   3E 01                  MVI   a,1   
+2873   32 BC 29               STA   gc_have_free   
+2876   AF                     XRA   a   
+2877   32 BD 29               STA   gc_free_next   ; しおりを先頭へ
+287A                             ; 
+287A                             ; --- 印の付かなかったスロットを探す ---
+287A                             ; **走査した直後なのでここで無ければ本当に満杯。**
+287A   CD 8D 28               CALL   gc_scan_free   
+287D   FE FF                  CPI   0FFh   
+287F   CA 03 00               JZ   vm_error   ; 全スロット使用中
+2882                             ; 
+2882                GC_FOUND_FREE:      
+2882                             ; A = 空きスロット番号
+2882   F5                     PUSH   psw   
+2883   CD 79 29               CALL   gc_set_bit   ; **配ったら印を立てる。** 二度配らないため
+2886   F1                     POP   psw   
+2887   F5                     PUSH   psw   ; スロット番号を退避
+2888   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
+288B   F1                     POP   psw   ; A = スロット番号を復帰
+288C   C9                     RET      
+288D                             ; 
+288D                             ; ---------------------------------------------------------------
+288D                             ; gc_scan_free — 印の付いていないスロットを探す
+288D                             ; 
+288D                             ;   出力: A = スロット番号 / 0FFh = 空き無し
+288D                             ;   破壊: B
+288D                             ; 
+288D                             ; B をカウンタに使う (gc_check_bit は B を壊さない)。
+288D                             ; 
+288D                             ; **しおりから探す。** 配る順は増える一方で、配った枠には印を立てるので、
+288D                             ; しおりより前はすべて印が付いている (生きているか、配ったか)。0 から
+288D                             ; 舐め直すと 64 枠ぶんの検査が確保のたびに乗る。
+288D                             ; ---------------------------------------------------------------
+288D                GC_SCAN_FREE:      
+288D   3A BD 29               LDA   gc_free_next   
+2890   47                     MOV   b,a   
+2891                GC_SF_LOOP:      
+2891   78                     MOV   a,b   ; A = 検査対象スロット番号
+2892   CD 86 29               CALL   gc_check_bit   ; Z=1: 空き (A は破壊される)
+2895   CA A2 28               JZ   gc_sf_hit   
+2898   04                     INR   b   
+2899   78                     MOV   a,b   
+289A   FE 40                  CPI   MAX_COL_SLOTS   
+289C   DA 91 28               JC   gc_sf_loop   
+289F   3E FF                  MVI   a,0FFh   
+28A1   C9                     RET      
+28A2                GC_SF_HIT:      
+28A2                             ; しおりを次へ。**この枠はすぐ印が立つ**ので飛ばして構わない
+28A2   78                     MOV   a,b   
+28A3   3C                     INR   a   
+28A4   32 BD 29               STA   gc_free_next   
+28A7   78                     MOV   a,b   
+28A8   C9                     RET      
+28A9                             ; 
+28A9                             ; ---------------------------------------------------------------
+28A9                             ; gc_propagate — 印が増えなくなるまで中身を辿る
+28A9                             ; 
+28A9                             ; **印は増える一方なので必ず止まる。** 最悪 MAX_COL_SLOTS 周。
+28A9                             ; 1 周で 1 つも走査しなければ終わり。
+28A9                             ; ---------------------------------------------------------------
+28A9                GC_PROPAGATE:      
+28A9   AF                     XRA   a   
+28AA   32 BB 29               STA   gc_changed   
+28AD   06 00                  MVI   b,0   ; B = スロット番号
+28AF                GC_PROP_SLOT:      
+28AF   78                     MOV   a,b   
+28B0   CD 86 29               CALL   gc_check_bit   ; 印が無ければ飛ばす
+28B3   CA CC 28               JZ   gc_prop_next   
+28B6   78                     MOV   a,b   
+28B7   CD 9F 29               CALL   gc_check_scanned   ; 走査済みなら飛ばす
+28BA   C2 CC 28               JNZ   gc_prop_next   
+28BD   78                     MOV   a,b   
+28BE   CD 92 29               CALL   gc_set_scanned   
+28C1   3E 01                  MVI   a,1   
+28C3   32 BB 29               STA   gc_changed   
+28C6   78                     MOV   a,b   
+28C7   C5                     PUSH   b   
+28C8   CD DB 28               CALL   gc_scan_slot   
+28CB   C1                     POP   b   
+28CC                GC_PROP_NEXT:      
+28CC   04                     INR   b   
+28CD   78                     MOV   a,b   
+28CE   FE 40                  CPI   MAX_COL_SLOTS   
+28D0   DA AF 28               JC   gc_prop_slot   
+28D3   3A BB 29               LDA   gc_changed   
+28D6   B7                     ORA   a   
+28D7   C2 A9 28               JNZ   gc_propagate   ; 印が増えたのでもう 1 周
+28DA   C9                     RET      
+28DB                             ; 
+28DB                             ; ---------------------------------------------------------------
+28DB                             ; gc_scan_slot — A = スロット番号。中身が指す先に印を付ける
+28DB                             ; 
+28DB                             ; **要素数 0 では 1 つも見ない。** 書いていない要素を値スロットとして
+28DB                             ; 読むと、前に入っていた文字列のバイトが型タグに見える。
+28DB                             ; 
+28DB                             ; **要素数は容量で頭を打たせる。** 同じ理由で、見出しのバイトがでたらめ
+28DB                             ; でも隣のスロットまで歩かないようにする。
+28DB                             ; ---------------------------------------------------------------
+28DB                GC_SCAN_SLOT:      
+28DB   C5                     PUSH   b   
+28DC   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス (A は残る)
+28DF   7E                     MOV   a,m   ; +0: 型
+28E0   23                     INX   h   
+28E1   46                     MOV   b,m   ; +1: 要素数 / 組の数
+28E2   23                     INX   h   ; HL = データ先頭
+28E3   FE 02                  CPI   COL_TYPE_ARRAY   
+28E5   CA F0 28               JZ   gc_scan_array   
+28E8   FE 03                  CPI   COL_TYPE_HASH   
+28EA   CA 0D 29               JZ   gc_scan_hash   
+28ED   C3 2E 29               JMP   gc_scan_done   ; 文字列と空きは辿らない
+28F0                GC_SCAN_ARRAY:      
+28F0   78                     MOV   a,b   
+28F1   B7                     ORA   a   
+28F2   CA 2E 29               JZ   gc_scan_done   ; 要素数 0
+28F5                             ; **即値に式を書かない。** アセンブラを持たない環境で直すことがあるので、
+28F5                             ; `+ 1` を足して 1 回で済ませるより、確実に通る形を選ぶ
+28F5   FE 08                  CPI   COL_MAX_ARRAY_ELEMS   
+28F7   DA FF 28               JC   gc_scan_aloop   ; 容量未満
+28FA   CA FF 28               JZ   gc_scan_aloop   ; ちょうど容量
+28FD   06 08                  MVI   b,COL_MAX_ARRAY_ELEMS   
+28FF                GC_SCAN_ALOOP:      
+28FF   CD 30 29               CALL   gc_mark_value   
+2902   23                     INX   h   
+2903   23                     INX   h   
+2904   23                     INX   h   
+2905   23                     INX   h   
+2906   05                     DCR   b   
+2907   C2 FF 28               JNZ   gc_scan_aloop   
+290A   C3 2E 29               JMP   gc_scan_done   
+290D                GC_SCAN_HASH:      
+290D   78                     MOV   a,b   
+290E   B7                     ORA   a   
+290F   CA 2E 29               JZ   gc_scan_done   ; 組の数 0
+2912   FE 04                  CPI   COL_MAX_HASH_PAIRS   
+2914   DA 1C 29               JC   gc_scan_hloop   
+2917   CA 1C 29               JZ   gc_scan_hloop   
+291A   06 04                  MVI   b,COL_MAX_HASH_PAIRS   
+291C                GC_SCAN_HLOOP:      
+291C   CD 30 29               CALL   gc_mark_value   ; 鍵
+291F   23                     INX   h   
+2920   23                     INX   h   
+2921   23                     INX   h   
+2922   23                     INX   h   
+2923   CD 30 29               CALL   gc_mark_value   ; 値
+2926   23                     INX   h   
+2927   23                     INX   h   
+2928   23                     INX   h   
+2929   23                     INX   h   
+292A   05                     DCR   b   
+292B   C2 1C 29               JNZ   gc_scan_hloop   
+292E                GC_SCAN_DONE:      
+292E   C1                     POP   b   
 292F   C9                     RET      
 2930                             ; 
 2930                             ; ---------------------------------------------------------------
-2930                             ; ビットの出し入れ
+2930                             ; gc_mark_value — HL = 値スロットのアドレス。指す先に印を付ける
 2930                             ; 
-2930                             ; **ビットマップが 2 枚あるので、場所の計算は 1 つにまとめる** — 片方だけ
-2930                             ; 直して食い違うのを避けるため。
+2930                             ; 印を持つのは文字列・配列・ハッシュだけ。**オブジェクトは別のプール**
+2930                             ; なのでここでは何もしない (中身はルート走査で辿る)。
 2930                             ; 
-2930                             ; gc_bit_ptr: A = スロット番号, DE = ビットマップの先頭
-2930                             ;   → HL = バイトのアドレス, A = マスク (C と DE は壊れる)
+2930                             ; **値は スロット + 1。** 0 は「無し」。
+2930                             ; **上位バイトが 0 でないものと範囲外は捨てる。** 古いバイト列が型タグに
+2930                             ; 見えたときに、8 バイトしかないビットマップの外を壊さないため。
+2930                             ; 
+2930                             ;   HL / DE / BC は保たれる
 2930                             ; ---------------------------------------------------------------
-2930                GC_BIT_PTR:      
-2930   4F                     MOV   c,a   ; C = スロット番号
-2931   0F                     RRC      
-2932   0F                     RRC      
-2933   0F                     RRC      
-2934   E6 07                  ANI   07h   ; A = バイト位置 (slot >> 3)
-2936   6F                     MOV   l,a   
-2937   26 00                  MVI   h,0   
-2939   19                     DAD   d   ; HL = 先頭 + バイト位置
-293A   E5                     PUSH   h   
-293B   79                     MOV   a,c   
-293C   E6 07                  ANI   07h   ; ビット位置 (slot & 7)
-293E   6F                     MOV   l,a   
-293F   26 00                  MVI   h,0   
-2941   11 8B 29               LXI   d,gc_bit_table   
-2944   19                     DAD   d   
-2945   7E                     MOV   a,m   ; A = ビットマスク
-2946   E1                     POP   h   ; HL = ビットマップのバイト
-2947   C9                     RET      
-2948                             ; 
-2948                             ; --- gc_set_bit: A = slot (0-63) の印を立てる ---
-2948                GC_SET_BIT:      
-2948   E5                     PUSH   h   
-2949   D5                     PUSH   d   
-294A   11 7A 29               LXI   d,gc_bitmap   
-294D   CD 30 29               CALL   gc_bit_ptr   
-2950   B6                     ORA   m   
-2951   77                     MOV   m,a   
-2952   D1                     POP   d   
-2953   E1                     POP   h   
-2954   C9                     RET      
-2955                             ; 
-2955                             ; --- gc_check_bit: A = slot の印を検査 ---
-2955                             ; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
-2955                GC_CHECK_BIT:      
-2955   E5                     PUSH   h   
-2956   D5                     PUSH   d   
-2957   11 7A 29               LXI   d,gc_bitmap   
-295A   CD 30 29               CALL   gc_bit_ptr   
-295D   A6                     ANA   m   ; Z=1 ならビットクリア
-295E   D1                     POP   d   ; POP はフラグを変えない
+2930                GC_MARK_VALUE:      
+2930   E5                     PUSH   h   
+2931   D5                     PUSH   d   
+2932   C5                     PUSH   b   
+2933   7E                     MOV   a,m   ; A = 型タグ
+2934   FE 07                  CPI   TT_STRING   
+2936   CA 46 29               JZ   gc_mv_ref   
+2939   FE 08                  CPI   TT_ARRAY   
+293B   CA 46 29               JZ   gc_mv_ref   
+293E   FE 09                  CPI   TT_HASH   
+2940   CA 46 29               JZ   gc_mv_ref   
+2943   C3 5D 29               JMP   gc_mv_done   
+2946                GC_MV_REF:      
+2946   23                     INX   h   
+2947   23                     INX   h   
+2948   23                     INX   h   
+2949   7E                     MOV   a,m   ; +3: val_hi
+294A   B7                     ORA   a   
+294B   C2 5D 29               JNZ   gc_mv_done   ; 上位が 0 でなければスロット番号ではない
+294E   2B                     DCX   h   
+294F   7E                     MOV   a,m   ; +2: val_lo = スロット + 1
+2950   B7                     ORA   a   
+2951   CA 5D 29               JZ   gc_mv_done   ; 0 = 無し
+2954   3D                     DCR   a   ; A = スロット番号
+2955   FE 40                  CPI   MAX_COL_SLOTS   
+2957   D2 5D 29               JNC   gc_mv_done   ; 範囲外
+295A   CD 79 29               CALL   gc_set_bit   
+295D                GC_MV_DONE:      
+295D   C1                     POP   b   
+295E   D1                     POP   d   
 295F   E1                     POP   h   
 2960   C9                     RET      
 2961                             ; 
-2961                             ; --- gc_set_scanned: A = slot を走査済みにする ---
-2961                GC_SET_SCANNED:      
-2961   E5                     PUSH   h   
-2962   D5                     PUSH   d   
-2963   11 82 29               LXI   d,gc_scanned   
-2966   CD 30 29               CALL   gc_bit_ptr   
-2969   B6                     ORA   m   
-296A   77                     MOV   m,a   
-296B   D1                     POP   d   
-296C   E1                     POP   h   
-296D   C9                     RET      
-296E                             ; 
-296E                             ; --- gc_check_scanned: A = slot が走査済みか ---
-296E                             ; 戻り: Z=1 → まだ、Z=0 → 済み
-296E                GC_CHECK_SCANNED:      
-296E   E5                     PUSH   h   
-296F   D5                     PUSH   d   
-2970   11 82 29               LXI   d,gc_scanned   
-2973   CD 30 29               CALL   gc_bit_ptr   
-2976   A6                     ANA   m   
-2977   D1                     POP   d   
-2978   E1                     POP   h   
-2979   C9                     RET      
-297A                             ; 
-297A                             ; --- GC データ ---
-297A                             ; 
-297A                             ; **gc_bitmap と gc_scanned は隣に置くこと。** 消すときに 16 バイトまとめて
-297A                             ; 回している
-297A   00 00 00 00 00 00 00 00 GC_BITMAP:   DB   0,0,0,0,0,0,0,0   
-2982   00 00 00 00 00 00 00 00 GC_SCANNED:   DB   0,0,0,0,0,0,0,0   
-298A   00           GC_CHANGED:   DB   0   
-298B   01 02 04 08 10 20 40 80 GC_BIT_TABLE:   DB   01h,02h,04h,08h,10h,20h,40h,80h   
-2993                             ; 
-2993                             ; ===============================================================
-2993                             ; sendb_each — Array#each / Hash#each
-2993                             ; 
-2993                             ;   R[a] = TT_ARRAY か TT_HASH (レシーバ)
-2993                             ;   R[a+argc+1] = TT_PROC (ブロック)
-2993                             ;   配列: 各反復で R[1] = array[index]
-2993                             ;   ハッシュ: 各反復で R[1] = 鍵, R[2] = 値
-2993                             ; 
-2993                             ; FRAME_KIND_EACH / FRAME_KIND_HASH_EACH を使い、フレーム +11
-2993                             ; (reserved) にコレクションスロット番号を格納する。
-2993                             ; 
-2993                             ; **見出しの +1 (count) はどちらも「反復の回数」です。** 配列なら要素数、
-2993                             ; ハッシュならペア数なので、上限の出し方を分ける必要がありません。
-2993                             ; 違うのはブロックへ渡す値だけで、そこは each_block_args に出しています。
-2993                             ; ===============================================================
-2993                SENDB_EACH:      
-2993                             ; each はレシーバの型でフレーム種別を決める
-2993                             ; (述語は sendb_pred が種別を書いてから合流する)
-2993   3A C9 19               LDA   sendb_reg_a   
-2996   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
-2999   7E                     MOV   a,m   
-299A   FE 08                  CPI   TT_ARRAY   
-299C   CA A9 29               JZ   each_kind_array   
-299F   FE 09                  CPI   TT_HASH   
-29A1   C2 03 00               JNZ   vm_error   
-29A4   3E 03                  MVI   a,FRAME_KIND_HASH_EACH   
-29A6   C3 AB 29               JMP   each_kind_set   
-29A9                EACH_KIND_ARRAY:      
-29A9   3E 02                  MVI   a,FRAME_KIND_EACH   
-29AB                EACH_KIND_SET:      
-29AB   32 96 2B               STA   each_arg_kind   
-29AE                             ; 
-29AE                SENDB_EACH_JOIN:      
-29AE                             ; レシーバが配列かハッシュであること (述語もここを通る)
-29AE   3A C9 19               LDA   sendb_reg_a   
-29B1   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
-29B4   7E                     MOV   a,m   
-29B5   FE 08                  CPI   TT_ARRAY   
-29B7   CA BF 29               JZ   each_recv_ok   
-29BA   FE 09                  CPI   TT_HASH   
-29BC   C2 03 00               JNZ   vm_error   
-29BF                EACH_RECV_OK:      
-29BF                             ; 
-29BF                             ; コレクションスロット番号を取得 (配列・ハッシュとも val_lo = slot + 1)
-29BF   3A C9 19               LDA   sendb_reg_a   
-29C2   CD 00 10               CALL   get_reg_addr   
-29C5   CD 32 10               CALL   slot_to_value   ; HL = 値先頭
-29C8   7E                     MOV   a,m   ; val_lo = slot + 1
-29C9   3D                     DCR   a   ; slot number (0-based)
-29CA   32 94 2B               STA   each_col_slot   
-29CD                             ; 
-29CD                             ; 反復の回数を読む (配列なら要素数、ハッシュならペア数)
-29CD   3A 94 2B               LDA   each_col_slot   
-29D0   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
-29D3   23                     INX   h   ; +1: count
-29D4   7E                     MOV   a,m   
-29D5   32 95 2B               STA   each_count   
-29D8   B7                     ORA   a   
-29D9   CA 32 2A               JZ   each_empty   ; 空 → ブロック実行しない
-29DC                             ; 
-29DC                             ; ブロック (TT_PROC) の情報を読む
-29DC   3A CB 19               LDA   sendb_argc   
-29DF   3C                     INR   a   ; argc + 1
-29E0   47                     MOV   b,a   
+2961                             ; ---------------------------------------------------------------
+2961                             ; ビットの出し入れ
+2961                             ; 
+2961                             ; **ビットマップが 2 枚あるので、場所の計算は 1 つにまとめる** — 片方だけ
+2961                             ; 直して食い違うのを避けるため。
+2961                             ; 
+2961                             ; gc_bit_ptr: A = スロット番号, DE = ビットマップの先頭
+2961                             ;   → HL = バイトのアドレス, A = マスク (C と DE は壊れる)
+2961                             ; ---------------------------------------------------------------
+2961                GC_BIT_PTR:      
+2961   4F                     MOV   c,a   ; C = スロット番号
+2962   0F                     RRC      
+2963   0F                     RRC      
+2964   0F                     RRC      
+2965   E6 07                  ANI   07h   ; A = バイト位置 (slot >> 3)
+2967   6F                     MOV   l,a   
+2968   26 00                  MVI   h,0   
+296A   19                     DAD   d   ; HL = 先頭 + バイト位置
+296B   E5                     PUSH   h   
+296C   79                     MOV   a,c   
+296D   E6 07                  ANI   07h   ; ビット位置 (slot & 7)
+296F   6F                     MOV   l,a   
+2970   26 00                  MVI   h,0   
+2972   11 BE 29               LXI   d,gc_bit_table   
+2975   19                     DAD   d   
+2976   7E                     MOV   a,m   ; A = ビットマスク
+2977   E1                     POP   h   ; HL = ビットマップのバイト
+2978   C9                     RET      
+2979                             ; 
+2979                             ; --- gc_set_bit: A = slot (0-63) の印を立てる ---
+2979                GC_SET_BIT:      
+2979   E5                     PUSH   h   
+297A   D5                     PUSH   d   
+297B   11 AB 29               LXI   d,gc_bitmap   
+297E   CD 61 29               CALL   gc_bit_ptr   
+2981   B6                     ORA   m   
+2982   77                     MOV   m,a   
+2983   D1                     POP   d   
+2984   E1                     POP   h   
+2985   C9                     RET      
+2986                             ; 
+2986                             ; --- gc_check_bit: A = slot の印を検査 ---
+2986                             ; 戻り: Z=1 → 空き (ビット = 0), Z=0 → 使用中
+2986                GC_CHECK_BIT:      
+2986   E5                     PUSH   h   
+2987   D5                     PUSH   d   
+2988   11 AB 29               LXI   d,gc_bitmap   
+298B   CD 61 29               CALL   gc_bit_ptr   
+298E   A6                     ANA   m   ; Z=1 ならビットクリア
+298F   D1                     POP   d   ; POP はフラグを変えない
+2990   E1                     POP   h   
+2991   C9                     RET      
+2992                             ; 
+2992                             ; --- gc_set_scanned: A = slot を走査済みにする ---
+2992                GC_SET_SCANNED:      
+2992   E5                     PUSH   h   
+2993   D5                     PUSH   d   
+2994   11 B3 29               LXI   d,gc_scanned   
+2997   CD 61 29               CALL   gc_bit_ptr   
+299A   B6                     ORA   m   
+299B   77                     MOV   m,a   
+299C   D1                     POP   d   
+299D   E1                     POP   h   
+299E   C9                     RET      
+299F                             ; 
+299F                             ; --- gc_check_scanned: A = slot が走査済みか ---
+299F                             ; 戻り: Z=1 → まだ、Z=0 → 済み
+299F                GC_CHECK_SCANNED:      
+299F   E5                     PUSH   h   
+29A0   D5                     PUSH   d   
+29A1   11 B3 29               LXI   d,gc_scanned   
+29A4   CD 61 29               CALL   gc_bit_ptr   
+29A7   A6                     ANA   m   
+29A8   D1                     POP   d   
+29A9   E1                     POP   h   
+29AA   C9                     RET      
+29AB                             ; 
+29AB                             ; --- GC データ ---
+29AB                             ; 
+29AB                             ; **gc_bitmap と gc_scanned は隣に置くこと。** 消すときに 16 バイトまとめて
+29AB                             ; 回している
+29AB   00 00 00 00 00 00 00 00 GC_BITMAP:   DB   0,0,0,0,0,0,0,0   
+29B3   00 00 00 00 00 00 00 00 GC_SCANNED:   DB   0,0,0,0,0,0,0,0   
+29BB   00           GC_CHANGED:   DB   0   
+29BC                             ; 
+29BC                             ; **印を空き表として使い回せるか。** 0 = 走査が要る
+29BC   00           GC_HAVE_FREE:   DB   0   
+29BD                             ; 
+29BD                             ; **空きを探し始める位置。** これより前はすべて印が付いている
+29BD   00           GC_FREE_NEXT:   DB   0   
+29BE   01 02 04 08 10 20 40 80 GC_BIT_TABLE:   DB   01h,02h,04h,08h,10h,20h,40h,80h   
+29C6                             ; 
+29C6                             ; ===============================================================
+29C6                             ; sendb_each — Array#each / Hash#each
+29C6                             ; 
+29C6                             ;   R[a] = TT_ARRAY か TT_HASH (レシーバ)
+29C6                             ;   R[a+argc+1] = TT_PROC (ブロック)
+29C6                             ;   配列: 各反復で R[1] = array[index]
+29C6                             ;   ハッシュ: 各反復で R[1] = 鍵, R[2] = 値
+29C6                             ; 
+29C6                             ; FRAME_KIND_EACH / FRAME_KIND_HASH_EACH を使い、フレーム +11
+29C6                             ; (reserved) にコレクションスロット番号を格納する。
+29C6                             ; 
+29C6                             ; **見出しの +1 (count) はどちらも「反復の回数」です。** 配列なら要素数、
+29C6                             ; ハッシュならペア数なので、上限の出し方を分ける必要がありません。
+29C6                             ; 違うのはブロックへ渡す値だけで、そこは each_block_args に出しています。
+29C6                             ; ===============================================================
+29C6                SENDB_EACH:      
+29C6                             ; each はレシーバの型でフレーム種別を決める
+29C6                             ; (述語は sendb_pred が種別を書いてから合流する)
+29C6   3A C9 19               LDA   sendb_reg_a   
+29C9   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
+29CC   7E                     MOV   a,m   
+29CD   FE 08                  CPI   TT_ARRAY   
+29CF   CA DC 29               JZ   each_kind_array   
+29D2   FE 09                  CPI   TT_HASH   
+29D4   C2 03 00               JNZ   vm_error   
+29D7   3E 03                  MVI   a,FRAME_KIND_HASH_EACH   
+29D9   C3 DE 29               JMP   each_kind_set   
+29DC                EACH_KIND_ARRAY:      
+29DC   3E 02                  MVI   a,FRAME_KIND_EACH   
+29DE                EACH_KIND_SET:      
+29DE   32 C9 2B               STA   each_arg_kind   
+29E1                             ; 
+29E1                SENDB_EACH_JOIN:      
+29E1                             ; レシーバが配列かハッシュであること (述語もここを通る)
 29E1   3A C9 19               LDA   sendb_reg_a   
-29E4   80                     ADD   b   ; A = a + argc + 1
-29E5   CD 00 10               CALL   get_reg_addr   ; HL = R[a+argc+1]
-29E8   CD 32 10               CALL   slot_to_value   
-29EB   7E                     MOV   a,m   ; irep 番号
-29EC   32 CD 19               STA   sendb_block_irep   
-29EF   23                     INX   h   
-29F0   7E                     MOV   a,m   ; outer
-29F1   32 CE 19               STA   sendb_block_outer   
-29F4                             ; 
-29F4                             ; push_frame(a, kind, outer)
-29F4   3A 96 2B               LDA   each_arg_kind   
-29F7   47                     MOV   b,a   
-29F8   3A CE 19               LDA   sendb_block_outer   
-29FB   4F                     MOV   c,a   
-29FC   3A C9 19               LDA   sendb_reg_a   
-29FF   CD 9C 17               CALL   push_frame   
-2A02                             ; 
-2A02                             ; フレームに limit = count - 1 を設定
-2A02   CD 95 17               CALL   cur_frame_addr   
-2A05   11 08 00               LXI   d,FRAME_OFF_LIMIT   
-2A08   19                     DAD   d   
-2A09   3A 95 2B               LDA   each_count   
-2A0C   3D                     DCR   a   ; limit = count - 1
-2A0D   77                     MOV   m,a   ; limit_lo
-2A0E   23                     INX   h   
-2A0F   36 00                  MVI   m,0   ; limit_hi
-2A11                             ; 
-2A11                             ; フレーム +11 (reserved) にコレクションスロット番号を格納
-2A11   CD 95 17               CALL   cur_frame_addr   
-2A14   11 0B 00               LXI   d,11   
-2A17   19                     DAD   d   
-2A18   3A 94 2B               LDA   each_col_slot   
-2A1B   77                     MOV   m,a   
-2A1C                             ; 
-2A1C                             ; 最初の回のブロック引数 (index = 0)
-2A1C   AF                     XRA   a   
-2A1D   32 97 2B               STA   each_index   
-2A20   CD 40 2B               CALL   each_block_args   
-2A23                             ; 
-2A23                             ; 子 irep に切り替え
-2A23   3A CD 19               LDA   sendb_block_irep   
-2A26   CD 21 18               CALL   switch_irep   
-2A29                             ; 
-2A29                             ; PC = 0
-2A29   21 00 00               LXI   h,0   
-2A2C   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
-2A2F   C3 74 1D               JMP   vm_loop   
-2A32                             ; 
-2A32                             ; ===============================================================
-2A32                             ; each_empty — 1 回も回らないとき
-2A32                             ; 
-2A32                             ; each はレシーバがそのまま呼び出しの値になるので何もしません。
-2A32                             ; **述語だけは答えを書きます** (空の any? は false、all? と none? は true)。
-2A32                             ; フレームを積まないので、ここで決まります。
-2A32                             ; ===============================================================
-2A32                EACH_EMPTY:      
-2A32   3A 96 2B               LDA   each_arg_kind   
-2A35   FE 06                  CPI   FRAME_KIND_ANY   
-2A37   DA 74 1D               JC   vm_loop   ; 述語ではない → レシーバのまま
-2A3A   FE 06                  CPI   FRAME_KIND_ANY   
-2A3C   CA 44 2A               JZ   each_empty_false   ; any? → false
-2A3F   3E 03                  MVI   a,TT_TRUE   ; all? / none? → true
-2A41   C3 46 2A               JMP   each_empty_write   
-2A44                EACH_EMPTY_FALSE:      
-2A44   3E 02                  MVI   a,TT_FALSE   
-2A46                EACH_EMPTY_WRITE:      
-2A46   32 58 2A               STA   each_empty_tag   
-2A49   3A C9 19               LDA   sendb_reg_a   
-2A4C   CD 00 10               CALL   get_reg_addr   ; HL = R[a] (呼び出しの値になる場所)
-2A4F   3A 58 2A               LDA   each_empty_tag   
-2A52   CD 1A 10               CALL   set_slot_special   
-2A55   C3 74 1D               JMP   vm_loop   
-2A58                             ; 
-2A58   00           EACH_EMPTY_TAG:   DB   0   
-2A59                             ; 
-2A59                             ; ===============================================================
-2A59                             ; sendb_array_new — Array.new(n) 00bbIHxpfCA=
-2A59                             ; 
-2A59                             ; **先に配列を確保して R[a] に置く。** 窓をずらすと R[0] が配列になり、
-2A59                             ; 反復の間ずっとそこから書き込む先を引ける。尽きればそれが呼び出しの値。
-2A59                             ; 
-2A59                             ; 渡すのは添字 (times と同じ)。ブロックの値は advance_iteration が
-2A59                             ; その回の要素へ書く。**先に nil で埋めておく** — break で途中で抜けても、
-2A59                             ; 書いていない要素を値スロットとして読まれないようにするため。
-2A59                             ; ===============================================================
-2A59                SENDB_ARRAY_NEW:      
-2A59                             ; レシーバが Array であること
-2A59   3A C9 19               LDA   sendb_reg_a   
-2A5C   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
-2A5F   7E                     MOV   a,m   
-2A60   FE 0E                  CPI   TT_BUILTIN_CLASS   
-2A62   C2 03 00               JNZ   vm_error   
-2A65   3A C9 19               LDA   sendb_reg_a   
-2A68   CD 00 10               CALL   get_reg_addr   
-2A6B   CD 32 10               CALL   slot_to_value   
-2A6E   7E                     MOV   a,m   
-2A6F   FE 01                  CPI   BUILTIN_CLASS_ARRAY   
-2A71   C2 03 00               JNZ   vm_error   
-2A74                             ; 
-2A74                             ; 大きさは R[a+1]
-2A74   3A C9 19               LDA   sendb_reg_a   
-2A77   3C                     INR   a   
-2A78   CD 00 10               CALL   get_reg_addr   ; HL = R[a+1]
-2A7B   7E                     MOV   a,m   
-2A7C   FE 04                  CPI   TT_INTEGER   
-2A7E   C2 03 00               JNZ   vm_error   
-2A81   23                     INX   h   
-2A82   23                     INX   h   ; +2: val_lo
-2A83   4E                     MOV   c,m   
-2A84   23                     INX   h   
-2A85   7E                     MOV   a,m   ; 上位バイト
-2A86   B7                     ORA   a   
-2A87   C2 03 00               JNZ   vm_error   ; 負か大きすぎる
-2A8A   79                     MOV   a,c   
-2A8B   FE 09                  CPI   COL_MAX_ARRAY_ELEMS + 1   
-2A8D   D2 03 00               JNC   vm_error   
-2A90   32 3B 2B               STA   san_count   
-2A93                             ; 
-2A93                             ; スロットを確保して nil で埋める
-2A93   CD A6 21               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
-2A96   32 3C 2B               STA   san_slot   
-2A99   36 02                  MVI   m,COL_TYPE_ARRAY   
-2A9B   23                     INX   h   
-2A9C   3A 3B 2B               LDA   san_count   
-2A9F   77                     MOV   m,a   ; +1: count
-2AA0   23                     INX   h   ; HL → データ領域
-2AA1   22 3E 2B               SHLD   san_data   
-2AA4   3A 3B 2B               LDA   san_count   
-2AA7   B7                     ORA   a   
-2AA8   CA C7 2A               JZ   san_no_fill   
-2AAB   32 3D 2B               STA   san_left   
-2AAE                SAN_FILL_LOOP:      
-2AAE   2A 3E 2B               LHLD   san_data   
-2AB1   36 01                  MVI   m,TT_NIL   
-2AB3   23                     INX   h   
-2AB4   36 00                  MVI   m,0   
-2AB6   23                     INX   h   
-2AB7   36 00                  MVI   m,0   
-2AB9   23                     INX   h   
-2ABA   36 00                  MVI   m,0   
-2ABC   23                     INX   h   
-2ABD   22 3E 2B               SHLD   san_data   
-2AC0   21 3D 2B               LXI   h,san_left   
-2AC3   35                     DCR   m   
-2AC4   C2 AE 2A               JNZ   san_fill_loop   
-2AC7                             ; 
-2AC7                SAN_NO_FILL:      
-2AC7                             ; R[a] = TT_ARRAY, val_lo = slot+1。**これが呼び出しの値になる**
-2AC7   3A C9 19               LDA   sendb_reg_a   
-2ACA   CD 00 10               CALL   get_reg_addr   
-2ACD   36 08                  MVI   m,TT_ARRAY   
-2ACF   23                     INX   h   
-2AD0   36 00                  MVI   m,0   
-2AD2   23                     INX   h   
-2AD3   3A 3C 2B               LDA   san_slot   
-2AD6   3C                     INR   a   
-2AD7   77                     MOV   m,a   
-2AD8   23                     INX   h   
-2AD9   36 00                  MVI   m,0   
-2ADB                             ; 
-2ADB                             ; 0 個ならブロックを 1 回も回さない (配列はもう R[a] にある)
-2ADB   3A 3B 2B               LDA   san_count   
-2ADE   B7                     ORA   a   
-2ADF   CA 74 1D               JZ   vm_loop   
-2AE2                             ; 
-2AE2                             ; ブロック (TT_PROC) の情報を読む
-2AE2   3A CB 19               LDA   sendb_argc   
-2AE5   3C                     INR   a   
-2AE6   47                     MOV   b,a   
-2AE7   3A C9 19               LDA   sendb_reg_a   
-2AEA   80                     ADD   b   ; A = a + argc + 1
-2AEB   CD 00 10               CALL   get_reg_addr   
-2AEE   CD 32 10               CALL   slot_to_value   
-2AF1   7E                     MOV   a,m   
-2AF2   32 CD 19               STA   sendb_block_irep   
-2AF5   23                     INX   h   
-2AF6   7E                     MOV   a,m   
-2AF7   32 CE 19               STA   sendb_block_outer   
+29E4   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
+29E7   7E                     MOV   a,m   
+29E8   FE 08                  CPI   TT_ARRAY   
+29EA   CA F2 29               JZ   each_recv_ok   
+29ED   FE 09                  CPI   TT_HASH   
+29EF   C2 03 00               JNZ   vm_error   
+29F2                EACH_RECV_OK:      
+29F2                             ; 
+29F2                             ; コレクションスロット番号を取得 (配列・ハッシュとも val_lo = slot + 1)
+29F2   3A C9 19               LDA   sendb_reg_a   
+29F5   CD 00 10               CALL   get_reg_addr   
+29F8   CD 32 10               CALL   slot_to_value   ; HL = 値先頭
+29FB   7E                     MOV   a,m   ; val_lo = slot + 1
+29FC   3D                     DCR   a   ; slot number (0-based)
+29FD   32 C7 2B               STA   each_col_slot   
+2A00                             ; 
+2A00                             ; 反復の回数を読む (配列なら要素数、ハッシュならペア数)
+2A00   3A C7 2B               LDA   each_col_slot   
+2A03   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
+2A06   23                     INX   h   ; +1: count
+2A07   7E                     MOV   a,m   
+2A08   32 C8 2B               STA   each_count   
+2A0B   B7                     ORA   a   
+2A0C   CA 65 2A               JZ   each_empty   ; 空 → ブロック実行しない
+2A0F                             ; 
+2A0F                             ; ブロック (TT_PROC) の情報を読む
+2A0F   3A CB 19               LDA   sendb_argc   
+2A12   3C                     INR   a   ; argc + 1
+2A13   47                     MOV   b,a   
+2A14   3A C9 19               LDA   sendb_reg_a   
+2A17   80                     ADD   b   ; A = a + argc + 1
+2A18   CD 00 10               CALL   get_reg_addr   ; HL = R[a+argc+1]
+2A1B   CD 32 10               CALL   slot_to_value   
+2A1E   7E                     MOV   a,m   ; irep 番号
+2A1F   32 CD 19               STA   sendb_block_irep   
+2A22   23                     INX   h   
+2A23   7E                     MOV   a,m   ; outer
+2A24   32 CE 19               STA   sendb_block_outer   
+2A27                             ; 
+2A27                             ; push_frame(a, kind, outer)
+2A27   3A C9 2B               LDA   each_arg_kind   
+2A2A   47                     MOV   b,a   
+2A2B   3A CE 19               LDA   sendb_block_outer   
+2A2E   4F                     MOV   c,a   
+2A2F   3A C9 19               LDA   sendb_reg_a   
+2A32   CD 9C 17               CALL   push_frame   
+2A35                             ; 
+2A35                             ; フレームに limit = count - 1 を設定
+2A35   CD 95 17               CALL   cur_frame_addr   
+2A38   11 08 00               LXI   d,FRAME_OFF_LIMIT   
+2A3B   19                     DAD   d   
+2A3C   3A C8 2B               LDA   each_count   
+2A3F   3D                     DCR   a   ; limit = count - 1
+2A40   77                     MOV   m,a   ; limit_lo
+2A41   23                     INX   h   
+2A42   36 00                  MVI   m,0   ; limit_hi
+2A44                             ; 
+2A44                             ; フレーム +11 (reserved) にコレクションスロット番号を格納
+2A44   CD 95 17               CALL   cur_frame_addr   
+2A47   11 0B 00               LXI   d,11   
+2A4A   19                     DAD   d   
+2A4B   3A C7 2B               LDA   each_col_slot   
+2A4E   77                     MOV   m,a   
+2A4F                             ; 
+2A4F                             ; 最初の回のブロック引数 (index = 0)
+2A4F   AF                     XRA   a   
+2A50   32 CA 2B               STA   each_index   
+2A53   CD 73 2B               CALL   each_block_args   
+2A56                             ; 
+2A56                             ; 子 irep に切り替え
+2A56   3A CD 19               LDA   sendb_block_irep   
+2A59   CD 21 18               CALL   switch_irep   
+2A5C                             ; 
+2A5C                             ; PC = 0
+2A5C   21 00 00               LXI   h,0   
+2A5F   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
+2A62   C3 74 1D               JMP   vm_loop   
+2A65                             ; 
+2A65                             ; ===============================================================
+2A65                             ; each_empty — 1 回も回らないとき
+2A65                             ; 
+2A65                             ; each はレシーバがそのまま呼び出しの値になるので何もしません。
+2A65                             ; **述語だけは答えを書きます** (空の any? は false、all? と none? は true)。
+2A65                             ; フレームを積まないので、ここで決まります。
+2A65                             ; ===============================================================
+2A65                EACH_EMPTY:      
+2A65   3A C9 2B               LDA   each_arg_kind   
+2A68   FE 06                  CPI   FRAME_KIND_ANY   
+2A6A   DA 74 1D               JC   vm_loop   ; 述語ではない → レシーバのまま
+2A6D   FE 06                  CPI   FRAME_KIND_ANY   
+2A6F   CA 77 2A               JZ   each_empty_false   ; any? → false
+2A72   3E 03                  MVI   a,TT_TRUE   ; all? / none? → true
+2A74   C3 79 2A               JMP   each_empty_write   
+2A77                EACH_EMPTY_FALSE:      
+2A77   3E 02                  MVI   a,TT_FALSE   
+2A79                EACH_EMPTY_WRITE:      
+2A79   32 8B 2A               STA   each_empty_tag   
+2A7C   3A C9 19               LDA   sendb_reg_a   
+2A7F   CD 00 10               CALL   get_reg_addr   ; HL = R[a] (呼び出しの値になる場所)
+2A82   3A 8B 2A               LDA   each_empty_tag   
+2A85   CD 1A 10               CALL   set_slot_special   
+2A88   C3 74 1D               JMP   vm_loop   
+2A8B                             ; 
+2A8B   00           EACH_EMPTY_TAG:   DB   0   
+2A8C                             ; 
+2A8C                             ; ===============================================================
+2A8C                             ; sendb_array_new — Array.new(n) 00bbIHxpfCA=
+2A8C                             ; 
+2A8C                             ; **先に配列を確保して R[a] に置く。** 窓をずらすと R[0] が配列になり、
+2A8C                             ; 反復の間ずっとそこから書き込む先を引ける。尽きればそれが呼び出しの値。
+2A8C                             ; 
+2A8C                             ; 渡すのは添字 (times と同じ)。ブロックの値は advance_iteration が
+2A8C                             ; その回の要素へ書く。**先に nil で埋めておく** — break で途中で抜けても、
+2A8C                             ; 書いていない要素を値スロットとして読まれないようにするため。
+2A8C                             ; ===============================================================
+2A8C                SENDB_ARRAY_NEW:      
+2A8C                             ; レシーバが Array であること
+2A8C   3A C9 19               LDA   sendb_reg_a   
+2A8F   CD 00 10               CALL   get_reg_addr   ; HL = R[a]
+2A92   7E                     MOV   a,m   
+2A93   FE 0E                  CPI   TT_BUILTIN_CLASS   
+2A95   C2 03 00               JNZ   vm_error   
+2A98   3A C9 19               LDA   sendb_reg_a   
+2A9B   CD 00 10               CALL   get_reg_addr   
+2A9E   CD 32 10               CALL   slot_to_value   
+2AA1   7E                     MOV   a,m   
+2AA2   FE 01                  CPI   BUILTIN_CLASS_ARRAY   
+2AA4   C2 03 00               JNZ   vm_error   
+2AA7                             ; 
+2AA7                             ; 大きさは R[a+1]
+2AA7   3A C9 19               LDA   sendb_reg_a   
+2AAA   3C                     INR   a   
+2AAB   CD 00 10               CALL   get_reg_addr   ; HL = R[a+1]
+2AAE   7E                     MOV   a,m   
+2AAF   FE 04                  CPI   TT_INTEGER   
+2AB1   C2 03 00               JNZ   vm_error   
+2AB4   23                     INX   h   
+2AB5   23                     INX   h   ; +2: val_lo
+2AB6   4E                     MOV   c,m   
+2AB7   23                     INX   h   
+2AB8   7E                     MOV   a,m   ; 上位バイト
+2AB9   B7                     ORA   a   
+2ABA   C2 03 00               JNZ   vm_error   ; 負か大きすぎる
+2ABD   79                     MOV   a,c   
+2ABE   FE 09                  CPI   COL_MAX_ARRAY_ELEMS + 1   
+2AC0   D2 03 00               JNC   vm_error   
+2AC3   32 6E 2B               STA   san_count   
+2AC6                             ; 
+2AC6                             ; スロットを確保して nil で埋める
+2AC6   CD A6 21               CALL   col_alloc   ; A = slot_number, HL = スロットアドレス
+2AC9   32 6F 2B               STA   san_slot   
+2ACC   36 02                  MVI   m,COL_TYPE_ARRAY   
+2ACE   23                     INX   h   
+2ACF   3A 6E 2B               LDA   san_count   
+2AD2   77                     MOV   m,a   ; +1: count
+2AD3   23                     INX   h   ; HL → データ領域
+2AD4   22 71 2B               SHLD   san_data   
+2AD7   3A 6E 2B               LDA   san_count   
+2ADA   B7                     ORA   a   
+2ADB   CA FA 2A               JZ   san_no_fill   
+2ADE   32 70 2B               STA   san_left   
+2AE1                SAN_FILL_LOOP:      
+2AE1   2A 71 2B               LHLD   san_data   
+2AE4   36 01                  MVI   m,TT_NIL   
+2AE6   23                     INX   h   
+2AE7   36 00                  MVI   m,0   
+2AE9   23                     INX   h   
+2AEA   36 00                  MVI   m,0   
+2AEC   23                     INX   h   
+2AED   36 00                  MVI   m,0   
+2AEF   23                     INX   h   
+2AF0   22 71 2B               SHLD   san_data   
+2AF3   21 70 2B               LXI   h,san_left   
+2AF6   35                     DCR   m   
+2AF7   C2 E1 2A               JNZ   san_fill_loop   
 2AFA                             ; 
-2AFA                             ; push_frame(a, FRAME_KIND_ARRAY_FILL, outer)
-2AFA   06 09                  MVI   b,FRAME_KIND_ARRAY_FILL   
-2AFC   3A CE 19               LDA   sendb_block_outer   
-2AFF   4F                     MOV   c,a   
-2B00   3A C9 19               LDA   sendb_reg_a   
-2B03   CD 9C 17               CALL   push_frame   
-2B06                             ; 
-2B06                             ; limit = count - 1
-2B06   CD 95 17               CALL   cur_frame_addr   
-2B09   11 08 00               LXI   d,FRAME_OFF_LIMIT   
-2B0C   19                     DAD   d   
-2B0D   3A 3B 2B               LDA   san_count   
-2B10   3D                     DCR   a   
-2B11   77                     MOV   m,a   
-2B12   23                     INX   h   
-2B13   36 00                  MVI   m,0   
+2AFA                SAN_NO_FILL:      
+2AFA                             ; R[a] = TT_ARRAY, val_lo = slot+1。**これが呼び出しの値になる**
+2AFA   3A C9 19               LDA   sendb_reg_a   
+2AFD   CD 00 10               CALL   get_reg_addr   
+2B00   36 08                  MVI   m,TT_ARRAY   
+2B02   23                     INX   h   
+2B03   36 00                  MVI   m,0   
+2B05   23                     INX   h   
+2B06   3A 6F 2B               LDA   san_slot   
+2B09   3C                     INR   a   
+2B0A   77                     MOV   m,a   
+2B0B   23                     INX   h   
+2B0C   36 00                  MVI   m,0   
+2B0E                             ; 
+2B0E                             ; 0 個ならブロックを 1 回も回さない (配列はもう R[a] にある)
+2B0E   3A 6E 2B               LDA   san_count   
+2B11   B7                     ORA   a   
+2B12   CA 74 1D               JZ   vm_loop   
 2B15                             ; 
-2B15                             ; フレーム +11 にコレクションスロット番号 (書き込む先を引くのに使う)
-2B15   CD 95 17               CALL   cur_frame_addr   
-2B18   11 0B 00               LXI   d,11   
-2B1B   19                     DAD   d   
-2B1C   3A 3C 2B               LDA   san_slot   
-2B1F   77                     MOV   m,a   
-2B20                             ; 
-2B20                             ; ブロック引数 R[1] = 0 (添字)
-2B20   3E 01                  MVI   a,1   
-2B22   CD 00 10               CALL   get_reg_addr   
-2B25   06 00                  MVI   b,0   
-2B27   0E 00                  MVI   c,0   
-2B29   CD 10 10               CALL   set_slot_int16   
-2B2C                             ; 
-2B2C                             ; 子 irep に切り替えて PC = 0
-2B2C   3A CD 19               LDA   sendb_block_irep   
-2B2F   CD 21 18               CALL   switch_irep   
-2B32   21 00 00               LXI   h,0   
-2B35   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
-2B38   C3 74 1D               JMP   vm_loop   
-2B3B                             ; 
-2B3B   00           SAN_COUNT:   DB   0   
-2B3C   00           SAN_SLOT:   DB   0   
-2B3D   00           SAN_LEFT:   DB   0   
-2B3E   00 00        SAN_DATA:   DW   0   
-2B40                             ; 
-2B40                             ; ===============================================================
-2B40                             ; each_block_args — 反復のその回の値をブロックの引数へ
-2B40                             ; 
-2B40                             ;   入力: each_arg_kind / each_col_slot / each_index
-2B40                             ;   出力: R[1] (配列なら要素、ハッシュなら鍵)
-2B40                             ;         ハッシュなら R[2] にも値
-2B40                             ; 
-2B40                             ; **sendb_each と advance_iteration の両方から呼びます。** 最初の回と
-2B40                             ; 2 回目以降で同じ場所の出し方をするためで、以前は 1 回目を sendb_each に
-2B40                             ; 書き写していました。
-2B40                             ; 
-2B40                             ; **添字は下位バイトだけ見ます。** 配列は 8 要素、ハッシュは 4 ペアまでで、
-2B40                             ; 上限がバイトに収まります。
-2B40                             ; ===============================================================
-2B40                EACH_BLOCK_ARGS:      
-2B40   3A 94 2B               LDA   each_col_slot   
-2B43   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
-2B46   7E                     MOV   a,m   ; +0: 見出しの種別 (COL_TYPE_*)
-2B47   32 9A 2B               STA   eba_col_type   
-2B4A   23                     INX   h   ; skip type
-2B4B   23                     INX   h   ; skip count → data
-2B4C                             ; **渡す値はスロットの見出しで決めます。** フレームの種別ではありません —
-2B4C                             ; 述語は配列とハッシュで種別を分けていないためです
-2B4C   3A 9A 2B               LDA   eba_col_type   
-2B4F   FE 03                  CPI   COL_TYPE_HASH   
-2B51   CA 69 2B               JZ   eba_hash   
-2B54                             ; 
-2B54                             ; --- 配列: data + index * 4 ---
-2B54   3A 97 2B               LDA   each_index   
-2B57   87                     ADD   a   ; ×2
-2B58   87                     ADD   a   ; ×4
-2B59   5F                     MOV   e,a   
-2B5A   16 00                  MVI   d,0   
-2B5C   19                     DAD   d   ; HL = &data[index*4]
-2B5D   E5                     PUSH   h   
-2B5E   3E 01                  MVI   a,1   
-2B60   CD 00 10               CALL   get_reg_addr   ; HL = R[1]
-2B63   EB                     XCHG      ; DE = R[1] (コピー先)
-2B64   E1                     POP   h   ; HL = コピー元
-2B65   CD 25 10               CALL   copy_slot   ; R[1] = array[index]
-2B68   C9                     RET      
-2B69                             ; 
-2B69                             ; --- ハッシュ: data + index * 8 が鍵、その +4 が値 ---
-2B69                EBA_HASH:      
-2B69   3A 97 2B               LDA   each_index   
-2B6C   87                     ADD   a   ; ×2
-2B6D   87                     ADD   a   ; ×4
-2B6E   87                     ADD   a   ; ×8
-2B6F   5F                     MOV   e,a   
-2B70   16 00                  MVI   d,0   
-2B72   19                     DAD   d   ; HL = &pair
-2B73   22 98 2B               SHLD   eba_pair   ; copy_slot が HL を進めるので退避
-2B76   E5                     PUSH   h   
-2B77   3E 01                  MVI   a,1   
-2B79   CD 00 10               CALL   get_reg_addr   ; HL = R[1]
-2B7C   EB                     XCHG      ; DE = R[1]
-2B7D   E1                     POP   h   ; HL = &鍵
-2B7E   CD 25 10               CALL   copy_slot   ; R[1] = 鍵
-2B81   2A 98 2B               LHLD   eba_pair   
-2B84   11 04 00               LXI   d,4   
-2B87   19                     DAD   d   ; HL = &値
-2B88   E5                     PUSH   h   
-2B89   3E 02                  MVI   a,2   
-2B8B   CD 00 10               CALL   get_reg_addr   ; HL = R[2]
-2B8E   EB                     XCHG      ; DE = R[2]
-2B8F   E1                     POP   h   ; HL = &値
-2B90   CD 25 10               CALL   copy_slot   ; R[2] = 値
-2B93   C9                     RET      
-2B94                             ; 
-2B94                             ; --- sendb_each データ ---
-2B94   00           EACH_COL_SLOT:   DB   0   
-2B95   00           EACH_COUNT:   DB   0   
-2B96   00           EACH_ARG_KIND:   DB   0   
-2B97   00           EACH_INDEX:   DB   0   
-2B98   00 00        EBA_PAIR:   DW   0   
-2B9A   00           EBA_COL_TYPE:   DB   0   
-2B9B                             ; 
-2B9B                          END      
+2B15                             ; ブロック (TT_PROC) の情報を読む
+2B15   3A CB 19               LDA   sendb_argc   
+2B18   3C                     INR   a   
+2B19   47                     MOV   b,a   
+2B1A   3A C9 19               LDA   sendb_reg_a   
+2B1D   80                     ADD   b   ; A = a + argc + 1
+2B1E   CD 00 10               CALL   get_reg_addr   
+2B21   CD 32 10               CALL   slot_to_value   
+2B24   7E                     MOV   a,m   
+2B25   32 CD 19               STA   sendb_block_irep   
+2B28   23                     INX   h   
+2B29   7E                     MOV   a,m   
+2B2A   32 CE 19               STA   sendb_block_outer   
+2B2D                             ; 
+2B2D                             ; push_frame(a, FRAME_KIND_ARRAY_FILL, outer)
+2B2D   06 09                  MVI   b,FRAME_KIND_ARRAY_FILL   
+2B2F   3A CE 19               LDA   sendb_block_outer   
+2B32   4F                     MOV   c,a   
+2B33   3A C9 19               LDA   sendb_reg_a   
+2B36   CD 9C 17               CALL   push_frame   
+2B39                             ; 
+2B39                             ; limit = count - 1
+2B39   CD 95 17               CALL   cur_frame_addr   
+2B3C   11 08 00               LXI   d,FRAME_OFF_LIMIT   
+2B3F   19                     DAD   d   
+2B40   3A 6E 2B               LDA   san_count   
+2B43   3D                     DCR   a   
+2B44   77                     MOV   m,a   
+2B45   23                     INX   h   
+2B46   36 00                  MVI   m,0   
+2B48                             ; 
+2B48                             ; フレーム +11 にコレクションスロット番号 (書き込む先を引くのに使う)
+2B48   CD 95 17               CALL   cur_frame_addr   
+2B4B   11 0B 00               LXI   d,11   
+2B4E   19                     DAD   d   
+2B4F   3A 6F 2B               LDA   san_slot   
+2B52   77                     MOV   m,a   
+2B53                             ; 
+2B53                             ; ブロック引数 R[1] = 0 (添字)
+2B53   3E 01                  MVI   a,1   
+2B55   CD 00 10               CALL   get_reg_addr   
+2B58   06 00                  MVI   b,0   
+2B5A   0E 00                  MVI   c,0   
+2B5C   CD 10 10               CALL   set_slot_int16   
+2B5F                             ; 
+2B5F                             ; 子 irep に切り替えて PC = 0
+2B5F   3A CD 19               LDA   sendb_block_irep   
+2B62   CD 21 18               CALL   switch_irep   
+2B65   21 00 00               LXI   h,0   
+2B68   22 00 80               SHLD   VM_STATE_BASE + OFF_PC   
+2B6B   C3 74 1D               JMP   vm_loop   
+2B6E                             ; 
+2B6E   00           SAN_COUNT:   DB   0   
+2B6F   00           SAN_SLOT:   DB   0   
+2B70   00           SAN_LEFT:   DB   0   
+2B71   00 00        SAN_DATA:   DW   0   
+2B73                             ; 
+2B73                             ; ===============================================================
+2B73                             ; each_block_args — 反復のその回の値をブロックの引数へ
+2B73                             ; 
+2B73                             ;   入力: each_arg_kind / each_col_slot / each_index
+2B73                             ;   出力: R[1] (配列なら要素、ハッシュなら鍵)
+2B73                             ;         ハッシュなら R[2] にも値
+2B73                             ; 
+2B73                             ; **sendb_each と advance_iteration の両方から呼びます。** 最初の回と
+2B73                             ; 2 回目以降で同じ場所の出し方をするためで、以前は 1 回目を sendb_each に
+2B73                             ; 書き写していました。
+2B73                             ; 
+2B73                             ; **添字は下位バイトだけ見ます。** 配列は 8 要素、ハッシュは 4 ペアまでで、
+2B73                             ; 上限がバイトに収まります。
+2B73                             ; ===============================================================
+2B73                EACH_BLOCK_ARGS:      
+2B73   3A C7 2B               LDA   each_col_slot   
+2B76   CD 96 21               CALL   col_slot_addr   ; HL = スロットアドレス
+2B79   7E                     MOV   a,m   ; +0: 見出しの種別 (COL_TYPE_*)
+2B7A   32 CD 2B               STA   eba_col_type   
+2B7D   23                     INX   h   ; skip type
+2B7E   23                     INX   h   ; skip count → data
+2B7F                             ; **渡す値はスロットの見出しで決めます。** フレームの種別ではありません —
+2B7F                             ; 述語は配列とハッシュで種別を分けていないためです
+2B7F   3A CD 2B               LDA   eba_col_type   
+2B82   FE 03                  CPI   COL_TYPE_HASH   
+2B84   CA 9C 2B               JZ   eba_hash   
+2B87                             ; 
+2B87                             ; --- 配列: data + index * 4 ---
+2B87   3A CA 2B               LDA   each_index   
+2B8A   87                     ADD   a   ; ×2
+2B8B   87                     ADD   a   ; ×4
+2B8C   5F                     MOV   e,a   
+2B8D   16 00                  MVI   d,0   
+2B8F   19                     DAD   d   ; HL = &data[index*4]
+2B90   E5                     PUSH   h   
+2B91   3E 01                  MVI   a,1   
+2B93   CD 00 10               CALL   get_reg_addr   ; HL = R[1]
+2B96   EB                     XCHG      ; DE = R[1] (コピー先)
+2B97   E1                     POP   h   ; HL = コピー元
+2B98   CD 25 10               CALL   copy_slot   ; R[1] = array[index]
+2B9B   C9                     RET      
+2B9C                             ; 
+2B9C                             ; --- ハッシュ: data + index * 8 が鍵、その +4 が値 ---
+2B9C                EBA_HASH:      
+2B9C   3A CA 2B               LDA   each_index   
+2B9F   87                     ADD   a   ; ×2
+2BA0   87                     ADD   a   ; ×4
+2BA1   87                     ADD   a   ; ×8
+2BA2   5F                     MOV   e,a   
+2BA3   16 00                  MVI   d,0   
+2BA5   19                     DAD   d   ; HL = &pair
+2BA6   22 CB 2B               SHLD   eba_pair   ; copy_slot が HL を進めるので退避
+2BA9   E5                     PUSH   h   
+2BAA   3E 01                  MVI   a,1   
+2BAC   CD 00 10               CALL   get_reg_addr   ; HL = R[1]
+2BAF   EB                     XCHG      ; DE = R[1]
+2BB0   E1                     POP   h   ; HL = &鍵
+2BB1   CD 25 10               CALL   copy_slot   ; R[1] = 鍵
+2BB4   2A CB 2B               LHLD   eba_pair   
+2BB7   11 04 00               LXI   d,4   
+2BBA   19                     DAD   d   ; HL = &値
+2BBB   E5                     PUSH   h   
+2BBC   3E 02                  MVI   a,2   
+2BBE   CD 00 10               CALL   get_reg_addr   ; HL = R[2]
+2BC1   EB                     XCHG      ; DE = R[2]
+2BC2   E1                     POP   h   ; HL = &値
+2BC3   CD 25 10               CALL   copy_slot   ; R[2] = 値
+2BC6   C9                     RET      
+2BC7                             ; 
+2BC7                             ; --- sendb_each データ ---
+2BC7   00           EACH_COL_SLOT:   DB   0   
+2BC8   00           EACH_COUNT:   DB   0   
+2BC9   00           EACH_ARG_KIND:   DB   0   
+2BCA   00           EACH_INDEX:   DB   0   
+2BCB   00 00        EBA_PAIR:   DW   0   
+2BCD   00           EBA_COL_TYPE:   DB   0   
+2BCE                             ; 
+2BCE                          END      
 
 
 VM_CODE_ORG:        1000 DEFINED AT LINE 6 IN vm_constants.a80
@@ -6270,17 +6330,17 @@ VM_STATE_BASE:      8000 DEFINED AT LINE 12 IN vm_constants.a80
                     > USED AT LINE 1990
                     > USED AT LINE 1991
                     > USED AT LINE 1992
-                    > USED AT LINE 940 IN vm_hash.a80
-                    > USED AT LINE 1109 IN vm_hash.a80
+                    > USED AT LINE 1000 IN vm_hash.a80
+                    > USED AT LINE 1169 IN vm_hash.a80
 REG_FILE_BASE:      8100 DEFINED AT LINE 13 IN vm_constants.a80
                     > USED AT LINE 60 IN vm_upvar.a80
                     > USED AT LINE 621
                     > USED AT LINE 648
                     > USED AT LINE 678
-                    > USED AT LINE 531 IN vm_hash.a80
+                    > USED AT LINE 550 IN vm_hash.a80
 REG_FILE_BASE_HI:   0081 DEFINED AT LINE 14 IN vm_constants.a80
 MAX_REGS:           0040 DEFINED AT LINE 15 IN vm_constants.a80
-                    > USED AT LINE 532 IN vm_hash.a80
+                    > USED AT LINE 551 IN vm_hash.a80
 STACK_TOP:          FDFF DEFINED AT LINE 16 IN vm_constants.a80
                     > USED AT LINE 31
 DISPLAY_BASE:       FFF8 DEFINED AT LINE 17 IN vm_constants.a80
@@ -6329,8 +6389,8 @@ OFF_PC:             0000 DEFINED AT LINE 29 IN vm_constants.a80
                     > USED AT LINE 224 IN vm_class.a80
                     > USED AT LINE 207
                     > USED AT LINE 423
-                    > USED AT LINE 940 IN vm_hash.a80
-                    > USED AT LINE 1109 IN vm_hash.a80
+                    > USED AT LINE 1000 IN vm_hash.a80
+                    > USED AT LINE 1169 IN vm_hash.a80
 OFF_STATUS:         0002 DEFINED AT LINE 30 IN vm_constants.a80
                     > USED AT LINE 111
                     > USED AT LINE 361
@@ -6448,7 +6508,7 @@ TT_NIL:             0001 DEFINED AT LINE 64 IN vm_constants.a80
                     > USED AT LINE 1024
                     > USED AT LINE 179 IN vm_hash.a80
                     > USED AT LINE 361 IN vm_hash.a80
-                    > USED AT LINE 1028 IN vm_hash.a80
+                    > USED AT LINE 1088 IN vm_hash.a80
 TT_FALSE:           0002 DEFINED AT LINE 65 IN vm_constants.a80
                     > USED AT LINE 158 IN vm_load.a80
                     > USED AT LINE 50 IN vm_compare.a80
@@ -6457,7 +6517,7 @@ TT_FALSE:           0002 DEFINED AT LINE 65 IN vm_constants.a80
                     > USED AT LINE 289
                     > USED AT LINE 311
                     > USED AT LINE 344
-                    > USED AT LINE 959 IN vm_hash.a80
+                    > USED AT LINE 1019 IN vm_hash.a80
 TT_TRUE:            0003 DEFINED AT LINE 66 IN vm_constants.a80
                     > USED AT LINE 148 IN vm_load.a80
                     > USED AT LINE 44 IN vm_compare.a80
@@ -6465,14 +6525,14 @@ TT_TRUE:            0003 DEFINED AT LINE 66 IN vm_constants.a80
                     > USED AT LINE 460 IN vm_send.a80
                     > USED AT LINE 308
                     > USED AT LINE 341
-                    > USED AT LINE 956 IN vm_hash.a80
+                    > USED AT LINE 1016 IN vm_hash.a80
 TT_INTEGER:         0004 DEFINED AT LINE 67 IN vm_constants.a80
                     > USED AT LINE 55 IN vm_util.a80
                     > USED AT LINE 123 IN vm_load.a80
                     > USED AT LINE 270 IN vm_send.a80
                     > USED AT LINE 894
                     > USED AT LINE 1846
-                    > USED AT LINE 999 IN vm_hash.a80
+                    > USED AT LINE 1059 IN vm_hash.a80
 TT_STRING:          0007 DEFINED AT LINE 68 IN vm_constants.a80
                     > USED AT LINE 17 IN vm_arith.a80
                     > USED AT LINE 757
@@ -6485,7 +6545,7 @@ TT_STRING:          0007 DEFINED AT LINE 68 IN vm_constants.a80
                     > USED AT LINE 1844
                     > USED AT LINE 383 IN vm_hash.a80
                     > USED AT LINE 466 IN vm_hash.a80
-                    > USED AT LINE 716 IN vm_hash.a80
+                    > USED AT LINE 770 IN vm_hash.a80
 TT_ARRAY:           0008 DEFINED AT LINE 69 IN vm_constants.a80
                     > USED AT LINE 340 IN vm_send.a80
                     > USED AT LINE 360 IN vm_send.a80
@@ -6493,18 +6553,18 @@ TT_ARRAY:           0008 DEFINED AT LINE 69 IN vm_constants.a80
                     > USED AT LINE 1428
                     > USED AT LINE 1602
                     > USED AT LINE 1834
-                    > USED AT LINE 718 IN vm_hash.a80
-                    > USED AT LINE 851 IN vm_hash.a80
-                    > USED AT LINE 867 IN vm_hash.a80
-                    > USED AT LINE 1045 IN vm_hash.a80
+                    > USED AT LINE 772 IN vm_hash.a80
+                    > USED AT LINE 911 IN vm_hash.a80
+                    > USED AT LINE 927 IN vm_hash.a80
+                    > USED AT LINE 1105 IN vm_hash.a80
 TT_HASH:            0009 DEFINED AT LINE 70 IN vm_constants.a80
                     > USED AT LINE 383 IN vm_send.a80
                     > USED AT LINE 1314
                     > USED AT LINE 1430
                     > USED AT LINE 93 IN vm_hash.a80
-                    > USED AT LINE 720 IN vm_hash.a80
-                    > USED AT LINE 853 IN vm_hash.a80
-                    > USED AT LINE 869 IN vm_hash.a80
+                    > USED AT LINE 774 IN vm_hash.a80
+                    > USED AT LINE 913 IN vm_hash.a80
+                    > USED AT LINE 929 IN vm_hash.a80
 TT_OBJECT:          000A DEFINED AT LINE 71 IN vm_constants.a80
                     > USED AT LINE 288 IN vm_util.a80
                     > USED AT LINE 185 IN vm_send.a80
@@ -6519,7 +6579,7 @@ TT_CLASS:           000D DEFINED AT LINE 73 IN vm_constants.a80
 TT_BUILTIN_CLASS:   000E DEFINED AT LINE 74 IN vm_constants.a80
                     > USED AT LINE 151 IN vm_send.a80
                     > USED AT LINE 177 IN vm_class.a80
-                    > USED AT LINE 985 IN vm_hash.a80
+                    > USED AT LINE 1045 IN vm_hash.a80
 TT_FALSY_MAX:       0002 DEFINED AT LINE 75 IN vm_constants.a80
                     > USED AT LINE 44 IN vm_jump.a80
                     > USED AT LINE 65 IN vm_jump.a80
@@ -6568,19 +6628,19 @@ VM_ERROR:           1D54 DEFINED AT LINE 375
                     > USED AT LINE 1956
                     > USED AT LINE 266 IN vm_hash.a80
                     > USED AT LINE 384 IN vm_hash.a80
-                    > USED AT LINE 590 IN vm_hash.a80
-                    > USED AT LINE 854 IN vm_hash.a80
-                    > USED AT LINE 870 IN vm_hash.a80
-                    > USED AT LINE 986 IN vm_hash.a80
-                    > USED AT LINE 992 IN vm_hash.a80
-                    > USED AT LINE 1000 IN vm_hash.a80
-                    > USED AT LINE 1007 IN vm_hash.a80
-                    > USED AT LINE 1010 IN vm_hash.a80
+                    > USED AT LINE 608 IN vm_hash.a80
+                    > USED AT LINE 914 IN vm_hash.a80
+                    > USED AT LINE 930 IN vm_hash.a80
+                    > USED AT LINE 1046 IN vm_hash.a80
+                    > USED AT LINE 1052 IN vm_hash.a80
+                    > USED AT LINE 1060 IN vm_hash.a80
+                    > USED AT LINE 1067 IN vm_hash.a80
+                    > USED AT LINE 1070 IN vm_hash.a80
 SYM_TABLE_BASE:     8300 DEFINED AT LINE 86 IN vm_constants.a80
 GLOBALS_BASE:       9000 DEFINED AT LINE 87 IN vm_constants.a80
-                    > USED AT LINE 543 IN vm_hash.a80
+                    > USED AT LINE 562 IN vm_hash.a80
 MAX_GLOBALS:        0040 DEFINED AT LINE 88 IN vm_constants.a80
-                    > USED AT LINE 544 IN vm_hash.a80
+                    > USED AT LINE 563 IN vm_hash.a80
 SYM_KIND_USER_METHOD: 0001 DEFINED AT LINE 91 IN vm_constants.a80
                     > USED AT LINE 59 IN vm_send.a80
 SYM_KIND_CLASS:     0002 DEFINED AT LINE 92 IN vm_constants.a80
@@ -6591,7 +6651,7 @@ SYM_KIND_IVAR:      0003 DEFINED AT LINE 93 IN vm_constants.a80
 SYM_KIND_BUILTIN_CLASS: 0004 DEFINED AT LINE 94 IN vm_constants.a80
                     > USED AT LINE 160 IN vm_class.a80
 BUILTIN_CLASS_ARRAY: 0001 DEFINED AT LINE 95 IN vm_constants.a80
-                    > USED AT LINE 991 IN vm_hash.a80
+                    > USED AT LINE 1051 IN vm_hash.a80
 BUILTIN_CLASS_HASH: 0002 DEFINED AT LINE 96 IN vm_constants.a80
                     > USED AT LINE 255 IN vm_send.a80
 FRAME_STACK_BASE:   9100 DEFINED AT LINE 100 IN vm_constants.a80
@@ -6610,8 +6670,8 @@ FRAME_OFF_INDEX:    0006 DEFINED AT LINE 109 IN vm_constants.a80
                     > USED AT LINE 244
 FRAME_OFF_LIMIT:    0008 DEFINED AT LINE 110 IN vm_constants.a80
                     > USED AT LINE 208 IN vm_block.a80
-                    > USED AT LINE 914 IN vm_hash.a80
-                    > USED AT LINE 1083 IN vm_hash.a80
+                    > USED AT LINE 974 IN vm_hash.a80
+                    > USED AT LINE 1143 IN vm_hash.a80
 FRAME_OFF_OUTER:    000A DEFINED AT LINE 111 IN vm_constants.a80
                     > USED AT LINE 35 IN vm_upvar.a80
 FRAME_KIND_CALL:    0000 DEFINED AT LINE 114 IN vm_constants.a80
@@ -6622,9 +6682,9 @@ FRAME_KIND_ITERATE: 0001 DEFINED AT LINE 115 IN vm_constants.a80
                     > USED AT LINE 199 IN vm_block.a80
                     > USED AT LINE 174
 FRAME_KIND_EACH:    0002 DEFINED AT LINE 116 IN vm_constants.a80
-                    > USED AT LINE 858 IN vm_hash.a80
+                    > USED AT LINE 918 IN vm_hash.a80
 FRAME_KIND_HASH_EACH: 0003 DEFINED AT LINE 117 IN vm_constants.a80
-                    > USED AT LINE 855 IN vm_hash.a80
+                    > USED AT LINE 915 IN vm_hash.a80
 FRAME_KIND_LOOP:    0004 DEFINED AT LINE 118 IN vm_constants.a80
                     > USED AT LINE 250 IN vm_block.a80
                     > USED AT LINE 129
@@ -6637,8 +6697,8 @@ FRAME_KIND_ANY:     0006 DEFINED AT LINE 120 IN vm_constants.a80
                     > USED AT LINE 296
                     > USED AT LINE 335
                     > USED AT LINE 339
-                    > USED AT LINE 952 IN vm_hash.a80
-                    > USED AT LINE 954 IN vm_hash.a80
+                    > USED AT LINE 1012 IN vm_hash.a80
+                    > USED AT LINE 1014 IN vm_hash.a80
 FRAME_KIND_ALL:     0007 DEFINED AT LINE 121 IN vm_constants.a80
                     > USED AT LINE 153 IN vm_block.a80
                     > USED AT LINE 294
@@ -6650,7 +6710,7 @@ FRAME_KIND_NONE:    0008 DEFINED AT LINE 122 IN vm_constants.a80
 FRAME_KIND_ARRAY_FILL: 0009 DEFINED AT LINE 123 IN vm_constants.a80
                     > USED AT LINE 176
                     > USED AT LINE 231
-                    > USED AT LINE 1075 IN vm_hash.a80
+                    > USED AT LINE 1135 IN vm_hash.a80
 FRAME_NONE:         00FF DEFINED AT LINE 126 IN vm_constants.a80
                     > USED AT LINE 124 IN vm_send.a80
                     > USED AT LINE 229 IN vm_send.a80
@@ -6712,25 +6772,25 @@ OBJECT_POOL_BASE:   92C0 DEFINED AT LINE 159 IN vm_constants.a80
                     > USED AT LINE 134 IN vm_globals.a80
                     > USED AT LINE 177 IN vm_send.a80
                     > USED AT LINE 631
-                    > USED AT LINE 555 IN vm_hash.a80
+                    > USED AT LINE 574 IN vm_hash.a80
 MAX_OBJECTS:        0020 DEFINED AT LINE 160 IN vm_constants.a80
                     > USED AT LINE 156 IN vm_send.a80
-                    > USED AT LINE 556 IN vm_hash.a80
+                    > USED AT LINE 575 IN vm_hash.a80
 OBJECT_SLOT_SIZE:   0020 DEFINED AT LINE 161 IN vm_constants.a80
-                    > USED AT LINE 570 IN vm_hash.a80
+                    > USED AT LINE 589 IN vm_hash.a80
 OBJECT_HEADER_SIZE: 0004 DEFINED AT LINE 162 IN vm_constants.a80
                     > USED AT LINE 137 IN vm_globals.a80
-                    > USED AT LINE 555 IN vm_hash.a80
+                    > USED AT LINE 574 IN vm_hash.a80
 MAX_IVARS:          0007 DEFINED AT LINE 163 IN vm_constants.a80
-                    > USED AT LINE 560 IN vm_hash.a80
+                    > USED AT LINE 579 IN vm_hash.a80
 COLLECTION_POOL_BASE: 96C0 DEFINED AT LINE 167 IN vm_constants.a80
                     > USED AT LINE 636
                     > USED AT LINE 1260
 MAX_COL_SLOTS:      0040 DEFINED AT LINE 168 IN vm_constants.a80
                     > USED AT LINE 1274
-                    > USED AT LINE 588 IN vm_hash.a80
-                    > USED AT LINE 627 IN vm_hash.a80
-                    > USED AT LINE 735 IN vm_hash.a80
+                    > USED AT LINE 641 IN vm_hash.a80
+                    > USED AT LINE 681 IN vm_hash.a80
+                    > USED AT LINE 789 IN vm_hash.a80
 COL_SLOT_SIZE:      0024 DEFINED AT LINE 169 IN vm_constants.a80
 COL_HEADER_SIZE:    0002 DEFINED AT LINE 170 IN vm_constants.a80
 COL_DATA_SIZE:      0022 DEFINED AT LINE 171 IN vm_constants.a80
@@ -6750,9 +6810,9 @@ COL_MAX_ARRAY_ELEMS: 0008 DEFINED AT LINE 173 IN vm_constants.a80
                     > USED AT LINE 1555
                     > USED AT LINE 1651
                     > USED AT LINE 1955
-                    > USED AT LINE 661 IN vm_hash.a80
-                    > USED AT LINE 664 IN vm_hash.a80
-                    > USED AT LINE 1009 IN vm_hash.a80
+                    > USED AT LINE 715 IN vm_hash.a80
+                    > USED AT LINE 718 IN vm_hash.a80
+                    > USED AT LINE 1069 IN vm_hash.a80
 COL_TYPE_FREE:      0000 DEFINED AT LINE 174 IN vm_constants.a80
 COL_TYPE_STRING:    0001 DEFINED AT LINE 175 IN vm_constants.a80
                     > USED AT LINE 728
@@ -6764,20 +6824,20 @@ COL_TYPE_ARRAY:     0002 DEFINED AT LINE 176 IN vm_constants.a80
                     > USED AT LINE 355 IN vm_send.a80
                     > USED AT LINE 1561
                     > USED AT LINE 1617
-                    > USED AT LINE 650 IN vm_hash.a80
-                    > USED AT LINE 1016 IN vm_hash.a80
+                    > USED AT LINE 704 IN vm_hash.a80
+                    > USED AT LINE 1076 IN vm_hash.a80
 COL_TYPE_HASH:      0003 DEFINED AT LINE 177 IN vm_constants.a80
                     > USED AT LINE 378 IN vm_send.a80
                     > USED AT LINE 41 IN vm_hash.a80
-                    > USED AT LINE 652 IN vm_hash.a80
-                    > USED AT LINE 1141 IN vm_hash.a80
+                    > USED AT LINE 706 IN vm_hash.a80
+                    > USED AT LINE 1201 IN vm_hash.a80
 HASH_PAIR_BYTES:    0008 DEFINED AT LINE 178 IN vm_constants.a80
                     > USED AT LINE 168 IN vm_hash.a80
                     > USED AT LINE 253 IN vm_hash.a80
 COL_MAX_HASH_PAIRS: 0004 DEFINED AT LINE 179 IN vm_constants.a80
                     > USED AT LINE 265 IN vm_hash.a80
-                    > USED AT LINE 678 IN vm_hash.a80
-                    > USED AT LINE 681 IN vm_hash.a80
+                    > USED AT LINE 732 IN vm_hash.a80
+                    > USED AT LINE 735 IN vm_hash.a80
 OP_NOP:             0000 DEFINED AT LINE 183 IN vm_constants.a80
 OP_MOVE:            0001 DEFINED AT LINE 184 IN vm_constants.a80
 OP_LOADI:           0003 DEFINED AT LINE 185 IN vm_constants.a80
@@ -6957,20 +7017,20 @@ GET_REG_ADDR:       1000 DEFINED AT LINE 23 IN vm_util.a80
                     > USED AT LINE 399 IN vm_hash.a80
                     > USED AT LINE 407 IN vm_hash.a80
                     > USED AT LINE 465 IN vm_hash.a80
-                    > USED AT LINE 849 IN vm_hash.a80
-                    > USED AT LINE 865 IN vm_hash.a80
-                    > USED AT LINE 875 IN vm_hash.a80
-                    > USED AT LINE 896 IN vm_hash.a80
-                    > USED AT LINE 963 IN vm_hash.a80
-                    > USED AT LINE 983 IN vm_hash.a80
-                    > USED AT LINE 988 IN vm_hash.a80
-                    > USED AT LINE 997 IN vm_hash.a80
-                    > USED AT LINE 1044 IN vm_hash.a80
-                    > USED AT LINE 1066 IN vm_hash.a80
-                    > USED AT LINE 1100 IN vm_hash.a80
-                    > USED AT LINE 1153 IN vm_hash.a80
-                    > USED AT LINE 1171 IN vm_hash.a80
-                    > USED AT LINE 1180 IN vm_hash.a80
+                    > USED AT LINE 909 IN vm_hash.a80
+                    > USED AT LINE 925 IN vm_hash.a80
+                    > USED AT LINE 935 IN vm_hash.a80
+                    > USED AT LINE 956 IN vm_hash.a80
+                    > USED AT LINE 1023 IN vm_hash.a80
+                    > USED AT LINE 1043 IN vm_hash.a80
+                    > USED AT LINE 1048 IN vm_hash.a80
+                    > USED AT LINE 1057 IN vm_hash.a80
+                    > USED AT LINE 1104 IN vm_hash.a80
+                    > USED AT LINE 1126 IN vm_hash.a80
+                    > USED AT LINE 1160 IN vm_hash.a80
+                    > USED AT LINE 1213 IN vm_hash.a80
+                    > USED AT LINE 1231 IN vm_hash.a80
+                    > USED AT LINE 1240 IN vm_hash.a80
 GET_REG_ADDR_NEXT:  100C DEFINED AT LINE 41 IN vm_util.a80
                     > USED AT LINE 23 IN vm_arith.a80
                     > USED AT LINE 45 IN vm_arith.a80
@@ -6994,7 +7054,7 @@ SET_SLOT_INT16:     1010 DEFINED AT LINE 54 IN vm_util.a80
                     > USED AT LINE 1233
                     > USED AT LINE 1818
                     > USED AT LINE 355 IN vm_hash.a80
-                    > USED AT LINE 1103 IN vm_hash.a80
+                    > USED AT LINE 1163 IN vm_hash.a80
 SET_SLOT_SPECIAL:   101A DEFINED AT LINE 72 IN vm_util.a80
                     > USED AT LINE 139 IN vm_load.a80
                     > USED AT LINE 149 IN vm_load.a80
@@ -7012,7 +7072,7 @@ SET_SLOT_SPECIAL:   101A DEFINED AT LINE 72 IN vm_util.a80
                     > USED AT LINE 1025
                     > USED AT LINE 180 IN vm_hash.a80
                     > USED AT LINE 362 IN vm_hash.a80
-                    > USED AT LINE 965 IN vm_hash.a80
+                    > USED AT LINE 1025 IN vm_hash.a80
 COPY_SLOT:          1025 DEFINED AT LINE 90 IN vm_util.a80
                     > USED AT LINE 26 IN vm_load.a80
                     > USED AT LINE 47 IN vm_globals.a80
@@ -7034,9 +7094,9 @@ COPY_SLOT:          1025 DEFINED AT LINE 90 IN vm_util.a80
                     > USED AT LINE 248 IN vm_hash.a80
                     > USED AT LINE 289 IN vm_hash.a80
                     > USED AT LINE 294 IN vm_hash.a80
-                    > USED AT LINE 1156 IN vm_hash.a80
-                    > USED AT LINE 1174 IN vm_hash.a80
-                    > USED AT LINE 1183 IN vm_hash.a80
+                    > USED AT LINE 1216 IN vm_hash.a80
+                    > USED AT LINE 1234 IN vm_hash.a80
+                    > USED AT LINE 1243 IN vm_hash.a80
 COPY_SLOT_LOOP:     1027 DEFINED AT LINE 92 IN vm_util.a80
                     > USED AT LINE 98 IN vm_util.a80
 GET_SLOT_TYPE:      1030 DEFINED AT LINE 108 IN vm_util.a80
@@ -7081,10 +7141,10 @@ SLOT_TO_VALUE:      1032 DEFINED AT LINE 119 IN vm_util.a80
                     > USED AT LINE 1929
                     > USED AT LINE 400 IN vm_hash.a80
                     > USED AT LINE 408 IN vm_hash.a80
-                    > USED AT LINE 876 IN vm_hash.a80
-                    > USED AT LINE 897 IN vm_hash.a80
-                    > USED AT LINE 989 IN vm_hash.a80
-                    > USED AT LINE 1067 IN vm_hash.a80
+                    > USED AT LINE 936 IN vm_hash.a80
+                    > USED AT LINE 957 IN vm_hash.a80
+                    > USED AT LINE 1049 IN vm_hash.a80
+                    > USED AT LINE 1127 IN vm_hash.a80
 ADD_VALUE16:        1035 DEFINED AT LINE 134 IN vm_util.a80
                     > USED AT LINE 31 IN vm_arith.a80
 SUB_VALUE16:        103E DEFINED AT LINE 155 IN vm_util.a80
@@ -7539,18 +7599,18 @@ CUR_FRAME_ADDR:     1795 DEFINED AT LINE 38 IN vm_frame.a80
                     > USED AT LINE 197
                     > USED AT LINE 235
                     > USED AT LINE 243
-                    > USED AT LINE 913 IN vm_hash.a80
-                    > USED AT LINE 923 IN vm_hash.a80
-                    > USED AT LINE 1082 IN vm_hash.a80
-                    > USED AT LINE 1092 IN vm_hash.a80
+                    > USED AT LINE 973 IN vm_hash.a80
+                    > USED AT LINE 983 IN vm_hash.a80
+                    > USED AT LINE 1142 IN vm_hash.a80
+                    > USED AT LINE 1152 IN vm_hash.a80
 PUSH_FRAME:         179C DEFINED AT LINE 55 IN vm_frame.a80
                     > USED AT LINE 125 IN vm_send.a80
                     > USED AT LINE 230 IN vm_send.a80
                     > USED AT LINE 203 IN vm_block.a80
                     > USED AT LINE 254 IN vm_block.a80
                     > USED AT LINE 216 IN vm_class.a80
-                    > USED AT LINE 910 IN vm_hash.a80
-                    > USED AT LINE 1079 IN vm_hash.a80
+                    > USED AT LINE 970 IN vm_hash.a80
+                    > USED AT LINE 1139 IN vm_hash.a80
 PF_SHIFT_REG:       17F4 DEFINED AT LINE 128 IN vm_frame.a80
                     > USED AT LINE 57 IN vm_frame.a80
                     > USED AT LINE 110 IN vm_frame.a80
@@ -7575,8 +7635,8 @@ SWITCH_IREP:        1821 DEFINED AT LINE 186 IN vm_frame.a80
                     > USED AT LINE 225 IN vm_block.a80
                     > USED AT LINE 258 IN vm_block.a80
                     > USED AT LINE 220 IN vm_class.a80
-                    > USED AT LINE 936 IN vm_hash.a80
-                    > USED AT LINE 1107 IN vm_hash.a80
+                    > USED AT LINE 996 IN vm_hash.a80
+                    > USED AT LINE 1167 IN vm_hash.a80
 DO_OP_LOADSELF:     1861 DEFINED AT LINE 8 IN vm_block.a80
                     > USED AT LINE 503
 DO_OP_BLOCK:        1875 DEFINED AT LINE 27 IN vm_block.a80
@@ -7621,18 +7681,18 @@ SENDB_REG_A:        19C9 DEFINED AT LINE 266 IN vm_block.a80
                     > USED AT LINE 238 IN vm_block.a80
                     > USED AT LINE 249 IN vm_block.a80
                     > USED AT LINE 253 IN vm_block.a80
-                    > USED AT LINE 848 IN vm_hash.a80
-                    > USED AT LINE 864 IN vm_hash.a80
-                    > USED AT LINE 874 IN vm_hash.a80
-                    > USED AT LINE 894 IN vm_hash.a80
-                    > USED AT LINE 909 IN vm_hash.a80
-                    > USED AT LINE 962 IN vm_hash.a80
-                    > USED AT LINE 982 IN vm_hash.a80
-                    > USED AT LINE 987 IN vm_hash.a80
-                    > USED AT LINE 995 IN vm_hash.a80
-                    > USED AT LINE 1043 IN vm_hash.a80
-                    > USED AT LINE 1064 IN vm_hash.a80
-                    > USED AT LINE 1078 IN vm_hash.a80
+                    > USED AT LINE 908 IN vm_hash.a80
+                    > USED AT LINE 924 IN vm_hash.a80
+                    > USED AT LINE 934 IN vm_hash.a80
+                    > USED AT LINE 954 IN vm_hash.a80
+                    > USED AT LINE 969 IN vm_hash.a80
+                    > USED AT LINE 1022 IN vm_hash.a80
+                    > USED AT LINE 1042 IN vm_hash.a80
+                    > USED AT LINE 1047 IN vm_hash.a80
+                    > USED AT LINE 1055 IN vm_hash.a80
+                    > USED AT LINE 1103 IN vm_hash.a80
+                    > USED AT LINE 1124 IN vm_hash.a80
+                    > USED AT LINE 1138 IN vm_hash.a80
 SENDB_SYM_B:        19CA DEFINED AT LINE 267 IN vm_block.a80
                     > USED AT LINE 83 IN vm_block.a80
                     > USED AT LINE 109 IN vm_block.a80
@@ -7642,8 +7702,8 @@ SENDB_ARGC:         19CB DEFINED AT LINE 268 IN vm_block.a80
                     > USED AT LINE 111 IN vm_block.a80
                     > USED AT LINE 184 IN vm_block.a80
                     > USED AT LINE 235 IN vm_block.a80
-                    > USED AT LINE 891 IN vm_hash.a80
-                    > USED AT LINE 1061 IN vm_hash.a80
+                    > USED AT LINE 951 IN vm_hash.a80
+                    > USED AT LINE 1121 IN vm_hash.a80
 SENDB_METHOD_ID:    19CC DEFINED AT LINE 269 IN vm_block.a80
                     > USED AT LINE 122 IN vm_block.a80
                     > USED AT LINE 125 IN vm_block.a80
@@ -7652,19 +7712,19 @@ SENDB_BLOCK_IREP:   19CD DEFINED AT LINE 270 IN vm_block.a80
                     > USED AT LINE 224 IN vm_block.a80
                     > USED AT LINE 243 IN vm_block.a80
                     > USED AT LINE 257 IN vm_block.a80
-                    > USED AT LINE 899 IN vm_hash.a80
-                    > USED AT LINE 935 IN vm_hash.a80
-                    > USED AT LINE 1069 IN vm_hash.a80
-                    > USED AT LINE 1106 IN vm_hash.a80
+                    > USED AT LINE 959 IN vm_hash.a80
+                    > USED AT LINE 995 IN vm_hash.a80
+                    > USED AT LINE 1129 IN vm_hash.a80
+                    > USED AT LINE 1166 IN vm_hash.a80
 SENDB_BLOCK_OUTER:  19CE DEFINED AT LINE 271 IN vm_block.a80
                     > USED AT LINE 195 IN vm_block.a80
                     > USED AT LINE 200 IN vm_block.a80
                     > USED AT LINE 246 IN vm_block.a80
                     > USED AT LINE 251 IN vm_block.a80
-                    > USED AT LINE 902 IN vm_hash.a80
-                    > USED AT LINE 907 IN vm_hash.a80
-                    > USED AT LINE 1072 IN vm_hash.a80
-                    > USED AT LINE 1076 IN vm_hash.a80
+                    > USED AT LINE 962 IN vm_hash.a80
+                    > USED AT LINE 967 IN vm_hash.a80
+                    > USED AT LINE 1132 IN vm_hash.a80
+                    > USED AT LINE 1136 IN vm_hash.a80
 DO_OP_BREAK:        19CF DEFINED AT LINE 278 IN vm_block.a80
                     > USED AT LINE 543
 UPVAR_BASE:         19E6 DEFINED AT LINE 18 IN vm_upvar.a80
@@ -7916,11 +7976,11 @@ VM_LOOP:            1D74 DEFINED AT LINE 416
                     > USED AT LINE 356 IN vm_hash.a80
                     > USED AT LINE 363 IN vm_hash.a80
                     > USED AT LINE 475 IN vm_hash.a80
-                    > USED AT LINE 941 IN vm_hash.a80
-                    > USED AT LINE 953 IN vm_hash.a80
-                    > USED AT LINE 966 IN vm_hash.a80
-                    > USED AT LINE 1058 IN vm_hash.a80
-                    > USED AT LINE 1110 IN vm_hash.a80
+                    > USED AT LINE 1001 IN vm_hash.a80
+                    > USED AT LINE 1013 IN vm_hash.a80
+                    > USED AT LINE 1026 IN vm_hash.a80
+                    > USED AT LINE 1118 IN vm_hash.a80
+                    > USED AT LINE 1170 IN vm_hash.a80
 VM_DISPATCH:        1DA3 DEFINED AT LINE 451
                     > USED AT LINE 445
 DISPATCH_TABLE:     1DC5 DEFINED AT LINE 484
@@ -8030,10 +8090,10 @@ COL_SLOT_ADDR:      2196 DEFINED AT LINE 1247
                     > USED AT LINE 239
                     > USED AT LINE 1277
                     > USED AT LINE 1296
-                    > USED AT LINE 595 IN vm_hash.a80
-                    > USED AT LINE 645 IN vm_hash.a80
-                    > USED AT LINE 883 IN vm_hash.a80
-                    > USED AT LINE 1133 IN vm_hash.a80
+                    > USED AT LINE 616 IN vm_hash.a80
+                    > USED AT LINE 699 IN vm_hash.a80
+                    > USED AT LINE 943 IN vm_hash.a80
+                    > USED AT LINE 1193 IN vm_hash.a80
 COL_ALLOC:          21A6 DEFINED AT LINE 1272
                     > USED AT LINE 287 IN vm_send.a80
                     > USED AT LINE 353 IN vm_send.a80
@@ -8045,7 +8105,7 @@ COL_ALLOC:          21A6 DEFINED AT LINE 1272
                     > USED AT LINE 37 IN vm_hash.a80
                     > USED AT LINE 431 IN vm_hash.a80
                     > USED AT LINE 479 IN vm_hash.a80
-                    > USED AT LINE 1014 IN vm_hash.a80
+                    > USED AT LINE 1074 IN vm_hash.a80
 COL_FROM_REG:       21BB DEFINED AT LINE 1292
                     > USED AT LINE 936
                     > USED AT LINE 1322
@@ -8385,160 +8445,176 @@ SLICE_NEW_SLOT:     2810 DEFINED AT LINE 491 IN vm_hash.a80
                     > USED AT LINE 480 IN vm_hash.a80
 COL_GC_ALLOC:       2811 DEFINED AT LINE 518 IN vm_hash.a80
                     > USED AT LINE 1275
-GC_CLEAR_BM:        2817 DEFINED AT LINE 523 IN vm_hash.a80
-                    > USED AT LINE 527 IN vm_hash.a80
-GC_ROOT_REG:        2822 DEFINED AT LINE 533 IN vm_hash.a80
-                    > USED AT LINE 540 IN vm_hash.a80
-GC_ROOT_GLOBAL:     2832 DEFINED AT LINE 545 IN vm_hash.a80
-                    > USED AT LINE 552 IN vm_hash.a80
-GC_ROOT_OBJ:        2842 DEFINED AT LINE 557 IN vm_hash.a80
-                    > USED AT LINE 574 IN vm_hash.a80
-GC_ROOT_IVAR:       2846 DEFINED AT LINE 561 IN vm_hash.a80
-                    > USED AT LINE 568 IN vm_hash.a80
-GC_FIND_FREE:       2860 DEFINED AT LINE 582 IN vm_hash.a80
-                    > USED AT LINE 589 IN vm_hash.a80
-GC_FOUND_FREE:      2871 DEFINED AT LINE 592 IN vm_hash.a80
-                    > USED AT LINE 585 IN vm_hash.a80
-GC_PROPAGATE:       2878 DEFINED AT LINE 605 IN vm_hash.a80
-                    > USED AT LINE 577 IN vm_hash.a80
-                    > USED AT LINE 631 IN vm_hash.a80
-GC_PROP_SLOT:       287E DEFINED AT LINE 609 IN vm_hash.a80
-                    > USED AT LINE 628 IN vm_hash.a80
-GC_PROP_NEXT:       289B DEFINED AT LINE 624 IN vm_hash.a80
-                    > USED AT LINE 612 IN vm_hash.a80
-                    > USED AT LINE 615 IN vm_hash.a80
-GC_SCAN_SLOT:       28AA DEFINED AT LINE 643 IN vm_hash.a80
-                    > USED AT LINE 622 IN vm_hash.a80
-GC_SCAN_ARRAY:      28BF DEFINED AT LINE 655 IN vm_hash.a80
-                    > USED AT LINE 651 IN vm_hash.a80
-GC_SCAN_ALOOP:      28CE DEFINED AT LINE 665 IN vm_hash.a80
-                    > USED AT LINE 662 IN vm_hash.a80
-                    > USED AT LINE 663 IN vm_hash.a80
-                    > USED AT LINE 672 IN vm_hash.a80
-GC_SCAN_HASH:       28DC DEFINED AT LINE 674 IN vm_hash.a80
-                    > USED AT LINE 653 IN vm_hash.a80
-GC_SCAN_HLOOP:      28EB DEFINED AT LINE 682 IN vm_hash.a80
-                    > USED AT LINE 679 IN vm_hash.a80
-                    > USED AT LINE 680 IN vm_hash.a80
-                    > USED AT LINE 694 IN vm_hash.a80
-GC_SCAN_DONE:       28FD DEFINED AT LINE 695 IN vm_hash.a80
-                    > USED AT LINE 654 IN vm_hash.a80
-                    > USED AT LINE 658 IN vm_hash.a80
-                    > USED AT LINE 673 IN vm_hash.a80
-                    > USED AT LINE 677 IN vm_hash.a80
-GC_MARK_VALUE:      28FF DEFINED AT LINE 711 IN vm_hash.a80
-                    > USED AT LINE 534 IN vm_hash.a80
+COL_GC_SWEEP:       2824 DEFINED AT LINE 537 IN vm_hash.a80
+                    > USED AT LINE 529 IN vm_hash.a80
+GC_CLEAR_BM:        282A DEFINED AT LINE 542 IN vm_hash.a80
                     > USED AT LINE 546 IN vm_hash.a80
-                    > USED AT LINE 562 IN vm_hash.a80
+GC_ROOT_REG:        2835 DEFINED AT LINE 552 IN vm_hash.a80
+                    > USED AT LINE 559 IN vm_hash.a80
+GC_ROOT_GLOBAL:     2845 DEFINED AT LINE 564 IN vm_hash.a80
+                    > USED AT LINE 571 IN vm_hash.a80
+GC_ROOT_OBJ:        2855 DEFINED AT LINE 576 IN vm_hash.a80
+                    > USED AT LINE 593 IN vm_hash.a80
+GC_ROOT_IVAR:       2859 DEFINED AT LINE 580 IN vm_hash.a80
+                    > USED AT LINE 587 IN vm_hash.a80
+GC_FOUND_FREE:      2882 DEFINED AT LINE 610 IN vm_hash.a80
+                    > USED AT LINE 532 IN vm_hash.a80
+GC_SCAN_FREE:       288D DEFINED AT LINE 632 IN vm_hash.a80
+                    > USED AT LINE 530 IN vm_hash.a80
+                    > USED AT LINE 606 IN vm_hash.a80
+GC_SF_LOOP:         2891 DEFINED AT LINE 635 IN vm_hash.a80
+                    > USED AT LINE 642 IN vm_hash.a80
+GC_SF_HIT:          28A2 DEFINED AT LINE 645 IN vm_hash.a80
+                    > USED AT LINE 638 IN vm_hash.a80
+GC_PROPAGATE:       28A9 DEFINED AT LINE 659 IN vm_hash.a80
+                    > USED AT LINE 596 IN vm_hash.a80
+                    > USED AT LINE 685 IN vm_hash.a80
+GC_PROP_SLOT:       28AF DEFINED AT LINE 663 IN vm_hash.a80
+                    > USED AT LINE 682 IN vm_hash.a80
+GC_PROP_NEXT:       28CC DEFINED AT LINE 678 IN vm_hash.a80
                     > USED AT LINE 666 IN vm_hash.a80
-                    > USED AT LINE 683 IN vm_hash.a80
-                    > USED AT LINE 688 IN vm_hash.a80
-GC_MV_REF:          2915 DEFINED AT LINE 723 IN vm_hash.a80
+                    > USED AT LINE 669 IN vm_hash.a80
+GC_SCAN_SLOT:       28DB DEFINED AT LINE 697 IN vm_hash.a80
+                    > USED AT LINE 676 IN vm_hash.a80
+GC_SCAN_ARRAY:      28F0 DEFINED AT LINE 709 IN vm_hash.a80
+                    > USED AT LINE 705 IN vm_hash.a80
+GC_SCAN_ALOOP:      28FF DEFINED AT LINE 719 IN vm_hash.a80
+                    > USED AT LINE 716 IN vm_hash.a80
                     > USED AT LINE 717 IN vm_hash.a80
-                    > USED AT LINE 719 IN vm_hash.a80
-                    > USED AT LINE 721 IN vm_hash.a80
-GC_MV_DONE:         292C DEFINED AT LINE 738 IN vm_hash.a80
-                    > USED AT LINE 722 IN vm_hash.a80
-                    > USED AT LINE 729 IN vm_hash.a80
+                    > USED AT LINE 726 IN vm_hash.a80
+GC_SCAN_HASH:       290D DEFINED AT LINE 728 IN vm_hash.a80
+                    > USED AT LINE 707 IN vm_hash.a80
+GC_SCAN_HLOOP:      291C DEFINED AT LINE 736 IN vm_hash.a80
                     > USED AT LINE 733 IN vm_hash.a80
-                    > USED AT LINE 736 IN vm_hash.a80
-GC_BIT_PTR:         2930 DEFINED AT LINE 753 IN vm_hash.a80
-                    > USED AT LINE 778 IN vm_hash.a80
-                    > USED AT LINE 791 IN vm_hash.a80
-                    > USED AT LINE 802 IN vm_hash.a80
-                    > USED AT LINE 815 IN vm_hash.a80
-GC_SET_BIT:         2948 DEFINED AT LINE 774 IN vm_hash.a80
+                    > USED AT LINE 734 IN vm_hash.a80
+                    > USED AT LINE 748 IN vm_hash.a80
+GC_SCAN_DONE:       292E DEFINED AT LINE 749 IN vm_hash.a80
+                    > USED AT LINE 708 IN vm_hash.a80
+                    > USED AT LINE 712 IN vm_hash.a80
+                    > USED AT LINE 727 IN vm_hash.a80
+                    > USED AT LINE 731 IN vm_hash.a80
+GC_MARK_VALUE:      2930 DEFINED AT LINE 765 IN vm_hash.a80
+                    > USED AT LINE 553 IN vm_hash.a80
+                    > USED AT LINE 565 IN vm_hash.a80
+                    > USED AT LINE 581 IN vm_hash.a80
+                    > USED AT LINE 720 IN vm_hash.a80
                     > USED AT LINE 737 IN vm_hash.a80
-GC_CHECK_BIT:       2955 DEFINED AT LINE 787 IN vm_hash.a80
-                    > USED AT LINE 584 IN vm_hash.a80
-                    > USED AT LINE 611 IN vm_hash.a80
-GC_SET_SCANNED:     2961 DEFINED AT LINE 798 IN vm_hash.a80
-                    > USED AT LINE 617 IN vm_hash.a80
-GC_CHECK_SCANNED:   296E DEFINED AT LINE 811 IN vm_hash.a80
-                    > USED AT LINE 614 IN vm_hash.a80
-GC_BITMAP:          297A DEFINED AT LINE 825 IN vm_hash.a80
-                    > USED AT LINE 521 IN vm_hash.a80
-                    > USED AT LINE 777 IN vm_hash.a80
+                    > USED AT LINE 742 IN vm_hash.a80
+GC_MV_REF:          2946 DEFINED AT LINE 777 IN vm_hash.a80
+                    > USED AT LINE 771 IN vm_hash.a80
+                    > USED AT LINE 773 IN vm_hash.a80
+                    > USED AT LINE 775 IN vm_hash.a80
+GC_MV_DONE:         295D DEFINED AT LINE 792 IN vm_hash.a80
+                    > USED AT LINE 776 IN vm_hash.a80
+                    > USED AT LINE 783 IN vm_hash.a80
+                    > USED AT LINE 787 IN vm_hash.a80
                     > USED AT LINE 790 IN vm_hash.a80
-GC_SCANNED:         2982 DEFINED AT LINE 826 IN vm_hash.a80
-                    > USED AT LINE 801 IN vm_hash.a80
-                    > USED AT LINE 814 IN vm_hash.a80
-GC_CHANGED:         298A DEFINED AT LINE 827 IN vm_hash.a80
-                    > USED AT LINE 607 IN vm_hash.a80
-                    > USED AT LINE 619 IN vm_hash.a80
-                    > USED AT LINE 629 IN vm_hash.a80
-GC_BIT_TABLE:       298B DEFINED AT LINE 828 IN vm_hash.a80
-                    > USED AT LINE 767 IN vm_hash.a80
-SENDB_EACH:         2993 DEFINED AT LINE 845 IN vm_hash.a80
-                    > USED AT LINE 129 IN vm_block.a80
-EACH_KIND_ARRAY:    29A9 DEFINED AT LINE 857 IN vm_hash.a80
-                    > USED AT LINE 852 IN vm_hash.a80
-EACH_KIND_SET:      29AB DEFINED AT LINE 859 IN vm_hash.a80
+GC_BIT_PTR:         2961 DEFINED AT LINE 807 IN vm_hash.a80
+                    > USED AT LINE 832 IN vm_hash.a80
+                    > USED AT LINE 845 IN vm_hash.a80
                     > USED AT LINE 856 IN vm_hash.a80
-SENDB_EACH_JOIN:    29AE DEFINED AT LINE 862 IN vm_hash.a80
-                    > USED AT LINE 159 IN vm_block.a80
-EACH_RECV_OK:       29BF DEFINED AT LINE 871 IN vm_hash.a80
+                    > USED AT LINE 869 IN vm_hash.a80
+GC_SET_BIT:         2979 DEFINED AT LINE 828 IN vm_hash.a80
+                    > USED AT LINE 613 IN vm_hash.a80
+                    > USED AT LINE 791 IN vm_hash.a80
+GC_CHECK_BIT:       2986 DEFINED AT LINE 841 IN vm_hash.a80
+                    > USED AT LINE 637 IN vm_hash.a80
+                    > USED AT LINE 665 IN vm_hash.a80
+GC_SET_SCANNED:     2992 DEFINED AT LINE 852 IN vm_hash.a80
+                    > USED AT LINE 671 IN vm_hash.a80
+GC_CHECK_SCANNED:   299F DEFINED AT LINE 865 IN vm_hash.a80
+                    > USED AT LINE 668 IN vm_hash.a80
+GC_BITMAP:          29AB DEFINED AT LINE 879 IN vm_hash.a80
+                    > USED AT LINE 540 IN vm_hash.a80
+                    > USED AT LINE 831 IN vm_hash.a80
+                    > USED AT LINE 844 IN vm_hash.a80
+GC_SCANNED:         29B3 DEFINED AT LINE 880 IN vm_hash.a80
+                    > USED AT LINE 855 IN vm_hash.a80
                     > USED AT LINE 868 IN vm_hash.a80
-EACH_EMPTY:         2A32 DEFINED AT LINE 950 IN vm_hash.a80
-                    > USED AT LINE 888 IN vm_hash.a80
-EACH_EMPTY_FALSE:   2A44 DEFINED AT LINE 958 IN vm_hash.a80
-                    > USED AT LINE 955 IN vm_hash.a80
-EACH_EMPTY_WRITE:   2A46 DEFINED AT LINE 960 IN vm_hash.a80
-                    > USED AT LINE 957 IN vm_hash.a80
-EACH_EMPTY_TAG:     2A58 DEFINED AT LINE 968 IN vm_hash.a80
-                    > USED AT LINE 961 IN vm_hash.a80
-                    > USED AT LINE 964 IN vm_hash.a80
-SENDB_ARRAY_NEW:    2A59 DEFINED AT LINE 980 IN vm_hash.a80
-                    > USED AT LINE 140 IN vm_block.a80
-SAN_FILL_LOOP:      2AAE DEFINED AT LINE 1026 IN vm_hash.a80
-                    > USED AT LINE 1039 IN vm_hash.a80
-SAN_NO_FILL:        2AC7 DEFINED AT LINE 1041 IN vm_hash.a80
-                    > USED AT LINE 1024 IN vm_hash.a80
-SAN_COUNT:          2B3B DEFINED AT LINE 1112 IN vm_hash.a80
-                    > USED AT LINE 1011 IN vm_hash.a80
-                    > USED AT LINE 1018 IN vm_hash.a80
-                    > USED AT LINE 1022 IN vm_hash.a80
-                    > USED AT LINE 1056 IN vm_hash.a80
-                    > USED AT LINE 1085 IN vm_hash.a80
-SAN_SLOT:           2B3C DEFINED AT LINE 1113 IN vm_hash.a80
-                    > USED AT LINE 1015 IN vm_hash.a80
-                    > USED AT LINE 1049 IN vm_hash.a80
-                    > USED AT LINE 1095 IN vm_hash.a80
-SAN_LEFT:           2B3D DEFINED AT LINE 1114 IN vm_hash.a80
-                    > USED AT LINE 1025 IN vm_hash.a80
-                    > USED AT LINE 1037 IN vm_hash.a80
-SAN_DATA:           2B3E DEFINED AT LINE 1115 IN vm_hash.a80
-                    > USED AT LINE 1021 IN vm_hash.a80
-                    > USED AT LINE 1027 IN vm_hash.a80
-                    > USED AT LINE 1036 IN vm_hash.a80
-EACH_BLOCK_ARGS:    2B40 DEFINED AT LINE 1131 IN vm_hash.a80
-                    > USED AT LINE 202
-                    > USED AT LINE 932 IN vm_hash.a80
-EBA_HASH:           2B69 DEFINED AT LINE 1160 IN vm_hash.a80
-                    > USED AT LINE 1142 IN vm_hash.a80
-EACH_COL_SLOT:      2B94 DEFINED AT LINE 1187 IN vm_hash.a80
-                    > USED AT LINE 201
-                    > USED AT LINE 879 IN vm_hash.a80
-                    > USED AT LINE 882 IN vm_hash.a80
-                    > USED AT LINE 926 IN vm_hash.a80
-                    > USED AT LINE 1132 IN vm_hash.a80
-EACH_COUNT:         2B95 DEFINED AT LINE 1188 IN vm_hash.a80
-                    > USED AT LINE 886 IN vm_hash.a80
+GC_CHANGED:         29BB DEFINED AT LINE 881 IN vm_hash.a80
+                    > USED AT LINE 661 IN vm_hash.a80
+                    > USED AT LINE 673 IN vm_hash.a80
+                    > USED AT LINE 683 IN vm_hash.a80
+GC_HAVE_FREE:       29BC DEFINED AT LINE 884 IN vm_hash.a80
+                    > USED AT LINE 527 IN vm_hash.a80
+                    > USED AT LINE 535 IN vm_hash.a80
+                    > USED AT LINE 600 IN vm_hash.a80
+GC_FREE_NEXT:       29BD DEFINED AT LINE 887 IN vm_hash.a80
+                    > USED AT LINE 602 IN vm_hash.a80
+                    > USED AT LINE 633 IN vm_hash.a80
+                    > USED AT LINE 649 IN vm_hash.a80
+GC_BIT_TABLE:       29BE DEFINED AT LINE 888 IN vm_hash.a80
+                    > USED AT LINE 821 IN vm_hash.a80
+SENDB_EACH:         29C6 DEFINED AT LINE 905 IN vm_hash.a80
+                    > USED AT LINE 129 IN vm_block.a80
+EACH_KIND_ARRAY:    29DC DEFINED AT LINE 917 IN vm_hash.a80
+                    > USED AT LINE 912 IN vm_hash.a80
+EACH_KIND_SET:      29DE DEFINED AT LINE 919 IN vm_hash.a80
                     > USED AT LINE 916 IN vm_hash.a80
-EACH_ARG_KIND:      2B96 DEFINED AT LINE 1189 IN vm_hash.a80
+SENDB_EACH_JOIN:    29E1 DEFINED AT LINE 922 IN vm_hash.a80
+                    > USED AT LINE 159 IN vm_block.a80
+EACH_RECV_OK:       29F2 DEFINED AT LINE 931 IN vm_hash.a80
+                    > USED AT LINE 928 IN vm_hash.a80
+EACH_EMPTY:         2A65 DEFINED AT LINE 1010 IN vm_hash.a80
+                    > USED AT LINE 948 IN vm_hash.a80
+EACH_EMPTY_FALSE:   2A77 DEFINED AT LINE 1018 IN vm_hash.a80
+                    > USED AT LINE 1015 IN vm_hash.a80
+EACH_EMPTY_WRITE:   2A79 DEFINED AT LINE 1020 IN vm_hash.a80
+                    > USED AT LINE 1017 IN vm_hash.a80
+EACH_EMPTY_TAG:     2A8B DEFINED AT LINE 1028 IN vm_hash.a80
+                    > USED AT LINE 1021 IN vm_hash.a80
+                    > USED AT LINE 1024 IN vm_hash.a80
+SENDB_ARRAY_NEW:    2A8C DEFINED AT LINE 1040 IN vm_hash.a80
+                    > USED AT LINE 140 IN vm_block.a80
+SAN_FILL_LOOP:      2AE1 DEFINED AT LINE 1086 IN vm_hash.a80
+                    > USED AT LINE 1099 IN vm_hash.a80
+SAN_NO_FILL:        2AFA DEFINED AT LINE 1101 IN vm_hash.a80
+                    > USED AT LINE 1084 IN vm_hash.a80
+SAN_COUNT:          2B6E DEFINED AT LINE 1172 IN vm_hash.a80
+                    > USED AT LINE 1071 IN vm_hash.a80
+                    > USED AT LINE 1078 IN vm_hash.a80
+                    > USED AT LINE 1082 IN vm_hash.a80
+                    > USED AT LINE 1116 IN vm_hash.a80
+                    > USED AT LINE 1145 IN vm_hash.a80
+SAN_SLOT:           2B6F DEFINED AT LINE 1173 IN vm_hash.a80
+                    > USED AT LINE 1075 IN vm_hash.a80
+                    > USED AT LINE 1109 IN vm_hash.a80
+                    > USED AT LINE 1155 IN vm_hash.a80
+SAN_LEFT:           2B70 DEFINED AT LINE 1174 IN vm_hash.a80
+                    > USED AT LINE 1085 IN vm_hash.a80
+                    > USED AT LINE 1097 IN vm_hash.a80
+SAN_DATA:           2B71 DEFINED AT LINE 1175 IN vm_hash.a80
+                    > USED AT LINE 1081 IN vm_hash.a80
+                    > USED AT LINE 1087 IN vm_hash.a80
+                    > USED AT LINE 1096 IN vm_hash.a80
+EACH_BLOCK_ARGS:    2B73 DEFINED AT LINE 1191 IN vm_hash.a80
+                    > USED AT LINE 202
+                    > USED AT LINE 992 IN vm_hash.a80
+EBA_HASH:           2B9C DEFINED AT LINE 1220 IN vm_hash.a80
+                    > USED AT LINE 1202 IN vm_hash.a80
+EACH_COL_SLOT:      2BC7 DEFINED AT LINE 1247 IN vm_hash.a80
+                    > USED AT LINE 201
+                    > USED AT LINE 939 IN vm_hash.a80
+                    > USED AT LINE 942 IN vm_hash.a80
+                    > USED AT LINE 986 IN vm_hash.a80
+                    > USED AT LINE 1192 IN vm_hash.a80
+EACH_COUNT:         2BC8 DEFINED AT LINE 1248 IN vm_hash.a80
+                    > USED AT LINE 946 IN vm_hash.a80
+                    > USED AT LINE 976 IN vm_hash.a80
+EACH_ARG_KIND:      2BC9 DEFINED AT LINE 1249 IN vm_hash.a80
                     > USED AT LINE 158 IN vm_block.a80
                     > USED AT LINE 195
-                    > USED AT LINE 860 IN vm_hash.a80
-                    > USED AT LINE 905 IN vm_hash.a80
-                    > USED AT LINE 951 IN vm_hash.a80
-EACH_INDEX:         2B97 DEFINED AT LINE 1190 IN vm_hash.a80
+                    > USED AT LINE 920 IN vm_hash.a80
+                    > USED AT LINE 965 IN vm_hash.a80
+                    > USED AT LINE 1011 IN vm_hash.a80
+EACH_INDEX:         2BCA DEFINED AT LINE 1250 IN vm_hash.a80
                     > USED AT LINE 193
-                    > USED AT LINE 931 IN vm_hash.a80
-                    > USED AT LINE 1145 IN vm_hash.a80
-                    > USED AT LINE 1161 IN vm_hash.a80
-EBA_PAIR:           2B98 DEFINED AT LINE 1191 IN vm_hash.a80
-                    > USED AT LINE 1168 IN vm_hash.a80
-                    > USED AT LINE 1175 IN vm_hash.a80
-EBA_COL_TYPE:       2B9A DEFINED AT LINE 1192 IN vm_hash.a80
-                    > USED AT LINE 1135 IN vm_hash.a80
-                    > USED AT LINE 1140 IN vm_hash.a80
+                    > USED AT LINE 991 IN vm_hash.a80
+                    > USED AT LINE 1205 IN vm_hash.a80
+                    > USED AT LINE 1221 IN vm_hash.a80
+EBA_PAIR:           2BCB DEFINED AT LINE 1251 IN vm_hash.a80
+                    > USED AT LINE 1228 IN vm_hash.a80
+                    > USED AT LINE 1235 IN vm_hash.a80
+EBA_COL_TYPE:       2BCD DEFINED AT LINE 1252 IN vm_hash.a80
+                    > USED AT LINE 1195 IN vm_hash.a80
+                    > USED AT LINE 1200 IN vm_hash.a80

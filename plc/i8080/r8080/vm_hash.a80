@@ -516,6 +516,25 @@ slice_new_slot:  db 0
 ;   エラー: 全スロット生きている → vm_error
 ; ===============================================================
 col_gc_alloc:
+  ; **前の走査で作った印がまだ使えるなら、走査せずに空きを配る。**
+  ;
+  ; 走査 1 回は実機で 51 ms。印を捨てると確保のたびに払うことになり、
+  ; 文字列を 9 個作る描画 1 回で 460 ms になっていた。印は走査のあと
+  ; 「空き表」として使い回す — 配った枠には印を立てるので二度は出ない。
+  ;
+  ; **走査のあとに死んだものは次の走査まで空かない。** 安全側に外すだけで、
+  ; 生きているものを配ることはない。
+  lda gc_have_free
+  ora a
+  jz col_gc_sweep
+  call gc_scan_free
+  cpi 0FFh
+  jnz gc_found_free     ; A = 空きスロット番号
+  ; 印が古くて空きが無い。捨てて走査からやり直す
+  xra a
+  sta gc_have_free
+
+col_gc_sweep:
   ; 印と走査済みを消す (64 スロット = 8 バイト × 2 枚)
   xra a
   lxi h, gc_bitmap
@@ -576,24 +595,59 @@ gc_root_ivar:
   ; --- 到達性を伝播する ---
   call gc_propagate
 
+  ; **ここから印は空き表になる。** 次の確保はこれを見るだけで済む
+  mvi a, 1
+  sta gc_have_free
+  xra a
+  sta gc_free_next      ; しおりを先頭へ
+
   ; --- 印の付かなかったスロットを探す ---
-  ; B をカウンタに使う (gc_check_bit は B を壊さない)
-  mvi b, 0
-gc_find_free:
-  mov a, b              ; A = 検査対象スロット番号
-  call gc_check_bit     ; Z=1: 空き (A は破壊される)
-  jz gc_found_free
-  inr b
-  mov a, b
-  cpi MAX_COL_SLOTS
-  jc gc_find_free
-  jmp vm_error          ; 全スロット使用中
+  ; **走査した直後なのでここで無ければ本当に満杯。**
+  call gc_scan_free
+  cpi 0FFh
+  jz vm_error           ; 全スロット使用中
 
 gc_found_free:
-  mov a, b              ; A = 空きスロット番号 (B から復帰)
+  ; A = 空きスロット番号
+  push psw
+  call gc_set_bit       ; **配ったら印を立てる。** 二度配らないため
+  pop psw
   push psw              ; スロット番号を退避
   call col_slot_addr    ; HL = スロットアドレス
   pop psw               ; A = スロット番号を復帰
+  ret
+
+; ---------------------------------------------------------------
+; gc_scan_free — 印の付いていないスロットを探す
+;
+;   出力: A = スロット番号 / 0FFh = 空き無し
+;   破壊: B
+;
+; B をカウンタに使う (gc_check_bit は B を壊さない)。
+;
+; **しおりから探す。** 配る順は増える一方で、配った枠には印を立てるので、
+; しおりより前はすべて印が付いている (生きているか、配ったか)。0 から
+; 舐め直すと 64 枠ぶんの検査が確保のたびに乗る。
+; ---------------------------------------------------------------
+gc_scan_free:
+  lda gc_free_next
+  mov b, a
+gc_sf_loop:
+  mov a, b              ; A = 検査対象スロット番号
+  call gc_check_bit     ; Z=1: 空き (A は破壊される)
+  jz gc_sf_hit
+  inr b
+  mov a, b
+  cpi MAX_COL_SLOTS
+  jc gc_sf_loop
+  mvi a, 0FFh
+  ret
+gc_sf_hit:
+  ; しおりを次へ。**この枠はすぐ印が立つ**ので飛ばして構わない
+  mov a, b
+  inr a
+  sta gc_free_next
+  mov a, b
   ret
 
 ; ---------------------------------------------------------------
@@ -825,6 +879,12 @@ gc_check_scanned:
 gc_bitmap:  db 0, 0, 0, 0, 0, 0, 0, 0
 gc_scanned: db 0, 0, 0, 0, 0, 0, 0, 0
 gc_changed: db 0
+
+; **印を空き表として使い回せるか。** 0 = 走査が要る
+gc_have_free: db 0
+
+; **空きを探し始める位置。** これより前はすべて印が付いている
+gc_free_next: db 0
 gc_bit_table: db 01h, 02h, 04h, 08h, 10h, 20h, 40h, 80h
 
 ; ===============================================================
