@@ -302,16 +302,57 @@ class TestKvsGenerator < Minitest::Test
   GENERATOR_SOURCE = File.read(File.expand_path("../tools/kvs_generator.rb", __dir__),
                                encoding: "utf-8")
 
-  # 3 つの内訳 — 増えたら確保かGCの外に検査が漏れた疑い
+  # 4 つの内訳 — 増えたら確保かGCの外に検査が漏れた疑い
   #
-  #   alloc_check   順に渡すぶんが尽きたか / 回収しても見つからなかったか
-  #   gc_find_free  まだ見つかっていないか
+  #   alloc_check   順に渡すぶんが尽きたか / 空き表が尽きたか /
+  #                 走査しても無かったか
+  #   gc_take_free  まだ見つかっていないか
   def test_プールの上限検査は_alloc_と_gc_のヘルパーだけが書く
     checks = GENERATOR_SOURCE.lines.grep(/>= \#\{layout\.max_arrays\}/)
 
-    assert_equal 3, checks.size,
+    assert_equal 4, checks.size,
                  "上限の検査がヘルパーの外にあります。確保を増やすときは " \
                  "alloc_check を通してください (doc/gc.md):\n#{checks.join}"
+  end
+
+  # **走査は確保のたびではありません。** 前の走査が残した空き表から配り、
+  # 配り切ったときに初めてもう一度走査します。ここが逆に戻ると、`ARRAY_SP`
+  # が上限に張り付いた後の確保が**毎回全走査**になります (実機で 1 スキャンが
+  # 5-10 倍。doc/gc.md)。
+  def test_確保は空き表を先に見る
+    body = GENERATOR_SOURCE[/\n    def alloc_check.*?\n    end\n/m]
+
+    refute_nil body, "alloc_check が見つかりません"
+    assert_operator body.index("gc_take_free"), :<, body.index("collect_pool"),
+                    "走査が空き表より先に来ています (確保ごとに全走査)"
+    assert_equal 2, body.scan("gc_take_free").size,
+                 "空き表から配るのは 2 回 (そのまま / 走査してもう一度)"
+    assert_equal 1, body.scan("collect_pool").size, "走査は 1 回だけ"
+  end
+
+  # **しおりを書くのは 3 箇所だけです。**
+  #
+  #   vm_init       空き表は空 (走査するまで配らない)
+  #   collect_pool  走査のあと先頭へ戻す
+  #   gc_take_free  配ったら次へ進める
+  #
+  # **配った枠に印は立てていません。** しおりが戻らないことが「二度配らない」
+  # の中身なので、ここが増えると生きている枠をもう一度配る道ができます。
+  def test_しおりを書くのは初期化と走査と配りだけ
+    writes = GENERATOR_SOURCE.lines.grep(/line "\#\{gc_cursor\} = /)
+
+    assert_equal 3, writes.size,
+                 "しおりを書く行が増えています (doc/gc.md):\n#{writes.join}"
+  end
+
+  # **電源投入とリセットのしおりは「空き表は空」です。** 走査する前に配ると、
+  # 消えていない印を空き表と読んで**生きている枠を配ります。**
+  def test_初期化のしおりは空き表が空
+    body = GENERATOR_SOURCE[/\n    def reset_to_top_irep.*?\n    end\n/m]
+
+    refute_nil body, "reset_to_top_irep が見つかりません"
+    assert_match(/\#\{gc_cursor\} = \#\{layout\.max_arrays\}/, body,
+                 "しおりの初期化が「空き表は空」になっていません")
   end
 
   # **ARRAY_SP を書くのは 2 箇所だけです。**

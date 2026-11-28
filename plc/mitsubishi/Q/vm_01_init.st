@@ -36,6 +36,7 @@ IF VMFIRSTSCAN THEN
     (* 実行中の irep をトップレベル (0番) に戻す *)
     VMFRAMESP := 0;   (* 呼び出しの深さ *)
     VMARRAYSP := 0;   (* 配列プールの空き先頭 *)
+    VMW3683 := 32;   (* 空き表は空 (走査してから配る) *)
     VMREGBASE := 72;   (* レジスタ窓の先頭 *)
     VMCURIREP := 0;
     (* IREP テーブルから実行中の irep の情報を写す *)
@@ -78,6 +79,7 @@ IF VMRESETREQ = 1 THEN
   (* 実行中の irep をトップレベル (0番) に戻す *)
   VMFRAMESP := 0;   (* 呼び出しの深さ *)
   VMARRAYSP := 0;   (* 配列プールの空き先頭 *)
+  VMW3683 := 32;   (* 空き表は空 (走査してから配る) *)
   VMREGBASE := 72;   (* レジスタ窓の先頭 *)
   VMCURIREP := 0;
   (* IREP テーブルから実行中の irep の情報を写す *)

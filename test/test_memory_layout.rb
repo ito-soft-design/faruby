@@ -121,7 +121,10 @@ class TestMemoryLayout < Minitest::Test
                 "GC_TAG" => Layout::GC_TAG, "GC_PINNED" => Layout::GC_PINNED,
                 "GC_CHANGED" => Layout::GC_CHANGED,
                 "GC_SAVED_Z6" => Layout::GC_SAVED_Z6,
-                "GC_SAVED_Z7" => Layout::GC_SAVED_Z7 }
+                "GC_SAVED_Z7" => Layout::GC_SAVED_Z7,
+                "GC_PASS" => Layout::GC_PASS, "GC_HEADER" => Layout::GC_HEADER,
+                "GC_ELEM" => Layout::GC_ELEM, "GC_LIMIT" => Layout::GC_LIMIT,
+                "GC_CURSOR" => Layout::GC_CURSOR }
 
     assert_equal offsets.size, offsets.values.uniq.size, "作業ワードが重なっています"
     offsets.each do |name, offset|

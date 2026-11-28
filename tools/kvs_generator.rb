@@ -1043,6 +1043,7 @@ module FaRuby
       note "実行中の irep をトップレベル (0番) に戻す"
       line "#{state(layout.frame_sp_addr)} = 0      ' 呼び出しの深さ"
       line "#{array_sp} = 0      ' 配列プールの空き先頭"
+      line "#{gc_cursor} = #{layout.max_arrays}      ' 空き表は空 (走査してから配る)"
       line "#{state(layout.reg_base_addr)} = #{layout.offset_of(layout.reg_file_base)}" \
            "      ' レジスタ窓の先頭"
       line "#{state(layout.cur_irep_addr)} = 0"
@@ -1326,16 +1327,31 @@ module FaRuby
     def gc_header   = state(layout.gc_header_addr)
     def gc_elem     = state(layout.gc_elem_addr)
     def gc_limit    = state(layout.gc_limit_addr)
+    def gc_cursor   = state(layout.gc_cursor_addr)
 
-    # これから使うスロットを決める。**尽きていたら回収してから探す**
+    # これから使うスロットを決める。**空き表から配り、尽きたときだけ走査する**
+    #
+    # **走査は確保ごとではありません。** 前の走査で印の付かなかった枠を順に
+    # 配り、配り切ったときに初めてもう一度走査します。`ARRAY_SP` は一度上限に
+    # 届くと戻らないので、ここを「毎回走査」にすると確保のたびに全走査が
+    # 乗ります — 実機で 1 スキャンが 5-10 倍になります (doc/gc.md)。
+    #
+    # **走査のあとに死んだものは次の走査まで空きません。** 安全側に外すだけで、
+    # 生きているものを配ることはありません。プールを指す参照は確保でしか
+    # 生まれないので、空き表が古くなっても指されている枠は入ってきません。
     def alloc_check(error_code)
       note "プールの空きスロットを決める"
       if_else_block("#{array_sp} >= #{layout.max_arrays}") do
-        note "順に渡すぶんは尽きた。回収して空きを探す"
-        collect_pool
+        note "順に渡すぶんは尽きた。前の走査が残した空き表から配る"
+        gc_take_free
         if_("#{gc_found} >= #{layout.max_arrays}") do
-          note "全スロットが生きている。回収しても足りない"
-          vm_error(error_code)
+          note "空き表も尽きた。**ここで初めて走査する**"
+          collect_pool
+          gc_take_free
+          if_("#{gc_found} >= #{layout.max_arrays}") do
+            note "全スロットが生きている。回収しても足りない"
+            vm_error(error_code)
+          end
         end
       end
       note "まだ順に渡せる"
@@ -1391,7 +1407,9 @@ module FaRuby
       gc_clear_marks
       gc_mark_roots
       gc_propagate
-      gc_find_free
+
+      note "**印はここから空き表になる。** しおりを先頭へ戻す"
+      line "#{gc_cursor} = 0"
 
       note "借りた Z を返す"
       line "Z6 = #{gc_saved_z6}"
@@ -1555,26 +1573,45 @@ module FaRuby
       end
     end
 
-    # 印の付かなかったスロットを 1 つ探す
+    # 空き表から 1 つ配る (印の付かなかったスロットを 1 つ探す)
+    #
+    # **しおりから先だけ見ます。** 配る順は増える一方なので、しおりより手前に
+    # 空きは残っていません (生きているか、配ったか)。0 から舐め直すと
+    # `max_arrays` 枠ぶんの検査が確保のたびに乗ります — **i8080 ではこれが
+    # 2 番目の山でした** (902 → 607 ms)。
     #
     # **番号の小さいほうから取ります。** 入れ子は内側が先に確保されて小さい
     # 番号になるので、その並びを崩さないほうが到達性の伝播が 1 周で済みます。
     #
     # **BREAK は使いません。** 見つけたかどうかの比較で足りるので、FOR を
     # 抜ける命令の機種差を持ち込まずに済みます。
-    def gc_find_free
-      note "印の付かなかったスロットを探す。#{layout.max_arrays} なら見つからなかった印"
+    #
+    # **Z6 を借りて返します。** 走査の外からも呼ぶので、ここでも退避します。
+    # 走査のすぐ後に呼ぶぶんは退避が二重になりますが、入れ子ではないので
+    # (走査が先に返している) 同じ退避先を使い回せます。
+    def gc_take_free
+      note "空き表から配る。#{layout.max_arrays} なら尽きた印"
       line "#{gc_found} = #{layout.max_arrays}"
-      line "FOR #{gc_slot} = 0 TO #{layout.max_arrays - 1}"
-      indent
-      if_("#{gc_found} >= #{layout.max_arrays}") do
+      note "アドレスを載せる Z を 1 本借りる"
+      line "#{gc_saved_z6} = Z6"
+      note "しおりが上限なら空き表は空。FOR の始点が終点を越えないようにする"
+      if_("#{gc_cursor} < #{layout.max_arrays}") do
+        line "FOR #{gc_slot} = #{gc_cursor} TO #{layout.max_arrays - 1}"
+        indent
+        note "見出しのアドレスは毎周載せる。見つかった後も載せるが、Z6 は返す"
         gc_slot_header_into(6)
-        if_("#{word_at(6, MemoryLayout::SLOT_MARK)} = 0") do
+        note "**まだ見つかっていない** かつ **印が無い**。2 つを AND で 1 つの IF に"
+        if_("(#{gc_found} >= #{layout.max_arrays}) AND " \
+            "(#{word_at(6, MemoryLayout::SLOT_MARK)} = 0)") do
           line "#{gc_found} = #{gc_slot}"
         end
+        dedent
+        line "NEXT"
       end
-      dedent
-      line "NEXT"
+      note "しおりを次へ。見つからなければ上限の先 = 空き表は空"
+      line "#{gc_cursor} = #{gc_found} + 1"
+      note "借りた Z を返す"
+      line "Z6 = #{gc_saved_z6}"
     end
 
     # 走査中のスロット (GC_SLOT) の見出しのアドレスを Z に載せる
@@ -4559,7 +4596,9 @@ end
       e.note "         見出しの +#{MemoryLayout::SLOT_MARK} が回収の印 " \
              "(0 = 未到達、それ以外は到達したときの型タグ)"
       e.note "  +#{layout.offset_of(layout.gc_work_base)}~ = GC 作業領域 " \
-             "(#{MemoryLayout::GC_WORK_WORDS}ワード。使い切ったときだけ走る)"
+             "(#{MemoryLayout::GC_WORK_WORDS}ワード。空き表を使い切ったときだけ走る)"
+      e.note "         +#{MemoryLayout::GC_CURSOR} が空き表のしおり " \
+             "(#{layout.max_arrays} 以上 = 空き表は空)"
       e.note ""
       e.note "実行中に変わらないものは #{layout.fixed_device_name} のバンク " \
              "#{layout.fixed_bank} (#{layout.fixed_device(0)} から) に置く。"
